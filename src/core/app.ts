@@ -18,7 +18,7 @@ export interface AppContext {
 export interface AppInstance {
   app: Hono<{ Variables: AppContext }>;
   stores: Stores;
-  logRouter: LogRouter;
+  logRouter: ILogRouter;
   dispose: () => Promise<void>;
 }
 

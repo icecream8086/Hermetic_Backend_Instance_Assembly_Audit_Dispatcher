@@ -8,29 +8,27 @@ export interface RateLimitConfig {
 
 /**
  * Simple in-memory sliding-window rate limiter.
+ * Expired entries are purged lazily on each request — no background timer.
  * For production, replace with distributed store (KV / Redis / DO).
  */
 export function rateLimit(config: RateLimitConfig): MiddlewareHandler {
   const hits = new Map<string, number[]>();
 
-  // Periodic cleanup of expired entries
-  const cleanup = setInterval(() => {
-    const now = Date.now();
-    for (const [key, timestamps] of hits) {
-      const valid = timestamps.filter((t) => now - t < config.windowMs);
-      if (valid.length === 0) hits.delete(key);
-      else hits.set(key, valid);
-    }
-  }, config.windowMs * 2);
-
-  if (typeof cleanup === 'object' && 'unref' in cleanup) cleanup.unref();
-
   return async (c, next) => {
-    const ip = c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for') ?? 'unknown';
     const now = Date.now();
+    const cutoff = now - config.windowMs;
+
+    // Lazy cleanup: purge fully-expired IPs from the map
+    for (const [key, timestamps] of hits) {
+      const valid = timestamps.filter((t) => t > cutoff);
+      if (valid.length === 0) hits.delete(key);
+      else if (valid.length < timestamps.length) hits.set(key, valid);
+    }
+
+    const ip = c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for') ?? 'unknown';
     const timestamps = hits.get(ip) ?? [];
 
-    const valid = timestamps.filter((t) => now - t < config.windowMs);
+    const valid = timestamps.filter((t) => t > cutoff);
     if (valid.length >= config.maxRequests) {
       throw new AppError(429, 'RATE_LIMITED', `Too many requests. Max ${config.maxRequests} per ${config.windowMs}ms`);
     }

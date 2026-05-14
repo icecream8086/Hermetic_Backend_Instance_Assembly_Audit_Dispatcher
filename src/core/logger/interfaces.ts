@@ -49,6 +49,7 @@ export interface ILogger extends ILogWriter, ILogReader {
 export interface ILogRouter {
   resolve(facility: Facility): ILogWriter & ILogReader;
   register(facility: Facility, logger: ILogger): void;
+  dispose(): void;
 }
 
 export type { LogInput, LogEntry, LogQuery } from './types.ts';
