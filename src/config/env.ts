@@ -21,10 +21,17 @@ export function loadConfig(overrides?: Partial<AppConfig>): AppConfig {
   };
 
   const storageConfig: StorageConfig = overrides?.storage ?? {
-    stateBackend: (process.env['STATE_BACKEND'] as StorageConfig['stateBackend']) ?? 'pg',
-    queryBackend: (process.env['QUERY_BACKEND'] as StorageConfig['queryBackend']) ?? 'pg',
-    blobBackend: (process.env['BLOB_BACKEND'] as StorageConfig['blobBackend']) ?? 's3',
-    connections: {},
+    stateBackend: (process.env['STATE_BACKEND'] as StorageConfig['stateBackend']) ?? 'file',
+    queryBackend: (process.env['QUERY_BACKEND'] as StorageConfig['queryBackend']) ?? 'none',
+    blobBackend: (process.env['BLOB_BACKEND'] as StorageConfig['blobBackend']) ?? 'none',
+    connections: {
+      filePath: process.env['STATE_FILE_PATH'] ?? '.data',
+      kvNamespace: process.env['KV_NAMESPACE'] ?? 'KV_STORE',
+      doNamespace: process.env['DO_NAMESPACE'] ?? 'ATOMIC_STORE_DO',
+      doInstanceName: process.env['DO_INSTANCE_NAME'] ?? 'global-store',
+      d1Binding: process.env['D1_BINDING'] ?? 'QUERY_DB',
+      r2Binding: process.env['R2_BINDING'] ?? 'BLOB_STORE',
+    },
   };
 
   return {

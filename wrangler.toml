@@ -1,0 +1,36 @@
+name = "hbi-aad"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Dev server
+[dev]
+port = 3000
+
+# ─── Durable Object for atomic state (strong consistency) ───
+[[durable_objects.bindings]]
+name = "ATOMIC_STORE_DO"
+class_name = "AtomicStoreDO"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["AtomicStoreDO"]
+
+# ─── KV for state storage (eventual consistency fallback) ───
+[[kv_namespaces]]
+binding = "KV_STORE"
+id = "local-dev"
+
+# ─── D1 for relational queries ───
+[[d1_databases]]
+binding = "QUERY_DB"
+database_name = "hbi-aad-db"
+database_id = "local-dev"
+
+# ─── R2 for blob storage ───
+[[r2_buckets]]
+binding = "BLOB_STORE"
+bucket_name = "hbi-aad-blobs"
+
+[env.production]
+# Production overrides — set real IDs via `wrangler secret` and `wrangler deploy --env production`

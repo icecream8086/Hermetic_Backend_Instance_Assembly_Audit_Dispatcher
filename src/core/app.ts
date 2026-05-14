@@ -25,9 +25,9 @@ export interface AppInstance {
 /**
  * Assemble the application: wire stores, logger, middleware, and routes.
  */
-export function createApp(config: AppConfig): AppInstance {
-  // 1. Create storage adapters
-  const stores = createStores(config.storage);
+export function createApp(config: AppConfig, platformBindings?: Record<string, unknown>): AppInstance {
+  // 1. Create storage adapters (KV, file, etc.)
+  const stores = createStores(config.storage, platformBindings);
 
   // 2. Create logger infrastructure
   const logRouter = new LogRouter();

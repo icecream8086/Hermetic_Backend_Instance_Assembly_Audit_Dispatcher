@@ -1,22 +1,22 @@
-import { createApp, SYSTEM_FACILITY } from './core/app.ts';
+import { createApp } from './core/app.ts';
 import { loadConfig } from './config/env.ts';
-import { ExampleService } from './features/example/example.service.ts';
-import { ExampleHandler } from './features/example/example.handler.ts';
-import { createExampleRouter } from './features/example/example.router.ts';
 
-// Load environment-based configuration
+// DO class must be exported at module scope for wrangler to discover it
+export { AtomicStoreDO } from './core/store/adapters/durable-object.ts';
+
 const config = loadConfig();
-const { app, stores, logRouter } = createApp(config);
 
-// Wire feature dependencies
-const exampleService = new ExampleService(
-  stores.atomic,
-  logRouter.resolve(SYSTEM_FACILITY),
-);
-const exampleHandler = new ExampleHandler(exampleService);
+let _app: ReturnType<typeof createApp> | null = null;
 
-// Mount feature routers
-app.route('/api/orders', createExampleRouter(exampleHandler));
+function getApp(platformBindings: Record<string, unknown>) {
+  if (_app) return _app;
+  _app = createApp(config, platformBindings);
+  return _app;
+}
 
-// Export for hosting environment (Node, Bun, Cloudflare Workers, etc.)
-export default app;
+export default {
+  async fetch(request: Request, env: Record<string, unknown>) {
+    const { app } = getApp(env);
+    return app.fetch(request, env);
+  },
+};

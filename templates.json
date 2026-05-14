@@ -1,0 +1,255 @@
+{
+  "$description": "Template samples derived from catch/script0. Load into IAtomicStore at key template:{name}.",
+  "$source": "https://api.aliyun.com/product/Eci, Cloudflare DNS API",
+
+  "templates": {
+    "gamebin": {
+      "name": "gamebin",
+      "description": "L4D2 game binaries. From alibaba_l4d2_runtime_test.py volume_0 / alibaba_l4d2_runtime_test_rw.py volume_0",
+      "kind": "volume",
+      "version": "1.0.0",
+      "spec": {
+        "type": "NFSVolume",
+        "nfs": {
+          "server": "05adb481d3-tki63.cn-hangzhou.nas.aliyuncs.com",
+          "path": "/l4d2/l4d2f",
+          "readOnly": true
+        }
+      }
+    },
+
+    "map-ro": {
+      "name": "map-ro",
+      "description": "L4D2 maps (read-only). From alibaba_l4d2_runtime_test.py volume_1",
+      "kind": "volume",
+      "version": "1.0.0",
+      "spec": {
+        "type": "NFSVolume",
+        "nfs": {
+          "server": "05adb481d3-tki63.cn-hangzhou.nas.aliyuncs.com",
+          "path": "/l4d2/map",
+          "readOnly": true
+        }
+      }
+    },
+
+    "map-rw": {
+      "name": "map-rw",
+      "description": "L4D2 maps (read-write). From alibaba_l4d2_runtime_test_rw.py volume_1 / alibaba_vsftp_map.py volume_0 conf-1",
+      "kind": "volume",
+      "version": "1.0.0",
+      "spec": {
+        "type": "NFSVolume",
+        "nfs": {
+          "server": "05adb481d3-tki63.cn-hangzhou.nas.aliyuncs.com",
+          "path": "/l4d2/map",
+          "readOnly": false
+        }
+      }
+    },
+
+    "sdk-ro": {
+      "name": "sdk-ro",
+      "description": "L4D2 SDK (read-only). From alibaba_l4d2_runtime_test.py volume_2",
+      "kind": "volume",
+      "version": "1.0.0",
+      "spec": {
+        "type": "NFSVolume",
+        "nfs": {
+          "server": "05adb481d3-tki63.cn-hangzhou.nas.aliyuncs.com",
+          "path": "/l4d2/sdk",
+          "readOnly": true
+        }
+      }
+    },
+
+    "sdk-rw": {
+      "name": "sdk-rw",
+      "description": "L4D2 SDK (read-write). From alibaba_l4d2_runtime_test_rw.py volume_2",
+      "kind": "volume",
+      "version": "1.0.0",
+      "spec": {
+        "type": "NFSVolume",
+        "nfs": {
+          "server": "05adb481d3-tki63.cn-hangzhou.nas.aliyuncs.com",
+          "path": "/l4d2/sdk",
+          "readOnly": false
+        }
+      }
+    },
+
+    "ftp-root": {
+      "name": "ftp-root",
+      "description": "FTP server root volume. From alibaba_vsftp_test.py volume_0 conf-0",
+      "kind": "volume",
+      "version": "1.0.0",
+      "spec": {
+        "type": "NFSVolume",
+        "nfs": {
+          "server": "05adb481d3-tki63.cn-hangzhou.nas.aliyuncs.com",
+          "path": "/",
+          "readOnly": false
+        }
+      }
+    },
+
+    "steamcmd-sandbox": {
+      "name": "steamcmd-sandbox",
+      "description": "L4D2 game server container. From alibaba_l4d2_runtime_test.py container_0",
+      "kind": "container",
+      "version": "1.0.0",
+      "spec": {
+        "name": "sandbox0",
+        "image": "registry-vpc.cn-hangzhou.aliyuncs.com/minecraft-graalvm/steamcmd_runtime:0.0.0.1",
+        "tty": true,
+        "stdin": true,
+        "imagePullPolicy": "Always"
+      }
+    },
+
+    "ftp-server": {
+      "name": "ftp-server",
+      "description": "FTP server container. From alibaba_vsftp_map.py / alibaba_vsftp_test.py container_0",
+      "kind": "container",
+      "version": "1.0.0",
+      "spec": {
+        "name": "echo",
+        "image": "registry-vpc.cn-hangzhou.aliyuncs.com/minecraft-graalvm/ftp_bp:latest",
+        "tty": true,
+        "args": ["foo:pass:1001"],
+        "imagePullPolicy": "Always"
+      }
+    },
+
+    "l4d2-dns": {
+      "name": "l4d2-dns",
+      "description": "Cloudflare DNS A record for l4d2.hexgrid.ink. From alibaba_l4d2_runtime_test.py CF_* constants",
+      "kind": "resource",
+      "version": "1.0.0",
+      "resourceType": "dns",
+      "spec": {
+        "provider": "cloudflare",
+        "zoneId": "3a8fd53181882f370b312b93640747d1",
+        "recordName": "l4d2.hexgrid.ink",
+        "recordId": "0b93b1f0d106768b61daa5c51be78b78",
+        "ttl": 60,
+        "proxied": false
+      }
+    },
+
+    "default-network": {
+      "name": "default-network",
+      "description": "Default VPC network config. From alibaba_l4d2_runtime_test.py create_container_group_request",
+      "kind": "resource",
+      "version": "1.0.0",
+      "resourceType": "network",
+      "spec": {
+        "regionId": "cn-hangzhou",
+        "securityGroupId": "sg-bp16o5urk39itwcqmdzj",
+        "vSwitchIds": [
+          "vsw-bp1xx36ys1jou7o1bsdpp",
+          "vsw-bp1grwzlgy2739dxnskbz",
+          "vsw-bp1rv5m61jx4kmld0cc12",
+          "vsw-bp1wfyusfye82wm3d3zew"
+        ],
+        "allocatePublicIp": true,
+        "publicIpBandwidth": 19,
+        "eipIsp": "BGP",
+        "ingressBandwidth": 900719925474090,
+        "egressBandwidth": 900719925474090
+      }
+    },
+
+    "spot-config": {
+      "name": "spot-config",
+      "description": "Spot instance config. From all create_container_group_request blocks",
+      "kind": "resource",
+      "version": "1.0.0",
+      "resourceType": "spotConfig",
+      "spec": {
+        "spotStrategy": "SpotAsPriceGo",
+        "restartPolicy": "Always",
+        "autoMatchImageCache": true,
+        "resourceSpec": { "cpu": 2, "memory": 2 }
+      }
+    },
+
+    "l4d2-game-server": {
+      "name": "l4d2-game-server",
+      "description": "Complete L4D2 game server assembly. From alibaba_l4d2_runtime_test.py (total script).",
+      "kind": "assembly",
+      "version": "1.0.0",
+      "components": [
+        { "target": "steamcmd-sandbox", "mergeStrategy": "merge" },
+        { "target": "gamebin", "mergeStrategy": "merge" },
+        { "target": "map-ro", "mergeStrategy": "merge" },
+        { "target": "sdk-ro", "mergeStrategy": "merge" },
+        { "target": "l4d2-dns", "mergeStrategy": "merge" },
+        { "target": "default-network", "mergeStrategy": "merge" },
+        { "target": "spot-config", "mergeStrategy": "merge" }
+      ],
+      "overrides": {
+        "name": "l4d2-echo",
+        "description": "L4D2 game server sandbox",
+        "region": "cn-hangzhou"
+      }
+    },
+
+    "l4d2-game-server-rw": {
+      "name": "l4d2-game-server-rw",
+      "description": "L4D2 game server with read-write volumes. From alibaba_l4d2_runtime_test_rw.py.",
+      "kind": "assembly",
+      "version": "1.0.0",
+      "components": [
+        { "target": "steamcmd-sandbox", "mergeStrategy": "merge" },
+        { "target": "gamebin", "mergeStrategy": "merge" },
+        { "target": "map-rw", "mergeStrategy": "merge" },
+        { "target": "sdk-rw", "mergeStrategy": "merge" },
+        { "target": "l4d2-dns", "mergeStrategy": "merge" },
+        { "target": "default-network", "mergeStrategy": "merge" },
+        { "target": "spot-config", "mergeStrategy": "merge" }
+      ],
+      "overrides": {
+        "name": "l4d2-echo-rw",
+        "description": "L4D2 game server sandbox (read-write volumes)",
+        "region": "cn-hangzhou"
+      }
+    },
+
+    "ftp-server-sandbox": {
+      "name": "ftp-server-sandbox",
+      "description": "FTP server with root NFS mount. From alibaba_vsftp_test.py (total script).",
+      "kind": "assembly",
+      "version": "1.0.0",
+      "components": [
+        { "target": "ftp-server", "mergeStrategy": "merge" },
+        { "target": "ftp-root", "mergeStrategy": "merge" },
+        { "target": "default-network", "mergeStrategy": "merge" },
+        { "target": "spot-config", "mergeStrategy": "merge" }
+      ],
+      "overrides": {
+        "name": "ftp-echo",
+        "description": "FTP server sandbox",
+        "region": "cn-hangzhou"
+      }
+    },
+
+    "ftp-server-map": {
+      "name": "ftp-server-map",
+      "description": "FTP server with map NFS mount. From alibaba_vsftp_map.py.",
+      "kind": "assembly",
+      "version": "1.0.0",
+      "components": [
+        { "target": "ftp-server", "mergeStrategy": "merge" },
+        { "target": "map-rw", "mergeStrategy": "merge" },
+        { "target": "default-network", "mergeStrategy": "merge" },
+        { "target": "spot-config", "mergeStrategy": "merge" }
+      ],
+      "overrides": {
+        "name": "ftp-map-echo",
+        "description": "FTP server with map volume",
+        "region": "cn-hangzhou"
+      }
+    }
+  }
+}

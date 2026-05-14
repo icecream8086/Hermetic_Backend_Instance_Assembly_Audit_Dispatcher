@@ -1,8 +1,20 @@
 export interface StorageConfig {
-  stateBackend: 'do' | 'restate' | 'pg';
-  queryBackend: 'd1' | 'turso' | 'pg';
-  blobBackend: 'r2' | 's3';
+  stateBackend: 'kv' | 'do' | 'file';
+  queryBackend: 'd1' | 'file' | 'none';
+  blobBackend: 'r2' | 'file' | 'none';
   connections: {
+    /** CF KV namespace binding name (stateBackend='kv') */
+    kvNamespace?: string;
+    /** CF DO namespace binding name (stateBackend='do') */
+    doNamespace?: string;
+    /** DO instance ID name (stateBackend='do') */
+    doInstanceName?: string;
+    /** CF D1 database binding name (queryBackend='d1') */
+    d1Binding?: string;
+    /** CF R2 bucket binding name (blobBackend='r2') */
+    r2Binding?: string;
+    /** Local file path (stateBackend='file', queryBackend='file', blobBackend='file') */
+    filePath?: string;
     state?: Record<string, string>;
     query?: Record<string, string>;
     blob?: Record<string, string>;
@@ -10,8 +22,8 @@ export interface StorageConfig {
 }
 
 export const DEFAULT_STORAGE_CONFIG: StorageConfig = {
-  stateBackend: 'pg',
-  queryBackend: 'pg',
-  blobBackend: 's3',
+  stateBackend: 'file',
+  queryBackend: 'none',
+  blobBackend: 'none',
   connections: {},
 } as const;
