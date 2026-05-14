@@ -164,6 +164,7 @@ export class SandboxDnsService implements ISandboxDnsService {
     private readonly atomic: IAtomicStore,
     private readonly dnsProvider: IDnsProvider,
     private readonly logger: ILogWriter,
+    private readonly zoneId: string = 'stub-zone',
   ) {}
 
   async pollForIp(sandboxId: SandboxId, timeoutMs: number, pollIntervalMs: number): Promise<string | null> {
@@ -206,8 +207,8 @@ export class SandboxDnsService implements ISandboxDnsService {
       value: record.value,
       ttl: record.ttl,
       proxied: record.proxied,
-      providerRecordId: `stub-record-${sandboxId as string}`,
-      zoneId: 'stub-zone',
+      providerRecordId: `dns-${sandboxId as string}`,
+      zoneId: this.zoneId,
     });
 
     await this.logger.logAsync({
@@ -220,8 +221,8 @@ export class SandboxDnsService implements ISandboxDnsService {
 
   async cleanupDns(sandboxId: SandboxId): Promise<void> {
     await this.dnsProvider.deleteRecord({
-      zoneId: 'stub-zone',
-      providerRecordId: `stub-record-${sandboxId as string}`,
+      zoneId: this.zoneId,
+      providerRecordId: `dns-${sandboxId as string}`,
     });
   }
 }
@@ -229,25 +230,35 @@ export class SandboxDnsService implements ISandboxDnsService {
 // ─── Metrics service ───
 
 export class SandboxMetricsService implements ISandboxMetricsService {
-  constructor(private readonly metricsProvider: IMetricsProvider) {}
+  constructor(
+    private readonly metricsProvider: IMetricsProvider,
+    /** Region passed through to the provider. Resolved from the sandbox's config at call sites. */
+    private readonly defaultRegion: string = 'unknown',
+  ) {}
 
   async collect(sandboxId: SandboxId): Promise<readonly MetricSnapshot[]> {
+    // TODO: resolve region from the sandbox entity
     const result = await this.metricsProvider.fetchMetrics({
-      region: 'stub',
+      region: this.defaultRegion,
       providerId: String(sandboxId),
     });
     return result.snapshots;
   }
 
+  // TODO: implement query against IQueryStore once D1 / FileQuery is wired
   async query(_sandboxId: SandboxId, _range: MetricTimeRange): Promise<readonly MetricSnapshot[]> {
-    return [];
+    throw new AppError(501, 'NOT_IMPLEMENTED', 'MetricSnapshot query is not yet implemented');
   }
 }
 
 // ─── Log service ───
 
 export class SandboxLogService implements ISandboxLogService {
-  constructor(private readonly containerProvider: IContainerProvider) {}
+  constructor(
+    private readonly containerProvider: IContainerProvider,
+    /** Default region passed through to the provider. */
+    private readonly defaultRegion: string = 'unknown',
+  ) {}
 
   async getLogs(
     sandboxId: SandboxId,
@@ -255,7 +266,7 @@ export class SandboxLogService implements ISandboxLogService {
     options?: LogQueryOptions,
   ): Promise<ContainerLogResult> {
     return this.containerProvider.getLogs({
-      region: 'stub',
+      region: this.defaultRegion,
       providerId: String(sandboxId),
       containerName,
       ...(options?.limitBytes !== undefined ? { limitBytes: options.limitBytes } : {}),

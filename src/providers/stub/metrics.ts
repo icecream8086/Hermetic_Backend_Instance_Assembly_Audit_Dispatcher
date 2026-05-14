@@ -12,14 +12,15 @@ export class StubMetricsProvider implements IMetricsProvider {
     const snapshots: MetricSnapshot[] = [];
 
     for (let i = 0; i < 10; i++) {
+      const t = i + 1; // 1..10, deterministic
       snapshots.push({
         id: createMetricSnapshotId(`stub-metric-${i}`),
         sandboxId: createSandboxId(input.providerId),
         timestamp: now - (9 - i) * 60_000,
-        cpu: { usageNanoCores: Math.random() * 1e9, usageCores: Math.random() * 2 },
-        memory: { usageBytes: Math.random() * 512 * 1024 * 1024, rss: Math.random() * 256 * 1024 * 1024, cache: Math.random() * 128 * 1024 * 1024 },
-        network: { txBytes: Math.random() * 10000, rxBytes: Math.random() * 50000, txPackets: Math.random() * 100, rxPackets: Math.random() * 200 },
-        disk: { readBytes: Math.random() * 1024 * 1024, writeBytes: Math.random() * 512 * 1024, readIo: Math.random() * 10, writeIo: Math.random() * 5 },
+        cpu: { usageNanoCores: t * 100_000_000, usageCores: t * 0.2 },
+        memory: { usageBytes: t * 50 * 1024 * 1024, rss: t * 25 * 1024 * 1024, cache: t * 12 * 1024 * 1024 },
+        network: { txBytes: t * 1000, rxBytes: t * 5000, txPackets: t * 10, rxPackets: t * 20 },
+        disk: { readBytes: t * 100 * 1024, writeBytes: t * 50 * 1024, readIo: t, writeIo: t * 0.5 },
         containers: [],
       });
     }

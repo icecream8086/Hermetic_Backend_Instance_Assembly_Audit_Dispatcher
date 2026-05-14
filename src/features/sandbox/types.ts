@@ -151,6 +151,15 @@ export interface ResourceSpec {
   readonly memory: number;
 }
 
+// ─── Network config (input) ───
+
+export interface SandboxNetworkConfig {
+  readonly subnetIds?: readonly string[];
+  readonly securityGroupId?: string;
+  readonly allocatePublicIp: boolean;
+  readonly publicIpBandwidth?: number;
+}
+
 // ─── Sandbox ───
 
 export interface CreateSandboxInput {
@@ -162,12 +171,7 @@ export interface CreateSandboxInput {
   readonly restartPolicy: 'Always' | 'OnFailure' | 'Never';
   readonly containers: readonly ContainerConfig[];
   readonly volumes?: readonly Volume[];
-  readonly network: {
-    readonly subnetIds?: readonly string[];
-    readonly securityGroupId?: string;
-    readonly allocatePublicIp: boolean;
-    readonly publicIpBandwidth?: number;
-  };
+  readonly network: SandboxNetworkConfig;
   readonly tags?: readonly Tag[];
   readonly providerOverrides?: Record<string, unknown>;
 }
@@ -197,7 +201,9 @@ export interface DnsRecord extends BaseEntity<DnsRecordId, DnsRecordStatus> {
   readonly sandboxId: SandboxId;
 }
 
-// ─── MetricSnapshot (time-series data point, not an entity) ───
+// ─── MetricSnapshot — time-series data point, NOT a domain entity.
+// Equality is structural (same sandboxId + timestamp = same point).
+// Extends Identifiable only for cursor-based pagination across queries. ───
 
 export interface CPUMetrics {
   readonly usageNanoCores: number;

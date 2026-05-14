@@ -15,8 +15,6 @@ import { generateVersionId } from '../../brand.ts';
  * For strong consistency, use Durable Objects instead.
  */
 export class CloudflareKVAtomicStore implements IAtomicStore {
-  #inTx = false;
-
   constructor(private readonly kv: KVNamespace) {}
 
   async get<T>(key: string): Promise<{ value: T; version: VersionId } | null> {
@@ -37,34 +35,22 @@ export class CloudflareKVAtomicStore implements IAtomicStore {
     if (expectedVersion !== null && currentVersion !== expectedVersion) return null;
 
     const newVersion = generateVersionId();
-    const body = JSON.stringify(value);
-
-    if (this.#inTx) {
-      // Defer the actual put — caller wraps in transact
-      await this.kv.put(key, body, { metadata: { v: newVersion } });
-    } else {
-      await this.kv.put(key, body, { metadata: { v: newVersion } });
-    }
+    await this.kv.put(key, JSON.stringify(value), { metadata: { v: newVersion } });
 
     return newVersion;
   }
 
   async transact<T>(action: (txn: IStoreTransaction) => Promise<T>): Promise<T> {
-    this.#inTx = true;
-    try {
-      const txn: IStoreTransaction = {
-        get: async <V>(key: string) => {
-          const result = await this.kv.getWithMetadata<V>(key, 'json');
-          return result.value;
-        },
-        set: async <V>(key: string, value: V) => {
-          const newVersion = generateVersionId();
-          await this.kv.put(key, JSON.stringify(value), { metadata: { v: newVersion } });
-        },
-      };
-      return await action(txn);
-    } finally {
-      this.#inTx = false;
-    }
+    const txn: IStoreTransaction = {
+      get: async <V>(key: string) => {
+        const result = await this.kv.getWithMetadata<V>(key, 'json');
+        return result.value;
+      },
+      set: async <V>(key: string, value: V) => {
+        const newVersion = generateVersionId();
+        await this.kv.put(key, JSON.stringify(value), { metadata: { v: newVersion } });
+      },
+    };
+    return await action(txn);
   }
 }
