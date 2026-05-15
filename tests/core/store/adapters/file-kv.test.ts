@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { FileKVAtomicStore } from '../../../../src/core/store/adapters/file-kv.ts';
+import { TransactConflictError } from '../../../../src/core/store/interfaces.ts';
 
 // ─── White-box: inspect the raw JSON files on disk ───
 
@@ -11,6 +12,12 @@ function readEntry(dataDir: string, key: string): { value: unknown; metadata: { 
   const fp = join(dataDir, `${safe}.json`);
   if (!existsSync(fp)) return null;
   return JSON.parse(readFileSync(fp, 'utf-8'));
+}
+
+function writeEntry(dataDir: string, key: string, value: unknown, version: string): void {
+  const safe = key.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const fp = join(dataDir, `${safe}.json`);
+  writeFileSync(fp, JSON.stringify({ value, metadata: { v: version } }), 'utf-8');
 }
 
 function listFiles(dataDir: string): string[] {
@@ -185,6 +192,50 @@ describe('FileKVAtomicStore (white-box)', () => {
       expect(readEntry(dataDir, 'x')!.value).toBe(10);
       expect(readEntry(dataDir, 'y')!.value).toBe(20);
       expect(readEntry(dataDir, 'z')!.value).toBe(30);
+    });
+
+    it('detects concurrent file modification via TransactConflictError', async () => {
+      await store.set('a', 'original', null);
+
+      await expect(store.transact(async (txn) => {
+        // Read key 'a' — records version in readSet
+        const val = await txn.get<string>('a');
+        expect(val).toBe('original');
+
+        // Simulate concurrent write from another process to the SAME
+        // key — directly modify the underlying file with a different version.
+        writeEntry(dataDir, 'a', 'concurrent-write', 'other-version');
+
+        // Write a DIFFERENT key 'b' (not in readSet), so the post-
+        // callback check WILL verify 'a's version and detect the conflict.
+        await txn.set('b', 'transaction-write');
+        return 'done';
+      })).rejects.toThrow(TransactConflictError);
+
+      // The concurrent write should be preserved on disk
+      const entryA = readEntry(dataDir, 'a');
+      expect(entryA!.value).toBe('concurrent-write');
+      expect(entryA!.metadata.v).toBe('other-version');
+    });
+
+    it('detects phantom read (null dependency tracking)', async () => {
+      await expect(store.transact(async (txn) => {
+        // Read non-existent key — records null dependency in readSet
+        const val = await txn.get<string>('x');
+        expect(val).toBeNull();
+
+        // Simulate another process creating key 'x' via direct file write
+        writeEntry(dataDir, 'x', 'created-concurrently', 'v1');
+
+        // Write a different key — post-callback check will verify 'x'
+        // expected null but found 'v1' → conflict
+        await txn.set('y', 'based_on_x_absent');
+        return 'done';
+      })).rejects.toThrow(TransactConflictError);
+
+      // The concurrent write is preserved
+      const entryX = readEntry(dataDir, 'x');
+      expect(entryX!.value).toBe('created-concurrently');
     });
   });
 

@@ -1,6 +1,7 @@
 /// <reference types="@cloudflare/workers-types" />
 
 import type { IAtomicStore, IStoreTransaction } from '../interfaces.ts';
+import { TransactConflictError } from '../interfaces.ts';
 import type { VersionId } from '../../brand.ts';
 import { generateVersionId } from '../../brand.ts';
 
@@ -41,16 +42,40 @@ export class CloudflareKVAtomicStore implements IAtomicStore {
   }
 
   async transact<T>(action: (txn: IStoreTransaction) => Promise<T>): Promise<T> {
+    const readSet = new Map<string, string | null>(); // key → version (null = key didn't exist)
+    const writeSet = new Set<string>();
+
     const txn: IStoreTransaction = {
       get: async <V>(key: string) => {
         const result = await this.kv.getWithMetadata<V>(key, 'json');
-        return result.value;
+        const version = (result.metadata as { v?: string } | null)?.v ?? null;
+        readSet.set(key, version);
+        return result.value ?? null;
       },
       set: async <V>(key: string, value: V) => {
+        writeSet.add(key);
         const newVersion = generateVersionId();
         await this.kv.put(key, JSON.stringify(value), { metadata: { v: newVersion } });
       },
     };
-    return await action(txn);
+
+    const result = await action(txn);
+
+    // Optimistic concurrency check: verify that all read keys (excluding
+    // keys this transaction wrote) still have the same version. KV has no
+    // compare-and-swap, so this is a best-effort check that catches the
+    // common concurrent-modification pattern.
+    for (const [key, expectedVersion] of readSet) {
+      if (writeSet.has(key)) continue;
+      const current = await this.kv.getWithMetadata<unknown>(key, 'json');
+      const currentVersion = (current.metadata as { v?: string } | null)?.v;
+      if (currentVersion !== expectedVersion) {
+        throw new TransactConflictError(
+          `Transaction conflict: key "${key}" was modified concurrently.`,
+        );
+      }
+    }
+
+    return result;
   }
 }

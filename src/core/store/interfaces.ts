@@ -37,6 +37,17 @@ export interface IQueryStore {
 export type QueryParams = Record<string, unknown> | unknown[];
 
 /**
+ * Error thrown when a transaction fails due to an optimistic concurrency conflict.
+ * The caller should catch this and retry the transaction if appropriate.
+ */
+export class TransactConflictError extends Error {
+  constructor(message?: string) {
+    super(message ?? 'Transaction conflict detected. One or more keys were modified concurrently.');
+    this.name = 'TransactConflictError';
+  }
+}
+
+/**
  * Binary archive layer: large objects and log backups.
  */
 export interface IBlobStore {

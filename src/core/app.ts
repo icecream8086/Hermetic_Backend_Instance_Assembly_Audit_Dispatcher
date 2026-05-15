@@ -8,6 +8,7 @@ import { LogRouter } from './logger/router.ts';
 import { globalErrorHandler } from './middleware/error-handler.ts';
 import { rateLimit } from './middleware/rate-limit.ts';
 import { createFacility } from './brand.ts';
+import { createInfoHandler } from '../features/info/info.handler.ts';
 
 export interface AppContext {
   stores: Stores;
@@ -40,12 +41,15 @@ export function createApp(config: AppConfig, platformBindings?: Record<string, u
   app.use('*', rateLimit({ windowMs: 60_000, maxRequests: 100 }));
   app.onError(globalErrorHandler);
 
-  // 5. Bind per-request context
+  // 5. Mount feature routes
+  app.route('/', createInfoHandler());
+
+  // 6. Bind per-request context
   // Routes populate c.var.logger by resolving from logRouter.
   // Default logger middleware example:
   // app.use('*', async (c, next) => { c.set('logger', logRouter.resolve(...)); await next(); });
 
-  // 6. Export for route mounting
+  // 7. Export for route mounting
   return {
     app,
     stores,

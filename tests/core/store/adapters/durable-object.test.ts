@@ -5,6 +5,7 @@ import {
   DurableObjectAtomicStore,
   AtomicStoreDO,
 } from '../../../../src/core/store/adapters/durable-object.ts';
+import { TransactConflictError } from '../../../../src/core/store/interfaces.ts';
 
 // ─── Mock helpers ───
 
@@ -48,7 +49,7 @@ function createMockStub(
       key?: string;
       value?: unknown;
       expectedVersion?: string | null;
-      txnOps?: Array<{ op: string; key: string; value?: unknown }>;
+      txnOps?: Array<{ op: string; key: string; value?: unknown; expectedVersion?: string | null }>;
     };
 
     // Simulate DO returning a server error for specific operations
@@ -78,6 +79,16 @@ function createMockStub(
           if (txnOp.op === 'get') {
             const entry = data.get(txnOp.key);
             results.push(entry ? (entry as { v: unknown }).v : null);
+          } else if (txnOp.op === 'check') {
+            const entry = data.get(txnOp.key);
+            const curVer = (entry as { _ver?: string } | undefined)?._ver ?? null;
+            if (curVer !== txnOp.expectedVersion) {
+              return Response.json(
+                { error: `Version conflict on key "${txnOp.key}" during transact`, conflict: true },
+                { status: 409 },
+              );
+            }
+            results.push(null);
           } else {
             if (options?.txnConflictOnExisting) {
               const current = data.get(txnOp.key);
@@ -242,6 +253,109 @@ describe('DurableObjectAtomicStore (white-box)', () => {
         z: { v: 3, _ver: expect.any(String) },
       });
     });
+
+    it('can read and write within a transaction (read-modify-write)', async () => {
+      const dataRef: { current: Map<string, { v: unknown; _ver: string }> } = { current: new Map() };
+      const store = new DurableObjectAtomicStore(createMockNs(createMockStub(dataRef)));
+
+      // Seed data via individual set (bypasses transact)
+      await store.set('a', 3, null);
+      await store.set('b', 7, null);
+
+      // Transact: read a, b → compute sum → write sum
+      const result = await store.transact(async (txn) => {
+        const va = await txn.get<number>('a');
+        const vb = await txn.get<number>('b');
+        await txn.set('sum', va! + vb!);
+        return 'done';
+      });
+
+      expect(result).toBe('done');
+
+      // White-box: sum was written correctly
+      const sumEntry = dataRef.current.get('sum');
+      expect(sumEntry).toBeDefined();
+      expect(sumEntry!.v).toBe(10);
+    });
+
+    it('can read own writes within a transaction', async () => {
+      const dataRef: { current: Map<string, { v: unknown; _ver: string }> } = { current: new Map() };
+      const store = new DurableObjectAtomicStore(createMockNs(createMockStub(dataRef)));
+
+      const result = await store.transact(async (txn) => {
+        // Write, then read back in same transaction
+        await txn.set('x', 'hello');
+        const val = await txn.get<string>('x');
+        return val;
+      });
+
+      expect(result).toBe('hello');
+    });
+
+    it('transaction get returns null for missing key', async () => {
+      const store = new DurableObjectAtomicStore(createMockNs(createMockStub()));
+      const val = await store.transact(async (txn) => {
+        return txn.get<unknown>('nonexistent');
+      });
+      expect(val).toBeNull();
+    });
+
+    it('detects concurrent modification via TransactConflictError', async () => {
+      const dataRef: { current: Map<string, { v: unknown; _ver: string }> } = { current: new Map() };
+      const store = new DurableObjectAtomicStore(createMockNs(createMockStub(dataRef)));
+
+      await store.set('k', 'original', null);
+
+      await expect(store.transact(async (txn) => {
+        // Read key — records version in readSet
+        const val = await txn.get<string>('k');
+        expect(val).toBe('original');
+
+        // Simulate concurrent modification by an external request while
+        // this transaction is in-flight.
+        dataRef.current.set('k', { v: 'concurrent', _ver: 'other-version' });
+
+        // Try to write — the deferred batch-write will send a check op
+        // and detect that the read-set version no longer matches.
+        await txn.set('k', 'overwrite');
+        return 'done';
+      })).rejects.toThrow(TransactConflictError);
+    });
+
+    it('two concurrent transactions on same key — one wins, one conflicts', async () => {
+      const dataRef: { current: Map<string, { v: unknown; _ver: string }> } = { current: new Map() };
+      const store = new DurableObjectAtomicStore(createMockNs(createMockStub(dataRef)));
+
+      await store.set('counter', 0, null);
+
+      // Launch two overlapping transactions that both read counter and increment
+      const t1 = store.transact(async (txn) => {
+        const val = await txn.get<number>('counter');
+        await txn.set('counter', val! + 1);
+        return 't1';
+      });
+
+      const t2 = store.transact(async (txn) => {
+        const val = await txn.get<number>('counter');
+        await txn.set('counter', val! + 1);
+        return 't2';
+      });
+
+      const results = await Promise.allSettled([t1, t2]);
+
+      const succeeded = results.filter(r => r.status === 'fulfilled');
+      const failed = results.filter(r => r.status === 'rejected');
+
+      expect(succeeded.length).toBe(1);
+      expect(failed.length).toBe(1);
+      // The one that failed should be a TransactConflictError
+      expect(failed[0]).toHaveProperty('reason');
+      expect((failed[0] as PromiseRejectedResult).reason).toBeInstanceOf(TransactConflictError);
+
+      // Counter should have been incremented exactly once
+      const final = await store.get<number>('counter');
+      expect(final!.value).toBe(1);
+    });
   });
 
   describe('error handling', () => {
@@ -269,21 +383,30 @@ describe('DurableObjectAtomicStore (white-box)', () => {
       await expect(store.transact(async (txn) => {
         await txn.set('k', 'v');
         return 'ok';
-      })).rejects.toThrow('DO transact error');
+      })).rejects.toThrow('Internal error processing transact');
     });
 
-    it('transact throws on version conflict from DO', async () => {
-      const store = new DurableObjectAtomicStore(
-        createMockNs(createMockStub(undefined, { txnConflictOnExisting: true })),
-      );
-      // Create existing key first
-      await store.set('k', 'original', null);
+    it('transact detects phantom read via null dependency tracking', async () => {
+      const dataRef: { current: Map<string, { v: unknown; _ver: string }> } = { current: new Map() };
+      const store = new DurableObjectAtomicStore(createMockNs(createMockStub(dataRef)));
 
-      // Transact writing to existing key → mock simulates version conflict
       await expect(store.transact(async (txn) => {
-        await txn.set('k', 'overwrite');
-        return 'ok';
-      })).rejects.toThrow('DO transact error');
+        // Read non-existent key — records null dependency in readSet
+        const val = await txn.get<string>('x');
+        expect(val).toBeNull();
+
+        // Simulate another transaction creating key 'x' while this one is running
+        dataRef.current.set('x', { v: 'created-by-B', _ver: 'v1' });
+
+        // Write a different key — the batch will include a check op for 'x'
+        // with expectedVersion=null. The DO finds 'x' now has 'v1' → conflict.
+        await txn.set('y', 'based_on_x_absent');
+        return 'done';
+      })).rejects.toThrow(TransactConflictError);
+
+      // The concurrent write survived
+      const entry = dataRef.current.get('x') as { v: string; _ver: string };
+      expect(entry.v).toBe('created-by-B');
     });
 
     it('get propagates fetch network error', async () => {

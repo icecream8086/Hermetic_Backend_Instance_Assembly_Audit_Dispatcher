@@ -1,6 +1,7 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { IAtomicStore, IStoreTransaction } from '../interfaces.ts';
+import { TransactConflictError } from '../interfaces.ts';
 import type { VersionId } from '../../brand.ts';
 import { generateVersionId } from '../../brand.ts';
 
@@ -86,22 +87,52 @@ export class FileKVAtomicStore implements IAtomicStore {
   async transact<T>(action: (txn: IStoreTransaction) => Promise<T>): Promise<T> {
     return this.#serialise(async () => {
       await this.#ensureDir();
+      const readSet = new Map<string, string | null>(); // null = key didn't exist
+      const writeSet = new Set<string>();
+
       const txn: IStoreTransaction = {
         get: async <V>(key: string) => {
           try {
             const raw = await readFile(this.#filePath(key), 'utf-8');
-            return (JSON.parse(raw) as FileEntry<V>).value;
+            const entry = JSON.parse(raw) as FileEntry<V>;
+            readSet.set(key, entry.metadata.v);
+            return entry.value;
           } catch {
+            readSet.set(key, null); // track "key didn't exist" dependency
             return null;
           }
         },
         set: async <V>(key: string, value: V) => {
+          writeSet.add(key);
           const newVersion = generateVersionId();
           const entry: FileEntry = { value, metadata: { v: newVersion } };
           await writeFile(this.#filePath(key), JSON.stringify(entry), 'utf-8');
         },
       };
-      return await action(txn);
+
+      const result = await action(txn);
+
+      // Verify read-set versions haven't changed (excluding own writes)
+      for (const [key, expectedVersion] of readSet) {
+        if (writeSet.has(key)) continue;
+
+        let currentVersion: string | null;
+        try {
+          const raw = await readFile(this.#filePath(key), 'utf-8');
+          const entry = JSON.parse(raw) as FileEntry;
+          currentVersion = entry.metadata.v;
+        } catch {
+          currentVersion = null; // file doesn't exist (or corrupt — treat as absent)
+        }
+
+        if (currentVersion !== expectedVersion) {
+          throw new TransactConflictError(
+            `Transaction conflict: key "${key}" was modified concurrently.`,
+          );
+        }
+      }
+
+      return result;
     });
   }
 }
