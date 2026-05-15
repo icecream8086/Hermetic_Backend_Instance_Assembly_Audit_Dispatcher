@@ -25,9 +25,20 @@ function createMockStorage(): DurableObjectStorage {
   } as unknown as DurableObjectStorage;
 }
 
+interface MockStubOptions {
+  /** When set, these operations return HTTP 500 with an error message. */
+  failOps?: Set<'get' | 'set' | 'transact'>;
+  /** When true, transact set on a key that already exists returns 409 conflict. */
+  txnConflictOnExisting?: boolean;
+}
+
 /** Create a mock DurableObjectStub backed by an in-memory store.
- *  `dataRef` lets white-box tests inspect the internal Map after operations. */
-function createMockStub(dataRef?: { current: Map<string, { v: unknown; _ver: string }> }): DurableObjectStub {
+ *  `dataRef` lets white-box tests inspect the internal Map after operations.
+ *  `options` controls error-simulation behavior for the adapter error-handling tests. */
+function createMockStub(
+  dataRef?: { current: Map<string, { v: unknown; _ver: string }> },
+  options?: MockStubOptions,
+): DurableObjectStub {
   const data = new Map<string, { v: unknown; _ver: string }>();
   if (dataRef) dataRef.current = data;
 
@@ -39,6 +50,11 @@ function createMockStub(dataRef?: { current: Map<string, { v: unknown; _ver: str
       expectedVersion?: string | null;
       txnOps?: Array<{ op: string; key: string; value?: unknown }>;
     };
+
+    // Simulate DO returning a server error for specific operations
+    if (options?.failOps?.has(op as 'get' | 'set' | 'transact')) {
+      return Response.json({ error: `Internal error processing ${op}` }, { status: 500 });
+    }
 
     switch (op) {
       case 'get': {
@@ -63,6 +79,15 @@ function createMockStub(dataRef?: { current: Map<string, { v: unknown; _ver: str
             const entry = data.get(txnOp.key);
             results.push(entry ? (entry as { v: unknown }).v : null);
           } else {
+            if (options?.txnConflictOnExisting) {
+              const current = data.get(txnOp.key);
+              if (current) {
+                return Response.json(
+                  { error: `Version conflict on key: ${txnOp.key}`, conflict: true },
+                  { status: 409 },
+                );
+              }
+            }
             const newVersion = crypto.randomUUID();
             data.set(txnOp.key, { v: txnOp.value, _ver: newVersion });
             results.push(null);
@@ -80,6 +105,13 @@ function createMockStub(dataRef?: { current: Map<string, { v: unknown; _ver: str
       const req = init instanceof Request ? init : new Request(url, init);
       return handler(req);
     },
+  } as unknown as DurableObjectStub;
+}
+
+/** Create a mock stub whose fetch() always throws (simulates network error / stub unavailable). */
+function createNetworkErrorStub(): DurableObjectStub {
+  return {
+    fetch: async () => { throw new Error('Network error: stub unavailable'); },
   } as unknown as DurableObjectStub;
 }
 
@@ -211,6 +243,101 @@ describe('DurableObjectAtomicStore (white-box)', () => {
       });
     });
   });
+
+  describe('error handling', () => {
+    it('get returns null when DO returns non-200', async () => {
+      const store = new DurableObjectAtomicStore(
+        createMockNs(createMockStub(undefined, { failOps: new Set(['get']) })),
+      );
+      const result = await store.get('k');
+      expect(result).toBeNull();
+    });
+
+    it('set returns undefined when DO returns non-200', async () => {
+      const store = new DurableObjectAtomicStore(
+        createMockNs(createMockStub(undefined, { failOps: new Set(['set']) })),
+      );
+      const version = await store.set('k', 'value', null);
+      // Adapter returns body.version directly (undefined from the error JSON)
+      expect(version).toBeUndefined();
+    });
+
+    it('transact throws when DO returns non-200', async () => {
+      const store = new DurableObjectAtomicStore(
+        createMockNs(createMockStub(undefined, { failOps: new Set(['transact']) })),
+      );
+      await expect(store.transact(async (txn) => {
+        await txn.set('k', 'v');
+        return 'ok';
+      })).rejects.toThrow('DO transact error');
+    });
+
+    it('transact throws on version conflict from DO', async () => {
+      const store = new DurableObjectAtomicStore(
+        createMockNs(createMockStub(undefined, { txnConflictOnExisting: true })),
+      );
+      // Create existing key first
+      await store.set('k', 'original', null);
+
+      // Transact writing to existing key → mock simulates version conflict
+      await expect(store.transact(async (txn) => {
+        await txn.set('k', 'overwrite');
+        return 'ok';
+      })).rejects.toThrow('DO transact error');
+    });
+
+    it('get propagates fetch network error', async () => {
+      const store = new DurableObjectAtomicStore(createMockNs(createNetworkErrorStub()));
+      await expect(store.get('k')).rejects.toThrow('Network error');
+    });
+
+    it('set propagates fetch network error', async () => {
+      const store = new DurableObjectAtomicStore(createMockNs(createNetworkErrorStub()));
+      await expect(store.set('k', 'v', null)).rejects.toThrow('Network error');
+    });
+
+    it('transact propagates fetch network error', async () => {
+      const store = new DurableObjectAtomicStore(createMockNs(createNetworkErrorStub()));
+      await expect(store.transact(async (txn) => {
+        await txn.set('k', 'v');
+        return 'ok';
+      })).rejects.toThrow('Network error');
+    });
+  });
+
+  describe('boundary values', () => {
+    it('set and get with empty string key', async () => {
+      const store = new DurableObjectAtomicStore(createMockNs(createMockStub()));
+      const version = await store.set('', 'empty-val', null);
+      expect(version).toBeTruthy();
+
+      const result = await store.get<string>('');
+      expect(result).not.toBeNull();
+      expect(result!.value).toBe('empty-val');
+      expect(result!.version).toBe(version);
+    });
+
+    it('set with null value — get conflates stored null with not-found', async () => {
+      const store = new DurableObjectAtomicStore(createMockNs(createMockStub()));
+      const version = await store.set('k', null, null);
+      expect(version).toBeTruthy();
+
+      // NOTE: adapter's get() returns null when body.value is null,
+      // so stored null is indistinguishable from a missing key.
+      const result = await store.get('k');
+      expect(result).toBeNull();
+    });
+
+    it('set and get with special characters in key', async () => {
+      const store = new DurableObjectAtomicStore(createMockNs(createMockStub()));
+      const specialKey = 'key:with/special#chars?and=query&params';
+      const version = await store.set(specialKey, 'special', null);
+      expect(version).toBeTruthy();
+
+      const result = await store.get<string>(specialKey);
+      expect(result!.value).toBe('special');
+    });
+  });
 });
 
 // ─── AtomicStoreDO class (white-box: DO runtime internals) ───
@@ -249,6 +376,19 @@ describe('AtomicStoreDO (white-box)', () => {
       expect(body.value).toBe('hello');
       expect(body.version).toBe('v1');
     });
+
+    it('get with empty string key returns stored value and version', async () => {
+      const { do: doInst, storage } = createDO();
+      await storage.put('', { v: 'empty-key', _ver: 'v1' });
+
+      const resp = await doInst.fetch(new Request('https://do/op', {
+        method: 'POST',
+        body: JSON.stringify({ op: 'get', key: '' }),
+      }));
+      const body = await resp.json() as { value: string; version: string };
+      expect(body.value).toBe('empty-key');
+      expect(body.version).toBe('v1');
+    });
   });
 
   describe('op: set', () => {
@@ -277,6 +417,80 @@ describe('AtomicStoreDO (white-box)', () => {
       // White-box: storage unchanged
       const entry = await storage.get<{ v: string; _ver: string }>('k');
       expect(entry!.v).toBe('original');
+    });
+
+    it('set with matching expectedVersion succeeds (update)', async () => {
+      const { do: doInst, storage } = createDO();
+      await storage.put('k', { v: 'original', _ver: 'v1' });
+
+      const resp = await doInst.fetch(new Request('https://do/op', {
+        method: 'POST',
+        body: JSON.stringify({ op: 'set', key: 'k', value: 'updated', expectedVersion: 'v1' }),
+      }));
+      const body = await resp.json() as { version: string };
+      expect(body.version).toBeTruthy();
+      expect(typeof body.version).toBe('string');
+      expect(body.version).not.toBe('v1');
+
+      // White-box: storage updated with new value and version
+      const entry = await storage.get<{ v: string; _ver: string }>('k');
+      expect(entry!.v).toBe('updated');
+      expect(entry!._ver).toBe(body.version);
+    });
+
+    it('set stores { v, _ver } structure in storage', async () => {
+      const { do: doInst, storage } = createDO();
+
+      await doInst.fetch(new Request('https://do/op', {
+        method: 'POST',
+        body: JSON.stringify({ op: 'set', key: 'k', value: { hello: 'world' }, expectedVersion: null }),
+      }));
+
+      const entry = await storage.get<{ v: unknown; _ver: string }>('k');
+      expect(entry).toBeDefined();
+      expect(entry!.v).toEqual({ hello: 'world' });
+      expect(typeof entry!._ver).toBe('string');
+    });
+
+    it('set with empty string key stores successfully', async () => {
+      const { do: doInst, storage } = createDO();
+
+      await doInst.fetch(new Request('https://do/op', {
+        method: 'POST',
+        body: JSON.stringify({ op: 'set', key: '', value: 'empty-key', expectedVersion: null }),
+      }));
+
+      const entry = await storage.get<{ v: string; _ver: string }>('');
+      expect(entry!.v).toBe('empty-key');
+    });
+
+    it('set with null value stores entry with null v', async () => {
+      const { do: doInst, storage } = createDO();
+
+      await doInst.fetch(new Request('https://do/op', {
+        method: 'POST',
+        body: JSON.stringify({ op: 'set', key: 'k', value: null, expectedVersion: null }),
+      }));
+
+      const entry = await storage.get<{ v: null; _ver: string }>('k');
+      expect(entry).toBeDefined();
+      expect(entry!.v).toBeNull();
+      expect(typeof entry!._ver).toBe('string');
+    });
+
+    it('set with large value stores successfully', async () => {
+      const { do: doInst, storage } = createDO();
+      const largeValue = 'x'.repeat(100_000);
+
+      const resp = await doInst.fetch(new Request('https://do/op', {
+        method: 'POST',
+        body: JSON.stringify({ op: 'set', key: 'large', value: largeValue, expectedVersion: null }),
+      }));
+      const body = await resp.json() as { version: string };
+      expect(body.version).toBeTruthy();
+
+      const entry = await storage.get<{ v: string; _ver: string }>('large');
+      expect(entry!.v).toBe(largeValue);
     });
   });
 
@@ -321,6 +535,114 @@ describe('AtomicStoreDO (white-box)', () => {
         body: JSON.stringify({ op: 'transact' }),
       }));
       expect(resp.status).toBe(400);
+    });
+
+    it('writes are persisted in storage after transact', async () => {
+      const { do: doInst, storage } = createDO();
+
+      await doInst.fetch(new Request('https://do/op', {
+        method: 'POST',
+        body: JSON.stringify({
+          op: 'transact',
+          txnOps: [
+            { op: 'set', key: 'a', value: 1 },
+            { op: 'set', key: 'b', value: 2 },
+          ],
+        }),
+      }));
+
+      const entryA = await storage.get<{ v: number; _ver: string }>('a');
+      expect(entryA).toBeDefined();
+      expect(entryA!.v).toBe(1);
+      expect(typeof entryA!._ver).toBe('string');
+
+      const entryB = await storage.get<{ v: number; _ver: string }>('b');
+      expect(entryB).toBeDefined();
+      expect(entryB!.v).toBe(2);
+    });
+
+    it('get returns null for non-existent key in transact', async () => {
+      const { do: doInst } = createDO();
+
+      const resp = await doInst.fetch(new Request('https://do/op', {
+        method: 'POST',
+        body: JSON.stringify({
+          op: 'transact',
+          txnOps: [
+            { op: 'get', key: 'nonexistent' },
+          ],
+        }),
+      }));
+      const body = await resp.json() as { results: unknown[] };
+      expect(body.results[0]).toBeNull();
+    });
+
+    it('read-modify-write within transact works', async () => {
+      const { do: doInst, storage } = createDO();
+      await storage.put('counter', { v: 1, _ver: 'v1' });
+
+      // Read old value, then write new value in one batch
+      const resp = await doInst.fetch(new Request('https://do/op', {
+        method: 'POST',
+        body: JSON.stringify({
+          op: 'transact',
+          txnOps: [
+            { op: 'get', key: 'counter' },
+            { op: 'set', key: 'counter', value: 2 },
+          ],
+        }),
+      }));
+      const body = await resp.json() as { results: unknown[] };
+      // get returns old value
+      expect(body.results[0]).toBe(1);
+      // set returns null
+      expect(body.results[1]).toBeNull();
+
+      // Storage reflects the write
+      const entry = await storage.get<{ v: number; _ver: string }>('counter');
+      expect(entry!.v).toBe(2);
+      expect(entry!._ver).not.toBe('v1');
+    });
+
+    it('transact set overwrites regardless of version (no OCC in transact)', async () => {
+      const { do: doInst, storage } = createDO();
+      await storage.put('k', { v: 'original', _ver: 'v1' });
+
+      // transact protocol does not carry expectedVersion; it always writes
+      await doInst.fetch(new Request('https://do/op', {
+        method: 'POST',
+        body: JSON.stringify({
+          op: 'transact',
+          txnOps: [
+            { op: 'set', key: 'k', value: 'overwritten' },
+          ],
+        }),
+      }));
+
+      const entry = await storage.get<{ v: string; _ver: string }>('k');
+      expect(entry!.v).toBe('overwritten');
+      expect(entry!._ver).not.toBe('v1');
+    });
+
+    it('transact with empty string key works', async () => {
+      const { do: doInst, storage } = createDO();
+
+      const resp = await doInst.fetch(new Request('https://do/op', {
+        method: 'POST',
+        body: JSON.stringify({
+          op: 'transact',
+          txnOps: [
+            { op: 'set', key: '', value: 'empty' },
+            { op: 'get', key: '' },
+          ],
+        }),
+      }));
+      const body = await resp.json() as { results: unknown[] };
+      expect(body.results[0]).toBeNull();
+      expect(body.results[1]).toBe('empty');
+
+      const entry = await storage.get<{ v: string; _ver: string }>('');
+      expect(entry!.v).toBe('empty');
     });
   });
 
