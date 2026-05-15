@@ -11,10 +11,12 @@
 import type {
   CreateSandboxInput,
   SandboxId,
-  Sandbox,
-  SandboxStatus,
-  MetricSnapshot,
 } from '../../features/sandbox/types.ts';
+import type {
+  ContainerGroupRuntime,
+  ContainerGroupStatus,
+  MetricSnapshot,
+} from './types.ts';
 
 // ─── Container operations ───
 
@@ -22,13 +24,13 @@ export interface DescribeSandboxesInput {
   readonly region: string;
   readonly sandboxName?: string;
   readonly sandboxId?: SandboxId;
-  readonly status?: SandboxStatus;
+  readonly status?: ContainerGroupStatus;
   readonly limit?: number;
   readonly nextToken?: string;
 }
 
 export interface DescribeSandboxesResult {
-  readonly sandboxes: readonly Sandbox[];
+  readonly sandboxes: readonly ContainerGroupRuntime[];
   readonly nextToken?: string;
   readonly totalCount?: number;
 }

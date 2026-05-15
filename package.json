@@ -9,7 +9,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "docs:http": "tsx scripts/export-http.ts"
   },
   "dependencies": {
     "@hono/zod-validator": "^0.4.0",

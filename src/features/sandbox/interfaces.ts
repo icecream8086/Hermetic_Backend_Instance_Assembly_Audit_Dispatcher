@@ -5,12 +5,13 @@ import type {
   IDnsProvider,
   IMetricsProvider,
   ContainerLogResult,
-} from '../../core/provider/interfaces.ts';
+  MetricSnapshot,
+  ContainerGroupRuntime,
+} from '../../core/provider/index.ts';
 import type {
   SandboxId,
   Sandbox,
   SandboxStatus,
-  MetricSnapshot,
   CreateSandboxInput,
 } from './types.ts';
 
@@ -31,6 +32,14 @@ export interface ISandboxService {
 
   /** Force a state transition (admin use only). */
   forceTransition(id: SandboxId, to: SandboxStatus, reason: string): Promise<Sandbox>;
+
+  /**
+   * Sync the sandbox entity with the provider's real-time resource state.
+   * Updates network, containers, events from the provider and optionally
+   * transitions status if the provider reports a terminal state.
+   * Returns the raw runtime data from the provider.
+   */
+  syncRuntime(id: SandboxId): Promise<ContainerGroupRuntime>;
 }
 
 export interface ISandboxDnsService {

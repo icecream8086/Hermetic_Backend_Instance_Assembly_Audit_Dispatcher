@@ -4,7 +4,9 @@ import type {
   IContainerProvider,
   IDnsProvider,
   IMetricsProvider,
-} from '../../core/provider/interfaces.ts';
+  MetricSnapshot,
+  ContainerGroupRuntime,
+} from '../../core/provider/index.ts';
 import {
   SandboxStatus,
   isValidTransition,
@@ -17,7 +19,6 @@ import type {
   Sandbox,
   CreateSandboxInput,
   DnsRecord,
-  MetricSnapshot,
   NetworkInfo,
   ContainerRuntime,
   ContainerEvent,
@@ -127,6 +128,54 @@ export class SandboxService implements ISandboxService {
     return this.transition(id, to, reason);
   }
 
+  async syncRuntime(id: SandboxId): Promise<ContainerGroupRuntime> {
+    const sandbox = await this.getById(id);
+    if (!sandbox) throw new AppError(404, 'SANDBOX_NOT_FOUND', `Sandbox ${id} not found`);
+
+    const result = await this.containerProvider.describe({
+      region: sandbox.config.region,
+      sandboxId: id,
+    });
+
+    const runtime = result.sandboxes[0];
+    if (!runtime) {
+      throw new AppError(404, 'RUNTIME_NOT_FOUND', `No runtime found for sandbox ${id} from provider`);
+    }
+
+    // Resolve final status: auto-transition if provider reports a terminal/stable status
+    const mapped = mapProviderStatus(runtime.status);
+    const finalStatus = mapped && mapped !== sandbox.status && isValidTransition(sandbox.status, mapped)
+      ? mapped
+      : sandbox.status;
+
+    // Build the updated sandbox entity (all props at construction to avoid readonly reassignment)
+    const updated: Sandbox = {
+      ...sandbox,
+      network: runtimeToNetwork(runtime.network, runtime.associatedResources),
+      containers: runtimeToContainers(runtime),
+      events: runtimeToEvents(runtime),
+      status: finalStatus,
+      updatedAt: Date.now(),
+      version: generateVersionId(),
+    };
+
+    // CAS write
+    const entry = await this.atomic.get<Sandbox>(`${KEY_PREFIX}${id}`);
+    if (!entry) throw new AppError(404, 'SANDBOX_NOT_FOUND', `Sandbox ${id} not found`);
+
+    const newVersion = await this.atomic.set(`${KEY_PREFIX}${id}`, updated, entry.version);
+    if (!newVersion) throw new AppError(409, 'CONFLICT', 'Concurrent modification during syncRuntime');
+
+    await this.logger.logAsync({
+      facility: FACILITY,
+      level: LogLevel.DEBUG,
+      message: `Sandbox runtime synced (${runtime.status})`,
+      metadata: { sandboxId: id as string, providerStatus: runtime.status, containers: runtime.containers.length },
+    });
+
+    return runtime;
+  }
+
   private async transition(id: SandboxId, to: SandboxStatus, reason: string): Promise<Sandbox> {
     const entry = await this.atomic.get<Sandbox>(`${KEY_PREFIX}${id}`);
     if (!entry) throw new AppError(404, 'SANDBOX_NOT_FOUND', `Sandbox ${id} not found`);
@@ -154,6 +203,74 @@ export class SandboxService implements ISandboxService {
     });
 
     return updated;
+  }
+}
+
+// ─── Runtime mapping helpers ───
+
+/** Extract EIP public IP from associated resources, if any. */
+function eipFromResources(resources: ContainerGroupRuntime['associatedResources']): string | undefined {
+  const eip = resources.find(r => r.type === 'eip');
+  return eip?.ip;
+}
+
+function runtimeToNetwork(
+  network: ContainerGroupRuntime['network'],
+  associatedResources: ContainerGroupRuntime['associatedResources'],
+): NetworkInfo {
+  const publicIp = eipFromResources(associatedResources);
+  return {
+    ...(publicIp !== undefined ? { publicIp } : {}),
+    ...(network.privateIp !== undefined ? { privateIp: network.privateIp } : {}),
+    ...(network.vpcId !== undefined ? { vpcId: network.vpcId } : {}),
+    ...(network.vswitchId !== undefined ? { subnetId: network.vswitchId } : {}),
+    ...(network.securityGroupId !== undefined ? { securityGroupId: network.securityGroupId } : {}),
+    ...(network.eniId !== undefined ? { eniId: network.eniId } : {}),
+  };
+}
+
+function runtimeToContainers(r: ContainerGroupRuntime): ContainerRuntime[] {
+  return r.containers.map(c => ({
+    name: c.name,
+    image: c.image,
+    cpu: c.cpu,
+    memory: c.memory,
+    state: {
+      state: c.state.state,
+      ready: c.ready,
+      restartCount: c.restartCount,
+      ...(c.state.startTime !== undefined ? { startTime: c.state.startTime } : {}),
+    },
+    volumeMounts: c.volumeMounts.map(vm => ({
+      volumeId: undefined as never, // runtime volumes don't carry feature-level volumeId
+      mountPath: vm.mountPath,
+      readOnly: vm.readOnly,
+      ...(vm.mountPropagation !== undefined ? { mountPropagation: vm.mountPropagation } : {}),
+    })),
+  }));
+}
+
+function runtimeToEvents(r: ContainerGroupRuntime): ContainerEvent[] {
+  return r.events.map(e => ({
+    _brand: 'ValueObject' as const,
+    reason: e.reason,
+    type: e.type,
+    message: e.message,
+    count: e.count,
+    ...(e.lastTimestamp !== undefined ? { lastTimestamp: e.lastTimestamp } : {}),
+  }));
+}
+
+/** Map provider container group status to sandbox lifecycle status. Returns null if no transition is needed. */
+function mapProviderStatus(providerStatus: ContainerGroupRuntime['status']): SandboxStatus | null {
+  switch (providerStatus) {
+    case 'Running': return null; // already mapped
+    case 'Failed': return SandboxStatus.Failed;
+    case 'Expired':
+    case 'Expiring': return SandboxStatus.Terminated;
+    case 'Succeeded': return SandboxStatus.Stopped;
+    // Pending / Scheduling / Restarting — keep current state, no transition
+    default: return null;
   }
 }
 

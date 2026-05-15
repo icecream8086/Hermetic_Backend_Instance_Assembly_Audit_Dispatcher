@@ -1,6 +1,6 @@
 import type { StorageConfig } from '../core/store/config.ts';
 import { AuditTier } from '../core/logger/interfaces.ts';
-import type { AppConfig, LogConfig } from './types.ts';
+import type { AppConfig, LogConfig, ProviderConfig, S3Config } from './types.ts';
 
 export type { AppConfig } from './types.ts';
 
@@ -34,9 +34,22 @@ export function loadConfig(overrides?: Partial<AppConfig>): AppConfig {
     },
   };
 
+  const providerConfig: ProviderConfig = overrides?.provider ?? {
+    container: (process.env['PROVIDER_CONTAINER'] as ProviderConfig['container']) ?? 'stub',
+    dns: (process.env['PROVIDER_DNS'] as ProviderConfig['dns']) ?? 'stub',
+    metrics: (process.env['PROVIDER_METRICS'] as ProviderConfig['metrics']) ?? 'stub',
+  };
+
+  const s3Config: S3Config = overrides?.s3 ?? {
+    backend: (process.env['S3_BACKEND'] as S3Config['backend']) ?? 'none',
+    region: process.env['S3_REGION'] ?? 'auto',
+  };
+
   return {
     storage: storageConfig,
     log: logConfig,
+    provider: providerConfig,
+    s3: s3Config,
     server: {
       port: Number(process.env['PORT'] ?? 3000),
       ...overrides?.server,

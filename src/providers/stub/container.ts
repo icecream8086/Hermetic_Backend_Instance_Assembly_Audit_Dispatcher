@@ -5,81 +5,102 @@ import type {
   DeleteSandboxInput,
   GetContainerLogInput,
   ContainerLogResult,
-} from '../../core/provider/interfaces.ts';
-import type { CreateSandboxInput, Sandbox, NetworkInfo, ContainerRuntime, ContainerEvent } from '../../features/sandbox/types.ts';
-import {
-  SandboxStatus,
-  createSandboxId,
-} from '../../features/sandbox/types.ts';
+  ContainerGroupRuntime,
+  ContainerRuntimeInfo,
+  ContainerGroupRuntimeEvent,
+  AssociatedResource,
+} from '../../core/provider/index.ts';
+import type { CreateSandboxInput } from '../../features/sandbox/types.ts';
 
 /** In-memory stub for local development. State is lost on restart. */
 export class StubContainerProvider implements IContainerProvider {
-  #sandboxes = new Map<string, Sandbox>();
+  #runtimes = new Map<string, ContainerGroupRuntime>();
   #nextProviderId = 1;
 
   async create(input: CreateSandboxInput): Promise<{ providerId: string }> {
     const providerId = `stub-eci-${this.#nextProviderId++}`;
-    const id = createSandboxId(providerId);
 
-    const network = {
-      ...(input.network.allocatePublicIp ? { publicIp: `203.0.113.${this.#nextProviderId}` } : {}),
-      privateIp: `10.0.0.${this.#nextProviderId}`,
-      vpcId: 'stub-vpc',
-      ...(input.network.subnetIds?.[0] ? { subnetId: input.network.subnetIds[0] } : {}),
-      ...(input.network.securityGroupId ? { securityGroupId: input.network.securityGroupId } : {}),
-    } as NetworkInfo;
-
-    const containers: ContainerRuntime[] = input.containers.map(c => ({
+    const containers: ContainerRuntimeInfo[] = input.containers.map(c => ({
       name: c.name,
       image: c.image,
+      args: c.args ?? [],
       cpu: input.resourceSpec.cpu,
       memory: input.resourceSpec.memory,
-      state: { state: 'Running', ready: true, restartCount: 0 },
-      volumeMounts: c.volumeMounts ?? [],
+      ready: true,
+      restartCount: 0,
+      state: { state: 'Running' as const, startTime: new Date().toISOString() },
+      volumeMounts: (c.volumeMounts ?? []).map(vm => ({
+        name: String(vm.volumeId),
+        mountPath: vm.mountPath,
+        readOnly: vm.readOnly,
+        ...(vm.mountPropagation !== undefined ? { mountPropagation: vm.mountPropagation } : {}),
+      })),
     }));
 
-    const events: ContainerEvent[] = [{
-      _brand: 'ValueObject' as const,
+    const events: ContainerGroupRuntimeEvent[] = [{
       reason: 'Created',
-      type: 'Normal',
-      message: 'Sandbox created by stub provider',
+      type: 'Normal' as const,
+      message: 'Container group created by stub provider',
       count: 1,
+      lastTimestamp: new Date().toISOString(),
     }];
 
-    const sandbox = {
-      id,
-      name: input.name,
-      ...(input.description !== undefined ? { description: input.description } : {}),
-      tags: input.tags ?? [],
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      status: SandboxStatus.Running,
-      version: 'stub-v1',
-      config: input,
-      providerId,
-      network,
-      containers,
-      events,
-    } as Sandbox;
+    const publicIp = input.network.allocatePublicIp ? `203.0.113.${this.#nextProviderId}` : undefined;
+    const associatedResources: AssociatedResource[] = publicIp ? [{
+      type: 'eip',
+      resourceId: `eip-${providerId}`,
+      ip: publicIp,
+      bandwidth: input.network.publicIpBandwidth ?? 19,
+      isp: 'BGP',
+      status: 'InUse',
+    }] : [];
 
-    this.#sandboxes.set(providerId, sandbox);
+    const runtime: ContainerGroupRuntime = {
+      providerId,
+      name: input.name,
+      status: 'Running',
+      regionId: input.region,
+      zoneId: 'stub-zone-a',
+      instanceType: 'ecs.g6.large',
+      spotStrategy: input.spotStrategy,
+      cpu: input.resourceSpec.cpu,
+      memory: input.resourceSpec.memory,
+      network: {
+        privateIp: `10.0.0.${this.#nextProviderId}`,
+        vpcId: 'stub-vpc',
+        ...(input.network.subnetIds?.[0] ? { vswitchId: input.network.subnetIds[0] } : {}),
+        ...(input.network.securityGroupId ? { securityGroupId: input.network.securityGroupId } : {}),
+      },
+      associatedResources,
+      restartPolicy: input.restartPolicy,
+      containers,
+      volumes: (input.volumes ?? []).map(v => ({
+        name: String(v.id),
+        type: 'NFSVolume',
+        ...(v.nfs ? { nfs: { server: v.nfs.server, path: v.nfs.path, readOnly: v.nfs.readOnly } } : {}),
+      })),
+      events,
+      tags: (input.tags ?? []).map(t => ({ key: t.key, value: t.value })),
+    };
+
+    this.#runtimes.set(providerId, runtime);
     return { providerId };
   }
 
   async describe(input: DescribeSandboxesInput): Promise<DescribeSandboxesResult> {
-    let items = [...this.#sandboxes.values()];
+    let items = [...this.#runtimes.values()];
 
     if (input.sandboxId) {
-      items = items.filter(s => s.id === input.sandboxId);
+      items = items.filter(r => r.providerId === String(input.sandboxId));
     }
     if (input.sandboxName) {
-      items = items.filter(s => s.name.includes(input.sandboxName!));
+      items = items.filter(r => r.name.includes(input.sandboxName!));
     }
     if (input.status) {
-      items = items.filter(s => s.status === input.status);
+      items = items.filter(r => r.status === input.status);
     }
     if (input.region) {
-      items = items.filter(s => s.config.region === input.region);
+      items = items.filter(r => r.regionId === input.region);
     }
 
     const limit = input.limit ?? 50;
@@ -91,11 +112,11 @@ export class StubContainerProvider implements IContainerProvider {
       sandboxes: slice,
       ...(hasMore ? { nextToken: String(start + limit) } : {}),
       totalCount: items.length,
-    } as DescribeSandboxesResult;
+    };
   }
 
-  async delete(_input: DeleteSandboxInput): Promise<void> {
-    this.#sandboxes.delete(_input.providerId);
+  async delete(input: DeleteSandboxInput): Promise<void> {
+    this.#runtimes.delete(input.providerId);
   }
 
   async getLogs(input: GetContainerLogInput): Promise<ContainerLogResult> {

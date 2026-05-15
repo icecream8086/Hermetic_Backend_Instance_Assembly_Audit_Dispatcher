@@ -1,5 +1,4 @@
 import type {
-  Identifiable,
   BaseEntity,
   PersistedEntity,
   ValueObject,
@@ -201,47 +200,3 @@ export interface DnsRecord extends BaseEntity<DnsRecordId, DnsRecordStatus> {
   readonly sandboxId: SandboxId;
 }
 
-// ─── MetricSnapshot — time-series data point, NOT a domain entity.
-// Equality is structural (same sandboxId + timestamp = same point).
-// Extends Identifiable only for cursor-based pagination across queries. ───
-
-export interface CPUMetrics {
-  readonly usageNanoCores: number;
-  readonly usageCores: number;
-}
-
-export interface MemoryMetrics {
-  readonly usageBytes: number;
-  readonly rss: number;
-  readonly cache: number;
-}
-
-export interface NetworkMetrics {
-  readonly txBytes: number;
-  readonly rxBytes: number;
-  readonly txPackets: number;
-  readonly rxPackets: number;
-}
-
-export interface DiskMetrics {
-  readonly readBytes: number;
-  readonly writeBytes: number;
-  readonly readIo: number;
-  readonly writeIo: number;
-}
-
-export interface ContainerMetrics {
-  readonly containerName: string;
-  readonly cpu: CPUMetrics;
-  readonly memory: MemoryMetrics;
-}
-
-export interface MetricSnapshot extends Identifiable<MetricSnapshotId> {
-  readonly sandboxId: SandboxId;
-  readonly timestamp: number;
-  readonly cpu: CPUMetrics;
-  readonly memory: MemoryMetrics;
-  readonly network: NetworkMetrics;
-  readonly disk: DiskMetrics;
-  readonly containers: readonly ContainerMetrics[];
-}
