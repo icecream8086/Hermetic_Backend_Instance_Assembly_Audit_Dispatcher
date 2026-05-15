@@ -6,6 +6,9 @@
 // - Provider-agnostic — no Alibaba/AWS/GCP types leak through.
 // - All fields map to fields from the cloud provider's "describe" API.
 // - This lives in core/ so both providers/ and features/ can reference it.
+//
+// OCI container types live here because cloud provider instances ARE
+// OCI Runtime containers (same object, different abstraction layers).
 
 /** Real-time status from the cloud provider. */
 export type ContainerGroupStatus =
@@ -18,25 +21,84 @@ export type ContainerGroupStatus =
   | 'Expired'
   | 'Restarting';
 
-export interface ContainerRuntimeInfo {
-  readonly name: string;
-  readonly image: string;
-  readonly args: readonly string[];
-  readonly cpu: number;
-  readonly memory: number;
-  readonly ready: boolean;
-  readonly restartCount: number;
-  readonly state: {
-    readonly state: 'Running' | 'Waiting' | 'Terminated';
-    readonly startTime?: string;
-  };
-  readonly volumeMounts: readonly {
-    readonly name: string;
-    readonly mountPath: string;
-    readonly readOnly: boolean;
-    readonly mountPropagation?: string;
-  }[];
+// ─── OCI Container types (core) ───
+
+declare const CONTAINER_ID_BRAND: unique symbol;
+export type ContainerId = string & { readonly [CONTAINER_ID_BRAND]: true };
+
+export function createContainerId(raw: string): ContainerId {
+  if (!raw) throw new TypeError('ContainerId must not be empty');
+  return raw as ContainerId;
 }
+
+/** Standard OCI container states — used by both cloud provider and OCI Runtime. */
+export type OciContainerStatus =
+  | 'creating'
+  | 'created'
+  | 'running'
+  | 'stopped'
+  | 'paused'
+  | 'error'
+  | 'deleted';
+
+export type OciHealthStatus = 'none' | 'starting' | 'healthy' | 'unhealthy';
+
+export type OciImageRef = string;
+
+/** A container as managed by the OCI Runtime.
+ *  Cloud orchestration creates instances → these are the same objects
+ *  that the OCI Runtime manages at the OS level. */
+export interface OciContainer {
+  readonly id: ContainerId;
+  readonly name: string;
+  readonly image: OciImageRef;
+  readonly args: readonly string[];
+  readonly env: Record<string, string>;
+  readonly workingDir: string;
+  readonly status: OciContainerStatus;
+  /** Is the container's main process currently alive? */
+  readonly alive: boolean;
+  readonly createdAt: string;
+  readonly startedAt?: string | undefined;
+  readonly finishedAt?: string | undefined;
+  readonly exitCode?: number | undefined;
+  readonly labels: Record<string, string>;
+  readonly annotations: Record<string, string>;
+  readonly mounts: readonly {
+    readonly source: string;
+    readonly destination: string;
+    readonly type?: string | undefined;
+    readonly options?: readonly string[] | undefined;
+  }[];
+  readonly network?: {
+    readonly ipAddress: string;
+    readonly gateway: string;
+    readonly ports: readonly {
+      readonly containerPort: number;
+      readonly hostPort?: number | undefined;
+      readonly protocol: 'tcp' | 'udp';
+    }[];
+  } | undefined;
+  /** Allocated resources for this container. */
+  readonly resources?: {
+    /** CPU cores assigned. */
+    readonly cpu: number;
+    /** Memory limit in MB. */
+    readonly memory: number;
+    readonly cpuUsagePercent: number;
+    readonly memoryUsageBytes: number;
+    readonly memoryLimitBytes: number;
+    readonly pidsCurrent: number;
+  };
+  readonly health: {
+    readonly status: OciHealthStatus;
+    readonly lastCheckedAt?: string;
+    readonly message?: string;
+    readonly failingSince?: string;
+  };
+}
+
+// ─── Cloud resource types ───
 
 export interface VolumeRuntimeInfo {
   readonly name: string;
@@ -81,7 +143,9 @@ export interface AssociatedResource {
   readonly status?: string;
 }
 
-/** A container group resource instance as reported by the cloud provider. */
+/** A container group resource instance as reported by the cloud provider.
+ *  Each container in the group IS an OciContainer — the cloud orchestrator
+ *  creates them, the OCI Runtime manages them at the OS level. */
 export interface ContainerGroupRuntime {
   readonly providerId: string;
   readonly name: string;
@@ -100,7 +164,8 @@ export interface ContainerGroupRuntime {
   /** Cloud resources attached to this group (EIP, etc.). Each has its own lifecycle. */
   readonly associatedResources: readonly AssociatedResource[];
   readonly restartPolicy: string;
-  readonly containers: readonly ContainerRuntimeInfo[];
+  /** Containers in this group. These ARE OCI Runtime containers. */
+  readonly containers: readonly OciContainer[];
   readonly volumes: readonly VolumeRuntimeInfo[];
   readonly events: readonly ContainerGroupRuntimeEvent[];
   readonly tags: readonly { key: string; value: string }[];
@@ -149,4 +214,58 @@ export interface MetricSnapshot {
   readonly network: NetworkMetrics;
   readonly disk: DiskMetrics;
   readonly containers: readonly ContainerMetrics[];
+}
+
+// ─── Container Group Creation Input (provider boundary) ───
+// Provider-agnostic input for IContainerProvider.create().
+// No sandbox domain types — the business layer maps to this type.
+
+export interface ContainerCreateConfig {
+  readonly name: string;
+  readonly image: string;
+  readonly args?: readonly string[] | undefined;
+  readonly tty?: boolean | undefined;
+  readonly stdin?: boolean | undefined;
+  readonly imagePullPolicy?: string | undefined;
+  readonly volumeMounts?: readonly VolumeMountConfig[] | undefined;
+  readonly providerOverrides?: Record<string, unknown> | undefined;
+}
+
+export interface VolumeMountConfig {
+  readonly volumeId: string;
+  readonly mountPath: string;
+  readonly readOnly: boolean;
+  readonly mountPropagation?: string | undefined;
+}
+
+export interface VolumeConfigInput {
+  readonly id: string;
+  readonly type: string;
+  readonly nfs?: {
+    readonly server: string;
+    readonly path: string;
+    readonly readOnly: boolean;
+  } | undefined;
+}
+
+export interface ContainerGroupNetworkInput {
+  readonly subnetIds?: readonly string[] | undefined;
+  readonly securityGroupId?: string | undefined;
+  readonly allocatePublicIp: boolean;
+  readonly publicIpBandwidth?: number | undefined;
+}
+
+export interface CreateContainerGroupInput {
+  readonly name: string;
+  readonly description?: string | undefined;
+  readonly region: string;
+  readonly cpu: number;
+  readonly memory: number;
+  readonly spotStrategy: string;
+  readonly restartPolicy: string;
+  readonly containers: readonly ContainerCreateConfig[];
+  readonly volumes?: readonly VolumeConfigInput[] | undefined;
+  readonly network: ContainerGroupNetworkInput;
+  readonly tags?: readonly { key: string; value: string }[] | undefined;
+  readonly providerOverrides?: Record<string, unknown> | undefined;
 }

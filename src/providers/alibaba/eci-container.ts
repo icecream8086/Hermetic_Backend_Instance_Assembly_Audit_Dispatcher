@@ -6,13 +6,13 @@
 
 import type {
   IContainerProvider,
-  DescribeSandboxesInput,
-  DescribeSandboxesResult,
-  DeleteSandboxInput,
+  DescribeContainerGroupsInput,
+  DescribeContainerGroupsResult,
+  DeleteContainerGroupInput,
   GetContainerLogInput,
   ContainerLogResult,
 } from '../../core/provider/index.ts';
-import type { CreateSandboxInput } from '../../features/sandbox/types.ts';
+import type { CreateContainerGroupInput } from '../../core/provider/index.ts';
 
 export class AlibabaEciContainerProvider implements IContainerProvider {
   constructor(
@@ -21,20 +21,20 @@ export class AlibabaEciContainerProvider implements IContainerProvider {
     _endpoint = 'eci.cn-hangzhou.aliyuncs.com',
   ) {}
 
-  async create(_input: CreateSandboxInput): Promise<{ providerId: string }> {
+  async create(_input: CreateContainerGroupInput): Promise<{ providerId: string }> {
     // TODO: implement via Alibaba ECI CreateContainerGroup API
     // See catch/script0/alibaba_l4d2_runtime_test.py for reference
     throw new Error('AlibabaEciContainerProvider.create not implemented');
   }
 
-  async describe(_input: DescribeSandboxesInput): Promise<DescribeSandboxesResult> {
+  async describe(_input: DescribeContainerGroupsInput): Promise<DescribeContainerGroupsResult> {
     // TODO: implement via Alibaba ECI DescribeContainerGroups API
     // See catch/script0/alibaba_get_info.py for reference.
     // Parse the response body into ContainerGroupRuntime[].
     throw new Error('AlibabaEciContainerProvider.describe not implemented');
   }
 
-  async delete(_input: DeleteSandboxInput): Promise<void> {
+  async delete(_input: DeleteContainerGroupInput): Promise<void> {
     // TODO: implement via Alibaba ECI DeleteContainerGroup API
     // See catch/script0/alibaba_free_resource.py for reference
     throw new Error('AlibabaEciContainerProvider.delete not implemented');

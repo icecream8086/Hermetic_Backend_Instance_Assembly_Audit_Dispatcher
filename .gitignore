@@ -10,3 +10,4 @@ CLAUDE.md
 .data
 .vscode
 *.http
+coverage

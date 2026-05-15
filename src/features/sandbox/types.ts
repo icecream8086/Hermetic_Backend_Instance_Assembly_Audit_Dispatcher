@@ -8,17 +8,14 @@ import type {
 // ─── Brand types ───
 declare const SANDBOX_ID_BRAND: unique symbol;
 declare const VOLUME_ID_BRAND: unique symbol;
-declare const DNS_RECORD_ID_BRAND: unique symbol;
 declare const METRIC_SNAPSHOT_ID_BRAND: unique symbol;
 
 export type SandboxId = string & { readonly [SANDBOX_ID_BRAND]: true };
 export type VolumeId = string & { readonly [VOLUME_ID_BRAND]: true };
-export type DnsRecordId = string & { readonly [DNS_RECORD_ID_BRAND]: true };
 export type MetricSnapshotId = string & { readonly [METRIC_SNAPSHOT_ID_BRAND]: true };
 
 export function createSandboxId(raw: string): SandboxId { if (!raw) throw new TypeError('SandboxId must not be empty'); return raw as SandboxId; }
 export function createVolumeId(raw: string): VolumeId { if (!raw) throw new TypeError('VolumeId must not be empty'); return raw as VolumeId; }
-export function createDnsRecordId(raw: string): DnsRecordId { if (!raw) throw new TypeError('DnsRecordId must not be empty'); return raw as DnsRecordId; }
 export function createMetricSnapshotId(raw: string): MetricSnapshotId { if (!raw) throw new TypeError('MetricSnapshotId must not be empty'); return raw as MetricSnapshotId; }
 
 // ─── Sandbox state machine ───
@@ -184,19 +181,4 @@ export interface Sandbox extends PersistedEntity<SandboxId, SandboxStatus> {
   readonly events: readonly ContainerEvent[];
 }
 
-// ─── DNS ───
-
-export enum DnsRecordStatus {
-  Active = 'Active',
-  Stale = 'Stale',
-}
-
-export interface DnsRecord extends BaseEntity<DnsRecordId, DnsRecordStatus> {
-  readonly domain: string;
-  readonly type: 'A' | 'CNAME';
-  readonly value: string;
-  readonly ttl: number;
-  readonly proxied: boolean;
-  readonly sandboxId: SandboxId;
-}
 

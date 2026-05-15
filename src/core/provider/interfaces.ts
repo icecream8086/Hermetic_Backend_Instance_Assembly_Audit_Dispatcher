@@ -9,33 +9,30 @@
 //   so the business layer never branches on provider identity.
 
 import type {
-  CreateSandboxInput,
-  SandboxId,
-} from '../../features/sandbox/types.ts';
-import type {
   ContainerGroupRuntime,
   ContainerGroupStatus,
+  CreateContainerGroupInput,
   MetricSnapshot,
 } from './types.ts';
 
 // ─── Container operations ───
 
-export interface DescribeSandboxesInput {
+export interface DescribeContainerGroupsInput {
   readonly region: string;
   readonly sandboxName?: string;
-  readonly sandboxId?: SandboxId;
+  readonly sandboxId?: string;
   readonly status?: ContainerGroupStatus;
   readonly limit?: number;
   readonly nextToken?: string;
 }
 
-export interface DescribeSandboxesResult {
+export interface DescribeContainerGroupsResult {
   readonly sandboxes: readonly ContainerGroupRuntime[];
   readonly nextToken?: string;
   readonly totalCount?: number;
 }
 
-export interface DeleteSandboxInput {
+export interface DeleteContainerGroupInput {
   readonly region: string;
   readonly providerId: string;
 }
@@ -56,14 +53,14 @@ export interface ContainerLogResult {
 }
 
 export interface IContainerProvider {
-  /** Create a new sandbox. Returns the provider-assigned ID. */
-  create(input: CreateSandboxInput): Promise<{ providerId: string }>;
+  /** Create a container group. Returns the provider-assigned ID. */
+  create(input: CreateContainerGroupInput): Promise<{ providerId: string }>;
 
   /** Query sandboxes by filters. */
-  describe(input: DescribeSandboxesInput): Promise<DescribeSandboxesResult>;
+  describe(input: DescribeContainerGroupsInput): Promise<DescribeContainerGroupsResult>;
 
   /** Delete a sandbox by provider ID. */
-  delete(input: DeleteSandboxInput): Promise<void>;
+  delete(input: DeleteContainerGroupInput): Promise<void>;
 
   /** Fetch container stdout/stderr logs. */
   getLogs(input: GetContainerLogInput): Promise<ContainerLogResult>;

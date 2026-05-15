@@ -2,7 +2,6 @@ import type { IAtomicStore } from '../../core/store/interfaces.ts';
 import type { ILogWriter } from '../../core/logger/interfaces.ts';
 import type {
   IContainerProvider,
-  IDnsProvider,
   IMetricsProvider,
   ContainerLogResult,
   MetricSnapshot,
@@ -40,17 +39,12 @@ export interface ISandboxService {
    * Returns the raw runtime data from the provider.
    */
   syncRuntime(id: SandboxId): Promise<ContainerGroupRuntime>;
-}
 
-export interface ISandboxDnsService {
-  /** Poll the provider for a sandbox's public IP until available or timeout. */
+  /**
+   * Poll the sandbox's atomic store until a public IP is available, or timeout.
+   * Returns the IP or null if timed out.
+   */
   pollForIp(sandboxId: SandboxId, timeoutMs: number, pollIntervalMs: number): Promise<string | null>;
-
-  /** Create or update the DNS record pointing to the sandbox IP. */
-  syncDns(sandboxId: SandboxId): Promise<void>;
-
-  /** Remove DNS records associated with a sandbox. */
-  cleanupDns(sandboxId: SandboxId): Promise<void>;
 }
 
 export interface ISandboxMetricsService {
@@ -84,6 +78,5 @@ export interface SandboxDependencies {
   readonly atomic: IAtomicStore;
   readonly logger: ILogWriter;
   readonly containerProvider: IContainerProvider;
-  readonly dnsProvider: IDnsProvider;
   readonly metricsProvider: IMetricsProvider;
 }

@@ -4,9 +4,9 @@ import {
   isValidTransition,
   createSandboxId,
   createVolumeId,
-  createDnsRecordId,
   createMetricSnapshotId,
 } from '../../src/features/sandbox/types.ts';
+import { createDnsRecordId } from '../../src/features/dns/types.ts';
 
 describe('brand types', () => {
   it('createSandboxId accepts non-empty string', () => {

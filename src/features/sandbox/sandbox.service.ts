@@ -2,30 +2,27 @@ import type { IAtomicStore } from '../../core/store/interfaces.ts';
 import type { ILogWriter } from '../../core/logger/interfaces.ts';
 import type {
   IContainerProvider,
-  IDnsProvider,
   IMetricsProvider,
   MetricSnapshot,
   ContainerGroupRuntime,
+  OciContainerStatus,
+  CreateContainerGroupInput,
 } from '../../core/provider/index.ts';
 import {
   SandboxStatus,
   isValidTransition,
   createSandboxId,
-  createDnsRecordId,
-  DnsRecordStatus,
 } from './types.ts';
 import type {
   SandboxId,
   Sandbox,
   CreateSandboxInput,
-  DnsRecord,
   NetworkInfo,
   ContainerRuntime,
   ContainerEvent,
 } from './types.ts';
 import type {
   ISandboxService,
-  ISandboxDnsService,
   ISandboxMetricsService,
   ISandboxLogService,
   LogQueryOptions,
@@ -54,8 +51,9 @@ export class SandboxService implements ISandboxService {
       if (existing) return existing.value;
     }
 
-    // 1. Create the cloud resource
-    const { providerId } = await this.containerProvider.create(input);
+    // 1. Build provider input and create cloud resource
+    const providerInput = toContainerGroupInput(input);
+    const { providerId } = await this.containerProvider.create(providerInput);
 
     // 2. Build the sandbox entity
     const id = createSandboxId(providerId);
@@ -128,6 +126,20 @@ export class SandboxService implements ISandboxService {
     return this.transition(id, to, reason);
   }
 
+  async pollForIp(sandboxId: SandboxId, timeoutMs: number, pollIntervalMs: number): Promise<string | null> {
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() < deadline) {
+      const entry = await this.atomic.get<Sandbox>(`${KEY_PREFIX}${sandboxId}`);
+      if (entry?.value.network.publicIp) {
+        return entry.value.network.publicIp;
+      }
+      await new Promise(r => setTimeout(r, pollIntervalMs));
+    }
+
+    return null;
+  }
+
   async syncRuntime(id: SandboxId): Promise<ContainerGroupRuntime> {
     const sandbox = await this.getById(id);
     if (!sandbox) throw new AppError(404, 'SANDBOX_NOT_FOUND', `Sandbox ${id} not found`);
@@ -142,13 +154,11 @@ export class SandboxService implements ISandboxService {
       throw new AppError(404, 'RUNTIME_NOT_FOUND', `No runtime found for sandbox ${id} from provider`);
     }
 
-    // Resolve final status: auto-transition if provider reports a terminal/stable status
     const mapped = mapProviderStatus(runtime.status);
     const finalStatus = mapped && mapped !== sandbox.status && isValidTransition(sandbox.status, mapped)
       ? mapped
       : sandbox.status;
 
-    // Build the updated sandbox entity (all props at construction to avoid readonly reassignment)
     const updated: Sandbox = {
       ...sandbox,
       network: runtimeToNetwork(runtime.network, runtime.associatedResources),
@@ -159,7 +169,6 @@ export class SandboxService implements ISandboxService {
       version: generateVersionId(),
     };
 
-    // CAS write
     const entry = await this.atomic.get<Sandbox>(`${KEY_PREFIX}${id}`);
     if (!entry) throw new AppError(404, 'SANDBOX_NOT_FOUND', `Sandbox ${id} not found`);
 
@@ -206,9 +215,95 @@ export class SandboxService implements ISandboxService {
   }
 }
 
+// ─── Metrics service ───
+
+export class SandboxMetricsService implements ISandboxMetricsService {
+  constructor(
+    private readonly metricsProvider: IMetricsProvider,
+    private readonly defaultRegion: string = 'unknown',
+  ) {}
+
+  async collect(sandboxId: SandboxId): Promise<readonly MetricSnapshot[]> {
+    const result = await this.metricsProvider.fetchMetrics({
+      region: this.defaultRegion,
+      providerId: String(sandboxId),
+    });
+    return result.snapshots;
+  }
+
+  async query(_sandboxId: SandboxId, _range: MetricTimeRange): Promise<readonly MetricSnapshot[]> {
+    throw new AppError(501, 'NOT_IMPLEMENTED', 'MetricSnapshot query is not yet implemented');
+  }
+}
+
+// ─── Log service ───
+
+export class SandboxLogService implements ISandboxLogService {
+  constructor(
+    private readonly containerProvider: IContainerProvider,
+    private readonly defaultRegion: string = 'unknown',
+  ) {}
+
+  async getLogs(
+    sandboxId: SandboxId,
+    containerName: string,
+    options?: LogQueryOptions,
+  ): Promise<ContainerLogResult> {
+    return this.containerProvider.getLogs({
+      region: this.defaultRegion,
+      providerId: String(sandboxId),
+      containerName,
+      ...(options?.limitBytes !== undefined ? { limitBytes: options.limitBytes } : {}),
+      ...(options?.sinceSeconds !== undefined ? { sinceSeconds: options.sinceSeconds } : {}),
+      ...(options?.timestamps !== undefined ? { timestamps: options.timestamps } : {}),
+    });
+  }
+}
+
+// ─── Input mapping ───
+
+export function toContainerGroupInput(input: CreateSandboxInput): CreateContainerGroupInput {
+  return {
+    name: input.name,
+    description: input.description,
+    region: input.region,
+    cpu: input.resourceSpec.cpu,
+    memory: input.resourceSpec.memory,
+    spotStrategy: input.spotStrategy,
+    restartPolicy: input.restartPolicy,
+    containers: input.containers.map(c => ({
+      name: c.name,
+      image: c.image,
+      args: c.args,
+      tty: c.tty,
+      stdin: c.stdin,
+      imagePullPolicy: c.imagePullPolicy,
+      volumeMounts: c.volumeMounts?.map(vm => ({
+        volumeId: String(vm.volumeId),
+        mountPath: vm.mountPath,
+        readOnly: vm.readOnly,
+        mountPropagation: vm.mountPropagation,
+      })),
+      providerOverrides: c.providerOverrides,
+    })),
+    volumes: input.volumes?.map(v => ({
+      id: String(v.id),
+      type: v.type,
+      nfs: v.nfs ? { server: v.nfs.server, path: v.nfs.path, readOnly: v.nfs.readOnly } : undefined,
+    })),
+    network: {
+      subnetIds: input.network.subnetIds,
+      securityGroupId: input.network.securityGroupId,
+      allocatePublicIp: input.network.allocatePublicIp,
+      publicIpBandwidth: input.network.publicIpBandwidth,
+    },
+    tags: input.tags?.map(t => ({ key: t.key, value: t.value })),
+    providerOverrides: input.providerOverrides,
+  };
+}
+
 // ─── Runtime mapping helpers ───
 
-/** Extract EIP public IP from associated resources, if any. */
 function eipFromResources(resources: ContainerGroupRuntime['associatedResources']): string | undefined {
   const eip = resources.find(r => r.type === 'eip');
   return eip?.ip;
@@ -233,21 +328,35 @@ function runtimeToContainers(r: ContainerGroupRuntime): ContainerRuntime[] {
   return r.containers.map(c => ({
     name: c.name,
     image: c.image,
-    cpu: c.cpu,
-    memory: c.memory,
+    cpu: c.resources?.cpu ?? 0,
+    memory: c.resources?.memory ?? 0,
     state: {
-      state: c.state.state,
-      ready: c.ready,
-      restartCount: c.restartCount,
-      ...(c.state.startTime !== undefined ? { startTime: c.state.startTime } : {}),
+      state: ociStatusToContainerState(c.status),
+      ready: c.status === 'running',
+      restartCount: 0,
+      ...(c.startedAt !== undefined ? { startTime: c.startedAt } : {}),
     },
-    volumeMounts: c.volumeMounts.map(vm => ({
-      volumeId: undefined as never, // runtime volumes don't carry feature-level volumeId
-      mountPath: vm.mountPath,
-      readOnly: vm.readOnly,
-      ...(vm.mountPropagation !== undefined ? { mountPropagation: vm.mountPropagation } : {}),
+    volumeMounts: c.mounts.map(m => ({
+      volumeId: undefined as never,
+      mountPath: m.destination,
+      readOnly: false,
+      ...(m.options?.includes('ro') ? { readOnly: true } : {}),
     })),
   }));
+}
+
+/** Map OCI container status to the sandbox entity's ContainerState. */
+function ociStatusToContainerState(s: OciContainerStatus): 'Running' | 'Waiting' | 'Terminated' {
+  switch (s) {
+    case 'running': return 'Running';
+    case 'paused': return 'Running';
+    case 'stopped':
+    case 'error':
+    case 'deleted': return 'Terminated';
+    case 'creating':
+    case 'created':
+    default: return 'Waiting';
+  }
 }
 
 function runtimeToEvents(r: ContainerGroupRuntime): ContainerEvent[] {
@@ -261,134 +370,13 @@ function runtimeToEvents(r: ContainerGroupRuntime): ContainerEvent[] {
   }));
 }
 
-/** Map provider container group status to sandbox lifecycle status. Returns null if no transition is needed. */
 function mapProviderStatus(providerStatus: ContainerGroupRuntime['status']): SandboxStatus | null {
   switch (providerStatus) {
-    case 'Running': return null; // already mapped
+    case 'Running': return null;
     case 'Failed': return SandboxStatus.Failed;
     case 'Expired':
     case 'Expiring': return SandboxStatus.Terminated;
     case 'Succeeded': return SandboxStatus.Stopped;
-    // Pending / Scheduling / Restarting — keep current state, no transition
     default: return null;
-  }
-}
-
-// ─── DNS service ───
-
-export class SandboxDnsService implements ISandboxDnsService {
-  constructor(
-    private readonly atomic: IAtomicStore,
-    private readonly dnsProvider: IDnsProvider,
-    private readonly logger: ILogWriter,
-    private readonly zoneId: string = 'stub-zone',
-  ) {}
-
-  async pollForIp(sandboxId: SandboxId, timeoutMs: number, pollIntervalMs: number): Promise<string | null> {
-    const deadline = Date.now() + timeoutMs;
-
-    while (Date.now() < deadline) {
-      const entry = await this.atomic.get<Sandbox>(`${KEY_PREFIX}${sandboxId}`);
-      if (entry?.value.network.publicIp) {
-        return entry.value.network.publicIp;
-      }
-      await new Promise(r => setTimeout(r, pollIntervalMs));
-    }
-
-    return null;
-  }
-
-  async syncDns(sandboxId: SandboxId): Promise<void> {
-    const entry = await this.atomic.get<Sandbox>(`${KEY_PREFIX}${sandboxId}`);
-    if (!entry) throw new AppError(404, 'SANDBOX_NOT_FOUND', `Sandbox ${sandboxId} not found`);
-    if (!entry.value.network.publicIp) throw new AppError(400, 'NO_PUBLIC_IP', 'Sandbox has no public IP');
-
-    const record = {
-      id: createDnsRecordId(`dns-${sandboxId as string}`),
-      name: `dns-${sandboxId as string}`,
-      tags: [],
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      status: DnsRecordStatus.Active,
-      domain: `${sandboxId as string}.example.com`,
-      type: 'A' as const,
-      value: entry.value.network.publicIp,
-      ttl: 60,
-      proxied: false,
-      sandboxId,
-    } as DnsRecord;
-
-    await this.dnsProvider.updateRecord({
-      domain: record.domain,
-      type: record.type,
-      value: record.value,
-      ttl: record.ttl,
-      proxied: record.proxied,
-      providerRecordId: `dns-${sandboxId as string}`,
-      zoneId: this.zoneId,
-    });
-
-    await this.logger.logAsync({
-      facility: FACILITY,
-      level: LogLevel.INFO,
-      message: 'DNS record synced',
-      metadata: { sandboxId: sandboxId as string, ip: entry.value.network.publicIp },
-    });
-  }
-
-  async cleanupDns(sandboxId: SandboxId): Promise<void> {
-    await this.dnsProvider.deleteRecord({
-      zoneId: this.zoneId,
-      providerRecordId: `dns-${sandboxId as string}`,
-    });
-  }
-}
-
-// ─── Metrics service ───
-
-export class SandboxMetricsService implements ISandboxMetricsService {
-  constructor(
-    private readonly metricsProvider: IMetricsProvider,
-    /** Region passed through to the provider. Resolved from the sandbox's config at call sites. */
-    private readonly defaultRegion: string = 'unknown',
-  ) {}
-
-  async collect(sandboxId: SandboxId): Promise<readonly MetricSnapshot[]> {
-    // TODO: resolve region from the sandbox entity
-    const result = await this.metricsProvider.fetchMetrics({
-      region: this.defaultRegion,
-      providerId: String(sandboxId),
-    });
-    return result.snapshots;
-  }
-
-  // TODO: implement query against IQueryStore once D1 / FileQuery is wired
-  async query(_sandboxId: SandboxId, _range: MetricTimeRange): Promise<readonly MetricSnapshot[]> {
-    throw new AppError(501, 'NOT_IMPLEMENTED', 'MetricSnapshot query is not yet implemented');
-  }
-}
-
-// ─── Log service ───
-
-export class SandboxLogService implements ISandboxLogService {
-  constructor(
-    private readonly containerProvider: IContainerProvider,
-    /** Default region passed through to the provider. */
-    private readonly defaultRegion: string = 'unknown',
-  ) {}
-
-  async getLogs(
-    sandboxId: SandboxId,
-    containerName: string,
-    options?: LogQueryOptions,
-  ): Promise<ContainerLogResult> {
-    return this.containerProvider.getLogs({
-      region: this.defaultRegion,
-      providerId: String(sandboxId),
-      containerName,
-      ...(options?.limitBytes !== undefined ? { limitBytes: options.limitBytes } : {}),
-      ...(options?.sinceSeconds !== undefined ? { sinceSeconds: options.sinceSeconds } : {}),
-      ...(options?.timestamps !== undefined ? { timestamps: options.timestamps } : {}),
-    });
   }
 }

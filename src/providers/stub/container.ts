@@ -1,48 +1,64 @@
 import type {
   IContainerProvider,
-  DescribeSandboxesInput,
-  DescribeSandboxesResult,
-  DeleteSandboxInput,
+  DescribeContainerGroupsInput,
+  DescribeContainerGroupsResult,
+  DeleteContainerGroupInput,
   GetContainerLogInput,
   ContainerLogResult,
   ContainerGroupRuntime,
-  ContainerRuntimeInfo,
   ContainerGroupRuntimeEvent,
   AssociatedResource,
+  OciContainer,
 } from '../../core/provider/index.ts';
-import type { CreateSandboxInput } from '../../features/sandbox/types.ts';
+import type { CreateContainerGroupInput, ContainerId } from '../../core/provider/types.ts';
+import { StubOciRuntime } from '../../features/ociruntime/oci-runtime.stub.ts';
+import type { OciCreateSpec } from '../../features/ociruntime/types.ts';
 
 /** In-memory stub for local development. State is lost on restart. */
 export class StubContainerProvider implements IContainerProvider {
   #runtimes = new Map<string, ContainerGroupRuntime>();
+  #oci = new StubOciRuntime();
+  #nameToOciId = new Map<string, ContainerId>();
   #nextProviderId = 1;
 
-  async create(input: CreateSandboxInput): Promise<{ providerId: string }> {
+  async create(input: CreateContainerGroupInput): Promise<{ providerId: string }> {
     const providerId = `stub-eci-${this.#nextProviderId++}`;
 
-    const containers: ContainerRuntimeInfo[] = input.containers.map(c => ({
-      name: c.name,
-      image: c.image,
-      args: c.args ?? [],
-      cpu: input.resourceSpec.cpu,
-      memory: input.resourceSpec.memory,
-      ready: true,
-      restartCount: 0,
-      state: { state: 'Running' as const, startTime: new Date().toISOString() },
-      volumeMounts: (c.volumeMounts ?? []).map(vm => ({
-        name: String(vm.volumeId),
-        mountPath: vm.mountPath,
-        readOnly: vm.readOnly,
-        ...(vm.mountPropagation !== undefined ? { mountPropagation: vm.mountPropagation } : {}),
-      })),
-    }));
+    // Delegate container lifecycle to the OCI runtime
+    const ociContainers: OciContainer[] = [];
+    for (const c of input.containers) {
+      const spec: OciCreateSpec = {
+        name: c.name,
+        image: c.image,
+        args: c.args,
+        env: {},
+        workingDir: '/',
+        labels: {},
+        annotations: {},
+        mounts: (c.volumeMounts ?? []).map(vm => ({
+          source: `/mnt/${vm.volumeId}`,
+          destination: vm.mountPath,
+          options: vm.readOnly ? ['ro'] : [],
+        })),
+        ports: [],
+        resources: { cpu: input.cpu, memory: input.memory },
+      };
+      const created = await this.#oci.createContainer(spec);
+      await this.#oci.startContainer(created.id);
+      const inspected = await this.#oci.inspectContainer(created.id);
+      if (inspected) {
+        ociContainers.push(inspected);
+        this.#nameToOciId.set(c.name, inspected.id);
+      }
+    }
 
+    const now = new Date().toISOString();
     const events: ContainerGroupRuntimeEvent[] = [{
       reason: 'Created',
       type: 'Normal' as const,
       message: 'Container group created by stub provider',
       count: 1,
-      lastTimestamp: new Date().toISOString(),
+      lastTimestamp: now,
     }];
 
     const publicIp = input.network.allocatePublicIp ? `203.0.113.${this.#nextProviderId}` : undefined;
@@ -63,8 +79,8 @@ export class StubContainerProvider implements IContainerProvider {
       zoneId: 'stub-zone-a',
       instanceType: 'ecs.g6.large',
       spotStrategy: input.spotStrategy,
-      cpu: input.resourceSpec.cpu,
-      memory: input.resourceSpec.memory,
+      cpu: input.cpu,
+      memory: input.memory,
       network: {
         privateIp: `10.0.0.${this.#nextProviderId}`,
         vpcId: 'stub-vpc',
@@ -73,9 +89,9 @@ export class StubContainerProvider implements IContainerProvider {
       },
       associatedResources,
       restartPolicy: input.restartPolicy,
-      containers,
+      containers: ociContainers,
       volumes: (input.volumes ?? []).map(v => ({
-        name: String(v.id),
+        name: v.id,
         type: 'NFSVolume',
         ...(v.nfs ? { nfs: { server: v.nfs.server, path: v.nfs.path, readOnly: v.nfs.readOnly } } : {}),
       })),
@@ -87,7 +103,7 @@ export class StubContainerProvider implements IContainerProvider {
     return { providerId };
   }
 
-  async describe(input: DescribeSandboxesInput): Promise<DescribeSandboxesResult> {
+  async describe(input: DescribeContainerGroupsInput): Promise<DescribeContainerGroupsResult> {
     let items = [...this.#runtimes.values()];
 
     if (input.sandboxId) {
@@ -115,11 +131,17 @@ export class StubContainerProvider implements IContainerProvider {
     };
   }
 
-  async delete(input: DeleteSandboxInput): Promise<void> {
+  async delete(input: DeleteContainerGroupInput): Promise<void> {
     this.#runtimes.delete(input.providerId);
   }
 
   async getLogs(input: GetContainerLogInput): Promise<ContainerLogResult> {
+    const ociId = this.#nameToOciId.get(input.containerName);
+    if (ociId) {
+      const tail = input.limitBytes ? Math.min(input.limitBytes, 100) : undefined;
+      const content = await this.#oci.getLogs(ociId, tail !== undefined ? { tail } : undefined);
+      return { containerName: input.containerName, content, timestamp: new Date().toISOString() };
+    }
     return {
       containerName: input.containerName,
       content: `[stub] Log output for ${input.containerName} at ${new Date().toISOString()}\n`,
