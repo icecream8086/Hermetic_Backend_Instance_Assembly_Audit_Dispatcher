@@ -29,6 +29,7 @@ export interface DnsRecord {
   readonly value: string;
   readonly ttl: number;
   readonly proxied: boolean;
+  readonly zoneId: string;
   readonly status: DnsRecordStatus;
   readonly tags: readonly { key: string; value: string }[];
   readonly createdAt: number;

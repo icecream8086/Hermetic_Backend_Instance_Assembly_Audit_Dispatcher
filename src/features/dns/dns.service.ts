@@ -25,9 +25,13 @@ export class DnsService implements IDnsService {
   async syncRecord(input: DnsSyncInput): Promise<DnsRecord> {
     const { domain, type, value, ttl, proxied, zoneId, id } = input;
 
+    if (type !== 'A' && type !== 'CNAME') {
+      throw new AppError(400, 'UNSUPPORTED_DNS_TYPE', `DNS type ${type} is not supported by the provider`);
+    }
+
     await this.dnsProvider.updateRecord({
       domain,
-      type: type as 'A' | 'CNAME',
+      type,
       value,
       ttl,
       proxied,
@@ -45,6 +49,7 @@ export class DnsService implements IDnsService {
       value,
       ttl,
       proxied,
+      zoneId,
       status: DnsRecordStatus.Active,
       tags: [],
       createdAt: existingEntry?.value.createdAt ?? now,
@@ -68,7 +73,7 @@ export class DnsService implements IDnsService {
     if (!entry) return;
 
     await this.dnsProvider.deleteRecord({
-      zoneId: 'stub-zone',
+      zoneId: entry.value.zoneId,
       providerRecordId: String(id),
     });
 
@@ -87,10 +92,10 @@ export class DnsService implements IDnsService {
     return entry?.value ?? null;
   }
 
-  async listRecords(refId?: string): Promise<readonly DnsRecord[]> {
-    // Atomic store doesn't support prefix scan, so this is a best-effort.
-    // In production, this would use IQueryStore (D1).
-    if (!refId) return [];
-    throw new AppError(501, 'NOT_IMPLEMENTED', 'DnsService.listRecords requires a query store backend');
+  async listRecords(_refId?: string): Promise<readonly DnsRecord[]> {
+    // Atomic store (KV + DO) doesn't support prefix scans or relational queries.
+    // A query-capable backend (e.g. D1) is needed to implement this efficiently.
+    // See wrangler.toml — D1 is reserved for future use.
+    return [];
   }
 }
