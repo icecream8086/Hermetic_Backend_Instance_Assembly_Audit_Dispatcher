@@ -4,14 +4,45 @@ import type {
   DeleteDnsRecordInput,
 } from '../../core/provider/interfaces.ts';
 
+interface StubRecord {
+  readonly domain: string;
+  readonly type: 'A' | 'CNAME';
+  readonly value: string;
+  readonly ttl: number;
+  readonly proxied: boolean;
+  readonly providerRecordId: string;
+  readonly zoneId: string;
+  readonly createdAt: number;
+  readonly updatedAt: number;
+}
+
+/** In-memory stub for local development. State is lost on restart. */
 export class StubDnsProvider implements IDnsProvider {
-  #records = new Map<string, { ip: string }>();
+  #records = new Map<string, StubRecord>();
 
   async updateRecord(input: UpdateDnsRecordInput): Promise<void> {
-    this.#records.set(input.domain, { ip: input.value });
+    const now = Date.now();
+    const existing = this.#records.get(input.providerRecordId);
+
+    this.#records.set(input.providerRecordId, {
+      domain: input.domain,
+      type: input.type,
+      value: input.value,
+      ttl: input.ttl,
+      proxied: input.proxied,
+      providerRecordId: input.providerRecordId,
+      zoneId: input.zoneId,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    });
   }
 
-  async deleteRecord(_input: DeleteDnsRecordInput): Promise<void> {
-    // noop
+  async deleteRecord(input: DeleteDnsRecordInput): Promise<void> {
+    this.#records.delete(input.providerRecordId);
+  }
+
+  /** Expose all tracked records for test inspection. */
+  get entries(): readonly StubRecord[] {
+    return [...this.#records.values()];
   }
 }
