@@ -1,4 +1,4 @@
-import { Dag } from '../../../core/dag/graph.ts';
+import { buildDag } from '../../../core/dag/graph.ts';
 import type {
   Template,
   AssemblyTemplate,
@@ -40,11 +40,21 @@ export function resolveAssembly(
   rootName: string,
   store: ReadonlyMap<string, Template>,
 ): ResolveResult {
-  const dag = new Dag<string, Template>(t => t.name);
-  const errors: ResolveError[] = [];
+  const { dag, errors: buildErrors } = buildDag(
+    rootName,
+    name => store.get(name),
+    t => t.kind === TemplateKind.Assembly
+      ? (t as AssemblyTemplate).components.map(c => c.target)
+      : [],
+    t => t.name,
+  );
 
-  collectToDag(rootName, store, dag, new Set(), new Set(), errors);
-  if (errors.length > 0) return { success: false, errors };
+  if (buildErrors.length > 0) {
+    return {
+      success: false,
+      errors: buildErrors.map(e => ({ templateName: e.id, message: e.message })),
+    };
+  }
 
   const sorted = dag.topologicalSort();
   if (!sorted.success) {
@@ -71,54 +81,6 @@ export function resolveAssembly(
   }
 
   return { success: true, config: merged as CreateSandboxInput };
-}
-
-// ─── DFS collection with cycle detection ───
-
-function collectToDag(
-  name: string,
-  store: ReadonlyMap<string, Template>,
-  dag: Dag<string, Template>,
-  visited: Set<string>,
-  path: Set<string>,
-  errors: ResolveError[],
-): void {
-  const template = store.get(name);
-  if (!template) {
-    errors.push({ templateName: name, message: `Template not found` });
-    return;
-  }
-
-  if (path.has(name)) {
-    errors.push({
-      templateName: name,
-      message: `Circular dependency: ${[...path, name].join(' -> ')}`,
-    });
-    return;
-  }
-
-  if (visited.has(name)) return;
-
-  visited.add(name);
-  dag.addNode(template);
-
-  if (template.kind === TemplateKind.Assembly) {
-    const assembly = template as AssemblyTemplate;
-    path.add(name);
-
-    for (const edge of assembly.components) {
-      collectToDag(edge.target, store, dag, visited, path, errors);
-    }
-
-    // All targets are now in the DAG — safe to add edges
-    for (const edge of assembly.components) {
-      if (dag.hasNode(edge.target)) {
-        dag.addEdge(name, edge.target);
-      }
-    }
-
-    path.delete(name);
-  }
 }
 
 // ─── Merge engine ───

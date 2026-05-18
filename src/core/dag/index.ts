@@ -1,2 +1,2 @@
-export type { TopoSortResult } from './interfaces.ts';
-export { Dag } from './graph.ts';
+export type { TopoSortResult, DagBuildError } from './interfaces.ts';
+export { Dag, buildDag } from './graph.ts';

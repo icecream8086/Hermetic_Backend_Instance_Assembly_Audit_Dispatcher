@@ -1,4 +1,4 @@
-import type { TopoSortResult } from './interfaces.ts';
+import type { TopoSortResult, DagBuildError } from './interfaces.ts';
 
 /**
  * Generic directed acyclic graph base class.
@@ -102,6 +102,30 @@ export class Dag<TId, TNode> {
     return result;
   }
 
+  /** Nodes with in-degree 0 — no edges point TO them. */
+  sources(): readonly TNode[] {
+    const result: TNode[] = [];
+    for (const [id] of this.nodes) {
+      const inc = this.incoming.get(id);
+      if (!inc || inc.size === 0) {
+        result.push(this.nodes.get(id)!);
+      }
+    }
+    return result;
+  }
+
+  /** Nodes with out-degree 0 — no edges point FROM them. */
+  sinks(): readonly TNode[] {
+    const result: TNode[] = [];
+    for (const [id] of this.nodes) {
+      const out = this.outgoing.get(id);
+      if (!out || out.size === 0) {
+        result.push(this.nodes.get(id)!);
+      }
+    }
+    return result;
+  }
+
   // ─── Algorithms ───
 
   /**
@@ -160,8 +184,14 @@ export class Dag<TId, TNode> {
   /**
    * Extract the subgraph reachable from `root` using depth-first search.
    * Follows outgoing edges from root to find all transitive successors.
+   *
+   * Returns a discriminated union:
+   * - `{ success: true, dag }` on success
+   * - `{ success: false, error }` when the root is missing or a cycle is detected
    */
-  reachableSubgraph(root: TId): { dag: Dag<TId, TNode>; error: string | undefined } {
+  reachableSubgraph(root: TId):
+    | { readonly success: true; readonly dag: Dag<TId, TNode> }
+    | { readonly success: false; readonly error: string } {
     const subgraph = new Dag<TId, TNode>(this.getId);
     const path = new Set<TId>();
     const visited = new Set<TId>();
@@ -185,6 +215,67 @@ export class Dag<TId, TNode> {
     };
 
     const error = visit(root);
-    return { dag: subgraph, error };
+    if (error) return { success: false as const, error };
+    return { success: true as const, dag: subgraph };
   }
+}
+
+/**
+ * Build a DAG by traversing a key-value store using DFS starting from `rootId`.
+ *
+ * For each visited node, `getReferences` returns the IDs of downstream nodes.
+ * The DAG edges are set as `parent → child` (the node that lists the reference
+ * points TO the referenced node).
+ *
+ * Cycle detection uses path tracking: if a node is encountered twice on the
+ * current DFS path a `DagBuildError` is recorded and that branch is not
+ * traversed further.
+ *
+ * @param rootId      — Starting node ID.
+ * @param lookup      — Resolve an ID to a node (return `undefined` if missing).
+ * @param getReferences — Return the IDs this node references (outgoing edges).
+ * @param getId       — Extract a node's identity (passed to the Dag constructor).
+ */
+export function buildDag<TId, TNode>(
+  rootId: TId,
+  lookup: (id: TId) => TNode | undefined,
+  getReferences: (node: TNode) => readonly TId[],
+  getId: (node: TNode) => TId,
+): { dag: Dag<TId, TNode>; errors: readonly DagBuildError<TId>[] } {
+  const dag = new Dag<TId, TNode>(getId);
+  const errors: DagBuildError<TId>[] = [];
+  const visited = new Set<TId>();
+  const path = new Set<TId>();
+
+  function visit(id: TId): void {
+    if (path.has(id)) {
+      errors.push({ id, message: `Circular dependency: ${[...path, id].join(' -> ')}` });
+      return;
+    }
+    if (visited.has(id)) return;
+
+    const node = lookup(id);
+    if (!node) {
+      errors.push({ id, message: `Node not found` });
+      return;
+    }
+
+    visited.add(id);
+    dag.addNode(node);
+
+    const refs = getReferences(node);
+    if (refs.length > 0) {
+      path.add(id);
+      for (const ref of refs) {
+        visit(ref);
+        if (dag.hasNode(ref)) {
+          dag.addEdge(id, ref);
+        }
+      }
+      path.delete(id);
+    }
+  }
+
+  visit(rootId);
+  return { dag, errors };
 }

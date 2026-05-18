@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { Dag } from '../../../src/core/dag/graph.ts';
+import { Dag, buildDag } from '../../../src/core/dag/graph.ts';
 
 // ─── Test helpers ───
 
@@ -383,13 +383,14 @@ describe('Dag (white-box)', () => {
       dag.addEdge('a', 'c');
       // 'd' is not reachable from 'a'
 
-      const { dag: sub, error } = dag.reachableSubgraph('a');
-      expect(error).toBeUndefined();
-      expect(sub.size).toBe(3);
-      expect(sub.hasNode('a')).toBe(true);
-      expect(sub.hasNode('b')).toBe(true);
-      expect(sub.hasNode('c')).toBe(true);
-      expect(sub.hasNode('d')).toBe(false);
+      const result = dag.reachableSubgraph('a');
+      expect(result.success).toBe(true);
+      if (!result.success) return;
+      expect(result.dag.size).toBe(3);
+      expect(result.dag.hasNode('a')).toBe(true);
+      expect(result.dag.hasNode('b')).toBe(true);
+      expect(result.dag.hasNode('c')).toBe(true);
+      expect(result.dag.hasNode('d')).toBe(false);
     });
 
     it('preserves edges in the subgraph', () => {
@@ -400,19 +401,23 @@ describe('Dag (white-box)', () => {
       dag.addEdge('a', 'b');
       dag.addEdge('b', 'c');
 
-      const { dag: sub } = dag.reachableSubgraph('a');
-      const ids = sub.getAllNodes().map(n => n.id).sort();
+      const result = dag.reachableSubgraph('a');
+      expect(result.success).toBe(true);
+      if (!result.success) return;
+      const ids = result.dag.getAllNodes().map(n => n.id).sort();
       expect(ids).toEqual(['a', 'b', 'c']);
 
-      const result = sub.topologicalSort();
-      expect(result.success).toBe(true);
+      const sortResult = result.dag.topologicalSort();
+      expect(sortResult.success).toBe(true);
     });
 
     it('returns error for non-existent root', () => {
       const dag = new TestDag();
       dag.addNode(node('a'));
-      const { error } = dag.reachableSubgraph('x');
-      expect(error).toContain('not found');
+      const result = dag.reachableSubgraph('x');
+      expect(result.success).toBe(false);
+      if (result.success) return;
+      expect(result.error).toContain('not found');
     });
 
     it('returns error on cycle during DFS traversal', () => {
@@ -424,8 +429,10 @@ describe('Dag (white-box)', () => {
       dag.addEdge('b', 'c');
       dag.addEdge('c', 'a');
 
-      const { error } = dag.reachableSubgraph('a');
-      expect(error).toContain('Cycle detected');
+      const result = dag.reachableSubgraph('a');
+      expect(result.success).toBe(false);
+      if (result.success) return;
+      expect(result.error).toContain('Cycle detected');
     });
 
     it('subgraph from a leaf returns only that node', () => {
@@ -434,18 +441,198 @@ describe('Dag (white-box)', () => {
       dag.addNode(node('b'));
       dag.addEdge('a', 'b');
 
-      const { dag: sub } = dag.reachableSubgraph('b');
-      expect(sub.size).toBe(1);
-      expect(sub.hasNode('b')).toBe(true);
+      const result = dag.reachableSubgraph('b');
+      expect(result.success).toBe(true);
+      if (!result.success) return;
+      expect(result.dag.size).toBe(1);
+      expect(result.dag.hasNode('b')).toBe(true);
     });
 
     it('subgraph inherits parent construction (same getId)', () => {
       const dag = new TestDag();
       dag.addNode(node('a'));
-      const { dag: sub } = dag.reachableSubgraph('a');
-      // The subgraph was built using the same getId
-      expect(sub.size).toBe(1);
-      expect(sub.hasNode('a')).toBe(true);
+      const result = dag.reachableSubgraph('a');
+      expect(result.success).toBe(true);
+      if (!result.success) return;
+      expect(result.dag.size).toBe(1);
+      expect(result.dag.hasNode('a')).toBe(true);
+    });
+  });
+
+  // ─── sources / sinks ───
+
+  describe('sources', () => {
+    it('returns empty array for empty graph', () => {
+      const dag = new TestDag();
+      expect(dag.sources()).toEqual([]);
+    });
+
+    it('single isolated node is a source', () => {
+      const dag = new TestDag();
+      dag.addNode(node('a'));
+      expect(dag.sources().map(n => n.id)).toEqual(['a']);
+    });
+
+    it('excludes nodes with incoming edges', () => {
+      const dag = new TestDag();
+      dag.addNode(node('a'));
+      dag.addNode(node('b'));
+      dag.addEdge('a', 'b');
+      expect(dag.sources().map(n => n.id)).toEqual(['a']);
+    });
+
+    it('returns multiple sources in disconnected graph', () => {
+      const dag = new TestDag();
+      dag.addNode(node('a'));
+      dag.addNode(node('b'));
+      dag.addNode(node('c'));
+      dag.addEdge('a', 'c');
+      expect(dag.sources().map(n => n.id).sort()).toEqual(['a', 'b']);
+    });
+  });
+
+  describe('sinks', () => {
+    it('returns empty array for empty graph', () => {
+      const dag = new TestDag();
+      expect(dag.sinks()).toEqual([]);
+    });
+
+    it('single isolated node is a sink', () => {
+      const dag = new TestDag();
+      dag.addNode(node('a'));
+      expect(dag.sinks().map(n => n.id)).toEqual(['a']);
+    });
+
+    it('excludes nodes with outgoing edges', () => {
+      const dag = new TestDag();
+      dag.addNode(node('a'));
+      dag.addNode(node('b'));
+      dag.addEdge('a', 'b');
+      expect(dag.sinks().map(n => n.id)).toEqual(['b']);
+    });
+
+    it('returns multiple sinks in disconnected graph', () => {
+      const dag = new TestDag();
+      dag.addNode(node('a'));
+      dag.addNode(node('b'));
+      dag.addNode(node('c'));
+      dag.addEdge('a', 'c');
+      expect(dag.sinks().map(n => n.id).sort()).toEqual(['b', 'c']);
+    });
+  });
+
+  // ─── buildDag ───
+
+  describe('buildDag', () => {
+    it('builds a DAG from a key-value store with no references', () => {
+      const store = new Map<string, TestNode>([
+        ['a', node('a')],
+        ['b', node('b')],
+      ]);
+      const { dag, errors } = buildDag(
+        'a',
+        id => store.get(id),
+        () => [],
+        n => n.id,
+      );
+      expect(errors).toEqual([]);
+      expect(dag.size).toBe(1);
+      expect(dag.hasNode('a')).toBe(true);
+    });
+
+    it('follows references to build the full graph', () => {
+      const store = new Map<string, TestNode>([
+        ['a', node('a')],
+        ['b', node('b')],
+        ['c', node('c')],
+      ]);
+      const { dag, errors } = buildDag(
+        'a',
+        id => store.get(id),
+        n => n.id === 'a' ? ['b', 'c'] : [],
+        n => n.id,
+      );
+      expect(errors).toEqual([]);
+      expect(dag.size).toBe(3);
+      expect(dag.hasNode('a')).toBe(true);
+      expect(dag.hasNode('b')).toBe(true);
+      expect(dag.hasNode('c')).toBe(true);
+    });
+
+    it('adds parent→child edges for references', () => {
+      const store = new Map<string, TestNode>([
+        ['a', node('a')],
+        ['b', node('b')],
+      ]);
+      const { dag, errors } = buildDag(
+        'a',
+        id => store.get(id),
+        n => n.id === 'a' ? ['b'] : [],
+        n => n.id,
+      );
+      expect(errors).toEqual([]);
+      const succ = dag.successorsOf('a');
+      expect(succ).toHaveLength(1);
+      expect(succ[0]!.id).toBe('b');
+    });
+
+    it('reports error when root node is missing', () => {
+      const store = new Map<string, TestNode>();
+      const { errors } = buildDag(
+        'x',
+        id => store.get(id),
+        () => [],
+        n => n.id,
+      );
+      expect(errors).toHaveLength(1);
+      expect(errors[0]!.id).toBe('x');
+      expect(errors[0]!.message).toContain('not found');
+    });
+
+    it('reports error when a referenced node is missing', () => {
+      const store = new Map<string, TestNode>([
+        ['a', node('a')],
+      ]);
+      const { dag, errors } = buildDag(
+        'a',
+        id => store.get(id),
+        n => n.id === 'a' ? ['b'] : [],
+        n => n.id,
+      );
+      expect(errors).toHaveLength(1);
+      expect(errors[0]!.id).toBe('b');
+      expect(dag.hasNode('a')).toBe(true);
+    });
+
+    it('detects and reports cycles', () => {
+      const store = new Map<string, TestNode>([
+        ['a', node('a')],
+        ['b', node('b')],
+      ]);
+      const { errors } = buildDag(
+        'a',
+        id => store.get(id),
+        n => n.id === 'a' ? ['b'] : ['a'],
+        n => n.id,
+      );
+      expect(errors).toHaveLength(1);
+      expect(errors[0]!.message).toContain('Circular dependency');
+    });
+
+    it('returns empty errors for graph with independent nodes', () => {
+      const store = new Map<string, TestNode>([
+        ['a', node('a')],
+        ['b', node('b')],
+      ]);
+      const { dag, errors } = buildDag(
+        'b',
+        id => store.get(id),
+        () => [],
+        n => n.id,
+      );
+      expect(errors).toEqual([]);
+      expect(dag.size).toBe(1);
+      expect(dag.hasNode('b')).toBe(true);
     });
   });
 

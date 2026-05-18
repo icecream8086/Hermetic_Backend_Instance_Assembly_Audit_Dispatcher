@@ -7,3 +7,9 @@ export type TopoSortResult<TNode> = {
   readonly sorted: readonly TNode[];
   readonly error: string;
 };
+
+/** Error reported by buildDag when a node is missing or a cycle is detected. */
+export type DagBuildError<TId> = {
+  readonly id: TId;
+  readonly message: string;
+};
