@@ -50,6 +50,9 @@ export function loadConfig(overrides?: Partial<AppConfig>): AppConfig {
     backend: (process.env['SCHEDULER_BACKEND'] as SchedulerBackendType) ?? 'worker',
     intervalMs: Number(process.env['SCHEDULER_INTERVAL_MS'] ?? 60000),
     batchSize: Number(process.env['SCHEDULER_BATCH_SIZE'] ?? 0),
+    callbackUrl: process.env['WORKER_URL']
+      ? `${process.env['WORKER_URL'].replace(/\/+$/, '')}/__scheduled`
+      : undefined,
   };
 
   return {

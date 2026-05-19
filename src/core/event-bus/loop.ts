@@ -1,4 +1,5 @@
 import { CircularQueue } from '../circular-queue/queue.ts';
+import type { IAtomicStore } from '../store/interfaces.ts';
 import type { ITimerBackend, TimerHandle } from '../scheduler/interfaces.ts';
 import { SetIntervalBackend } from '../scheduler/set-interval-backend.ts';
 import type { EventBus } from './bus.ts';
@@ -9,6 +10,11 @@ import type {
   EventLoopStatus,
 } from './types.ts';
 import { eventFromTrigger, DEFAULT_EVENT_LOOP_CONFIG } from './types.ts';
+
+// ─── Store keys ───
+
+const KEY_QUEUE = 'events:queue';
+const KEY_EVENT = (id: string) => `events:${id}`;
 
 /**
  * Public control surface for the event loop.
@@ -81,10 +87,18 @@ export interface IEventLoopControl {
  * with Workers-native {@link import('../scheduler/interfaces.ts').ITimerBackend
  * ITimerBackend} implementations.
  *
+ * When an {@link IAtomicStore} is provided (4th constructor param), events
+ * are persisted atomically — they survive Worker restarts and are recovered
+ * on the next construction. The store bridges through the existing DO / KV
+ * abstraction layer so it works with any backend.
+ *
  * @example
  * ```ts
- * const bus = new EventBus();
- * const loop = new EventLoop(bus, { intervalMs: 60000, autoStart: true });
+ * // In-memory only
+ * const loop = new EventLoop(bus, { intervalMs: 60000 });
+ *
+ * // Persistent (survives restarts via DO / KV)
+ * const loop = new EventLoop(bus, { intervalMs: 60000 }, undefined, stores.atomic);
  *
  * // Wire up a Hono route:
  * app.post('/api/events', async (c) => {
@@ -100,6 +114,7 @@ export class EventLoop implements IEventLoopControl {
   readonly #queue: CircularQueue<Event>;
   readonly #bus: EventBus;
   readonly #timerBackend: ITimerBackend;
+  readonly #store: IAtomicStore | undefined;
   #timerHandle: TimerHandle | null = null;
   #paused = false;
   #processedCount = 0;
@@ -110,11 +125,14 @@ export class EventLoop implements IEventLoopControl {
     bus: EventBus,
     config?: Partial<EventLoopConfig>,
     timerBackend?: ITimerBackend,
+    store?: IAtomicStore,
   ) {
     this.#bus = bus;
     this.#timerBackend = timerBackend ?? new SetIntervalBackend();
     this.#queue = new CircularQueue<Event>({ capacity: 0 }); // auto-grow
     this.#config = { ...DEFAULT_EVENT_LOOP_CONFIG, ...config };
+    this.#store = store;
+    if (this.#store) this.#recover().catch(() => {});
     if (this.#config.autoStart) this.start();
   }
 
@@ -183,11 +201,13 @@ export class EventLoop implements IEventLoopControl {
 
   enqueue(event: Event): void {
     this.#queue.enqueue(event);
+    if (this.#store) this.#persistEnqueue(event).catch(() => {});
   }
 
   enqueueTrigger<T>(input: TriggerEventInput<T>): Event {
     const event = eventFromTrigger(input);
     this.#queue.enqueue(event);
+    if (this.#store) this.#persistEnqueue(event).catch(() => {});
     return event;
   }
 
@@ -208,11 +228,49 @@ export class EventLoop implements IEventLoopControl {
       ? Math.min(this.#config.batchSize, this.#queue.size)
       : this.#queue.size;
 
+    const dispatched: Event[] = [];
     for (let i = 0; i < limit; i++) {
       const event = this.#queue.dequeue();
       if (!event) break;
+      dispatched.push(event);
       this.#bus.dispatch(event).catch(() => {});
       this.#processedCount++;
     }
+
+    if (this.#store && dispatched.length > 0) {
+      this.#persistDequeue(dispatched).catch(() => {});
+    }
+  }
+
+  // ─── Store persistence ───
+
+  /** Recover pending events from store after construction. */
+  async #recover(): Promise<void> {
+    const queue = await this.#store!.get<string[]>(KEY_QUEUE);
+    if (!queue) return;
+
+    for (const id of queue.value) {
+      const entry = await this.#store!.get<Event>(KEY_EVENT(id));
+      if (entry) this.#queue.enqueue(entry.value);
+    }
+  }
+
+  /** Append one event to the persisted queue. */
+  async #persistEnqueue(event: Event): Promise<void> {
+    await this.#store!.transact(async (txn) => {
+      const ids = (await txn.get<string[]>(KEY_QUEUE)) ?? [];
+      ids.push(event.id);
+      txn.set(KEY_EVENT(event.id), event);
+      txn.set(KEY_QUEUE, ids);
+    });
+  }
+
+  /** Remove dispatched event IDs from the persisted queue. */
+  async #persistDequeue(events: Event[]): Promise<void> {
+    const dispatched = new Set(events.map(e => e.id));
+    await this.#store!.transact(async (txn) => {
+      const ids = (await txn.get<string[]>(KEY_QUEUE)) ?? [];
+      txn.set(KEY_QUEUE, ids.filter(id => !dispatched.has(id)));
+    });
   }
 }

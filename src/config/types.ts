@@ -34,6 +34,12 @@ export interface SchedulerAppConfig {
   intervalMs: number;
   /** Events per tick. 0 = drain all, 1 = round-robin. */
   batchSize: number;
+  /**
+   * Worker URL for DO alarm callback, driven by `WORKER_URL` env var.
+   * DO alarm fires → `fetch(WORKER_URL + "/__scheduled")` → loop.triggerTick().
+   * In dev: `http://localhost:3000`.
+   */
+  callbackUrl?: string | undefined;
 }
 
 export interface AppConfig {

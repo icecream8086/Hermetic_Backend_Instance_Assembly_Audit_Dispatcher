@@ -3,7 +3,7 @@ import { cors } from 'hono/cors';
 import type { AppConfig } from '../config/types.ts';
 import type { Stores } from './store/interfaces.ts';
 import { createStores } from './store/factory.ts';
-import type { ILogRouter, ILogger } from './logger/interfaces.ts';
+import type { ILogRouter } from './logger/interfaces.ts';
 import { LogRouter } from './logger/router.ts';
 import { globalErrorHandler } from './middleware/error-handler.ts';
 import { rateLimit } from './middleware/rate-limit.ts';
@@ -12,14 +12,18 @@ import { createInfoHandler } from '../features/info/info.handler.ts';
 import type { IProviderRegistry } from './provider/interfaces.ts';
 import { createProviderRegistry } from './provider/factory.ts';
 import type { ProviderCredentials } from './provider/factory.ts';
-import type { ITimerBackend } from './scheduler/interfaces.ts';
 import { createTimerBackend } from './scheduler/factory.ts';
+import { EventBus } from './event-bus/bus.ts';
+import { EventLoop } from './event-bus/loop.ts';
+import type { EventLoopConfig } from './event-bus/types.ts';
+import type { TriggerEventInput } from './event-bus/types.ts';
 
 export interface AppContext {
   stores: Stores;
   logRouter: ILogRouter;
-  logger: ILogger;
   providers: IProviderRegistry;
+  eventBus: EventBus;
+  eventLoop: EventLoop;
 }
 
 export interface AppInstance {
@@ -27,7 +31,8 @@ export interface AppInstance {
   stores: Stores;
   logRouter: ILogRouter;
   providers: IProviderRegistry;
-  schedulerBackend: ITimerBackend;
+  eventBus: EventBus;
+  eventLoop: EventLoop;
   dispose: () => Promise<void>;
 }
 
@@ -45,7 +50,7 @@ function resolveCredentials(): ProviderCredentials {
 }
 
 /**
- * Assemble the application: wire stores, logger, providers, middleware, and routes.
+ * Assemble the application: wire stores, logger, providers, event system, middleware, and routes.
  */
 export function createApp(config: AppConfig, platformBindings?: Record<string, unknown>): AppInstance {
   // 1. Create storage adapters (KV, file, etc.)
@@ -61,27 +66,84 @@ export function createApp(config: AppConfig, platformBindings?: Record<string, u
   // 4. Create timer backend (driven by SCHEDULER_BACKEND env var)
   const schedulerBackend = createTimerBackend(config.scheduler.backend, {
     doNamespace: platformBindings?.['ALARM_TIMER_DO'] as DurableObjectNamespace | undefined,
+    callbackUrl: config.scheduler.callbackUrl,
   });
 
-  // 5. Build Hono app
+  // 5. Create persistent event system
+  const eventBus = new EventBus();
+  const eventLoop = new EventLoop(
+    eventBus,
+    {
+      intervalMs: config.scheduler.intervalMs,
+      batchSize: config.scheduler.batchSize,
+      autoStart: true,
+    } satisfies Partial<EventLoopConfig>,
+    schedulerBackend,
+    stores.atomic, // persistent via DO / KV
+  );
+
+  // 6. Build Hono app
   const app = new Hono<{ Variables: AppContext }>();
 
-  // 6. Apply global middleware
+  // 7. Apply global middleware
   app.use('*', cors());
   app.use('*', rateLimit({ windowMs: 60_000, maxRequests: 100 }));
   app.onError(globalErrorHandler);
 
-  // 7. Mount feature routes
+  // 8. Inject context variables into Hono request context
+  app.use('*', async (c, next) => {
+    c.set('stores', stores);
+    c.set('logRouter', logRouter);
+    c.set('providers', providers);
+    c.set('eventBus', eventBus);
+    c.set('eventLoop', eventLoop);
+    await next();
+  });
+
+  // 9. DO alarm callback (production: DO fires → /__scheduled → triggerTick)
+  app.post('/__scheduled', (c) => {
+    eventLoop.triggerTick();
+    return c.json({ ok: true, queueSize: eventLoop.size });
+  });
+
+  // 10. Event management routes
+  const events = new Hono<{ Variables: AppContext }>()
+    // POST /api/events — enqueue a trigger event
+    .post('/', async (c) => {
+      const input = await c.req.json<TriggerEventInput>();
+      const event = eventLoop.enqueueTrigger(input);
+      return c.json({ id: event.id }, 202);
+    })
+    // GET /api/events/loop/status — loop state
+    .get('/loop/status', (c) => c.json(eventLoop.status()))
+    // POST /api/events/loop/start
+    .post('/loop/start', (c) => { eventLoop.start(); return c.json({ ok: true }); })
+    // POST /api/events/loop/stop
+    .post('/loop/stop', (c) => { eventLoop.stop(); return c.json({ ok: true }); })
+    // POST /api/events/loop/pause
+    .post('/loop/pause', (c) => { eventLoop.pause(); return c.json({ ok: true }); })
+    // POST /api/events/loop/resume
+    .post('/loop/resume', (c) => { eventLoop.resume(); return c.json({ ok: true }); })
+    // POST /api/events/loop/configure
+    .post('/loop/configure', async (c) => {
+      const body = await c.req.json<Partial<EventLoopConfig>>();
+      return c.json(eventLoop.configure(body));
+    });
+  app.route('/api/events', events);
+
+  // 11. Mount feature routes
   app.route('/', createInfoHandler());
 
-  // 8. Export for route mounting
+  // 12. Export for route mounting
   return {
     app,
     stores,
     logRouter,
     providers,
-    schedulerBackend,
+    eventBus,
+    eventLoop,
     dispose: async () => {
+      eventLoop.stop();
       logRouter.dispose();
     },
   };

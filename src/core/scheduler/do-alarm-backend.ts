@@ -3,42 +3,45 @@ import type { ITimerBackend, TimerHandle } from './interfaces.ts';
 /**
  * Durable Object Alarm–backed timer.
  *
- * In **Miniflare (local dev)** DO alarms work identically to production,
- * so this backend faithfully simulates the production scheduling path.
+ * **Production** (with `callbackUrl`):
+ * The DO Alarm is the sole timing source — no `setInterval`, no clock wall.
+ * The DO fires → calls `callbackUrl` via `fetch()` → Worker route →
+ * `loop.triggerTick()`. Reliable across all Worker isolates.
  *
- * The backend runs in **hybrid mode**:
- * 1. Uses `setInterval` locally to dispatch the handler callback (the DO
- *    cannot call back into the Worker's in-memory handler directly).
- * 2. Configures the {@link AlarmTimerDO} to set recurring alarms — proving
- *    the alarm path works end-to-end in the local dev environment.
- * 3. The DO's status endpoint is observable for monitoring and debugging.
- *
- * In a future production-only mode with a callback URL configured, the DO
- * can notify the Worker via HTTP instead of relying on `setInterval`.
+ * **Local dev** (without `callbackUrl`):
+ * Falls back to `setInterval` + DO alarm overlay for observability.
  *
  * @example
  * ```ts
- * const stub = env.ALARM_TIMER_DO.idFromName('event-loop');
+ * // Production: callback drives the tick
+ * const backend = new DoAlarmBackend(stub, 'http://my-worker/__scheduled');
+ *
+ * // Local dev: setInterval fallback
  * const backend = new DoAlarmBackend(stub);
- * const loop = new EventLoop(bus, { intervalMs: 60000 }, backend);
  * ```
  */
 export class DoAlarmBackend implements ITimerBackend {
   readonly #doStub: DurableObjectStub;
+  readonly #callbackUrl: string | undefined;
   #localTimerId: ReturnType<typeof setInterval> | null = null;
 
-  constructor(doStub: DurableObjectStub) {
+  constructor(doStub: DurableObjectStub, callbackUrl?: string | undefined) {
     this.#doStub = doStub;
+    this.#callbackUrl = callbackUrl;
   }
 
   start(handler: () => void, intervalMs: number): TimerHandle {
-    // 1. Local handler dispatch (always works in dev)
-    this.#localTimerId = setInterval(handler, intervalMs);
+    // In production mode (callbackUrl set), the DO alarm drives the tick
+    // via HTTP callback — the handler is wired through the Worker route.
+    // In dev mode, use setInterval to call the handler directly.
+    if (!this.#callbackUrl) {
+      this.#localTimerId = setInterval(handler, intervalMs);
+    }
 
-    // 2. Configure DO alarm for production-path simulation
+    // Configure DO alarm in both modes (for observability / production path)
     this.#doStub.fetch('http://do/start', {
       method: 'POST',
-      body: JSON.stringify({ intervalMs }),
+      body: JSON.stringify({ intervalMs, callbackUrl: this.#callbackUrl }),
     }).catch(() => {});
 
     return {
