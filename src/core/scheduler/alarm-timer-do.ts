@@ -11,14 +11,12 @@
  * 1. Calls back to the Worker via `fetch(callbackUrl)` to trigger a tick.
  * 2. Re-schedules the next alarm.
  *
- * Works identically in Miniflare (local dev) and production Cloudflare.
- *
- * When no `callbackUrl` is configured, the DO still sets recurring alarms
- * for observability, but the actual tick dispatch is handled locally.
+ * Note: Uses `_`-prefixed properties instead of `#` private fields to avoid
+ * a workerd crash on Windows when private fields are used in Durable Object
+ * classes.
  *
  * @example
  * ```ts
- * // Worker fetch handler:
  * const stub = env.ALARM_TIMER_DO.idFromName('event-loop');
  * await stub.fetch('http://do/start', {
  *   method: 'POST',
@@ -27,35 +25,35 @@
  * ```
  */
 export class AlarmTimerDO implements DurableObject {
-  readonly ctx: DurableObjectState;
-  readonly #minInterval = 1000; // DO alarm minimum safety floor
-  #intervalMs = 60000;
-  #callbackUrl = '';
-  #running = false;
-  #tickCount = 0;
+  // Injected by the DO runtime (same pattern as AtomicStoreDO)
+  readonly ctx!: DurableObjectState;
 
-  constructor(ctx: DurableObjectState) {
-    this.ctx = ctx;
-  }
+  /** Minimum interval safety floor (1s). DO alarms below this risk instability. */
+  static readonly MIN_INTERVAL = 1000;
+
+  _intervalMs = 60000;
+  _callbackUrl = '';
+  _running = false;
+  _tickCount = 0;
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
 
     if (url.pathname.endsWith('/start')) {
       const body = await request.json() as { intervalMs: number; callbackUrl?: string };
-      this.#intervalMs = Math.max(body.intervalMs, this.#minInterval);
-      this.#callbackUrl = body.callbackUrl ?? '';
-      this.#running = true;
-      await this.ctx.storage.setAlarm(Date.now() + this.#intervalMs);
+      this._intervalMs = Math.max(body.intervalMs, AlarmTimerDO.MIN_INTERVAL);
+      this._callbackUrl = body.callbackUrl ?? '';
+      this._running = true;
+      await this.ctx.storage.setAlarm(Date.now() + this._intervalMs);
       return Response.json({
         ok: true,
-        intervalMs: this.#intervalMs,
+        intervalMs: this._intervalMs,
         hasCallback: !!body.callbackUrl,
       });
     }
 
     if (url.pathname.endsWith('/stop')) {
-      this.#running = false;
+      this._running = false;
       await this.ctx.storage.deleteAlarm();
       return Response.json({ ok: true });
     }
@@ -63,10 +61,10 @@ export class AlarmTimerDO implements DurableObject {
     if (url.pathname.endsWith('/status')) {
       const nextAlarm = await this.ctx.storage.getAlarm();
       return Response.json({
-        running: this.#running,
-        intervalMs: this.#intervalMs,
-        tickCount: this.#tickCount,
-        hasCallback: !!this.#callbackUrl,
+        running: this._running,
+        intervalMs: this._intervalMs,
+        tickCount: this._tickCount,
+        hasCallback: !!this._callbackUrl,
         nextAlarm,
       });
     }
@@ -75,20 +73,17 @@ export class AlarmTimerDO implements DurableObject {
   }
 
   async alarm(): Promise<void> {
-    if (!this.#running) return;
-    this.#tickCount++;
+    if (!this._running) return;
+    this._tickCount++;
 
-    // Notify the Worker via callback URL (production path).
-    // The Worker's route dispatches to loop.triggerTick().
-    if (this.#callbackUrl) {
+    if (this._callbackUrl) {
       try {
-        await fetch(this.#callbackUrl, { method: 'POST' });
+        await fetch(this._callbackUrl, { method: 'POST' });
       } catch {
-        // callback failure is logged but doesn't stop re-scheduling
+        // callback failure doesn't stop re-scheduling
       }
     }
 
-    // Re-schedule next alarm
-    await this.ctx.storage.setAlarm(Date.now() + this.#intervalMs);
+    await this.ctx.storage.setAlarm(Date.now() + this._intervalMs);
   }
 }

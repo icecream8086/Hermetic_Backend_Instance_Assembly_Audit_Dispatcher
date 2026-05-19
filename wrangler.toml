@@ -21,9 +21,6 @@ class_name = "AlarmTimerDO"
 tag = "v1"
 new_classes = ["AtomicStoreDO"]
 
-[[migrations]]
-tag = "v2"
-new_classes = ["AlarmTimerDO"]
 
 # ─── KV for state storage (eventual consistency fallback) ───
 [[kv_namespaces]]

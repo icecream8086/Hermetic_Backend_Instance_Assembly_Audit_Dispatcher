@@ -15,8 +15,7 @@ import type { ProviderCredentials } from './provider/factory.ts';
 import { createTimerBackend } from './scheduler/factory.ts';
 import { EventBus } from './event-bus/bus.ts';
 import { EventLoop } from './event-bus/loop.ts';
-import type { EventLoopConfig } from './event-bus/types.ts';
-import type { TriggerEventInput } from './event-bus/types.ts';
+import type { EventLoopConfig, TriggerEventInput } from './event-bus/types.ts';
 
 export interface AppContext {
   stores: Stores;
@@ -77,9 +76,9 @@ export function createApp(config: AppConfig, platformBindings?: Record<string, u
       intervalMs: config.scheduler.intervalMs,
       batchSize: config.scheduler.batchSize,
       autoStart: true,
-    } satisfies Partial<EventLoopConfig>,
+    } as Partial<EventLoopConfig>,
     schedulerBackend,
-    stores.atomic, // persistent via DO / KV
+    stores.atomic,
   );
 
   // 6. Build Hono app
@@ -90,7 +89,7 @@ export function createApp(config: AppConfig, platformBindings?: Record<string, u
   app.use('*', rateLimit({ windowMs: 60_000, maxRequests: 100 }));
   app.onError(globalErrorHandler);
 
-  // 8. Inject context variables into Hono request context
+  // 8. Inject context variables
   app.use('*', async (c, next) => {
     c.set('stores', stores);
     c.set('logRouter', logRouter);
@@ -100,31 +99,24 @@ export function createApp(config: AppConfig, platformBindings?: Record<string, u
     await next();
   });
 
-  // 9. DO alarm callback (production: DO fires → /__scheduled → triggerTick)
+  // 9. DO alarm callback route
   app.post('/__scheduled', (c) => {
     eventLoop.triggerTick();
     return c.json({ ok: true, queueSize: eventLoop.size });
   });
 
-  // 10. Event management routes
+  // 10. Event management API routes
   const events = new Hono<{ Variables: AppContext }>()
-    // POST /api/events — enqueue a trigger event
     .post('/', async (c) => {
       const input = await c.req.json<TriggerEventInput>();
       const event = eventLoop.enqueueTrigger(input);
       return c.json({ id: event.id }, 202);
     })
-    // GET /api/events/loop/status — loop state
     .get('/loop/status', (c) => c.json(eventLoop.status()))
-    // POST /api/events/loop/start
     .post('/loop/start', (c) => { eventLoop.start(); return c.json({ ok: true }); })
-    // POST /api/events/loop/stop
     .post('/loop/stop', (c) => { eventLoop.stop(); return c.json({ ok: true }); })
-    // POST /api/events/loop/pause
     .post('/loop/pause', (c) => { eventLoop.pause(); return c.json({ ok: true }); })
-    // POST /api/events/loop/resume
     .post('/loop/resume', (c) => { eventLoop.resume(); return c.json({ ok: true }); })
-    // POST /api/events/loop/configure
     .post('/loop/configure', async (c) => {
       const body = await c.req.json<Partial<EventLoopConfig>>();
       return c.json(eventLoop.configure(body));
@@ -134,7 +126,7 @@ export function createApp(config: AppConfig, platformBindings?: Record<string, u
   // 11. Mount feature routes
   app.route('/', createInfoHandler());
 
-  // 12. Export for route mounting
+  // 12. Export
   return {
     app,
     stores,
@@ -149,7 +141,4 @@ export function createApp(config: AppConfig, platformBindings?: Record<string, u
   };
 }
 
-/**
- * Helper: create the default system facility for use in app assembly.
- */
 export const SYSTEM_FACILITY = createFacility('system');
