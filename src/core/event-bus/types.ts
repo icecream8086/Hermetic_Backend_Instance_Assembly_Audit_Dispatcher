@@ -56,6 +56,18 @@ export interface EventLoopConfig extends SchedulerConfig {
    * - `1` = strict round-robin (one event per tick).
    */
   batchSize: number;
+  /**
+   * Maximum pending events allowed in the queue.
+   * - `0` = unlimited.
+   * - When exceeded, new events are rejected and {@link onError} is called.
+   */
+  maxQueueSize: number;
+  /**
+   * Error reporter for internal failures (persistence, dispatch, recover, etc.).
+   * `context` describes where the error occurred (e.g. `"persist-enqueue"`).
+   * When omitted, errors are silently dropped.
+   */
+  onError?: (error: unknown, context: string) => void;
 }
 
 export interface EventLoopStatus extends SchedulerStatus {
@@ -68,6 +80,7 @@ export const DEFAULT_EVENT_LOOP_CONFIG: EventLoopConfig = {
   intervalMs: 60000,
   batchSize: 0,
   autoStart: false,
+  maxQueueSize: 0,
 };
 
 // ─── Event factory ───

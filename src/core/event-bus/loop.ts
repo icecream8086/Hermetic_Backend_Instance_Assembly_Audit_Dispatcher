@@ -13,8 +13,7 @@ import { eventFromTrigger, DEFAULT_EVENT_LOOP_CONFIG } from './types.ts';
 
 // ─── Store keys ───
 
-const KEY_QUEUE = 'events:queue';
-const KEY_EVENT = (id: string) => `events:${id}`;
+const KEY_PENDING = 'events:pending';
 
 /**
  * Public control surface for the event loop.
@@ -132,7 +131,7 @@ export class EventLoop implements IEventLoopControl {
     this.#queue = new CircularQueue<Event>({ capacity: 0 }); // auto-grow
     this.#config = { ...DEFAULT_EVENT_LOOP_CONFIG, ...config };
     this.#store = store;
-    if (this.#store) this.#recover().catch(() => {});
+    if (this.#store) this.#recover().catch(err => this.#reportError(err, 'recover'));
     if (this.#config.autoStart) this.start();
   }
 
@@ -153,6 +152,7 @@ export class EventLoop implements IEventLoopControl {
     this.#timerHandle.clear();
     this.#timerHandle = null;
     this.#paused = false;
+    this.#startTime = 0;
   }
 
   pause(): void {
@@ -173,8 +173,11 @@ export class EventLoop implements IEventLoopControl {
     if (config.batchSize !== undefined) {
       this.#config.batchSize = config.batchSize;
     }
-    if (config.autoStart !== undefined) {
-      this.#config.autoStart = config.autoStart;
+    if (config.maxQueueSize !== undefined) {
+      this.#config.maxQueueSize = config.maxQueueSize;
+    }
+    if (config.onError !== undefined) {
+      this.#config.onError = config.onError;
     }
 
     if (restart) {
@@ -200,14 +203,28 @@ export class EventLoop implements IEventLoopControl {
   }
 
   enqueue(event: Event): void {
+    if (this.#config.maxQueueSize > 0 && this.#queue.size >= this.#config.maxQueueSize) {
+      this.#reportError(
+        new Error(`Queue full (${this.#queue.size} >= ${this.#config.maxQueueSize})`),
+        'enqueue',
+      );
+      return;
+    }
     this.#queue.enqueue(event);
-    if (this.#store) this.#persistEnqueue(event).catch(() => {});
+    if (this.#store) this.#persistEnqueue(event).catch(err => this.#reportError(err, 'persist-enqueue'));
   }
 
   enqueueTrigger<T>(input: TriggerEventInput<T>): Event {
     const event = eventFromTrigger(input);
+    if (this.#config.maxQueueSize > 0 && this.#queue.size >= this.#config.maxQueueSize) {
+      this.#reportError(
+        new Error(`Queue full (${this.#queue.size} >= ${this.#config.maxQueueSize})`),
+        'enqueue',
+      );
+      return event;
+    }
     this.#queue.enqueue(event);
-    if (this.#store) this.#persistEnqueue(event).catch(() => {});
+    if (this.#store) this.#persistEnqueue(event).catch(err => this.#reportError(err, 'persist-enqueue'));
     return event;
   }
 
@@ -221,6 +238,10 @@ export class EventLoop implements IEventLoopControl {
 
   // ─── Internal ───
 
+  #reportError(err: unknown, context: string): void {
+    this.#config.onError?.(err, context);
+  }
+
   #tick(): void {
     if (this.#paused || this.#queue.isEmpty) return;
 
@@ -233,12 +254,12 @@ export class EventLoop implements IEventLoopControl {
       const event = this.#queue.dequeue();
       if (!event) break;
       dispatched.push(event);
-      this.#bus.dispatch(event).catch(() => {});
+      this.#bus.dispatch(event).catch(err => this.#reportError(err, 'dispatch'));
       this.#processedCount++;
     }
 
     if (this.#store && dispatched.length > 0) {
-      this.#persistDequeue(dispatched).catch(() => {});
+      this.#persistDequeue(dispatched).catch(err => this.#reportError(err, 'persist-dequeue'));
     }
   }
 
@@ -246,31 +267,28 @@ export class EventLoop implements IEventLoopControl {
 
   /** Recover pending events from store after construction. */
   async #recover(): Promise<void> {
-    const queue = await this.#store!.get<string[]>(KEY_QUEUE);
-    if (!queue) return;
-
-    for (const id of queue.value) {
-      const entry = await this.#store!.get<Event>(KEY_EVENT(id));
-      if (entry) this.#queue.enqueue(entry.value);
+    const entry = await this.#store!.get<Event[]>(KEY_PENDING);
+    if (!entry) return;
+    for (const event of entry.value) {
+      this.#queue.enqueue(event);
     }
   }
 
   /** Append one event to the persisted queue. */
   async #persistEnqueue(event: Event): Promise<void> {
     await this.#store!.transact(async (txn) => {
-      const ids = (await txn.get<string[]>(KEY_QUEUE)) ?? [];
-      ids.push(event.id);
-      txn.set(KEY_EVENT(event.id), event);
-      txn.set(KEY_QUEUE, ids);
+      const pending = (await txn.get<Event[]>(KEY_PENDING)) ?? [];
+      pending.push(event);
+      txn.set(KEY_PENDING, pending);
     });
   }
 
-  /** Remove dispatched event IDs from the persisted queue. */
+  /** Remove dispatched events from the persisted queue. */
   async #persistDequeue(events: Event[]): Promise<void> {
     const dispatched = new Set(events.map(e => e.id));
     await this.#store!.transact(async (txn) => {
-      const ids = (await txn.get<string[]>(KEY_QUEUE)) ?? [];
-      txn.set(KEY_QUEUE, ids.filter(id => !dispatched.has(id)));
+      const pending = (await txn.get<Event[]>(KEY_PENDING)) ?? [];
+      txn.set(KEY_PENDING, pending.filter(e => !dispatched.has(e.id)));
     });
   }
 }
