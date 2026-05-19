@@ -81,7 +81,10 @@ export class EventBus {
         this.#onError(err, event);
       }
     }
-    await Promise.all(results).catch(err => this.#onError(err, event));
+    const settled = await Promise.allSettled(results);
+    for (const s of settled) {
+      if (s.status === 'rejected') this.#onError(s.reason, event);
+    }
   }
 
   /** Number of registered event types. */

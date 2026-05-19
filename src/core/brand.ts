@@ -32,7 +32,10 @@ export function createFacility(raw: string): Facility {
   return raw as Facility;
 }
 
+const ORDER_ID_PATTERN = /^ord_[a-f0-9-]{36}$/;
+
 export function createOrderId(raw: string): OrderId {
+  if (!ORDER_ID_PATTERN.test(raw)) throw new TypeError(`Invalid OrderId format: ${raw}`);
   return raw as OrderId;
 }
 

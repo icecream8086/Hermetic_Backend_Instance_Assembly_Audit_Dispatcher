@@ -9,7 +9,7 @@ import type {
   S3ListObjectsResult,
 } from '../../core/provider/s3.ts';
 import type { S3ProviderConfig } from '../../core/provider/s3-types.ts';
-import { signSigV4, emptyPayloadHash, payloadHash } from '../../core/provider/s3-signer.ts';
+import { signSigV4, signPresignedUrl, emptyPayloadHash, payloadHash } from '../../core/provider/s3-signer.ts';
 import type { SigV4Credentials } from '../../core/provider/s3-signer.ts';
 
 export class AwsS3Provider implements IS3Provider {
@@ -106,11 +106,21 @@ export class AwsS3Provider implements IS3Provider {
   }
 
   async getPresignedUrl(bucket: string, key: string, expiresInSeconds = 3600): Promise<string> {
-    return `${this.#endpoint}/${this.#bucket(bucket)}/${encodeKey(key)}?X-Amz-Expires=${expiresInSeconds}`;
+    const path = `/${this.#bucket(bucket)}/${encodeKey(key)}`;
+    const url = await signPresignedUrl(
+      'GET', path, this.#credentials, this.#region, 's3', expiresInSeconds, new Date(),
+    );
+    url.host = new URL(this.#endpoint).hostname;
+    return url.toString();
   }
 
   async putPresignedUrl(bucket: string, key: string, expiresInSeconds = 3600): Promise<string> {
-    return this.getPresignedUrl(bucket, key, expiresInSeconds);
+    const path = `/${this.#bucket(bucket)}/${encodeKey(key)}`;
+    const url = await signPresignedUrl(
+      'PUT', path, this.#credentials, this.#region, 's3', expiresInSeconds, new Date(),
+    );
+    url.host = new URL(this.#endpoint).hostname;
+    return url.toString();
   }
 
   async #fetchObject(method: string, bucket: string, key: string): Promise<S3GetObjectResult | null> {

@@ -8,7 +8,7 @@ import { LogRouter } from './logger/router.ts';
 import { globalErrorHandler } from './middleware/error-handler.ts';
 import { rateLimit } from './middleware/rate-limit.ts';
 import { createFacility } from './brand.ts';
-import { createInfoHandler } from '../features/info/info.handler.ts';
+import { getFeatures } from '../features/generated.ts';
 import type { IProviderRegistry } from './provider/interfaces.ts';
 import { createProviderRegistry } from './provider/factory.ts';
 import type { ProviderCredentials } from './provider/factory.ts';
@@ -18,6 +18,15 @@ import { EventLoop } from './event-bus/loop.ts';
 import type { EventLoopConfig, TriggerEventInput } from './event-bus/types.ts';
 
 export interface AppContext {
+  stores: Stores;
+  logRouter: ILogRouter;
+  providers: IProviderRegistry;
+  eventBus: EventBus;
+  eventLoop: EventLoop;
+}
+
+/** Shared dependencies injected into every feature's createRouter(). */
+export interface FeatureDeps {
   stores: Stores;
   logRouter: ILogRouter;
   providers: IProviderRegistry;
@@ -123,8 +132,11 @@ export function createApp(config: AppConfig, platformBindings?: Record<string, u
     });
   app.route('/api/events', events);
 
-  // 11. Mount feature routes
-  app.route('/', createInfoHandler());
+  // 11. Auto-register features from generated registry
+  const featureDeps: FeatureDeps = { stores, logRouter, providers, eventBus, eventLoop };
+  for (const feat of getFeatures()) {
+    app.route(feat.path, feat.mount(featureDeps));
+  }
 
   // 12. Export
   return {

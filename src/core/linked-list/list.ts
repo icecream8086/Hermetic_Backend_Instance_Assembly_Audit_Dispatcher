@@ -85,6 +85,7 @@ export class LinkedList<T> {
    * The caller must ensure the node belongs to this list.
    */
   remove(node: ListNode<T>): void {
+    if (this._size === 0) return;
     if (node.prev) {
       node.prev.next = node.next;
     } else {

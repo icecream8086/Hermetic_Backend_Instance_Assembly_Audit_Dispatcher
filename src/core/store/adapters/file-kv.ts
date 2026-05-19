@@ -88,10 +88,14 @@ export class FileKVAtomicStore implements IAtomicStore {
     return this.#serialise(async () => {
       await this.#ensureDir();
       const readSet = new Map<string, string | null>(); // null = key didn't exist
-      const writeSet = new Set<string>();
+      const deferredWrites = new Map<string, { value: unknown; version: VersionId }>();
 
       const txn: IStoreTransaction = {
         get: async <V>(key: string) => {
+          // Read-your-own-writes: check deferred writes first
+          const dw = deferredWrites.get(key);
+          if (dw !== undefined) return dw.value as V;
+
           try {
             const raw = await readFile(this.#filePath(key), 'utf-8');
             const entry = JSON.parse(raw) as FileEntry<V>;
@@ -103,10 +107,8 @@ export class FileKVAtomicStore implements IAtomicStore {
           }
         },
         set: async <V>(key: string, value: V) => {
-          writeSet.add(key);
           const newVersion = generateVersionId();
-          const entry: FileEntry = { value, metadata: { v: newVersion } };
-          await writeFile(this.#filePath(key), JSON.stringify(entry), 'utf-8');
+          deferredWrites.set(key, { value, version: newVersion });
         },
       };
 
@@ -114,7 +116,7 @@ export class FileKVAtomicStore implements IAtomicStore {
 
       // Verify read-set versions haven't changed (excluding own writes)
       for (const [key, expectedVersion] of readSet) {
-        if (writeSet.has(key)) continue;
+        if (deferredWrites.has(key)) continue;
 
         let currentVersion: string | null;
         try {
@@ -122,7 +124,7 @@ export class FileKVAtomicStore implements IAtomicStore {
           const entry = JSON.parse(raw) as FileEntry;
           currentVersion = entry.metadata.v;
         } catch {
-          currentVersion = null; // file doesn't exist (or corrupt — treat as absent)
+          currentVersion = null;
         }
 
         if (currentVersion !== expectedVersion) {
@@ -130,6 +132,12 @@ export class FileKVAtomicStore implements IAtomicStore {
             `Transaction conflict: key "${key}" was modified concurrently.`,
           );
         }
+      }
+
+      // Apply all deferred writes — within #serialise this is atomic
+      for (const [key, { value, version }] of deferredWrites) {
+        const entry: FileEntry = { value, metadata: { v: version } };
+        await writeFile(this.#filePath(key), JSON.stringify(entry), 'utf-8');
       }
 
       return result;

@@ -43,30 +43,31 @@ export class CloudflareKVAtomicStore implements IAtomicStore {
 
   async transact<T>(action: (txn: IStoreTransaction) => Promise<T>): Promise<T> {
     const readSet = new Map<string, string | null>(); // key → version (null = key didn't exist)
-    const writeSet = new Set<string>();
+    const deferredWrites = new Map<string, { value: unknown; version: VersionId }>();
 
     const txn: IStoreTransaction = {
       get: async <V>(key: string) => {
+        // Read-your-own-writes: check deferred writes first
+        const dw = deferredWrites.get(key);
+        if (dw !== undefined) return dw.value as V;
+
         const result = await this.kv.getWithMetadata<V>(key, 'json');
         const version = (result.metadata as { v?: string } | null)?.v ?? null;
         readSet.set(key, version);
         return result.value ?? null;
       },
       set: async <V>(key: string, value: V) => {
-        writeSet.add(key);
         const newVersion = generateVersionId();
-        await this.kv.put(key, JSON.stringify(value), { metadata: { v: newVersion } });
+        deferredWrites.set(key, { value, version: newVersion });
       },
     };
 
     const result = await action(txn);
 
     // Optimistic concurrency check: verify that all read keys (excluding
-    // keys this transaction wrote) still have the same version. KV has no
-    // compare-and-swap, so this is a best-effort check that catches the
-    // common concurrent-modification pattern.
+    // keys this transaction wrote) still have the same version.
     for (const [key, expectedVersion] of readSet) {
-      if (writeSet.has(key)) continue;
+      if (deferredWrites.has(key)) continue;
       const current = await this.kv.getWithMetadata<unknown>(key, 'json');
       const currentVersion = (current.metadata as { v?: string } | null)?.v;
       if (currentVersion !== expectedVersion) {
@@ -74,6 +75,11 @@ export class CloudflareKVAtomicStore implements IAtomicStore {
           `Transaction conflict: key "${key}" was modified concurrently.`,
         );
       }
+    }
+
+    // Apply all deferred writes
+    for (const [key, { value, version }] of deferredWrites) {
+      await this.kv.put(key, JSON.stringify(value), { metadata: { v: version } });
     }
 
     return result;

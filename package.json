@@ -4,6 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "generate": "node scripts/generate-features.mjs",
+    "predev": "npm run generate",
+    "predev:worker": "npm run generate",
+    "pretypecheck": "npm run generate",
+    "predeploy": "npm run generate",
     "dev": "tsx watch src/dev.ts",
     "dev:worker": "wrangler dev",
     "typecheck": "tsc --noEmit",
@@ -11,6 +16,12 @@
     "test:watch": "vitest",
     "deploy": "wrangler deploy",
     "docs:http": "tsx scripts/export-http.ts"
+  },
+  "hbi-aad": {
+    "features": {
+      "info": "/",
+      "users": "/api/users"
+    }
   },
   "dependencies": {
     "@hono/zod-validator": "^0.4.0",

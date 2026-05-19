@@ -85,8 +85,12 @@ describe('SandboxStatus state machine', () => {
       }
     });
 
-    it('rejects Pending → Deleted (must go through intermediate status)', () => {
-      expect(isValidTransition(SandboxStatus.Pending, SandboxStatus.Deleted)).toBe(false);
+    it('allows Pending → Deleted (cancel before scheduling)', () => {
+      expect(isValidTransition(SandboxStatus.Pending, SandboxStatus.Deleted)).toBe(true);
+    });
+
+    it('allows Stopped → Terminated (explicit termination flow)', () => {
+      expect(isValidTransition(SandboxStatus.Stopped, SandboxStatus.Terminated)).toBe(true);
     });
 
     it('rejects Running → Pending (cannot go backwards)', () => {

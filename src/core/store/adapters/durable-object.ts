@@ -95,7 +95,8 @@ export class DurableObjectAtomicStore implements IAtomicStore {
       body: JSON.stringify({ op: 'get', key }),
     });
     const body = await resp.json() as { value: T | null; version: string | null };
-    if (!body.value || !body.version) return null;
+    if (body.value === null || body.value === undefined) return null;
+    if (body.version === null || body.version === undefined) return null;
     return { value: body.value, version: body.version as VersionId };
   }
 

@@ -51,37 +51,47 @@ export class SandboxService implements ISandboxService {
       if (existing) return existing.value;
     }
 
-    // 1. Build provider input and create cloud resource
-    const providerInput = toContainerGroupInput(input);
-    const { providerId } = await this.containerProvider.create(providerInput);
-
-    // 2. Build the sandbox entity
-    const id = createSandboxId(providerId);
-    const sandbox = {
+    // 1. Generate sandbox identity and persist as Scheduling
+    const id = createSandboxId(crypto.randomUUID());
+    const initial: Sandbox = {
       id,
       name: input.name,
       ...(input.description !== undefined ? { description: input.description } : {}),
       tags: input.tags ?? [],
       createdAt: Date.now(),
       updatedAt: Date.now(),
-      status: SandboxStatus.Running,
+      status: SandboxStatus.Scheduling,
       version: generateVersionId(),
       config: input,
-      providerId,
       network: {} as NetworkInfo,
       containers: [] as ContainerRuntime[],
       events: [] as ContainerEvent[],
     } as Sandbox;
 
-    // 3. Persist
-    const persisted = await this.atomic.set<Sandbox>(
-      `${KEY_PREFIX}${id}`,
-      sandbox,
-      null,
-    );
+    const created = await this.atomic.set<Sandbox>(`${KEY_PREFIX}${id}`, initial, null);
+    if (!created) throw new AppError(500, 'CREATE_FAILED', 'Failed to persist initial sandbox state');
 
-    if (persisted && idempotencyKey) {
-      await this.atomic.set(`${KEY_PREFIX}idem:${idempotencyKey}`, sandbox, null);
+    // 2. Build provider input and create cloud resource
+    const providerInput = toContainerGroupInput(input);
+    const { providerId } = await this.containerProvider.create(providerInput);
+
+    // 3. Transition to Running with provider details
+    const entry = await this.atomic.get<Sandbox>(`${KEY_PREFIX}${id}`);
+    if (!entry) throw new AppError(500, 'STATE_MISSING', 'Sandbox state missing after create');
+
+    const running: Sandbox = {
+      ...entry.value,
+      status: SandboxStatus.Running,
+      providerId,
+      updatedAt: Date.now(),
+      version: generateVersionId(),
+    } as Sandbox;
+
+    const updated = await this.atomic.set(`${KEY_PREFIX}${id}`, running, entry.version);
+    if (!updated) throw new AppError(409, 'CONFLICT', 'Concurrent modification during provision');
+
+    if (idempotencyKey) {
+      await this.atomic.set(`${KEY_PREFIX}idem:${idempotencyKey}`, running, null);
     }
 
     await this.logger.logAsync({
@@ -91,7 +101,7 @@ export class SandboxService implements ISandboxService {
       metadata: { sandboxId: id as string, providerId, name: input.name },
     });
 
-    return sandbox;
+    return running;
   }
 
   async getById(id: SandboxId): Promise<Sandbox | null> {

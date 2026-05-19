@@ -1,2 +1,9 @@
+import { Hono } from 'hono';
+import type { FeatureDeps } from '../../core/app.ts';
+import { createInfoHandler } from './info.handler.ts';
+
 export { ServerInfoSchema, type ServerInfo } from './info.schema.ts';
-export { createInfoHandler } from './info.handler.ts';
+
+export function createRouter(_deps: FeatureDeps): Hono<any> {
+  return createInfoHandler();
+}

@@ -31,10 +31,10 @@ export enum SandboxStatus {
 }
 
 export const VALID_TRANSITIONS: Readonly<Record<SandboxStatus, readonly SandboxStatus[]>> = {
-  [SandboxStatus.Pending]: [SandboxStatus.Scheduling, SandboxStatus.Running, SandboxStatus.Failed],
+  [SandboxStatus.Pending]: [SandboxStatus.Scheduling, SandboxStatus.Running, SandboxStatus.Failed, SandboxStatus.Deleted],
   [SandboxStatus.Scheduling]: [SandboxStatus.Running, SandboxStatus.Failed],
   [SandboxStatus.Running]: [SandboxStatus.Stopped, SandboxStatus.Terminated, SandboxStatus.Deleted],
-  [SandboxStatus.Stopped]: [SandboxStatus.Running, SandboxStatus.Deleted],
+  [SandboxStatus.Stopped]: [SandboxStatus.Running, SandboxStatus.Terminated, SandboxStatus.Deleted],
   [SandboxStatus.Terminated]: [SandboxStatus.Deleted],
   [SandboxStatus.Failed]: [SandboxStatus.Deleted],
   [SandboxStatus.Deleted]: [],

@@ -121,3 +121,62 @@ export async function payloadHash(body: BufferSource | string): Promise<string> 
   const hash = await crypto.subtle.digest('SHA-256', enc);
   return bytesToHex(new Uint8Array(hash));
 }
+
+/**
+ * Generate a presigned URL for S3-compatible services using SigV4 query-string auth.
+ *
+ * The returned URL includes all required `X-Amz-*` query parameters and the
+ * final `X-Amz-Signature`. The caller must use the same HTTP method as passed here.
+ */
+export async function signPresignedUrl(
+  method: string,
+  canonicalUri: string,
+  credentials: SigV4Credentials,
+  region: string,
+  service: string,
+  expiresInSeconds: number,
+  now: Date,
+): Promise<URL> {
+  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '');
+  const dateStamp = amzDate.slice(0, 8);
+  const algorithm = 'AWS4-HMAC-SHA256';
+  const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
+
+  // Build canonical query params (sorted by key), excluding Signature
+  const params = new URLSearchParams();
+  params.set('X-Amz-Algorithm', algorithm);
+  params.set('X-Amz-Credential', `${credentials.accessKeyId}/${credentialScope}`);
+  params.set('X-Amz-Date', amzDate);
+  params.set('X-Amz-Expires', String(expiresInSeconds));
+  params.set('X-Amz-SignedHeaders', 'host');
+  if (credentials.sessionToken) {
+    params.set('X-Amz-Security-Token', credentials.sessionToken);
+  }
+
+  const canonicalQueryString = params.toString();
+
+  // Canonical request with host-only signed headers
+  const hostname = new URL(`https://s3.${region}.amazonaws.com`).hostname;
+  const canonicalRequest = [
+    method,
+    canonicalUri,
+    canonicalQueryString,
+    `host:${hostname}\n`,
+    'host',
+    'UNSIGNED-PAYLOAD',
+  ].join('\n');
+
+  // String to sign
+  const canonicalRequestHash = await sha256Hex(canonicalRequest);
+  const stringToSign = [algorithm, amzDate, credentialScope, canonicalRequestHash].join('\n');
+
+  // Signing key + signature
+  const signingKey = await deriveKey(credentials.secretAccessKey, dateStamp, region, service);
+  const signature = await hmacHex(signingKey, stringToSign);
+
+  params.set('X-Amz-Signature', signature);
+
+  const url = new URL(`https://s3.${region}.amazonaws.com${canonicalUri}`);
+  url.search = params.toString();
+  return url;
+}
