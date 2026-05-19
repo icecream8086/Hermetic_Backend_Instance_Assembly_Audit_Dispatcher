@@ -1,8 +1,9 @@
 import { createApp } from './core/app.ts';
 import { loadConfig } from './config/env.ts';
 
-// DO class must be exported at module scope for wrangler to discover it
+// DO classes must be exported at module scope for wrangler to discover them
 export { AtomicStoreDO } from './core/store/adapters/durable-object.ts';
+export { AlarmTimerDO } from './core/scheduler/alarm-timer-do.ts';
 
 const config = loadConfig();
 

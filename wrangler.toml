@@ -12,9 +12,18 @@ port = 3000
 name = "ATOMIC_STORE_DO"
 class_name = "AtomicStoreDO"
 
+# ─── Durable Object for alarm-based scheduler (cron simulation) ───
+[[durable_objects.bindings]]
+name = "ALARM_TIMER_DO"
+class_name = "AlarmTimerDO"
+
 [[migrations]]
 tag = "v1"
 new_classes = ["AtomicStoreDO"]
+
+[[migrations]]
+tag = "v2"
+new_classes = ["AlarmTimerDO"]
 
 # ─── KV for state storage (eventual consistency fallback) ───
 [[kv_namespaces]]

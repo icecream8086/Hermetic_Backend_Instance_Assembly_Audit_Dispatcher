@@ -1,6 +1,7 @@
 import type { StorageConfig } from '../core/store/config.ts';
 import type { AuditTier } from '../core/logger/interfaces.ts';
 import type { S3ProviderType } from '../core/provider/s3-types.ts';
+import type { SchedulerBackendType } from '../core/scheduler/interfaces.ts';
 
 export interface LogConfig {
   auditTier: AuditTier;
@@ -26,11 +27,21 @@ export interface S3Config {
   region: string;
 }
 
+export interface SchedulerAppConfig {
+  /** Timer backend type, driven by `SCHEDULER_BACKEND` env var. */
+  backend: SchedulerBackendType;
+  /** Tick interval in ms, driven by `SCHEDULER_INTERVAL_MS` env var. */
+  intervalMs: number;
+  /** Events per tick. 0 = drain all, 1 = round-robin. */
+  batchSize: number;
+}
+
 export interface AppConfig {
   storage: StorageConfig;
   log: LogConfig;
   provider: ProviderConfig;
   s3: S3Config;
+  scheduler: SchedulerAppConfig;
   server: {
     port: number;
   };

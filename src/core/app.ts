@@ -12,6 +12,8 @@ import { createInfoHandler } from '../features/info/info.handler.ts';
 import type { IProviderRegistry } from './provider/interfaces.ts';
 import { createProviderRegistry } from './provider/factory.ts';
 import type { ProviderCredentials } from './provider/factory.ts';
+import type { ITimerBackend } from './scheduler/interfaces.ts';
+import { createTimerBackend } from './scheduler/factory.ts';
 
 export interface AppContext {
   stores: Stores;
@@ -25,6 +27,7 @@ export interface AppInstance {
   stores: Stores;
   logRouter: ILogRouter;
   providers: IProviderRegistry;
+  schedulerBackend: ITimerBackend;
   dispose: () => Promise<void>;
 }
 
@@ -55,15 +58,20 @@ export function createApp(config: AppConfig, platformBindings?: Record<string, u
   const credentials = resolveCredentials();
   const providers = createProviderRegistry(config.provider, credentials);
 
-  // 4. Build Hono app
+  // 4. Create timer backend (driven by SCHEDULER_BACKEND env var)
+  const schedulerBackend = createTimerBackend(config.scheduler.backend, {
+    doNamespace: platformBindings?.['ALARM_TIMER_DO'] as DurableObjectNamespace | undefined,
+  });
+
+  // 5. Build Hono app
   const app = new Hono<{ Variables: AppContext }>();
 
-  // 5. Apply global middleware
+  // 6. Apply global middleware
   app.use('*', cors());
   app.use('*', rateLimit({ windowMs: 60_000, maxRequests: 100 }));
   app.onError(globalErrorHandler);
 
-  // 6. Mount feature routes
+  // 7. Mount feature routes
   app.route('/', createInfoHandler());
 
   // 8. Export for route mounting
@@ -72,6 +80,7 @@ export function createApp(config: AppConfig, platformBindings?: Record<string, u
     stores,
     logRouter,
     providers,
+    schedulerBackend,
     dispose: async () => {
       logRouter.dispose();
     },

@@ -1,6 +1,7 @@
 import type { StorageConfig } from '../core/store/config.ts';
 import { AuditTier } from '../core/logger/interfaces.ts';
-import type { AppConfig, LogConfig, ProviderConfig, S3Config } from './types.ts';
+import type { SchedulerBackendType } from '../core/scheduler/interfaces.ts';
+import type { AppConfig, LogConfig, ProviderConfig, S3Config, SchedulerAppConfig } from './types.ts';
 
 export type { AppConfig } from './types.ts';
 
@@ -45,11 +46,18 @@ export function loadConfig(overrides?: Partial<AppConfig>): AppConfig {
     region: process.env['S3_REGION'] ?? 'auto',
   };
 
+  const schedulerConfig: SchedulerAppConfig = overrides?.scheduler ?? {
+    backend: (process.env['SCHEDULER_BACKEND'] as SchedulerBackendType) ?? 'worker',
+    intervalMs: Number(process.env['SCHEDULER_INTERVAL_MS'] ?? 60000),
+    batchSize: Number(process.env['SCHEDULER_BATCH_SIZE'] ?? 0),
+  };
+
   return {
     storage: storageConfig,
     log: logConfig,
     provider: providerConfig,
     s3: s3Config,
+    scheduler: schedulerConfig,
     server: {
       port: Number(process.env['PORT'] ?? 3000),
       ...overrides?.server,
