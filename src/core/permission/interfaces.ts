@@ -1,10 +1,12 @@
 import type { IAtomicStore } from '../store/interfaces.ts';
 import type { ILogWriter } from '../logger/interfaces.ts';
+import type { IAuditWriter } from '../audit/types.ts';
 import type { PermissionCheck, PermissionResult, AuthzId, AuthzRecord } from './types.ts';
 
 export interface PermissionDependencies {
   readonly atomic: IAtomicStore;
   readonly logger: ILogWriter;
+  readonly audit?: IAuditWriter;
 }
 
 export interface IPermissionChecker {

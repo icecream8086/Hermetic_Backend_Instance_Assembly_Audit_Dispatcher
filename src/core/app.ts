@@ -16,6 +16,8 @@ import { createTimerBackend } from './scheduler/factory.ts';
 import { EventBus } from './event-bus/bus.ts';
 import { EventLoop } from './event-bus/loop.ts';
 import type { EventLoopConfig, TriggerEventInput } from './event-bus/types.ts';
+import type { IAuditWriter, IAuditReader } from './audit/types.ts';
+import { WorkersAuditLogger, createAuditRouter } from './audit/index.ts';
 
 export interface AppContext {
   stores: Stores;
@@ -23,6 +25,7 @@ export interface AppContext {
   providers: IProviderRegistry;
   eventBus: EventBus;
   eventLoop: EventLoop;
+  audit: IAuditWriter;
 }
 
 /** Shared dependencies injected into every feature's createRouter(). */
@@ -32,6 +35,7 @@ export interface FeatureDeps {
   providers: IProviderRegistry;
   eventBus: EventBus;
   eventLoop: EventLoop;
+  audit: IAuditWriter;
 }
 
 export interface AppInstance {
@@ -64,6 +68,11 @@ export function createApp(config: AppConfig, platformBindings?: Record<string, u
   // 1. Create storage adapters (KV, file, etc.)
   const stores = createStores(config.storage, platformBindings);
 
+  // 1b. 审计日志: console → Workers Logs (纯转发，不本地缓存)
+  const auditLogger = new WorkersAuditLogger();
+  const audit: IAuditWriter = auditLogger;
+  const auditReader: IAuditReader = auditLogger;
+
   // 2. Create logger infrastructure
   const logRouter = new LogRouter();
 
@@ -93,7 +102,12 @@ export function createApp(config: AppConfig, platformBindings?: Record<string, u
   // 6. Build Hono app
   const app = new Hono<{ Variables: AppContext }>();
 
-  // 7. Apply global middleware
+  // 7. Apply global middleware (timing first = outermost, wrapping everything)
+  app.use('*', async (c, next) => {
+    const t0 = performance.now();
+    await next();
+    c.header('Server-Timing', `total;dur=${(performance.now() - t0).toFixed(2)}`);
+  });
   app.use('*', cors());
   app.use('*', rateLimit({ windowMs: 60_000, maxRequests: 100 }));
   app.onError(globalErrorHandler);
@@ -105,6 +119,7 @@ export function createApp(config: AppConfig, platformBindings?: Record<string, u
     c.set('providers', providers);
     c.set('eventBus', eventBus);
     c.set('eventLoop', eventLoop);
+    c.set('audit', audit);
     await next();
   });
 
@@ -114,7 +129,32 @@ export function createApp(config: AppConfig, platformBindings?: Record<string, u
     return c.json({ ok: true, queueSize: eventLoop.size });
   });
 
-  // 10. Event management API routes
+  // 10. Migration endpoint (local only) — rebuild sharded user index from existing user keys
+  app.post('/__admin/migrate-user-index', async (c) => {
+    const { ids } = await c.req.json<{ ids: string[] }>();
+    const atomic = stores.atomic;
+    const SHARDS = 16;
+    const shards = Array.from({ length: SHARDS }, (_, i) => ({ key: 'user:idx:' + i, ids: new Set<string>() }));
+    let count = 0;
+    for (const id of ids) {
+      const entry = await atomic.get<unknown>('user:' + id);
+      if (entry !== null) {
+        let hash = 5381;
+        for (let i = 0; i < id.length; i++) { hash = ((hash << 5) + hash) + id.charCodeAt(i); hash |= 0; }
+        const si = Math.abs(hash) % SHARDS;
+        shards[si]!.ids.add(id);
+        count++;
+      }
+    }
+    if (count === 0) return c.json({ migrated: 0 });
+    for (const s of shards) {
+      const current = await atomic.get<string[]>(s.key);
+      await atomic.set(s.key, [...s.ids], current?.version ?? null);
+    }
+    return c.json({ migrated: count });
+  });
+
+  // 11. Event management API routes
   const events = new Hono<{ Variables: AppContext }>()
     .post('/', async (c) => {
       const input = await c.req.json<TriggerEventInput>();
@@ -132,10 +172,19 @@ export function createApp(config: AppConfig, platformBindings?: Record<string, u
     });
   app.route('/api/events', events);
 
-  // 11. Auto-register features from generated registry
-  const featureDeps: FeatureDeps = { stores, logRouter, providers, eventBus, eventLoop };
+  // 11. Mount audit log query endpoint
+  app.route('/api/audit', createAuditRouter(auditReader));
+
+  // 12. Auto-register features from generated registry
+  // Mount at both /path and /path/ since Hono's route() doesn't normalize
+  // trailing slashes — /api/users matches but /api/users/ does not.
+  const featureDeps: FeatureDeps = { stores, logRouter, providers, eventBus, eventLoop, audit };
   for (const feat of getFeatures()) {
-    app.route(feat.path, feat.mount(featureDeps));
+    const router = feat.mount(featureDeps);
+    app.route(feat.path, router);
+    if (feat.path !== '/') {
+      app.route(feat.path + '/', router);
+    }
   }
 
   // 12. Export

@@ -11,3 +11,5 @@ CLAUDE.md
 .vscode
 *.http
 coverage
+*.ps1
+.data-test

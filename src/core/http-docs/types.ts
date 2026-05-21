@@ -9,4 +9,6 @@ export interface RouteMeta {
   requestBody?: unknown;
   /** Short description of the response (shown as comment in .http) */
   responseDescription?: string;
+  /** Example query parameter sets — generates multiple request lines in .http */
+  queryExamples?: Record<string, string>[];
 }

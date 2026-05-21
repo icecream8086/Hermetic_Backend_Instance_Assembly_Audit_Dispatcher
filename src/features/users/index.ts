@@ -10,7 +10,7 @@ export { UserRole, generateUserId } from './types.ts';
 export { RegisterUserSchema, LoginUserSchema, UpdateUserSchema, UserResponseSchema } from './schema.ts';
 
 export function createRouter(deps: FeatureDeps): Hono<any> {
-  const service = new UserService(deps.stores.atomic, new ConsoleLogger());
+  const service = new UserService(deps.stores.atomic, new ConsoleLogger(), deps.audit);
   return createUserRouter(service);
 }
 

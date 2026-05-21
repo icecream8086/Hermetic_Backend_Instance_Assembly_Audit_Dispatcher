@@ -13,10 +13,43 @@ import { TransactConflictError } from '../../../../src/core/store/interfaces.ts'
 function createMockStorage(): DurableObjectStorage {
   const data = new Map<string, unknown>();
   return {
-    get: async <T>(key: string) => data.get(key) as T | undefined,
-    put: async (key: string, value: unknown) => { data.set(key, value); },
-    delete: async (key: string) => { data.delete(key); },
-    list: async () => data,
+    get: async <T>(key: string | string[]) => {
+      if (Array.isArray(key)) {
+        const result = new Map<string, T>();
+        for (const k of key) {
+          if (data.has(k)) result.set(k, data.get(k) as T);
+        }
+        return result as Map<string, T>;
+      }
+      return data.get(key) as T | undefined;
+    },
+    put: async (key: string | Record<string, unknown>, value?: unknown) => {
+      if (typeof key === 'object') {
+        for (const [k, v] of Object.entries(key)) data.set(k, v);
+      } else {
+        data.set(key, value);
+      }
+    },
+    delete: async (key: string | string[]) => {
+      const keys = Array.isArray(key) ? key : [key];
+      for (const k of keys) data.delete(k);
+    },
+    list: async <T>(options?: DurableObjectListOptions) => {
+      let entries = [...data.entries()];
+      if (options?.prefix) {
+        entries = entries.filter(([k]) => k.startsWith(options.prefix!));
+      }
+      // Lexicographic sort (DO storage contract)
+      entries.sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
+      if (options?.start) {
+        const idx = entries.findIndex(([k]) => k >= options.start!);
+        entries = idx === -1 ? [] : entries.slice(idx);
+      }
+      if (options?.limit && options.limit < entries.length) {
+        entries = entries.slice(0, options.limit);
+      }
+      return new Map(entries) as Map<string, T>;
+    },
     transaction: async <T>(fn: () => T) => fn(),
     getAlarm: async () => undefined,
     setAlarm: async () => {},
@@ -474,6 +507,20 @@ describe('AtomicStoreDO (white-box)', () => {
     return { do: doInstance, storage };
   }
 
+  /** Helper: create a DO with a storage that tracks setAlarm calls. */
+  function createDOWithAlarmTracking(): {
+    do: AtomicStoreDO;
+    storage: DurableObjectStorage;
+    alarmTimes: number[];
+  } {
+    const alarmTimes: number[] = [];
+    const storage = createMockStorage();
+    storage.setAlarm = async (t: number) => { alarmTimes.push(t); };
+    const doInstance = new AtomicStoreDO();
+    (doInstance as any).ctx = { storage } as DurableObjectState;
+    return { do: doInstance, storage, alarmTimes };
+  }
+
   describe('op: get', () => {
     it('returns null for missing key', async () => {
       const { do: doInst } = createDO();
@@ -500,6 +547,17 @@ describe('AtomicStoreDO (white-box)', () => {
       expect(body.version).toBe('v1');
     });
 
+    it('returns 400 when key is missing', async () => {
+      const { do: doInst } = createDO();
+      const resp = await doInst.fetch(new Request('https://do/op', {
+        method: 'POST',
+        body: JSON.stringify({ op: 'get' }),
+      }));
+      expect(resp.status).toBe(400);
+      const body = await resp.json() as { error: string };
+      expect(body.error).toContain('Missing key');
+    });
+
     it('get with empty string key returns stored value and version', async () => {
       const { do: doInst, storage } = createDO();
       await storage.put('', { v: 'empty-key', _ver: 'v1' });
@@ -523,6 +581,17 @@ describe('AtomicStoreDO (white-box)', () => {
       }));
       const body = await resp.json() as { version: string };
       expect(body.version).toBeTruthy();
+    });
+
+    it('returns 400 when key is missing for set', async () => {
+      const { do: doInst } = createDO();
+      const resp = await doInst.fetch(new Request('https://do/op', {
+        method: 'POST',
+        body: JSON.stringify({ op: 'set', value: 42, expectedVersion: null }),
+      }));
+      expect(resp.status).toBe(400);
+      const body = await resp.json() as { error: string };
+      expect(body.error).toContain('Missing key');
     });
 
     it('rejects write on version conflict', async () => {
@@ -779,6 +848,113 @@ describe('AtomicStoreDO (white-box)', () => {
       expect(resp.status).toBe(400);
       const body = await resp.json() as { error: string };
       expect(body.error).toContain('Unknown op');
+    });
+  });
+
+  describe('alarm', () => {
+    it('bootstraps alarm on first fetch', async () => {
+      const { do: doInst, alarmTimes } = createDOWithAlarmTracking();
+
+      // Before any fetch, no alarm should have been set
+      expect(alarmTimes).toHaveLength(0);
+
+      // First fetch triggers alarm bootstrap
+      await doInst.fetch(new Request('https://do/op', {
+        method: 'POST',
+        body: JSON.stringify({ op: 'get', key: 'k' }),
+      }));
+
+      expect(alarmTimes).toHaveLength(1);
+      expect(alarmTimes[0]).toBeGreaterThan(Date.now());
+    });
+
+    it('only bootstraps alarm once across multiple fetches', async () => {
+      const { do: doInst, alarmTimes } = createDOWithAlarmTracking();
+
+      await doInst.fetch(new Request('https://do/op', {
+        method: 'POST',
+        body: JSON.stringify({ op: 'get', key: 'k' }),
+      }));
+      await doInst.fetch(new Request('https://do/op', {
+        method: 'POST',
+        body: JSON.stringify({ op: 'get', key: 'k' }),
+      }));
+
+      // Alarm should have been set exactly once
+      expect(alarmTimes).toHaveLength(1);
+    });
+
+    it('removes entries past their TTL via alarm', async () => {
+      const { do: doInst, storage } = createDO();
+
+      const now = Date.now();
+
+      // Entry with TTL that has expired (past its _expiresAt)
+      await storage.put('session:old', {
+        v: { data: 'stale' },
+        _ver: 'v1',
+        _expiresAt: now - 100_000_000,
+      });
+      await storage.put('__ttl:' + String(now - 100_000_000).padStart(20, '0') + ':session:old', {
+        expiresAt: now - 100_000_000,
+      });
+
+      // Entry with TTL still in the future
+      await storage.put('session:new', {
+        v: { data: 'fresh' },
+        _ver: 'v2',
+        _expiresAt: now + 100_000_000,
+      });
+      await storage.put('__ttl:' + String(now + 100_000_000).padStart(20, '0') + ':session:new', {
+        expiresAt: now + 100_000_000,
+      });
+
+      // Entry without TTL (permanent)
+      await storage.put('config:foo', {
+        v: { setting: 'bar' },
+        _ver: 'v3',
+        _expiresAt: null,
+      });
+
+      await doInst.alarm();
+
+      const staleEntry = await storage.get('session:old');
+      expect(staleEntry).toBeUndefined();
+
+      const freshEntry = await storage.get('session:new');
+      expect(freshEntry).toBeDefined();
+
+      const configEntry = await storage.get('config:foo');
+      expect(configEntry).toBeDefined();
+
+      // TTL marker for expired entry should also be gone
+      const staleMarker = await storage.get('__ttl:' + String(now - 100_000_000).padStart(20, '0') + ':session:old');
+      expect(staleMarker).toBeUndefined();
+    });
+
+    it('does not delete entries without TTL markers', async () => {
+      const { do: doInst, storage } = createDO();
+
+      // Entry without _expiresAt field (pre-migration format) — treated as permanent
+      await storage.put('session:legacy', {
+        v: { someData: true },
+        _ver: 'v1',
+      });
+
+      await doInst.alarm();
+
+      const entry = await storage.get('session:legacy');
+      expect(entry).toBeDefined();
+    });
+
+    it('reschedules alarm based on next expiry', async () => {
+      const { do: doInst, alarmTimes } = createDOWithAlarmTracking();
+
+      // No TTL markers — alarm should set idle poll (1h)
+      await doInst.alarm();
+
+      expect(alarmTimes).toHaveLength(1);
+      expect(alarmTimes[0]).toBeGreaterThan(Date.now() + 3_000_000); // well within 1h
     });
   });
 });

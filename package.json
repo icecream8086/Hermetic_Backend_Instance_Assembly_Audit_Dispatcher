@@ -15,7 +15,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "deploy": "wrangler deploy",
-    "docs:http": "tsx scripts/export-http.ts"
+    "docs:http": "tsx scripts/export-http.ts",
+    "tail": "wrangler tail --format pretty",
+    "reset": "node scripts/reset.mjs"
   },
   "hbi-aad": {
     "features": {
@@ -33,6 +35,7 @@
     "@cloudflare/workers-types": "^4.20260511.1",
     "@hono/node-server": "^2.0.2",
     "@types/node": "^22.19.19",
+    "pactum": "^3.9.1",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "vitest": "^4.1.6",

@@ -6,8 +6,12 @@ import { HashTable } from '../hash-table/index.ts';
 import { LinkedList } from '../linked-list/index.ts';
 import { createFacility } from '../brand.ts';
 import { LogLevel } from '../types.ts';
+import { KernLevel } from '../audit/kern-level.ts';
 
 const AUTHZ_FACILITY = createFacility('authz');
+
+/** 7 days in seconds — matches audit KV TTL. */
+const AUTHZ_TTL_SEC = 7 * 24 * 60 * 60;
 
 /**
  * Base class for permission checks.
@@ -137,8 +141,8 @@ export class BasePermission implements IPermissionChecker {
       ...(params.context !== undefined ? { metadata: params.context } : {}),
     } as AuthzRecord;
 
-    // 1. Write to atomic store (KV log)
-    await this.deps.atomic.set(`authz:${id}`, record, null);
+    // 1. Write to atomic store (KV log) with 7-day TTL (钟墙)
+    await this.deps.atomic.set(`authz:${id}`, record, null, AUTHZ_TTL_SEC);
 
     // 2. Write audit log entry
     await this.deps.logger.logSync({
@@ -156,6 +160,15 @@ export class BasePermission implements IPermissionChecker {
         allowed: result.allowed,
         reason: result.reason,
       } satisfies Record<string, unknown>,
+    });
+
+    // 2b. KV audit record (7-day TTL, formatted line)
+    await this.deps.audit?.write({
+      level: result.allowed ? KernLevel.NOTICE : KernLevel.WARNING,
+      facility: AUTHZ_FACILITY,
+      message: result.allowed
+        ? `Authorized ${params.actor} ${params.action} on ${params.resource}:${params.resourceId}`
+        : `Denied ${params.actor} ${params.action} on ${params.resource}:${params.resourceId} — ${result.reason}`,
     });
 
     // 3. Update in-memory decision cache

@@ -72,6 +72,21 @@ export class EventBus {
     const handlers = this.#handlers.get(event.type);
     if (!handlers || handlers.size === 0) return;
 
+    // Fast path: single handler — no array / allSettled allocation
+    if (handlers.size === 1) {
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+      const handler: EventHandler | undefined = handlers.values().next().value;
+      if (handler) {
+        try {
+          const r = handler(event);
+          if (r instanceof Promise) await r;
+        } catch (err) {
+          this.#onError(err, event);
+        }
+      }
+      return;
+    }
+
     const results: Promise<void>[] = [];
     for (const handler of handlers) {
       try {

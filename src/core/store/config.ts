@@ -2,13 +2,13 @@ export interface StorageConfig {
   stateBackend: 'kv' | 'do' | 'file';
   queryBackend: 'd1' | 'file' | 'none';
   blobBackend: 'r2' | 'file' | 'none';
+  /** Seconds until cache entries expire in the KV backend (read-trough TTL). */
+  cacheTtlSeconds?: number;
   connections: {
     /** CF KV namespace binding name (stateBackend='kv') */
     kvNamespace?: string;
     /** CF DO namespace binding name (stateBackend='do') */
     doNamespace?: string;
-    /** DO instance ID name (stateBackend='do') */
-    doInstanceName?: string;
     /** CF D1 database binding name (queryBackend='d1') */
     d1Binding?: string;
     /** CF R2 bucket binding name (blobBackend='r2') */

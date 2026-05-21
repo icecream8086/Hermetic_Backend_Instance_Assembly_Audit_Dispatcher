@@ -25,8 +25,7 @@
  * ```
  */
 export class AlarmTimerDO implements DurableObject {
-  // Injected by the DO runtime (same pattern as AtomicStoreDO)
-  readonly ctx!: DurableObjectState;
+  constructor(readonly ctx: DurableObjectState, _env: unknown) {}
 
   /** Minimum interval safety floor (1s). DO alarms below this risk instability. */
   static readonly MIN_INTERVAL = 1000;

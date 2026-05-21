@@ -6,7 +6,7 @@ import type { VersionId } from '../brand.ts';
  */
 export interface IStoreTransaction {
   get<T>(key: string): Promise<T | null>;
-  set<T>(key: string, value: T): void;
+  set<T>(key: string, value: T, ttlSeconds?: number): void;
 }
 
 /**
@@ -20,11 +20,18 @@ export interface IAtomicStore {
    * Atomic write with version check.
    * Pass `expectedVersion = null` to assert the key does not yet exist (create-only).
    * Returns the new version on success, or null on conflict.
+   * Pass `ttlSeconds` to set server-side TTL on backends that support it (e.g. KV).
    */
-  set<T>(key: string, value: T, expectedVersion: VersionId | null): Promise<VersionId | null>;
+  set<T>(key: string, value: T, expectedVersion: VersionId | null, ttlSeconds?: number): Promise<VersionId | null>;
 
   /** Execute operations inside a serialized atomic transaction. */
   transact<T>(action: (txn: IStoreTransaction) => Promise<T>): Promise<T>;
+
+  /**
+   * Evict a key from the read-through cache so the next get() goes to
+   * the authoritative coordinator (DO). No-op on backends without caching.
+   */
+  invalidateCache?(key: string): Promise<void>;
 }
 
 /**
@@ -62,6 +69,8 @@ export interface BlobMetadata {
   custom?: Record<string, string>;
 }
 
+import type { IServerMetrics } from './metrics.ts';
+
 /**
  * Aggregated stores for dependency injection.
  */
@@ -69,4 +78,6 @@ export interface Stores {
   readonly atomic: IAtomicStore;
   readonly query: IQueryStore;
   readonly blob: IBlobStore;
+  /** 缓存命中率指标抽象层 — 底层可对接 Cloudflare 或其他平台 API. */
+  readonly metrics: IServerMetrics;
 }

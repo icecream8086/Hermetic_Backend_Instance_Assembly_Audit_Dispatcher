@@ -26,28 +26,27 @@ export class CloudflareKVAtomicStore implements IAtomicStore {
     return { value: result.value, version: version as VersionId };
   }
 
-  async set<T>(key: string, value: T, expectedVersion: VersionId | null): Promise<VersionId | null> {
+  async set<T>(key: string, value: T, expectedVersion: VersionId | null, ttlSeconds?: number): Promise<VersionId | null> {
     const existing = await this.kv.getWithMetadata<unknown>(key, 'json');
     const currentVersion = (existing.metadata as { v?: string } | null)?.v;
 
-    // expectedVersion === null means "key must not exist"
     if (expectedVersion === null && existing.value !== null) return null;
-    // expectedVersion must match current
     if (expectedVersion !== null && currentVersion !== expectedVersion) return null;
 
     const newVersion = generateVersionId();
-    await this.kv.put(key, JSON.stringify(value), { metadata: { v: newVersion } });
+    const options: KVNamespacePutOptions = { metadata: { v: newVersion } };
+    if (ttlSeconds !== undefined) options.expirationTtl = ttlSeconds;
+    await this.kv.put(key, JSON.stringify(value), options);
 
     return newVersion;
   }
 
   async transact<T>(action: (txn: IStoreTransaction) => Promise<T>): Promise<T> {
-    const readSet = new Map<string, string | null>(); // key → version (null = key didn't exist)
-    const deferredWrites = new Map<string, { value: unknown; version: VersionId }>();
+    const readSet = new Map<string, string | null>();
+    const deferredWrites = new Map<string, { value: unknown; version: VersionId; ttlSeconds?: number }>();
 
     const txn: IStoreTransaction = {
       get: async <V>(key: string) => {
-        // Read-your-own-writes: check deferred writes first
         const dw = deferredWrites.get(key);
         if (dw !== undefined) return dw.value as V;
 
@@ -56,16 +55,14 @@ export class CloudflareKVAtomicStore implements IAtomicStore {
         readSet.set(key, version);
         return result.value ?? null;
       },
-      set: async <V>(key: string, value: V) => {
+      set: async <V>(key: string, value: V, ttlSeconds?: number) => {
         const newVersion = generateVersionId();
-        deferredWrites.set(key, { value, version: newVersion });
+        deferredWrites.set(key, { value, version: newVersion, ...(ttlSeconds !== undefined && { ttlSeconds }) });
       },
     };
 
     const result = await action(txn);
 
-    // Optimistic concurrency check: verify that all read keys (excluding
-    // keys this transaction wrote) still have the same version.
     for (const [key, expectedVersion] of readSet) {
       if (deferredWrites.has(key)) continue;
       const current = await this.kv.getWithMetadata<unknown>(key, 'json');
@@ -77,9 +74,10 @@ export class CloudflareKVAtomicStore implements IAtomicStore {
       }
     }
 
-    // Apply all deferred writes
-    for (const [key, { value, version }] of deferredWrites) {
-      await this.kv.put(key, JSON.stringify(value), { metadata: { v: version } });
+    for (const [key, { value, version, ttlSeconds }] of deferredWrites) {
+      const options: KVNamespacePutOptions = { metadata: { v: version } };
+      if (ttlSeconds !== undefined) options.expirationTtl = ttlSeconds;
+      await this.kv.put(key, JSON.stringify(value), options);
     }
 
     return result;

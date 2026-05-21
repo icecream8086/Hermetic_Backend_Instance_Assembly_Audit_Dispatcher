@@ -29,7 +29,6 @@ export function loadConfig(overrides?: Partial<AppConfig>): AppConfig {
       filePath: process.env['STATE_FILE_PATH'] ?? '.data',
       kvNamespace: process.env['KV_NAMESPACE'] ?? 'KV_STORE',
       doNamespace: process.env['DO_NAMESPACE'] ?? 'ATOMIC_STORE_DO',
-      doInstanceName: process.env['DO_INSTANCE_NAME'] ?? 'global-store',
       d1Binding: process.env['D1_BINDING'] ?? 'QUERY_DB',
       r2Binding: process.env['R2_BINDING'] ?? 'BLOB_STORE',
     },

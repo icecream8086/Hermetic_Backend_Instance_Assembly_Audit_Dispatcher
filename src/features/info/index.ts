@@ -4,6 +4,6 @@ import { createInfoHandler } from './info.handler.ts';
 
 export { ServerInfoSchema, type ServerInfo } from './info.schema.ts';
 
-export function createRouter(_deps: FeatureDeps): Hono<any> {
-  return createInfoHandler();
+export function createRouter(deps: FeatureDeps): Hono<any> {
+  return createInfoHandler(deps.stores);
 }

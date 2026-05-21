@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { IAtomicStore, IStoreTransaction } from '../interfaces.ts';
 import { TransactConflictError } from '../interfaces.ts';
@@ -7,7 +7,7 @@ import { generateVersionId } from '../../brand.ts';
 
 interface FileEntry<T = unknown> {
   value: T;
-  metadata: { v: string };
+  metadata: { v: string; e?: number };
 }
 
 /**
@@ -55,6 +55,13 @@ export class FileKVAtomicStore implements IAtomicStore {
       try {
         const raw = await readFile(this.#filePath(key), 'utf-8');
         const entry = JSON.parse(raw) as FileEntry<T>;
+        if (entry.metadata.e && Date.now() > entry.metadata.e) {
+          // TTL expired — delete file and return null
+          try { await rm(this.#filePath(key), { force: true }); } catch { /* noop */ }
+          return null;
+        }
+        // null value = deleted — consistent with DO adapter behavior
+        if (entry.value === null) return null;
         return { value: entry.value, version: entry.metadata.v as VersionId };
       } catch {
         return null;
@@ -62,7 +69,7 @@ export class FileKVAtomicStore implements IAtomicStore {
     });
   }
 
-  async set<T>(key: string, value: T, expectedVersion: VersionId | null): Promise<VersionId | null> {
+  async set<T>(key: string, value: T, expectedVersion: VersionId | null, ttlSeconds?: number): Promise<VersionId | null> {
     return this.#serialise(async () => {
       await this.#ensureDir();
       const fp = this.#filePath(key);
@@ -78,7 +85,9 @@ export class FileKVAtomicStore implements IAtomicStore {
       if (expectedVersion !== null && current?.metadata.v !== expectedVersion) return null;
 
       const newVersion = generateVersionId();
-      const entry: FileEntry = { value, metadata: { v: newVersion } };
+      const metadata: { v: string; e?: number } = { v: newVersion };
+      if (ttlSeconds !== undefined) metadata.e = Date.now() + ttlSeconds * 1000;
+      const entry: FileEntry = { value, metadata };
       await writeFile(fp, JSON.stringify(entry), 'utf-8');
       return newVersion;
     });
@@ -88,11 +97,10 @@ export class FileKVAtomicStore implements IAtomicStore {
     return this.#serialise(async () => {
       await this.#ensureDir();
       const readSet = new Map<string, string | null>(); // null = key didn't exist
-      const deferredWrites = new Map<string, { value: unknown; version: VersionId }>();
+      const deferredWrites = new Map<string, { value: unknown; version: VersionId; ttlSeconds?: number }>();
 
       const txn: IStoreTransaction = {
         get: async <V>(key: string) => {
-          // Read-your-own-writes: check deferred writes first
           const dw = deferredWrites.get(key);
           if (dw !== undefined) return dw.value as V;
 
@@ -102,13 +110,13 @@ export class FileKVAtomicStore implements IAtomicStore {
             readSet.set(key, entry.metadata.v);
             return entry.value;
           } catch {
-            readSet.set(key, null); // track "key didn't exist" dependency
+            readSet.set(key, null);
             return null;
           }
         },
-        set: async <V>(key: string, value: V) => {
+        set: async <V>(key: string, value: V, ttlSeconds?: number) => {
           const newVersion = generateVersionId();
-          deferredWrites.set(key, { value, version: newVersion });
+          deferredWrites.set(key, { value, version: newVersion, ...(ttlSeconds !== undefined && { ttlSeconds }) });
         },
       };
 
@@ -134,9 +142,10 @@ export class FileKVAtomicStore implements IAtomicStore {
         }
       }
 
-      // Apply all deferred writes — within #serialise this is atomic
-      for (const [key, { value, version }] of deferredWrites) {
-        const entry: FileEntry = { value, metadata: { v: version } };
+      for (const [key, { value, version, ttlSeconds }] of deferredWrites) {
+        const metadata: { v: string; e?: number } = { v: version };
+        if (ttlSeconds !== undefined) metadata.e = Date.now() + ttlSeconds * 1000;
+        const entry: FileEntry = { value, metadata };
         await writeFile(this.#filePath(key), JSON.stringify(entry), 'utf-8');
       }
 

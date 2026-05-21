@@ -75,19 +75,17 @@ export class SandboxService implements ISandboxService {
     const providerInput = toContainerGroupInput(input);
     const { providerId } = await this.containerProvider.create(providerInput);
 
-    // 3. Transition to Running with provider details
-    const entry = await this.atomic.get<Sandbox>(`${KEY_PREFIX}${id}`);
-    if (!entry) throw new AppError(500, 'STATE_MISSING', 'Sandbox state missing after create');
-
+    // 3. Transition to Running with provider details (no redundant re-read: we just
+    //    wrote `initial` with OCC create-only at line 71, so it's the current state).
     const running: Sandbox = {
-      ...entry.value,
+      ...initial,
       status: SandboxStatus.Running,
       providerId,
       updatedAt: Date.now(),
       version: generateVersionId(),
     } as Sandbox;
 
-    const updated = await this.atomic.set(`${KEY_PREFIX}${id}`, running, entry.version);
+    const updated = await this.atomic.set(`${KEY_PREFIX}${id}`, running, created);
     if (!updated) throw new AppError(409, 'CONFLICT', 'Concurrent modification during provision');
 
     if (idempotencyKey) {
@@ -151,8 +149,11 @@ export class SandboxService implements ISandboxService {
   }
 
   async syncRuntime(id: SandboxId): Promise<ContainerGroupRuntime> {
-    const sandbox = await this.getById(id);
-    if (!sandbox) throw new AppError(404, 'SANDBOX_NOT_FOUND', `Sandbox ${id} not found`);
+    // Single read — reuse its version for OCC at write time, avoiding a redundant
+    // second read before the set() below.
+    const entry = await this.atomic.get<Sandbox>(`${KEY_PREFIX}${id}`);
+    if (!entry) throw new AppError(404, 'SANDBOX_NOT_FOUND', `Sandbox ${id} not found`);
+    const sandbox = entry.value;
 
     const result = await this.containerProvider.describe({
       region: sandbox.config.region,
@@ -178,9 +179,6 @@ export class SandboxService implements ISandboxService {
       updatedAt: Date.now(),
       version: generateVersionId(),
     };
-
-    const entry = await this.atomic.get<Sandbox>(`${KEY_PREFIX}${id}`);
-    if (!entry) throw new AppError(404, 'SANDBOX_NOT_FOUND', `Sandbox ${id} not found`);
 
     const newVersion = await this.atomic.set(`${KEY_PREFIX}${id}`, updated, entry.version);
     if (!newVersion) throw new AppError(409, 'CONFLICT', 'Concurrent modification during syncRuntime');

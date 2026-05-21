@@ -142,7 +142,7 @@ export class EventLoop implements IEventLoopControl {
     this.#paused = false;
     this.#startTime = this.#startTime === 0 ? Date.now() : this.#startTime;
     this.#timerHandle = this.#timerBackend.start(
-      () => this.#tick(),
+      () => { this.#tick().catch(err => this.#reportError(err, 'tick')); },
       this.#config.intervalMs,
     );
   }
@@ -183,7 +183,7 @@ export class EventLoop implements IEventLoopControl {
     if (restart) {
       this.#timerHandle!.clear();
       this.#timerHandle = this.#timerBackend.start(
-        () => this.#tick(),
+        () => { this.#tick().catch(err => this.#reportError(err, 'tick')); },
         this.#config.intervalMs,
       );
     }
@@ -233,7 +233,7 @@ export class EventLoop implements IEventLoopControl {
   }
 
   triggerTick(): void {
-    this.#tick();
+    this.#tick().catch(err => this.#reportError(err, 'tick'));
   }
 
   // ─── Internal ───
@@ -242,24 +242,36 @@ export class EventLoop implements IEventLoopControl {
     this.#config.onError?.(err, context);
   }
 
-  #tick(): void {
+  async #tick(): Promise<void> {
     if (this.#paused || this.#queue.isEmpty) return;
 
     const limit = this.#config.batchSize > 0
       ? Math.min(this.#config.batchSize, this.#queue.size)
       : this.#queue.size;
 
+    // Dequeue batch first so the queue is drained before we await I/O.
     const dispatched: Event[] = [];
     for (let i = 0; i < limit; i++) {
       const event = this.#queue.dequeue();
       if (!event) break;
       dispatched.push(event);
-      this.#bus.dispatch(event).catch(err => this.#reportError(err, 'dispatch'));
       this.#processedCount++;
     }
 
+    // Await batch dispatch — provides backpressure so only one batch
+    // processes at a time.  Prevents unbounded queue growth when dispatch
+    // handlers are slower than the tick interval.
+    const results = await Promise.allSettled(dispatched.map(e => this.#bus.dispatch(e)));
+    for (const r of results) {
+      if (r.status === 'rejected') this.#reportError(r.reason, 'dispatch');
+    }
+
     if (this.#store && dispatched.length > 0) {
-      this.#persistDequeue(dispatched).catch(err => this.#reportError(err, 'persist-dequeue'));
+      try {
+        await this.#persistDequeue(dispatched);
+      } catch (err) {
+        this.#reportError(err, 'persist-dequeue');
+      }
     }
   }
 

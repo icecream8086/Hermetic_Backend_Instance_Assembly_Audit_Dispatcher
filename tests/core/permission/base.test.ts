@@ -30,7 +30,7 @@ class StubAtomicStore implements IAtomicStore {
     return { value: raw as T, version: `v${this.versionCounter}` as VersionId };
   }
 
-  async set<T>(key: string, value: T, _expectedVersion: VersionId | null): Promise<VersionId | null> {
+  async set<T>(key: string, value: T, _expectedVersion: VersionId | null, _ttlSeconds?: number): Promise<VersionId | null> {
     this.store.set(key, value);
     this.versionCounter++;
     return `v${this.versionCounter}` as VersionId;

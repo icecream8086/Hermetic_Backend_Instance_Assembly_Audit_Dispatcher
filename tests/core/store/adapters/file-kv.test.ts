@@ -261,13 +261,11 @@ describe('FileKVAtomicStore (white-box)', () => {
 
   describe('edge cases', () => {
     it('handles undefined and null values', async () => {
-      // null is valid JSON
-      await store.set('null-key', null, null);
+      // null is valid JSON but treated as "deleted" — get() returns null
+      const version = await store.set('null-key', null, null);
+      expect(version).toBeTruthy();
       const result = await store.get<null>('null-key');
-      // Since the JSON object stores { value: null }, the get method
-      // would return { value: null, version: ... } — not null
-      expect(result).not.toBeNull();
-      expect(result!.value).toBeNull();
+      expect(result).toBeNull();
     });
 
     it('handles boolean values', async () => {
