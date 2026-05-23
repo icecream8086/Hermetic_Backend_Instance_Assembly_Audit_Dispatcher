@@ -4,6 +4,7 @@ import type {
   ValueObject,
   Tag,
 } from './base.ts';
+import type { EnvVar, ProbeSpec, ResourceRequirements } from '../../core/provider/types.ts';
 
 // ─── Brand types ───
 declare const SANDBOX_ID_BRAND: unique symbol;
@@ -87,11 +88,21 @@ export interface ContainerConfig {
   readonly name: string;
   readonly image: string;
   readonly args?: readonly string[];
+  readonly env?: readonly EnvVar[];
   readonly tty?: boolean;
   readonly stdin?: boolean;
   readonly imagePullPolicy?: 'Always' | 'IfNotPresent' | 'Never';
+  readonly resources?: ResourceRequirements;
   readonly volumeMounts?: readonly VolumeMount[];
+  readonly livenessProbe?: ProbeSpec;
+  readonly readinessProbe?: ProbeSpec;
+  readonly startupProbe?: ProbeSpec;
   readonly providerOverrides?: Record<string, unknown>;
+}
+
+/** Init containers — run to completion before main containers start. */
+export interface InitContainerConfig extends ContainerConfig {
+  readonly restartPolicy?: 'Always' | 'OnFailure' | 'Never';
 }
 
 export interface ContainerState {
@@ -145,6 +156,22 @@ export enum SpotStrategy {
 export interface ResourceSpec {
   readonly cpu: number;
   readonly memory: number;
+  readonly gpu?: number | undefined;
+  readonly gpuType?: string | undefined;
+  readonly requests?: ResourceRequirements['requests'] | undefined;
+  readonly limits?: ResourceRequirements['limits'] | undefined;
+}
+
+// ─── Pod condition ───
+
+export type ConditionStatus = 'True' | 'False' | 'Unknown';
+
+export interface PodCondition {
+  readonly type: 'PodScheduled' | 'Initialized' | 'ContainersReady' | 'Ready';
+  readonly status: ConditionStatus;
+  readonly lastTransitionTime?: string;
+  readonly reason?: string;
+  readonly message?: string;
 }
 
 // ─── Network config (input) ───
@@ -165,6 +192,7 @@ export interface CreateSandboxInput {
   readonly resourceSpec: ResourceSpec;
   readonly spotStrategy: SpotStrategy;
   readonly restartPolicy: 'Always' | 'OnFailure' | 'Never';
+  readonly initContainers?: readonly InitContainerConfig[];
   readonly containers: readonly ContainerConfig[];
   readonly volumes?: readonly Volume[];
   readonly network: SandboxNetworkConfig;
@@ -175,10 +203,22 @@ export interface CreateSandboxInput {
 /** Full sandbox entity. Extends PersistedEntity for optimistic-concurrency state mutations. */
 export interface Sandbox extends PersistedEntity<SandboxId, SandboxStatus> {
   readonly config: CreateSandboxInput;
-  readonly providerId?: string;
+  readonly podUid?: string;        // Kubernetes Pod UID
+  readonly providerId?: string;    // Cloud provider instance ID
   readonly network: NetworkInfo;
   readonly containers: readonly ContainerRuntime[];
+  readonly conditions?: readonly PodCondition[];
   readonly events: readonly ContainerEvent[];
+}
+
+// ─── Pod ↔ Sandbox ↔ Provider mapping ───
+
+export interface PodMapping {
+  readonly podUid: string;
+  readonly sandboxId: SandboxId;
+  readonly providerId?: string;
+  readonly createdAt: number;
+  readonly updatedAt: number;
 }
 
 

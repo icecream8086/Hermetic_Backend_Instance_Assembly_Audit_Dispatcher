@@ -22,7 +22,9 @@
   "hbi-aad": {
     "features": {
       "info": "/",
-      "users": "/api/users"
+      "users": "/api/users",
+      "permission": "/api/permissions",
+      "system-group": "/api/system-groups"
     }
   },
   "dependencies": {

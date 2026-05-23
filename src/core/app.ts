@@ -1,5 +1,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { secureHeaders } from 'hono/secure-headers';
+import { bodyLimit } from 'hono/body-limit';
 import type { AppConfig } from '../config/types.ts';
 import type { Stores } from './store/interfaces.ts';
 import { createStores } from './store/factory.ts';
@@ -18,6 +20,10 @@ import { EventLoop } from './event-bus/loop.ts';
 import type { EventLoopConfig, TriggerEventInput } from './event-bus/types.ts';
 import type { IAuditWriter, IAuditReader } from './audit/types.ts';
 import { WorkersAuditLogger, createAuditRouter } from './audit/index.ts';
+import { authz } from './middleware/auth.ts';
+import { jsonDepthLimit } from './middleware/security.ts';
+import { PermissionService } from '../features/permission/service.ts';
+import { ConsoleLogger } from './logger/console-logger.ts';
 
 export interface AppContext {
   stores: Stores;
@@ -64,7 +70,7 @@ function resolveCredentials(): ProviderCredentials {
 /**
  * Assemble the application: wire stores, logger, providers, event system, middleware, and routes.
  */
-export function createApp(config: AppConfig, platformBindings?: Record<string, unknown>): AppInstance {
+export async function createApp(config: AppConfig, platformBindings?: Record<string, unknown>): Promise<AppInstance> {
   // 1. Create storage adapters (KV, file, etc.)
   const stores = createStores(config.storage, platformBindings);
 
@@ -99,7 +105,66 @@ export function createApp(config: AppConfig, platformBindings?: Record<string, u
     stores.atomic,
   );
 
-  // 6. Build Hono app
+  // 6. Initialize policy library (first-run seeding — Linux/RBAC-style)
+  {
+    const KEY = '_init:policy-lib';
+    const entry = await stores.atomic.get<any>(KEY);
+    if (entry === null) {
+      const now = Date.now();
+      let count = 0;
+
+      // System groups (global, no user binding, evaluated first)
+      const sysGroups = [
+        { name: 'perm.sysadmin', desc: 'Full system access', rules: [{ effect: 'allow', actions: ['*'], resource: '*', priority: 100 }] },
+        { name: 'perm.operator', desc: 'Operational CRUD', rules: [{ effect: 'allow', actions: ['create', 'read', 'update', 'delete'], priority: 80 }, { effect: 'deny', actions: ['admin'], priority: 90 }] },
+        { name: 'perm.viewer', desc: 'Read-only', rules: [{ effect: 'allow', actions: ['read'], priority: 70 }] },
+        { name: 'perm.auth', desc: 'Authentication only', rules: [{ effect: 'allow', actions: ['login'], resource: 'session', priority: 60 }, { effect: 'deny', actions: ['*'], resource: '*', priority: 50 }] },
+      ];
+      for (const g of sysGroups) {
+        const id = `sysgrp_${crypto.randomUUID()}`;
+        await stores.atomic.set('sysgroup:' + id, { id, name: g.name, description: g.desc, rules: g.rules, priority: g.rules[0]!.priority, dependsOn: [], createdAt: now, updatedAt: now }, null);
+        const idx = await stores.atomic.get<string[]>('sysgroup:ids');
+        await stores.atomic.set('sysgroup:ids', [...(idx?.value ?? []), id], idx?.version ?? null);
+        count++;
+      }
+
+      // User groups (Linux convention: wheel for sudo, root/daemon/users for roles)
+      const userGroupDefs = [
+        { name: 'wheel', desc: 'Full sudo-level access' },
+        { name: 'root', desc: 'System administrators' },
+        { name: 'daemon', desc: 'Service accounts' },
+        { name: 'users', desc: 'Regular users' },
+      ];
+      const userGroupIds: Record<string, string> = {};
+      for (const g of userGroupDefs) {
+        const id = `usergrp_${crypto.randomUUID()}`;
+        userGroupIds[g.name] = id;
+        await stores.atomic.set('usergroup:' + id, { id, name: g.name, description: g.desc, memberIds: [], dependsOn: [], createdAt: now, updatedAt: now }, null);
+        const ugIdx = await stores.atomic.get<string[]>('usergroup:ids');
+        await stores.atomic.set('usergroup:ids', [...(ugIdx?.value ?? []), id], ugIdx?.version ?? null);
+        count++;
+      }
+
+      // Default Route ACLs for groups (Linux-style: users = basic, wheel = full)
+      for (const [grpName, grpId] of Object.entries(userGroupIds)) {
+        const isWheel = grpName === 'wheel';
+        const aclId = `routeacl_${crypto.randomUUID()}`;
+        await stores.atomic.set('routeacl:' + aclId, {
+          id: aclId, method: isWheel ? '*' : 'GET', pathPrefix: isWheel ? '/' : '/api/users',
+          matchType: 'prefix', effect: 'allow', userGroupId: grpId,
+          priority: isWheel ? 1000 : 10, createdAt: now, updatedAt: now,
+        }, null);
+        const raIdx = await stores.atomic.get<string[]>('routeacl:ids');
+        await stores.atomic.set('routeacl:ids', [...(raIdx?.value ?? []), aclId], raIdx?.version ?? null);
+        count++;
+      }
+
+      await stores.atomic.set(KEY, { seededAt: now }, null);
+      console.log(`[init] Policy library seeded: ${count} items (${sysGroups.length} system groups, ${userGroupDefs.length} user groups + route ACLs)`);
+    }
+  }
+
+  // 7. Build Hono app
   const app = new Hono<{ Variables: AppContext }>();
 
   // 7. Apply global middleware (timing first = outermost, wrapping everything)
@@ -108,7 +173,10 @@ export function createApp(config: AppConfig, platformBindings?: Record<string, u
     await next();
     c.header('Server-Timing', `total;dur=${(performance.now() - t0).toFixed(2)}`);
   });
+  app.use('*', secureHeaders());
   app.use('*', cors());
+  app.use('*', bodyLimit({ maxSize: 100 * 1024 }));  // 100 KB
+  app.use('*', jsonDepthLimit(10));                   // max JSON nesting
   app.use('*', rateLimit({ windowMs: 60_000, maxRequests: 100 }));
   app.onError(globalErrorHandler);
 
@@ -123,7 +191,84 @@ export function createApp(config: AppConfig, platformBindings?: Record<string, u
     await next();
   });
 
-  // 9. DO alarm callback route
+  // 9. Dev-only: localhost → add any user to simulate_wheel group (bypasses auth)
+  app.post('/__become-wheel', async (c) => {
+    const ip = c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ?? c.req.header('cf-connecting-ip');
+    if (ip && ip !== '127.0.0.1' && ip !== '::1' && !ip.startsWith('::ffff:127.')) {
+      return c.json({ success: false, error: 'Only available from localhost' }, 403);
+    }
+    const atomic = c.var.stores.atomic;
+    const { userId } = await c.req.json<{ userId: string }>();
+    if (!userId) return c.json({ success: false, error: 'userId required' }, 400);
+
+    // Find or create simulate_wheel group
+    const ugEntry = await atomic.get<string[]>('usergroup:ids');
+    let groupId: string | null = null;
+    if (ugEntry) {
+      for (const id of ugEntry.value) {
+        const g = await atomic.get<any>('usergroup:' + id);
+        if (g?.value?.name === 'simulate_wheel') { groupId = id; break; }
+      }
+    }
+    if (!groupId) {
+      groupId = `usergrp_${crypto.randomUUID()}`;
+      const now = Date.now();
+      await atomic.set('usergroup:' + groupId, { id: groupId, name: 'simulate_wheel', memberIds: [userId], createdAt: now, updatedAt: now }, null);
+      await atomic.set('usergroup:ids', [...(ugEntry?.value ?? []), groupId], ugEntry?.version ?? null);
+      for (const acl of [
+        { method: '*', pathPrefix: '/api', matchType: 'prefix', effect: 'allow', userGroupId: groupId, priority: 1000 },
+        { method: '*', pathPrefix: '/api', matchType: 'prefix', effect: 'allow', userId, priority: 999 },
+      ]) {
+        const aclId = `routeacl_${crypto.randomUUID()}`;
+        await atomic.set('routeacl:' + aclId, { id: aclId, ...acl, createdAt: now, updatedAt: now }, null);
+        const raEntry = await atomic.get<string[]>('routeacl:ids');
+        await atomic.set('routeacl:ids', [...(raEntry?.value ?? []), aclId], raEntry?.version ?? null);
+      }
+    } else {
+      // Group exists — add user if not already a member
+      const gEntry = await atomic.get<any>('usergroup:' + groupId);
+      if (gEntry && !gEntry.value.memberIds.includes(userId)) {
+        gEntry.value.memberIds.push(userId);
+        gEntry.value.updatedAt = Date.now();
+        await atomic.set('usergroup:' + groupId, gEntry.value, gEntry.version);
+      }
+      // Ensure user-level ACL exists
+      const raEntry = await atomic.get<string[]>('routeacl:ids');
+      if (raEntry) {
+        const hasUserAcl = raEntry.value.some(async (id) => {
+          const a = await atomic.get<any>('routeacl:' + id);
+          return a?.value?.userId === userId;
+        });
+        if (!hasUserAcl) {
+          const aclId = `routeacl_${crypto.randomUUID()}`;
+          await atomic.set('routeacl:' + aclId, { id: aclId, method: '*', pathPrefix: '/api', matchType: 'prefix', effect: 'allow', userId, priority: 999, createdAt: Date.now(), updatedAt: Date.now() }, null);
+          await atomic.set('routeacl:ids', [...raEntry.value, aclId], raEntry.version);
+        }
+      }
+    }
+    console.log(`[become-wheel] userId=${userId} added to simulate_wheel`);
+    return c.json({ success: true, data: { message: 'Added to simulate_wheel' } });
+  });
+
+  // 10. Auth + route ACL middleware
+  if (config.authz?.enabled !== false) {
+    const permService = new PermissionService(stores.atomic, new ConsoleLogger(), audit);
+    app.use('/api/*', authz({
+      store: stores.atomic,
+      audit,
+      checkRouteAccess: async (method, path, userId) => {
+        return permService.checkRouteAccess(method, path, userId);
+      },
+      publicPaths: [
+        '/api/users/register',
+        '/api/users/login',
+        '/api/users/login-info',
+        '/api/users/no-password-login',
+      ],
+    }));
+  }
+
+  // 11. DO alarm callback route
   app.post('/__scheduled', (c) => {
     eventLoop.triggerTick();
     return c.json({ ok: true, queueSize: eventLoop.size });

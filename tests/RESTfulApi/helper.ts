@@ -1,13 +1,11 @@
 /// <reference types="pactum" />
 
-import { rmSync, existsSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { rmSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { serve, type ServerType } from '@hono/node-server';
 import { loadConfig } from '../../src/config/env.ts';
 import { createApp } from '../../src/core/app.ts';
-
-const DATA_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../../.data-test');
 
 export interface TestServer {
   server: ServerType;
@@ -17,30 +15,27 @@ export interface TestServer {
 
 /**
  * Start the Hono app locally with file-based storage.
- * Cleans `.data-test` before starting so each run starts fresh.
- * Call in vitest's `beforeAll` / dispose in `afterAll`.
+ * Each call uses a unique temp directory so parallel test files don't collide.
  */
 export async function startTestServer(): Promise<TestServer> {
-  // Wipe state from previous runs to guarantee isolation
-  if (existsSync(DATA_DIR)) {
-    rmSync(DATA_DIR, { recursive: true, force: true });
-  }
+  const dataDir = mkdtempSync(join(tmpdir(), 'hbi-test-'));
 
   const config = loadConfig({
     storage: {
       stateBackend: 'file',
       queryBackend: 'none',
       blobBackend: 'none',
-      connections: { filePath: DATA_DIR },
+      connections: { filePath: dataDir },
     },
     scheduler: {
       backend: 'worker',
       intervalMs: 60000,
       batchSize: 0,
     },
+    authz: { enabled: false },
   });
 
-  const instance = createApp(config);
+  const instance = await createApp(config);
 
   return new Promise((resolve, reject) => {
     const server = serve(
@@ -53,6 +48,7 @@ export async function startTestServer(): Promise<TestServer> {
           dispose: async () => {
             await instance.dispose();
             await new Promise<void>((r) => server.close(() => r()));
+            rmSync(dataDir, { recursive: true, force: true });
           },
         });
       },

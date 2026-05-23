@@ -42,6 +42,10 @@ export interface SchedulerAppConfig {
   callbackUrl?: string | undefined;
 }
 
+export interface AuthzConfig {
+  enabled: boolean;
+}
+
 export interface AppConfig {
   storage: StorageConfig;
   log: LogConfig;
@@ -52,4 +56,5 @@ export interface AppConfig {
     port: number;
   };
   features: Record<string, boolean>;
+  authz?: AuthzConfig | undefined;
 }

@@ -3,6 +3,8 @@ export type {
   IDnsProvider,
   IMetricsProvider,
   IProviderRegistry,
+  IVirtualNode,
+  VirtualNodeInfo,
   ProviderCapabilities,
   DescribeContainerGroupsInput,
   DescribeContainerGroupsResult,
@@ -39,6 +41,11 @@ export type {
   ContainerGroupNetworkInput,
   VolumeConfigInput,
   VolumeMountConfig,
+  NodeCapacity,
+  NodeCondition,
+  EnvVar,
+  ResourceRequirements,
+  ProbeSpec,
 } from './types.ts';
 
 export { createProviderRegistry } from './factory.ts';

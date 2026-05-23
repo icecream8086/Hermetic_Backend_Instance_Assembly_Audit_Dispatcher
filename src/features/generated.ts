@@ -3,6 +3,8 @@
 
 import { createRouter as infoRouter } from './info/index.ts';
 import { createRouter as usersRouter } from './users/index.ts';
+import { createRouter as permissionRouter } from './permission/index.ts';
+import { createRouter as system_groupRouter } from './system-group/index.ts';
 
 import type { FeatureDeps } from '../core/app.ts';
 import type { Hono } from 'hono';
@@ -15,5 +17,7 @@ export interface RegisteredFeature {
 export function getFeatures(): RegisteredFeature[] {
   return [
   { path: '/', mount: (deps) => infoRouter(deps) },
-  { path: '/api/users', mount: (deps) => usersRouter(deps) },  ];
+  { path: '/api/users', mount: (deps) => usersRouter(deps) },
+  { path: '/api/permissions', mount: (deps) => permissionRouter(deps) },
+  { path: '/api/system-groups', mount: (deps) => system_groupRouter(deps) },  ];
 }

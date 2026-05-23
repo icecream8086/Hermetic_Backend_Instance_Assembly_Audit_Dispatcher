@@ -136,7 +136,7 @@ export function createUserRouter(userService: IUserService): Hono<{ Variables: A
     const id = createUserId(c.req.param('id'));
     const user = await userService.getById(id);
     if (!user) return c.json(fail('USER_NOT_FOUND', 'User not found'), 404);
-    return c.json(ok(user.loginPolicy ?? null));
+    return c.json(ok(user.loginPolicy ?? { enabled: true, timeRanges: [], allowedCIDRs: [] }));
   });
 
   router.put('/:id/login-policy', async (c) => {
@@ -211,14 +211,14 @@ export const userRouteMeta: RouteMeta[] = [
   {
     method: 'POST',
     path: '/register',
-    description: '注册新用户',
+    description: '注册新用户 — 密码至少 8 位，自动加入 "users" 组获得基本权限。返回 token 用于后续请求的 Authorization 头',
     requestBody: { email: 'user@example.com', password: 'secret123', name: 'Alice', role: 'Viewer' },
     responseDescription: 'LoginResponse — token + user',
   },
   {
     method: 'POST',
     path: '/login',
-    description: '用户登录',
+    description: '用户登录 — 校验密码，返回 token。公开端点不需要 Authorization 头',
     requestBody: { email: 'user@example.com', password: 'secret123' },
     responseDescription: 'LoginResponse — token + user',
   },

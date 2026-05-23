@@ -55,8 +55,9 @@ export class CachedAtomicStore implements IAtomicStore {
     const hit = await this.store.get<CacheEntry<T>>(key);
     if (hit !== null) {
       const entry = hit.value;
-      if (entry.data === null) return null;
       if (Date.now() - entry.cachedAt < this.cacheTtlMs) {
+        // Tombstone within TTL — data genuinely absent
+        if (entry.data === null) return null;
         this.metrics?.recordHit();
         if (entry.coordinatorVersion !== null) {
           return { value: entry.data, version: entry.coordinatorVersion as VersionId };

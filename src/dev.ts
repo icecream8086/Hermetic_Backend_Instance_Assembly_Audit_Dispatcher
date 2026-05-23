@@ -26,7 +26,7 @@ const config = loadConfig({
   },
 });
 
-const instance = createApp(config);
+const instance = await createApp(config);
 
 serve({ fetch: instance.app.fetch, port: config.server.port }, (info) => {
   // eslint-disable-next-line no-console

@@ -23,6 +23,9 @@ export interface ISandboxService {
   /** Get current sandbox state. */
   getById(id: SandboxId): Promise<Sandbox | null>;
 
+  /** List sandboxes with optional status filter. */
+  list?(status?: SandboxStatus, limit?: number, cursor?: string): Promise<{ items: Sandbox[]; nextCursor?: string }>;
+
   /** Stop a running sandbox. */
   stop(id: SandboxId): Promise<Sandbox>;
 
@@ -73,6 +76,25 @@ export interface MetricTimeRange {
 }
 
 // ─── Dependency bundle (injected by createApp) ───
+
+// ─── Pod ↔ Sandbox ↔ Provider mapping ───
+
+export interface IPodMappingService {
+  /** Record a new mapping between a K8s Pod UID, a sandbox ID, and a provider instance ID. */
+  bind(podUid: string, sandboxId: string, providerId?: string): Promise<void>;
+
+  /** Look up a sandbox ID by K8s Pod UID. */
+  getSandboxByPod(podUid: string): Promise<string | null>;
+
+  /** Look up a sandbox ID by provider instance ID. */
+  getSandboxByProvider(providerId: string): Promise<string | null>;
+
+  /** Look up the provider instance ID for a sandbox. */
+  getProviderBySandbox(sandboxId: string): Promise<string | null>;
+
+  /** Remove a mapping (when sandbox is terminated). */
+  unbind(podUid: string): Promise<void>;
+}
 
 export interface SandboxDependencies {
   readonly atomic: IAtomicStore;

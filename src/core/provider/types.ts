@@ -143,6 +143,59 @@ export interface AssociatedResource {
   readonly status?: string;
 }
 
+// ─── Virtual Node types ───
+
+/** Capacity/resources a virtual node reports to the cluster. */
+export interface NodeCapacity {
+  readonly cpu: number;
+  readonly memory: number;          // MB
+  readonly podCount: number;
+  readonly gpu?: number;
+  readonly gpuType?: string;
+  readonly ephemeralStorage?: number; // GB
+}
+
+export interface NodeCondition {
+  readonly type: 'Ready' | 'MemoryPressure' | 'DiskPressure' | 'PIDPressure' | 'NetworkUnavailable';
+  readonly status: 'True' | 'False' | 'Unknown';
+  readonly lastHeartbeatTime?: string;
+  readonly lastTransitionTime?: string;
+  readonly reason?: string;
+  readonly message?: string;
+}
+
+// ─── EnvVar with ValueFrom support ───
+
+export interface EnvVar {
+  readonly name: string;
+  readonly value?: string | undefined;
+  readonly valueFrom?: {
+    readonly secretKeyRef?: { readonly name: string; readonly key: string };
+    readonly configMapKeyRef?: { readonly name: string; readonly key: string };
+    readonly fieldRef?: { readonly fieldPath: string };
+  } | undefined;
+}
+
+// ─── Resource requirements (requests vs limits) ───
+
+export interface ResourceRequirements {
+  readonly requests?: { readonly cpu: number; readonly memory: number; readonly gpu?: number } | undefined;
+  readonly limits?: { readonly cpu: number; readonly memory: number; readonly gpu?: number } | undefined;
+}
+
+// ─── Probe ───
+
+export interface ProbeSpec {
+  readonly initialDelaySeconds?: number | undefined;
+  readonly timeoutSeconds?: number | undefined;
+  readonly periodSeconds?: number | undefined;
+  readonly successThreshold?: number | undefined;
+  readonly failureThreshold?: number | undefined;
+  readonly httpGet?: { readonly path: string; readonly port: number; readonly scheme?: string } | undefined;
+  readonly exec?: { readonly command: readonly string[] } | undefined;
+  readonly tcpSocket?: { readonly port: number } | undefined;
+}
+
 /** A container group resource instance as reported by the cloud provider.
  *  Each container in the group IS an OciContainer — the cloud orchestrator
  *  creates them, the OCI Runtime manages them at the OS level. */

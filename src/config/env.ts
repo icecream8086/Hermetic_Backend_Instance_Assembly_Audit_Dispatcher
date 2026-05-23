@@ -65,5 +65,6 @@ export function loadConfig(overrides?: Partial<AppConfig>): AppConfig {
       ...overrides?.server,
     },
     features: overrides?.features ?? {},
+    authz: overrides?.authz,
   };
 }

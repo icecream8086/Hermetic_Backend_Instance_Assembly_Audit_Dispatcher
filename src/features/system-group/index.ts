@@ -1,0 +1,10 @@
+import { Hono } from 'hono';
+import type { FeatureDeps } from '../../core/app.ts';
+import { ConsoleLogger } from '../../core/logger/console-logger.ts';
+import { SysGroupService } from './service.ts';
+import { createSysGroupRouter } from './handler.ts';
+
+export function createRouter(deps: FeatureDeps): Hono<any> {
+  const service = new SysGroupService(deps.stores.atomic, new ConsoleLogger());
+  return createSysGroupRouter(service);
+}

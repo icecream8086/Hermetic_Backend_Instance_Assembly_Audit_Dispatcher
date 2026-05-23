@@ -23,7 +23,7 @@ export function generateUserId(): UserId {
 }
 
 export function generateSessionToken(): SessionToken {
-  return crypto.randomUUID() as SessionToken;
+  return `sess_${crypto.randomUUID()}` as SessionToken;
 }
 
 // ─── Enums ───

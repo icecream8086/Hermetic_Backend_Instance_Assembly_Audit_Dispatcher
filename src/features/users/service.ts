@@ -1,7 +1,7 @@
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
 import type { ILogWriter } from '../../core/logger/interfaces.ts';
 import { createFacility } from '../../core/brand.ts';
-import { measure } from '../../core/perf.ts';
+import { measure, lastPerf } from '../../core/perf.ts';
 import { LogLevel, AppError } from '../../core/types.ts';
 import type { IAuditWriter } from '../../core/audit/types.ts';
 import { KernLevel } from '../../core/audit/kern-level.ts';
@@ -120,7 +120,12 @@ function checkThrottle(email: string, ip?: string): void {
   const now = Date.now();
   const entry = _attempts.get(key);
   if (entry && entry.count >= MAX_ATTEMPTS) {
-    const remaining = Math.ceil((LOCKOUT_MS - (now - entry.window)) / 1000);
+    const elapsed = now - entry.window;
+    if (elapsed >= LOCKOUT_MS) {
+      _attempts.delete(key);
+      return;
+    }
+    const remaining = Math.ceil((LOCKOUT_MS - elapsed) / 1000);
     throw new AppError(429, 'TOO_MANY_ATTEMPTS', `Too many login attempts. Try again in ${remaining}s`);
   }
 }
@@ -137,6 +142,13 @@ function recordAttempt(email: string, success: boolean, ip?: string): void {
     entry.count++;
   } else {
     _attempts.set(key, { count: 1, window: now });
+  }
+  // Trim stale entries once in a while
+  if (_attempts.size > 1000) {
+    const cutoff = now - LOCKOUT_MS;
+    for (const [k, v] of _attempts) {
+      if (v.window < cutoff) _attempts.delete(k);
+    }
   }
 }
 
@@ -191,6 +203,7 @@ export class UserService implements IUserService {
   async register(input: RegisterInput): Promise<{ user: User; token: SessionToken }> {
     const id = generateUserId();
     const passwordHash = await hashPassword(input.password);
+    this.logger.logAsync({ facility: FACILITY, level: LogLevel.INFO, message: `PBKDF2 hash: ${lastPerf().toFixed(1)}ms`, metadata: { operation: 'hash', duration: lastPerf() } });
     const now = Date.now();
 
     const user: User = {
@@ -222,6 +235,9 @@ export class UserService implements IUserService {
 
     // Append to user ID index for list()
     await this.#addToIndex(id);
+
+    // Auto-join "users" group (Linux-style default group)
+    await this.#joinDefaultGroup(id);
 
     await this.logger.logAsync({
       facility: FACILITY,
@@ -255,6 +271,7 @@ export class UserService implements IUserService {
 
     const user = entry.value;
     const valid = await serialisedHash(() => verifyPassword(input.password, user.passwordHash));
+    this.logger.logAsync({ facility: FACILITY, level: LogLevel.INFO, message: `PBKDF2 verify: ${lastPerf().toFixed(1)}ms`, metadata: { operation: 'verify', duration: lastPerf() } });
     if (!valid) {
       recordAttempt(email, false, ip);
       throw new AppError(401, 'INVALID_CREDENTIALS', 'Invalid email or password');
@@ -323,7 +340,12 @@ export class UserService implements IUserService {
     if (!sigB64 || !tsB64 || !nonceB64) { recordAttempt(email, false, ip); throw new AppError(400, 'BAD_KEY_FORMAT', 'Empty component in one-time key'); }
 
     // Check timestamp window (±30s)
-    const ts = parseInt(atob(tsB64.replace(/-/g, '+').replace(/_/g, '/')), 10);
+    let ts: number;
+    try {
+      ts = parseInt(atob(tsB64.replace(/-/g, '+').replace(/_/g, '/')), 10);
+    } catch {
+      recordAttempt(email, false, ip); throw new AppError(400, 'BAD_TIMESTAMP', 'Invalid timestamp encoding');
+    }
     if (isNaN(ts)) { recordAttempt(email, false, ip); throw new AppError(400, 'BAD_TIMESTAMP', 'Invalid timestamp'); }
     const skew = Date.now() - ts * 1000;
     if (Math.abs(skew) > 30_000) { recordAttempt(email, false, ip); throw new AppError(403, 'KEY_EXPIRED', 'One-time key expired'); }
@@ -360,9 +382,15 @@ export class UserService implements IUserService {
     if (!pubKeyB64) { recordAttempt(email, false, ip); throw new AppError(403, 'NO_PUBLIC_KEY', 'No public key configured for this account'); }
 
     // Verify Ed25519 signature
-    const nonceBytes = base64UrlDecode(nonceB64);
+    let nonceBytes: ReturnType<typeof base64UrlDecode>;
+    let signature: ReturnType<typeof base64UrlDecode>;
+    try {
+      nonceBytes = base64UrlDecode(nonceB64);
+      signature = base64UrlDecode(sigB64);
+    } catch {
+      recordAttempt(email, false, ip); throw new AppError(400, 'BAD_KEY_FORMAT', 'Invalid base64 encoding in one-time key');
+    }
     const message = new Uint8Array(new TextEncoder().encode(`${ts}${input.email}${ctx?.siteContext ?? ''}`));
-    const signature = base64UrlDecode(sigB64);
     const pkRaw = atob(pubKeyB64);
     const publicKeyBytes = new Uint8Array(pkRaw.length);
     for (let i = 0; i < pkRaw.length; i++) publicKeyBytes[i] = pkRaw.charCodeAt(i);
@@ -425,6 +453,10 @@ export class UserService implements IUserService {
       ...(input.privateKeyEd25519 !== undefined ? { privateKeyEd25519: input.privateKeyEd25519 } : {}),
       updatedAt: Date.now(),
     };
+
+    if (input.password !== undefined) {
+      this.logger.logAsync({ facility: FACILITY, level: LogLevel.INFO, message: `PBKDF2 hash: ${lastPerf().toFixed(1)}ms`, metadata: { operation: 'hash', duration: lastPerf() } });
+    }
 
     const newVersion = await this.atomic.set(USER_PREFIX + id, updated, entry.version);
     if (!newVersion) throw new AppError(409, 'CONFLICT', 'Concurrent modification detected');
@@ -566,6 +598,27 @@ export class UserService implements IUserService {
     await this.atomic.set(TOKEN_PREFIX + token, session, null);
     await this.atomic.set(USER_SESSION_PREFIX + userId, token, idxEntry?.version ?? null);
     return token;
+  }
+
+  /** Auto-join "users" group on registration (Linux-style). */
+  async #joinDefaultGroup(userId: UserId): Promise<void> {
+    try {
+      const ugEntry = await this.atomic.get<string[]>('usergroup:ids');
+      if (!ugEntry) return;
+      for (const id of ugEntry.value) {
+        const g = await this.atomic.get<any>('usergroup:' + id);
+        if (g?.value?.name === 'users') {
+          if (!g.value.memberIds.includes(userId)) {
+            g.value.memberIds.push(userId);
+            g.value.updatedAt = Date.now();
+            await this.atomic.set('usergroup:' + id, g.value, g.version);
+          }
+          return;
+        }
+      }
+    } catch {
+      // Silently ignore — default group is best-effort
+    }
   }
 
   /**

@@ -13,6 +13,8 @@ import type {
   ContainerGroupStatus,
   CreateContainerGroupInput,
   MetricSnapshot,
+  NodeCapacity,
+  NodeCondition,
 } from './types.ts';
 
 // ─── Container operations ───
@@ -59,11 +61,42 @@ export interface IContainerProvider {
   /** Query sandboxes by filters. */
   describe(input: DescribeContainerGroupsInput): Promise<DescribeContainerGroupsResult>;
 
+  /** Update an existing container group (spec changes). */
+  update?(providerId: string, input: Partial<CreateContainerGroupInput>): Promise<void>;
+
+  /** Get a single sandbox's runtime status by provider ID. */
+  getStatus?(providerId: string): Promise<ContainerGroupRuntime | null>;
+
   /** Delete a sandbox by provider ID. */
   delete(input: DeleteContainerGroupInput): Promise<void>;
 
   /** Fetch container stdout/stderr logs. */
   getLogs(input: GetContainerLogInput): Promise<ContainerLogResult>;
+}
+
+// ─── Virtual Node operations ───
+
+export interface VirtualNodeInfo {
+  readonly name: string;
+  readonly provider: string;
+  readonly capacity: NodeCapacity;
+  readonly conditions: readonly NodeCondition[];
+  readonly ready: boolean;
+  readonly lastHeartbeatTime?: string;
+}
+
+export interface IVirtualNode {
+  /** Register or refresh the virtual node in the cluster. */
+  register(info: VirtualNodeInfo): Promise<void>;
+
+  /** Deregister the virtual node. */
+  deregister(): Promise<void>;
+
+  /** Check node health. Returns false if the node should be marked NotReady. */
+  ping(): Promise<boolean>;
+
+  /** Report current node status (capacity, conditions). */
+  status(): Promise<VirtualNodeInfo>;
 }
 
 // ─── DNS operations ───
@@ -128,5 +161,6 @@ export interface IProviderRegistry {
   readonly container: IContainerProvider;
   readonly dns: IDnsProvider;
   readonly metrics: IMetricsProvider;
+  readonly virtualNode?: IVirtualNode | undefined;
   readonly capabilities: ProviderCapabilities;
 }
