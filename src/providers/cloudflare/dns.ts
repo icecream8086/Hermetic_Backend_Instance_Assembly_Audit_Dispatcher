@@ -4,6 +4,7 @@
 //   PUT https://api.cloudflare.com/client/v4/zones/{zone_id}/dns_records/{record_id}
 
 import type { IDnsProvider, UpdateDnsRecordInput, DeleteDnsRecordInput } from '../../core/provider/interfaces.ts';
+import { BearerTokenProvider } from '../../core/auth/providers.ts';
 
 interface CfError {
   readonly code: number;
@@ -19,10 +20,10 @@ interface CfApiResponse {
 export const CF_API_BASE_URL = 'https://api.cloudflare.com/client/v4';
 
 export class CloudflareDnsProvider implements IDnsProvider {
-  readonly #apiToken: string;
+  readonly #auth: BearerTokenProvider;
 
   constructor(apiToken: string) {
-    this.#apiToken = apiToken;
+    this.#auth = new BearerTokenProvider(apiToken);
   }
 
   async updateRecord(input: UpdateDnsRecordInput): Promise<void> {
@@ -68,8 +69,9 @@ export class CloudflareDnsProvider implements IDnsProvider {
     }
   }
 
-  #fetch(method: string, url: string, bodyInput?: UpdateDnsRecordInput): Promise<Response> {
-    const init: RequestInit = { method, headers: this.#headers() };
+  async #fetch(method: string, url: string, bodyInput?: UpdateDnsRecordInput): Promise<Response> {
+    const headers = await this.#headers();
+    const init: RequestInit = { method, headers };
     if (bodyInput) {
       init.body = JSON.stringify({
         type: bodyInput.type,
@@ -82,11 +84,9 @@ export class CloudflareDnsProvider implements IDnsProvider {
     return fetch(url, init);
   }
 
-  #headers(): Record<string, string> {
-    return {
-      Authorization: `Bearer ${this.#apiToken}`,
-      'Content-Type': 'application/json',
-    };
+  async #headers(): Promise<Record<string, string>> {
+    const base = { 'Content-Type': 'application/json' };
+    return this.#auth.sign({ method: 'GET', url: '', headers: base });
   }
 }
 

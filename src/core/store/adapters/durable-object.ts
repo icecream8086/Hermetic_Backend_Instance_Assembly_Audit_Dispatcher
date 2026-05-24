@@ -249,11 +249,6 @@ export class DurableObjectAtomicStore implements IAtomicStore {
     return this.#ns.get(this.#ns.idFromName('tx_' + prefix));
   }
 
-  /** Global fallback DO for transact (multi-key, never called in practice). */
-  #stubForTransact(): DurableObjectStub {
-    return this.#ns.get(this.#ns.idFromName('tx__txn'));
-  }
-
   async get<T>(key: string): Promise<{ value: T; version: VersionId } | null> {
     const resp = await this.#stubForKey(key).fetch('https://do/op', {
       method: 'POST',
@@ -314,7 +309,11 @@ export class DurableObjectAtomicStore implements IAtomicStore {
         txnOps.push({ op: 'set', key: w.key, value: w.value });
       }
 
-      const resp = await this.#stubForTransact().fetch('https://do/op', {
+      // Route to the correct DO shard: all keys in a transaction share a
+      // common prefix (the event bus only transacts on events:pending).
+      // Use the first read or write key to determine the shard.
+      const firstKey = readSet.keys().next().value ?? deferredWrites[0]!.key;
+      const resp = await this.#stubForKey(firstKey).fetch('https://do/op', {
         method: 'POST',
         body: JSON.stringify({ op: 'transact', txnOps }),
       });

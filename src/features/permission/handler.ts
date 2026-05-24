@@ -24,6 +24,17 @@ function actorFrom(c: any): AuditActor | undefined {
   return { userId: u.id, ip: c.req.header('x-forwarded-for')?.split(',')[0]?.trim() };
 }
 
+/** Reject non-root users on admin endpoints. No-op when authz is disabled (no currentUser). */
+function requireRoot(c: any): Response | null {
+  const user = c.var?.currentUser;
+  if (!user) return null; // authz disabled — allow
+  const isRoot = user.role === 'root' || user.role === 'Operator' || user.role === 'wheel';
+  if (!isRoot) {
+    return c.json(fail('FORBIDDEN', 'Admin access required'), 403);
+  }
+  return null;
+}
+
 export function createPermissionRouter(svc: IPermissionService): Hono<{ Variables: AppContext }> {
   const router = new Hono<{ Variables: AppContext }>();
 
@@ -32,6 +43,7 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
   // ═══════════════════════════════════
 
   router.post('/policies', async (c) => {
+    { const r = requireRoot(c); if (r) return r; }
     const body: unknown = await c.req.json();
     const parsed = CreatePolicySchema.safeParse(body);
     if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
@@ -52,6 +64,7 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
   });
 
   router.put('/policies/:id', async (c) => {
+    { const r = requireRoot(c); if (r) return r; }
     const body: unknown = await c.req.json();
     const parsed = UpdatePolicySchema.safeParse(body);
     if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
@@ -59,6 +72,7 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
   });
 
   router.delete('/policies/:id', async (c) => {
+    { const r = requireRoot(c); if (r) return r; }
     await svc.deletePolicy(c.req.param('id'), actorFrom(c));
     return c.json(ok(null));
   });
@@ -68,6 +82,7 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
   // ═══════════════════════════════════
 
   router.post('/user-groups', async (c) => {
+    { const r = requireRoot(c); if (r) return r; }
     const body: unknown = await c.req.json();
     const parsed = CreateUserGroupSchema.safeParse(body);
     if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
@@ -88,6 +103,7 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
   });
 
   router.put('/user-groups/:id', async (c) => {
+    { const r = requireRoot(c); if (r) return r; }
     const body: unknown = await c.req.json();
     const parsed = UpdateUserGroupSchema.safeParse(body);
     if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
@@ -95,6 +111,7 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
   });
 
   router.delete('/user-groups/:id', async (c) => {
+    { const r = requireRoot(c); if (r) return r; }
     await svc.deleteUserGroup(c.req.param('id'), actorFrom(c));
     return c.json(ok(null));
   });
@@ -104,6 +121,7 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
   // ═══════════════════════════════════
 
   router.post('/groups', async (c) => {
+    { const r = requireRoot(c); if (r) return r; }
     const body: unknown = await c.req.json();
     const parsed = CreatePermGroupSchema.safeParse(body);
     if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
@@ -112,6 +130,7 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
   });
 
   router.post('/groups/from-template/:templateId', async (c) => {
+    { const r = requireRoot(c); if (r) return r; }
     const body: unknown = await c.req.json();
     const parsed = CreatePermGroupSchema.partial().safeParse(body);
     if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
@@ -137,6 +156,7 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
   });
 
   router.put('/groups/:id', async (c) => {
+    { const r = requireRoot(c); if (r) return r; }
     const body: unknown = await c.req.json();
     const parsed = UpdatePermGroupSchema.safeParse(body);
     if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
@@ -144,6 +164,7 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
   });
 
   router.delete('/groups/:id', async (c) => {
+    { const r = requireRoot(c); if (r) return r; }
     await svc.deletePermGroup(c.req.param('id'), actorFrom(c));
     return c.json(ok(null));
   });
@@ -167,6 +188,7 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
   // ═══════════════════════════════════
 
   router.post('/user-templates', async (c) => {
+    { const r = requireRoot(c); if (r) return r; }
     const body: unknown = await c.req.json();
     const parsed = CreateUserTplSchema.safeParse(body);
     if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
@@ -187,6 +209,7 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
   });
 
   router.put('/user-templates/:id', async (c) => {
+    { const r = requireRoot(c); if (r) return r; }
     const body: unknown = await c.req.json();
     const parsed = UpdateUserTplSchema.safeParse(body);
     if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
@@ -194,6 +217,7 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
   });
 
   router.delete('/user-templates/:id', async (c) => {
+    { const r = requireRoot(c); if (r) return r; }
     await svc.deleteUserTpl(c.req.param('id'), actorFrom(c));
     return c.json(ok(null));
   });
@@ -203,6 +227,7 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
   // ═══════════════════════════════════
 
   router.post('/route-acls', async (c) => {
+    { const r = requireRoot(c); if (r) return r; }
     const body: unknown = await c.req.json();
     const parsed = CreateRouteAclSchema.safeParse(body);
     if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
@@ -223,6 +248,7 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
   });
 
   router.put('/route-acls/:id', async (c) => {
+    { const r = requireRoot(c); if (r) return r; }
     const body: unknown = await c.req.json();
     const parsed = UpdateRouteAclSchema.safeParse(body);
     if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
@@ -230,8 +256,24 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
   });
 
   router.delete('/route-acls/:id', async (c) => {
+    { const r = requireRoot(c); if (r) return r; }
     await svc.deleteRouteAcl(c.req.param('id'), actorFrom(c));
     return c.json(ok(null));
+  });
+
+  // ═══════════════════════════════════
+  // Log policy (wheel-only via auth middleware)
+  // ═══════════════════════════════════
+
+  router.get('/log-policy', async (c) => {
+    return c.json(ok(await svc.getLogPolicy()));
+  });
+
+  router.put('/log-policy', async (c) => {
+    { const r = requireRoot(c); if (r) return r; }
+    const body: unknown = await c.req.json();
+    const policy = await svc.updateLogPolicy(body as any, actorFrom(c));
+    return c.json(ok(policy));
   });
 
   // ═══════════════════════════════════
@@ -257,6 +299,7 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
   // ═══════════════════════════════════
 
   router.post('/check', async (c) => {
+    { const r = requireRoot(c); if (r) return r; }
     const body: unknown = await c.req.json();
     const parsed = PermissionCheckSchema.safeParse(body);
     if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
@@ -308,6 +351,8 @@ export const permissionRouteMeta: RouteMeta[] = [
   { method: 'DELETE', path: '/route-acls/:id', description: '删除路由绑定', responseDescription: '{ ok: true }' },
 
   // ─── Compare ───
+  { method: 'GET', path: '/log-policy', description: '获取全局日志策略配置（默认值 + 各 facility 级别）。无策略时返回内置默认值', responseDescription: 'LogPolicy' },
+  { method: 'PUT', path: '/log-policy', description: '更新全局日志策略 — 调整 defaultLevel/auditLevel/facilities[]。仅 wheel 组可操作', requestBody: { defaultLevel: 'info', facilities: [{ facility: 'user-service', level: 'debug' }] }, responseDescription: 'LogPolicy' },
   { method: 'POST', path: '/compare/perm-groups', description: '对比两个权限组 — 选取两个权限组 id，返回规则差异(common/onlyA/onlyB) 和 DAG 依赖链差异(depDiff)', requestBody: { idA: 'permgrp_uuid1', idB: 'permgrp_uuid2' }, responseDescription: 'CompareResult' },
   { method: 'POST', path: '/compare/user-groups', description: '对比两个用户组 — 选取两个用户组 id，返回成员差异(common/onlyA/onlyB) 和 DAG 依赖链差异(depDiff)', requestBody: { idA: 'usergrp_uuid1', idB: 'usergrp_uuid2' }, responseDescription: 'CompareResult' },
 

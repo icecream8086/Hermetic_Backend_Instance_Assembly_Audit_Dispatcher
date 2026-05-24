@@ -47,7 +47,7 @@ beforeAll(async () => {
 
   // 1. Wheel user (Admin role)
   writeFileKV(`user:${WHEEL_USER_ID}`, {
-    id: WHEEL_USER_ID, email: WHEEL_EMAIL, name: 'Wheel', role: 'Admin',
+    id: WHEEL_USER_ID, email: WHEEL_EMAIL, name: 'Wheel', role: 'root',
     passwordHash: WHEEL_PASSWORD_HASH,
     loginPolicy: { enabled: true, timeRanges: [], allowedCIDRs: [] },
     createdAt: NOW, updatedAt: NOW,

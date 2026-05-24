@@ -93,7 +93,7 @@ export class StubContainerProvider implements IContainerProvider {
       volumes: (input.volumes ?? []).map(v => ({
         name: v.id,
         type: 'NFSVolume',
-        ...(v.nfs ? { nfs: { server: v.nfs.server, path: v.nfs.path, readOnly: v.nfs.readOnly } } : {}),
+        ...(v.options ? { nfs: v.options as { server: string; path: string; readOnly: boolean } } : {}),
       })),
       events,
       tags: (input.tags ?? []).map(t => ({ key: t.key, value: t.value })),

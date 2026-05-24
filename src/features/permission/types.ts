@@ -72,7 +72,6 @@ export interface UserGroup {
   name: string;
   description?: string | undefined;
   memberIds: string[];
-  /** Other UserGroup IDs this group depends on (inherits members). */
   dependsOn: string[];
   createdAt: number;
   updatedAt: number;
@@ -117,7 +116,6 @@ export interface PermissionGroup {
   rules: PermissionRule[];
   userGroupIds: string[];
   userIds: string[];
-  /** Other PermissionGroup IDs this group depends on (inherits rules). */
   dependsOn: string[];
   createdAt: number;
   updatedAt: number;
@@ -154,11 +152,8 @@ export interface UserTemplate {
   id: UserTplId;
   name: string;
   description?: string | undefined;
-  /** UserGroup IDs to auto-join when a user is created with this template. */
   defaultGroupIds: string[];
-  /** PermissionGroup IDs to auto-assign. */
   defaultPermGroupIds: string[];
-  /** Other UserTemplate IDs to inherit from. */
   dependsOn: string[];
   createdAt: number;
   updatedAt: number;
@@ -180,23 +175,19 @@ export interface UpdateUserTplInput {
   dependsOn?: string[] | null | undefined;
 }
 
-// ─── Comparison ───
+// ─── Log policy ───
 
-export interface CompareResult {
-  a: { id: string; name: string };
-  b: { id: string; name: string };
-  /** Items present in both. */
-  common: Record<string, unknown>[];
-  /** Items only in A. */
-  onlyA: Record<string, unknown>[];
-  /** Items only in B. */
-  onlyB: Record<string, unknown>[];
-  /** Dependency chain diff. */
-  depDiff: {
-    onlyA: string[];
-    onlyB: string[];
-    common: string[];
-  };
+export interface LogPolicyEntry {
+  readonly facility: string;
+  readonly level: string;        // 'debug' | 'info' | 'warn' | 'error' | 'none'
+}
+
+export interface LogPolicy {
+  readonly defaultLevel: string;
+  readonly auditLevel: string;
+  readonly facilities: LogPolicyEntry[];
+  readonly updatedAt: number;
+  readonly updatedBy?: string | undefined;
 }
 
 // ─── Templates ───
@@ -219,19 +210,12 @@ export function generateRouteAclId(): RouteAclId {
 
 export interface RouteAcl {
   id: RouteAclId;
-  /** HTTP method (GET/POST/PUT/DELETE) or '*' for all. */
   method: string;
-  /** URL path to match. With 'prefix' mode, matches anything starting with this. */
   pathPrefix: string;
-  /** 'prefix' = starts-with match, 'exact' = full path match. Default 'prefix'. */
   matchType?: 'prefix' | 'exact' | undefined;
-  /** 'allow' (default) or 'deny' — deny overrides. */
   effect?: 'allow' | 'deny' | undefined;
-  /** Specific user this ACL applies to (optional). */
   userId?: string | undefined;
-  /** User group this ACL applies to (optional). */
   userGroupId?: string | undefined;
-  /** Higher priority evaluated first. */
   priority: number;
   createdAt: number;
   updatedAt: number;
@@ -257,6 +241,21 @@ export interface UpdateRouteAclInput {
   priority?: number | undefined;
 }
 
+// ─── Comparison ───
+
+export interface CompareResult {
+  a: { id: string; name: string };
+  b: { id: string; name: string };
+  common: Record<string, unknown>[];
+  onlyA: Record<string, unknown>[];
+  onlyB: Record<string, unknown>[];
+  depDiff: {
+    onlyA: string[];
+    onlyB: string[];
+    common: string[];
+  };
+}
+
 // ─── Permission check (existing) ───
 
 export interface PermissionCheckInput {
@@ -272,6 +271,5 @@ export interface PolicyMatchResult {
   allowed: boolean;
   reason: string;
   matchedPolicy?: StoredPolicy | undefined;
-  /** Which permission group matched (if via group). */
   matchedGroup?: string | undefined;
 }

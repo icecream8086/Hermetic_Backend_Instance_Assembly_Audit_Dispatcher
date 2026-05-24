@@ -13,6 +13,7 @@ const USER_PREFIX = 'user:';
 const EMAIL_INDEX_PREFIX = 'user:email:';
 const TOKEN_PREFIX = 'session:';
 const USER_SESSION_PREFIX = 'user:lastSession:';
+const USER_SESSIONS_PREFIX = 'user:sessions:';
 /** Number of shards for the user ID index.  Higher = lower OCC contention
  *  on concurrent register/delete.  list() reads all shards in parallel so
  *  the read cost scales linearly with shard count — 16 is a good balance. */
@@ -191,6 +192,12 @@ export interface IUserService {
   getLoginInfo(email: string): Promise<LoginInfo>;
   /** Bust the KV cache for a user and fetch fresh from authoritative store. */
   refresh(id: UserId): Promise<User | null>;
+
+  /** List active session tokens for a user. */
+  listSessions(userId: UserId): Promise<readonly SessionToken[]>;
+
+  /** Revoke a specific session token. No-op if already revoked. */
+  revokeSession(token: SessionToken): Promise<void>;
 }
 
 export class UserService implements IUserService {
@@ -597,7 +604,51 @@ export class UserService implements IUserService {
     };
     await this.atomic.set(TOKEN_PREFIX + token, session, null);
     await this.atomic.set(USER_SESSION_PREFIX + userId, token, idxEntry?.version ?? null);
+
+    // Track session in per-user list for revocation
+    const sessIdx = await this.atomic.get<string[]>(USER_SESSIONS_PREFIX + userId);
+    await this.atomic.set(
+      USER_SESSIONS_PREFIX + userId,
+      [...(sessIdx?.value ?? []), token],
+      sessIdx?.version ?? null,
+    );
     return token;
+  }
+
+  async listSessions(userId: UserId): Promise<readonly SessionToken[]> {
+    const entry = await this.atomic.get<string[]>(USER_SESSIONS_PREFIX + userId);
+    if (!entry) return [];
+    // Filter out expired sessions (still in index but TTL-expired in store)
+    const live: SessionToken[] = [];
+    for (const raw of entry.value) {
+      const t = createSessionToken(raw);
+      const s = await this.atomic.get<Session>(TOKEN_PREFIX + t);
+      if (s) {
+        const age = Date.now() - s.value.createdAt;
+        if (age < SESSION_TTL_MS) live.push(t);
+      }
+    }
+    return live;
+  }
+
+  async revokeSession(token: SessionToken): Promise<void> {
+    // Read session before deleting to find userId for index cleanup
+    const entry = await this.atomic.get<Session>(TOKEN_PREFIX + token);
+    if (!entry) return;
+    const userId = entry.value.userId;
+
+    // Remove from store
+    await this.atomic.set(TOKEN_PREFIX + token, null, entry.version);
+
+    // Remove from user's session index
+    const sessIdx = await this.atomic.get<string[]>(USER_SESSIONS_PREFIX + userId);
+    if (sessIdx) {
+      await this.atomic.set(
+        USER_SESSIONS_PREFIX + userId,
+        sessIdx.value.filter(t => t !== token),
+        sessIdx.version,
+      );
+    }
   }
 
   /** Auto-join "users" group on registration (Linux-style). */

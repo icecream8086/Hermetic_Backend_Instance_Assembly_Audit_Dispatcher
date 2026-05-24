@@ -80,7 +80,9 @@ export function resolveAssembly(
     return { success: false, errors: validationErrors };
   }
 
-  return { success: true, config: merged as CreateSandboxInput };
+  // Merge produces raw strings; RegionId is a zero-cost brand — the caller
+  // (sandbox service) receives the struct and writes it to the store as-is.
+  return { success: true, config: merged as unknown as CreateSandboxInput };
 }
 
 // ─── Merge engine ───

@@ -74,6 +74,7 @@ export class AlarmTimerDO implements DurableObject {
   async alarm(): Promise<void> {
     if (!this._running) return;
     this._tickCount++;
+    console.log(`[${new Date().toISOString()}] INFO: [scheduler] Tick #${this._tickCount} (interval=${this._intervalMs}ms)`);
 
     if (this._callbackUrl) {
       try {

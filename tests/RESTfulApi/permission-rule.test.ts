@@ -23,7 +23,7 @@ afterAll(async () => {
 beforeAll(async () => {
   await spec()
     .post('/api/users/register')
-    .withJson({ email: 'rule-test@test.local', password: 'TestPass123', name: 'RuleTester', role: 'Admin' })
+    .withJson({ email: 'rule-test@test.local', password: 'TestPass123', name: 'RuleTester', role: 'root' })
     .expectStatus(201)
     .stores('userId', 'data.user.id');
 });

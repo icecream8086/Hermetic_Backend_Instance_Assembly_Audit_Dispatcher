@@ -13,3 +13,5 @@ CLAUDE.md
 coverage
 *.ps1
 .data-test
+openapi.json
+openapi-summary.json

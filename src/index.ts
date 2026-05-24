@@ -5,12 +5,19 @@ import { loadConfig } from './config/env.ts';
 export { AtomicStoreDO } from './core/store/adapters/durable-object.ts';
 export { AlarmTimerDO } from './core/scheduler/alarm-timer-do.ts';
 
-const config = loadConfig();
-
 let _appPromise: Promise<AppInstance> | null = null;
 
 function getApp(platformBindings: Record<string, unknown>): Promise<AppInstance> {
   if (!_appPromise) {
+    // Merge platform env bindings into process.env for env.ts to pick up.
+    // In Miniflare, .env vars are injected as Worker bindings (env.XXX), not
+    // process.env — so we copy them over before loadConfig() reads them.
+    for (const key of Object.keys(platformBindings)) {
+      if (typeof platformBindings[key] === 'string' && !(key in process.env)) {
+        (process.env as any)[key] = platformBindings[key];
+      }
+    }
+    const config = loadConfig();
     _appPromise = createApp(config, platformBindings) as Promise<AppInstance>;
   }
   return _appPromise;

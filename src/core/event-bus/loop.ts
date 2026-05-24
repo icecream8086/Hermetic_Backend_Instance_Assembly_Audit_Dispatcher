@@ -70,7 +70,7 @@ export interface IEventLoopControl {
    * - `wrangler dev --test-scheduled` endpoint
    * - Manual API-driven dispatch
    */
-  triggerTick(): void;
+  triggerTick(): Promise<void>;
 }
 
 /**
@@ -232,8 +232,12 @@ export class EventLoop implements IEventLoopControl {
     return this.#queue.size;
   }
 
-  triggerTick(): void {
-    this.#tick().catch(err => this.#reportError(err, 'tick'));
+  async triggerTick(): Promise<void> {
+    try {
+      await this.#tick();
+    } catch (err) {
+      this.#reportError(err, 'tick');
+    }
   }
 
   // ─── Internal ───

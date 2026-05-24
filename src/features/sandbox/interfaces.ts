@@ -48,6 +48,9 @@ export interface ISandboxService {
    * Returns the IP or null if timed out.
    */
   pollForIp(sandboxId: SandboxId, timeoutMs: number, pollIntervalMs: number): Promise<string | null>;
+
+  /** Get health status for all containers in a sandbox. */
+  getHealth(id: SandboxId): Promise<readonly ContainerHealth[]>;
 }
 
 export interface ISandboxMetricsService {
@@ -61,6 +64,14 @@ export interface ISandboxMetricsService {
 export interface ISandboxLogService {
   /** Fetch container logs from the provider. */
   getLogs(sandboxId: SandboxId, containerName: string, options?: LogQueryOptions): Promise<ContainerLogResult>;
+}
+
+export interface ContainerHealth {
+  readonly containerName: string;
+  readonly status: string;       // OciHealthStatus as string
+  readonly ready: boolean;
+  readonly startedAt?: string | undefined;
+  readonly message?: string | undefined;
 }
 
 export interface LogQueryOptions {

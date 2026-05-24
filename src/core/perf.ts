@@ -17,27 +17,18 @@
  * ```
  */
 
-let _enabled = true;
 let _lastDuration = 0;
-
-/** Enable or disable [perf] console output at runtime. */
-export function enablePerf(on: boolean): void {
-  _enabled = on;
-}
 
 /** Returns the last measured duration in milliseconds. */
 export function lastPerf(): number {
   return _lastDuration;
 }
 
-export async function measure<T>(label: string, fn: () => Promise<T>): Promise<T> {
+export async function measure<T>(_label: string, fn: () => Promise<T>): Promise<T> {
   const t0 = performance.now();
   try {
     return await fn();
   } finally {
     _lastDuration = performance.now() - t0;
-    if (_enabled) {
-      console.debug(`[perf] ${label}: ${_lastDuration.toFixed(1)}ms`);
-    }
   }
 }

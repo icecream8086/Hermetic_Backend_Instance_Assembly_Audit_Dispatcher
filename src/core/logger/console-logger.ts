@@ -3,7 +3,7 @@ import { AuditTier } from './interfaces.ts';
 import type { LogInput, LogEntry, LogQuery } from './types.ts';
 import type { LogId } from '../brand.ts';
 import { generateLogId } from '../brand.ts';
-import { LogLevel } from '../types.ts';
+import { shouldLog } from './log-policy.ts';
 
 /** Minimal console logger for local development. */
 export class ConsoleLogger implements ILogger {
@@ -21,7 +21,9 @@ export class ConsoleLogger implements ILogger {
       ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
     } as LogEntry;
     this.#entries.push(entry);
-    this.#print(entry);
+    if (shouldLog(input.facility, input.level)) {
+      this.#print(entry);
+    }
     return id;
   }
 
@@ -47,8 +49,8 @@ export class ConsoleLogger implements ILogger {
   async dispose(): Promise<void> { this.#entries = []; }
 
   #print(entry: LogEntry): void {
-    const prefix = entry.level === LogLevel.ERROR || entry.level === LogLevel.FATAL ? '❌' :
-                   entry.level === LogLevel.WARN ? '⚠️' : '→';
-    console.log(`${prefix} [${entry.facility}] ${entry.message}`);
+    const ts = new Date(entry.timestamp).toISOString();
+    const level = entry.level.toUpperCase();
+    console.log(`[${ts}] ${level}: [${entry.facility}] ${entry.message}`);
   }
 }

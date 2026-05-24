@@ -5,6 +5,10 @@ import { createInfoHandler, infoRouteMeta } from '../src/features/info/info.hand
 import { createUserRouter, userRouteMeta } from '../src/features/users/handler.ts';
 import { createPermissionRouter, permissionRouteMeta } from '../src/features/permission/handler.ts';
 import { createSysGroupRouter, sysGroupRouteMeta } from '../src/features/system-group/handler.ts';
+import { createTemplateRouter, templateRouteMeta } from '../src/features/template/handler.ts';
+import { createImageRouter, imageRouteMeta } from '../src/features/image/handler.ts';
+import { createSandboxRouter, sandboxRouteMeta } from '../src/features/sandbox/handler.ts';
+import { createPlatformsRouter, platformsRouteMeta } from '../src/features/platforms/handler.ts';
 import type { RouteMeta } from '../src/core/http-docs/types.ts';
 import { createAuditRouter } from '../src/core/audit/audit-router.ts';
 import { WorkersAuditLogger } from '../src/core/audit/workers-audit-logger.ts';
@@ -95,6 +99,17 @@ collect('perm', 'Perm', '/api/permissions', createPermissionRouter(stubPermServi
 const stubSysGroupService = { create: async () => ({ id: '', name: '', rules: [], priority: 0, createdAt: 0, updatedAt: 0 }), list: async () => [], get: async () => null, update: async () => { throw new Error('stub'); }, delete: async () => {} };
 collect('sysgrp', 'SysGrp', '/api/system-groups', createSysGroupRouter(stubSysGroupService as any), () => true, sysGroupRouteMeta);
 
+// Use a plain store object that accepts any key/value (stub for route scanning)
+const stubAtomic: any = { get: async () => null, set: async () => null };
+collect('tpl', 'Tpl', '/api/templates', createTemplateRouter(stubAtomic as any), () => true, templateRouteMeta);
+collect('img', 'Img', '/api/images', createImageRouter(), () => true, imageRouteMeta);
+
+const stubSandboxSvc: any = { getById: async () => null, stop: async () => {}, terminate: async () => {}, syncRuntime: async () => {}, list: async () => ({ items: [] }) };
+collect('sbx', 'Sbx', '/api/sandboxes', createSandboxRouter(stubSandboxSvc as any), () => true, sandboxRouteMeta);
+
+const stubRegistry: any = { availableProviders: () => [{ name: 'stub' }, { name: 'podman' }] };
+collect('plf', 'Plf', '/api/platforms', createPlatformsRouter(stubRegistry as any), () => true, platformsRouteMeta);
+
 // Manually-added routes (not in any feature router)
 routes.push({
   method: 'POST', path: '/__become-wheel', fileTag: 'auth', tag: 'Dev',
@@ -107,11 +122,15 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const httpDir = resolve(__dirname, '..', 'http');
 mkdirSync(httpDir, { recursive: true });
 
-const fileTagOrder = ['info', 'auth', 'sysgrp', 'perm', 'audit', 'users'];
+const fileTagOrder = ['info', 'auth', 'sysgrp', 'tpl', 'img', 'sbx', 'plf', 'perm', 'audit', 'users'];
 const fileTagTitle: Record<string, string> = {
   info: 'Info',
   auth: 'Auth',
   sysgrp: 'SysGrp',
+  tpl: 'Tpl',
+  img: 'Img',
+  sbx: 'Sbx',
+  plf: 'Plf',
   perm: 'Perm',
   audit: 'Audit',
   users: 'Users',

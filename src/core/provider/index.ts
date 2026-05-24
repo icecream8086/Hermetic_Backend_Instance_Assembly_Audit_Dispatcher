@@ -1,7 +1,9 @@
 export type {
   IContainerProvider,
+  IContainerGroupProvider,
   IDnsProvider,
   IMetricsProvider,
+  INetworkPolicyProvider,
   IProviderRegistry,
   IVirtualNode,
   VirtualNodeInfo,
@@ -49,7 +51,6 @@ export type {
 } from './types.ts';
 
 export { createProviderRegistry } from './factory.ts';
-export type { ProviderCredentials } from './factory.ts';
 
 export type {
   IS3Provider,

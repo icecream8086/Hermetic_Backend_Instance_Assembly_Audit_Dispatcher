@@ -8,6 +8,7 @@ import { createPolicyId } from '../../core/permission/types.ts';
 import { permLogAudit } from './audit.ts';
 import type { AuditActor } from './audit.ts';
 import { CrudStore, type PaginatedResult } from './crud-store.ts';
+import { setActivePolicy, DEFAULT_POLICY } from '../../core/logger/log-policy.ts';
 import type {
   StoredPolicy,
   PolicyEffect,
@@ -30,6 +31,7 @@ import type {
   CreateUserTplInput,
   UpdateUserTplInput,
   CompareResult,
+  LogPolicy,
 } from './types.ts';
 import { generatePermissionId, generateUserGroupId, generatePermGroupId, generateRouteAclId, generateUserTplId } from './types.ts';
 
@@ -44,6 +46,7 @@ const ROUTEACL_PREFIX = 'routeacl:';
 const ROUTEACL_INDEX_KEY = 'routeacl:ids';
 const USERTPL_PREFIX = 'usertpl:';
 const USERTPL_INDEX_KEY = 'usertpl:ids';
+const LOG_POLICY_KEY = '_sys:log-policy';
 
 function ipInCIDR(ip: string, cidr: string): boolean {
   const parts = cidr.split('/');
@@ -152,6 +155,10 @@ export interface IPermissionService {
   // Compare
   comparePermGroups(idA: string, idB: string): Promise<CompareResult>;
   compareUserGroups(idA: string, idB: string): Promise<CompareResult>;
+
+  // Log policy
+  getLogPolicy(): Promise<LogPolicy & { readonly exists: boolean }>;
+  updateLogPolicy(input: Partial<LogPolicy>, actor?: AuditActor): Promise<LogPolicy>;
 
   // User templates
   createUserTpl(input: CreateUserTplInput, actor?: AuditActor): Promise<UserTemplate>;
@@ -516,6 +523,15 @@ export class PermissionService implements IPermissionService {
       .map(g => g.id);
     const userGroupIds = this.#resolveDag(allGroups, directGroupIds);
 
+    // Dual-check: wheel group access requires Admin role (Linux sudo model)
+    const wheelGroupIds = allGroups.filter(g => g.name === 'wheel').map(g => g.id);
+    const isWheel = wheelGroupIds.some(wgId => userGroupIds.includes(wgId as any));
+    let wheelElevated = false;
+    if (isWheel) {
+      const userEntry = await this.atomic.get<any>('user:' + userId);
+      if (userEntry?.value?.role === 'root') wheelElevated = true;
+    }
+
     // Sort ACLs by priority descending
     const sorted = allAcls.sort((a, b) => b.priority - a.priority);
 
@@ -523,7 +539,11 @@ export class PermissionService implements IPermissionService {
       if (acl.method !== '*' && acl.method !== method.toUpperCase()) continue;
       if (acl.matchType === 'exact' ? path !== acl.pathPrefix : !path.startsWith(acl.pathPrefix)) continue;
       if (acl.userId && acl.userId !== userId) continue;
-      if (acl.userGroupId && !userGroupIds.includes(acl.userGroupId as any)) continue;
+      // If ACL targets a wheel group, user must have wheel elevation
+      if (acl.userGroupId) {
+        if (!userGroupIds.includes(acl.userGroupId as any)) continue;
+        if (wheelGroupIds.includes(acl.userGroupId as any) && !wheelElevated) continue;
+      }
       if (!acl.userId && !acl.userGroupId) continue;
       if (acl.effect === 'deny') return false;
       return true;
@@ -601,6 +621,30 @@ export class PermissionService implements IPermissionService {
   }
 
   // ═══════════════════════════════════════════
+  // Log policy
+  // ═══════════════════════════════════════════
+
+  async getLogPolicy(): Promise<LogPolicy & { readonly exists: boolean }> {
+    const entry = await this.atomic.get<LogPolicy>(LOG_POLICY_KEY);
+    // GET has no side effects — does NOT call setActivePolicy()
+    if (!entry) return { ...DEFAULT_POLICY, exists: false };
+    return { ...entry.value, exists: true };
+  }
+
+  async updateLogPolicy(input: Partial<LogPolicy>, actor?: AuditActor): Promise<LogPolicy> {
+    const existing = await this.atomic.get<LogPolicy>(LOG_POLICY_KEY);
+    const updated: LogPolicy = {
+      ...(existing?.value ?? DEFAULT_POLICY),
+      ...input,
+      updatedAt: Date.now(),
+      updatedBy: actor?.userId,
+    };
+    await this.atomic.set(LOG_POLICY_KEY, updated, existing?.version ?? null);
+    setActivePolicy(updated);
+    return updated;
+  }
+
+  // ═══════════════════════════════════════════
   // Permission evaluation
   // ═══════════════════════════════════════════
 
@@ -647,12 +691,19 @@ export class PermissionService implements IPermissionService {
       .map(g => g.id);
     const userGroupIds = this.#resolveDag(allUserGroups, directGroupIds);
 
+    // Dual-check: wheel group permission groups require Admin role
+    const wheelGroupIds = allUserGroups.filter(g => g.name === 'wheel').map(g => g.id);
+    const userIsElevated = wheelGroupIds.some(wgId => userGroupIds.includes(wgId as any))
+      && userRole === 'root';
+
     // 3b. Collect rules from permission groups (resolve DAG for each matched group)
     const groupRules: Array<{ rule: PermissionRule; groupName: string }> = [];
     for (const pg of allPermGroups) {
       const applies = pg.userIds.includes(userId)
         || pg.userGroupIds.some(ugId => userGroupIds.includes(ugId as any));
       if (!applies) continue;
+      // If this permission group targets a wheel group, skip if not elevated
+      if (!userIsElevated && pg.userGroupIds.some(ugId => wheelGroupIds.includes(ugId as any))) continue;
       // Resolve this permission group's dependency chain
       const depIds = this.#resolveDag(allPermGroups, [pg.id]);
       for (const depId of depIds) {
@@ -716,7 +767,7 @@ export class PermissionService implements IPermissionService {
     if (action === 'no-password-login' && !hasPublicKey) {
       result = { allowed: false, reason: 'No public key configured for this account' };
     } else {
-      result = { allowed: true, reason: 'No matching policy — allowed by default' };
+      result = { allowed: false, reason: 'No matching policy — denied by default' };
     }
 
     permLogAudit(this.logger, this.audit, 'perm.check', undefined, {

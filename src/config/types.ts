@@ -2,6 +2,7 @@ import type { StorageConfig } from '../core/store/config.ts';
 import type { AuditTier } from '../core/logger/interfaces.ts';
 import type { S3ProviderType } from '../core/provider/s3-types.ts';
 import type { SchedulerBackendType } from '../core/scheduler/interfaces.ts';
+import type { RegionId } from '../core/region/types.ts';
 
 export interface LogConfig {
   auditTier: AuditTier;
@@ -11,9 +12,33 @@ export interface LogConfig {
   };
 }
 
+export interface Credential {
+  readonly name: string;
+  readonly type?: 'aksk' | 'bearer' | undefined;
+  // aksk
+  readonly accessKeyId?: string | undefined;
+  readonly accessKeySecret?: string | undefined;
+  // bearer
+  readonly token?: string | undefined;
+  // shared
+  readonly defaultRegion?: string | undefined;
+  readonly endpoint?: string | undefined;
+  readonly bucket?: string | undefined;
+  /** Provider-specific extensions (e.g. r2AccountId, cert). */
+  readonly extra?: Record<string, unknown> | undefined;
+}
+
 export interface ProviderConfig {
   /** Container provider backend type. */
-  container: 'alibaba' | 'stub';
+  container: 'alibaba' | 'podman' | 'stub';
+  /** Default region for container operations (fallback when account has none). */
+  region: RegionId;
+  /** Named credentials for multi-account support. */
+  accounts: Credential[];
+  /** Which account to use when none is specified. */
+  defaultAccount: string;
+  /** Cloudflare API token (for DNS, R2, etc.). */
+  cfApiToken?: string | undefined;
   /** DNS provider backend type. */
   dns: 'cloudflare' | 'stub';
   /** Metrics provider backend type. */
@@ -23,8 +48,14 @@ export interface ProviderConfig {
 export interface S3Config {
   /** S3-compatible storage backend type. */
   backend: S3ProviderType | 'none';
-  /** Region for the storage backend (not used for cloudflare-r2). */
+  /** Region for the storage backend (not used for cloudflare-r2 / minio). */
   region: string;
+  /** Custom endpoint (required for minio, optional for others). */
+  endpoint?: string | undefined;
+  /** Named credentials for multi-account support. */
+  accounts: Credential[];
+  /** Which account to use when none is specified. */
+  defaultAccount: string;
 }
 
 export interface SchedulerAppConfig {

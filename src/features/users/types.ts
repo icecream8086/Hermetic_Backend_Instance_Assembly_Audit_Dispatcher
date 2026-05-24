@@ -29,7 +29,7 @@ export function generateSessionToken(): SessionToken {
 // ─── Enums ───
 
 export enum UserRole {
-  Admin = 'Admin',
+  Root = 'root',
   Operator = 'Operator',
   Viewer = 'Viewer',
 }

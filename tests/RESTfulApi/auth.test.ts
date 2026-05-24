@@ -109,9 +109,9 @@ describe('Auth integration', () => {
   it('update user role', async () => {
     await spec()
       .put('/api/users/$S{userId}')
-      .withJson({ role: 'Admin' })
+      .withJson({ role: 'root' })
       .expectStatus(200)
-      .expectJson('data.role', 'Admin')
+      .expectJson('data.role', 'root')
       .expectJson('data.email', email);
   });
 

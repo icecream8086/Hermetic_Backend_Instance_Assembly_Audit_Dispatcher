@@ -16,6 +16,7 @@
     "test:watch": "vitest",
     "deploy": "wrangler deploy",
     "docs:http": "tsx scripts/export-http.ts",
+    "docs:openapi": "tsx scripts/export-openapi.ts",
     "tail": "wrangler tail --format pretty",
     "reset": "node scripts/reset.mjs"
   },
@@ -24,7 +25,11 @@
       "info": "/",
       "users": "/api/users",
       "permission": "/api/permissions",
-      "system-group": "/api/system-groups"
+      "system-group": "/api/system-groups",
+      "template": "/api/templates",
+      "image": "/api/images",
+      "sandbox": "/api/sandboxes",
+      "platforms": "/api/platforms"
     }
   },
   "dependencies": {

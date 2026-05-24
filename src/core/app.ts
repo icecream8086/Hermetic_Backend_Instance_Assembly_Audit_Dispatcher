@@ -13,15 +13,17 @@ import { createFacility } from './brand.ts';
 import { getFeatures } from '../features/generated.ts';
 import type { IProviderRegistry } from './provider/interfaces.ts';
 import { createProviderRegistry } from './provider/factory.ts';
-import type { ProviderCredentials } from './provider/factory.ts';
 import { createTimerBackend } from './scheduler/factory.ts';
 import { EventBus } from './event-bus/bus.ts';
 import { EventLoop } from './event-bus/loop.ts';
 import type { EventLoopConfig, TriggerEventInput } from './event-bus/types.ts';
 import type { IAuditWriter, IAuditReader } from './audit/types.ts';
+import type { Sandbox } from '../features/sandbox/types.ts';
+import { SandboxStatus } from '../features/sandbox/types.ts';
 import { WorkersAuditLogger, createAuditRouter } from './audit/index.ts';
 import { authz } from './middleware/auth.ts';
 import { jsonDepthLimit } from './middleware/security.ts';
+import { setActivePolicy } from './logger/log-policy.ts';
 import { PermissionService } from '../features/permission/service.ts';
 import { ConsoleLogger } from './logger/console-logger.ts';
 
@@ -42,6 +44,8 @@ export interface FeatureDeps {
   eventBus: EventBus;
   eventLoop: EventLoop;
   audit: IAuditWriter;
+  /** Optional action+resource level permission checker (PermissionService.check compatible). */
+  permissionChecker?: { check(params: { userId: string; action: string; resource: string; ip?: string }): Promise<{ allowed: boolean; reason: string }> };
 }
 
 export interface AppInstance {
@@ -52,19 +56,6 @@ export interface AppInstance {
   eventBus: EventBus;
   eventLoop: EventLoop;
   dispose: () => Promise<void>;
-}
-
-// ─── Credentials resolvers ───
-
-function resolveCredentials(): ProviderCredentials {
-  const aliAkId = process.env['ALIBABA_ACCESS_KEY_ID'];
-  const aliAkSecret = process.env['ALIBABA_ACCESS_KEY_SECRET'];
-  const cfToken = process.env['CF_API_TOKEN'];
-
-  return {
-    ...(aliAkId && aliAkSecret ? { alibaba: { accessKeyId: aliAkId, accessKeySecret: aliAkSecret } } : {}),
-    ...(cfToken ? { cloudflare: { apiToken: cfToken } } : {}),
-  };
 }
 
 /**
@@ -83,8 +74,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
   const logRouter = new LogRouter();
 
   // 3. Create container provider implementations
-  const credentials = resolveCredentials();
-  const providers = createProviderRegistry(config.provider, credentials);
+  const providers = createProviderRegistry(config.provider, config.s3);
 
   // 4. Create timer backend (driven by SCHEDULER_BACKEND env var)
   const schedulerBackend = createTimerBackend(config.scheduler.backend, {
@@ -97,13 +87,70 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
   const eventLoop = new EventLoop(
     eventBus,
     {
-      intervalMs: config.scheduler.intervalMs,
+      intervalMs: 5000,
       batchSize: config.scheduler.batchSize,
       autoStart: true,
     } as Partial<EventLoopConfig>,
     schedulerBackend,
     stores.atomic,
   );
+
+  // 5b. 健康检查事件：每 tick 查询 provider 实时状态，可配重试次数，-1 为白名单
+  eventBus.on('health:check', async () => {
+    const idx = await stores.atomic.get<string[]>('sandbox:ids');
+    if (!idx || !providers.container.getStatus) return;
+    for (const sid of idx.value) {
+      try {
+        const entry = await stores.atomic.get<Sandbox>(`sandbox:${sid}`);
+        // 检查所有非 Deleted 的沙箱（Running / Stopped / Terminated 都需要确认容器已清理）
+        if (!entry || entry.value.status === SandboxStatus.Deleted) continue;
+        const maxRetries = entry.value.config.healthMaxRetries ?? 10;
+        if (maxRetries === -1) continue;
+        // 从 provider 获取实时状态
+        // provider 返回 null 表示容器已不存在，标记已清理
+        const runtime = await providers.container.getStatus(entry.value.providerId ?? sid);
+        if (!runtime) {
+          console.error(`[health] runtime null for ${sid}, deleting`);
+          for (let attempt = 0; attempt < 3; attempt++) {
+            const latest = await stores.atomic.get<Sandbox>(`sandbox:${sid}`);
+            if (!latest) break;
+            const ver = await stores.atomic.set(`sandbox:${sid}`, { ...latest.value, status: SandboxStatus.Deleted, updatedAt: Date.now() }, latest.version);
+            if (ver) { console.error(`[health] deleted ${sid}`); break; }
+          }
+          continue;
+        }
+        const allHealthy = runtime.containers.every(cc => cc.alive);
+        const failKey = `health:fails:${sid}`;
+        if (allHealthy) {
+          const failEntry = await stores.atomic.get<number>(failKey);
+          if (failEntry) await stores.atomic.set(failKey, 0, failEntry.version);
+        } else {
+          const failEntry = await stores.atomic.get<number>(failKey);
+          const fails = (failEntry?.value ?? 0) + 1;
+          await stores.atomic.set(failKey, fails, failEntry?.version ?? null);
+          console.log(`[${new Date().toISOString()}] NOTICE: [health] sandbox ${sid} unhealthy (${fails}/${maxRetries})`);
+          if (fails >= maxRetries) {
+            console.log(`[${new Date().toISOString()}] NOTICE: [health] terminating sandbox ${sid} (${fails} consecutive)`);
+            await providers.container.delete({ region: entry.value.config.region, providerId: entry.value.providerId ?? sid });
+            // OCC 重试最多 3 次
+            for (let attempt = 0; attempt < 3; attempt++) {
+              const latest = await stores.atomic.get<Sandbox>(`sandbox:${sid}`);
+              if (!latest) break;
+              const ver = await stores.atomic.set(`sandbox:${sid}`, { ...latest.value, status: SandboxStatus.Deleted, updatedAt: Date.now() }, latest.version);
+              if (ver) break;
+            }
+          }
+        }
+      } catch (e) { console.error(`[health] check error ${sid}:`, e instanceof Error ? e.message : e); }
+    }
+  });
+  // 注册连续健康检查事件（每 tick 触发一次）
+  eventLoop.enqueueTrigger({ type: 'health:check', payload: {} });
+
+  // 5c. Load log policy into runtime (non-blocking)
+  stores.atomic.get<any>('_sys:log-policy').then(entry => {
+    if (entry) setActivePolicy(entry.value);
+  }).catch(() => {});
 
   // 6. Initialize policy library (first-run seeding — Linux/RBAC-style)
   {
@@ -160,7 +207,43 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
       }
 
       await stores.atomic.set(KEY, { seededAt: now }, null);
-      console.log(`[init] Policy library seeded: ${count} items (${sysGroups.length} system groups, ${userGroupDefs.length} user groups + route ACLs)`);
+      console.log(`[${new Date().toISOString()}] INFO: [init] Policy library seeded: ${count} items (${sysGroups.length} system groups, ${userGroupDefs.length} user groups + route ACLs)`);
+    }
+  }
+
+  // 6b. Seed built-in sandbox templates (Nginx demo)
+  {
+    const KEY = '_init:sandbox-tpls';
+    const entry = await stores.atomic.get<any>(KEY);
+    if (entry === null) {
+      const now = Date.now();
+      const tpls = [
+        {
+          id: `tpl_${crypto.randomUUID()}`,
+          name: 'nginx',
+          description: 'Nginx web server demo — lightweight, ports 80',
+          spec: {
+            provider: 'podman',
+            region: 'local',
+            containers: [{
+              name: 'nginx', image: 'docker.io/library/nginx:latest',
+              ports: [{ containerPort: 80, protocol: 'TCP' }],
+              resources: { limits: { cpu: 0.5, memory: 128 } },
+              readinessProbe: { tcpSocket: { port: 80 }, periodSeconds: 5, initialDelaySeconds: 2 },
+            }],
+            network: { allocatePublicIp: false },
+            restartPolicy: 'Always',
+          },
+          createdAt: now, updatedAt: now,
+        },
+      ];
+      for (const t of tpls) {
+        await stores.atomic.set('sandbox-tpl:' + t.id, t, null);
+        const idx = await stores.atomic.get<string[]>('sandbox-tpl:ids');
+        await stores.atomic.set('sandbox-tpl:ids', [...(idx?.value ?? []), t.id], idx?.version ?? null);
+      }
+      await stores.atomic.set(KEY, { seededAt: now }, null);
+      console.log(`[${new Date().toISOString()}] INFO: [init] Sandbox templates seeded: ${tpls.length} (nginx)`);
     }
   }
 
@@ -246,18 +329,19 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
         }
       }
     }
-    console.log(`[become-wheel] userId=${userId} added to simulate_wheel`);
+    console.log(`[${new Date().toISOString()}] INFO: [become-wheel] userId=${userId} added to simulate_wheel`);
     return c.json({ success: true, data: { message: 'Added to simulate_wheel' } });
   });
 
   // 10. Auth + route ACL middleware
+  let permService: PermissionService | undefined;
   if (config.authz?.enabled !== false) {
-    const permService = new PermissionService(stores.atomic, new ConsoleLogger(), audit);
+    permService = new PermissionService(stores.atomic, new ConsoleLogger(), audit);
     app.use('/api/*', authz({
       store: stores.atomic,
       audit,
       checkRouteAccess: async (method, path, userId) => {
-        return permService.checkRouteAccess(method, path, userId);
+        return permService!.checkRouteAccess(method, path, userId);
       },
       publicPaths: [
         '/api/users/register',
@@ -269,9 +353,10 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
   }
 
   // 11. DO alarm callback route
-  app.post('/__scheduled', (c) => {
-    eventLoop.triggerTick();
-    return c.json({ ok: true, queueSize: eventLoop.size });
+  app.post('/__tick', async (c) => {
+    await eventLoop.triggerTick();
+    const st = eventLoop.status();
+    return c.json({ ok: true, queueSize: st.queueSize, processedCount: st.processedCount, running: st.running });
   });
 
   // 10. Migration endpoint (local only) — rebuild sharded user index from existing user keys
@@ -317,13 +402,29 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
     });
   app.route('/api/events', events);
 
-  // 11. Mount audit log query endpoint
+  // 11. OpenAPI specification endpoint
+  // Serve from the pre-generated openapi.json at dev time; in production
+  // the file is bundled by wrangler. Run `npm run docs:openapi` to regenerate.
+  let openApiSpec: Record<string, unknown> | null = null;
+  app.get('/api/openapi.json', async (c) => {
+    if (!openApiSpec) {
+      try {
+        const mod = await import('../../openapi.json' as string) as { default: Record<string, unknown> };
+        openApiSpec = mod.default;
+      } catch {
+        return c.json({ error: 'OpenAPI spec not generated. Run: npm run docs:openapi' }, 503);
+      }
+    }
+    return c.json(openApiSpec);
+  });
+
+  // 12. Mount audit log query endpoint
   app.route('/api/audit', createAuditRouter(auditReader));
 
   // 12. Auto-register features from generated registry
   // Mount at both /path and /path/ since Hono's route() doesn't normalize
   // trailing slashes — /api/users matches but /api/users/ does not.
-  const featureDeps: FeatureDeps = { stores, logRouter, providers, eventBus, eventLoop, audit };
+  const featureDeps: FeatureDeps = { stores, logRouter, providers, eventBus, eventLoop, audit, permissionChecker: permService as any };
   for (const feat of getFeatures()) {
     const router = feat.mount(featureDeps);
     app.route(feat.path, router);

@@ -1,0 +1,29 @@
+{
+  "name": "nginx-demo",
+  "description": "Nginx demo running on Podman (local WSL)",
+  "spec": {
+    "provider": "podman",
+    "region": "local",
+    "containers": [
+      {
+        "name": "nginx",
+        "image": "docker.io/library/nginx:latest",
+        "ports": [
+          { "containerPort": 80, "protocol": "TCP" }
+        ],
+        "resources": {
+          "limits": { "cpu": 0.5, "memory": 128 }
+        },
+        "readinessProbe": {
+          "tcpSocket": { "port": 80 },
+          "periodSeconds": 5,
+          "initialDelaySeconds": 2
+        }
+      }
+    ],
+    "network": {
+      "allocatePublicIp": false
+    },
+    "restartPolicy": "Always"
+  }
+}

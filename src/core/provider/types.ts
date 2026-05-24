@@ -23,6 +23,8 @@ export type ContainerGroupStatus =
 
 // ─── OCI Container types (core) ───
 
+import type { RegionId } from '../region/types.ts';
+
 declare const CONTAINER_ID_BRAND: unique symbol;
 export type ContainerId = string & { readonly [CONTAINER_ID_BRAND]: true };
 
@@ -81,15 +83,13 @@ export interface OciContainer {
   } | undefined;
   /** Allocated resources for this container. */
   readonly resources?: {
-    /** CPU cores assigned. */
     readonly cpu: number;
-    /** Memory limit in MB. */
     readonly memory: number;
-    readonly cpuUsagePercent: number;
-    readonly memoryUsageBytes: number;
-    readonly memoryLimitBytes: number;
-    readonly pidsCurrent: number;
-  };
+    readonly cpuUsagePercent?: number;
+    readonly memoryUsageBytes?: number;
+    readonly memoryLimitBytes?: number;
+    readonly pidsCurrent?: number;
+  } | undefined;
   readonly health: {
     readonly status: OciHealthStatus;
     readonly lastCheckedAt?: string;
@@ -203,7 +203,7 @@ export interface ContainerGroupRuntime {
   readonly providerId: string;
   readonly name: string;
   readonly status: ContainerGroupStatus;
-  readonly regionId: string;
+  readonly regionId: RegionId;
   readonly zoneId?: string;
   readonly creationTime?: string;
   readonly expiredTime?: string;
@@ -273,14 +273,28 @@ export interface MetricSnapshot {
 // Provider-agnostic input for IContainerProvider.create().
 // No sandbox domain types — the business layer maps to this type.
 
+export interface ContainerPortConfig {
+  readonly containerPort: number;
+  readonly hostPort?: number | undefined;
+  readonly protocol?: string | undefined;
+}
+
 export interface ContainerCreateConfig {
   readonly name: string;
   readonly image: string;
   readonly args?: readonly string[] | undefined;
+  readonly env?: readonly EnvVar[] | undefined;
   readonly tty?: boolean | undefined;
   readonly stdin?: boolean | undefined;
   readonly imagePullPolicy?: string | undefined;
+  readonly resources?: ResourceRequirements | undefined;
+  readonly livenessProbe?: ProbeSpec | undefined;
+  readonly readinessProbe?: ProbeSpec | undefined;
+  readonly startupProbe?: ProbeSpec | undefined;
+  readonly ports?: readonly ContainerPortConfig[] | undefined;
   readonly volumeMounts?: readonly VolumeMountConfig[] | undefined;
+  /** Network mode: 'bridge' | 'host' | 'none' | 'container:<name|id>'. */
+  readonly networkMode?: string | undefined;
   readonly providerOverrides?: Record<string, unknown> | undefined;
 }
 
@@ -294,11 +308,8 @@ export interface VolumeMountConfig {
 export interface VolumeConfigInput {
   readonly id: string;
   readonly type: string;
-  readonly nfs?: {
-    readonly server: string;
-    readonly path: string;
-    readonly readOnly: boolean;
-  } | undefined;
+  /** Provider-specific volume options (e.g. NFS {server, path, readOnly}). */
+  readonly options?: Record<string, unknown> | undefined;
 }
 
 export interface ContainerGroupNetworkInput {
@@ -311,7 +322,7 @@ export interface ContainerGroupNetworkInput {
 export interface CreateContainerGroupInput {
   readonly name: string;
   readonly description?: string | undefined;
-  readonly region: string;
+  readonly region: RegionId;
   readonly cpu: number;
   readonly memory: number;
   readonly spotStrategy: string;

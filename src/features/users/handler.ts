@@ -5,7 +5,7 @@ import type { IUserService } from './service.ts';
 import type { RouteMeta } from '../../core/http-docs/types.ts';
 import { RegisterUserSchema, LoginUserSchema, UpdateUserSchema, UserResponseSchema, LoginResponseSchema, LoginPolicySchema, NoPasswordLoginSchema, PublicKeySchema } from './schema.ts';
 import type { UserResponse } from './schema.ts';
-import { createUserId, UserRole } from './types.ts';
+import { createUserId, createSessionToken, UserRole } from './types.ts';
 import { ok, fail } from '../../core/response.ts';
 
 // ─── Response helpers ───
@@ -35,11 +35,13 @@ export function createUserRouter(userService: IUserService): Hono<{ Variables: A
       return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
     }
 
+    // Always force role to Viewer on self-registration — escalation to
+    // root/Operator must go through admin-only endpoints.
     const { user, token } = await userService.register({
       email: parsed.data.email,
       password: parsed.data.password,
       name: parsed.data.name,
-      role: parsed.data.role,
+      role: UserRole.Viewer,
     });
 
     return c.json(ok(LoginResponseSchema.parse({ token, user: userToResponse(user) })), 201);
@@ -185,6 +187,36 @@ export function createUserRouter(userService: IUserService): Hono<{ Variables: A
   router.delete('/:id/public-key', async (c) => {
     const id = createUserId(c.req.param('id'));
     await userService.clearPublicKey(id);
+    return c.json(ok(null));
+  });
+
+  // ─── Session management ───
+  // Static routes before /:id to avoid Hono matching 'sessions' as a user ID.
+
+  router.get('/sessions', async (c) => {
+    const user = (c as any).var?.currentUser as { id: string; role?: string } | undefined;
+    if (!user) return c.json(fail('UNAUTHORIZED', 'Authentication required'), 401);
+
+    // Admin can query any user's sessions; users see only their own
+    const targetId = c.req.query('userId');
+    const userId = (targetId && (user.role === 'root' || user.role === 'Operator'))
+      ? createUserId(targetId)
+      : createUserId(user.id);
+
+    const sessions = await userService.listSessions(userId);
+    return c.json(ok(sessions.map(s => ({
+      token: s,
+      // Last 4 chars for identification, not full token
+      tokenHint: s.slice(-4),
+    }))));
+  });
+
+  router.delete('/sessions/:token', async (c) => {
+    const user = (c as any).var?.currentUser as { id: string; role?: string } | undefined;
+    if (!user) return c.json(fail('UNAUTHORIZED', 'Authentication required'), 401);
+
+    const token = createSessionToken(c.req.param('token'));
+    await userService.revokeSession(token);
     return c.json(ok(null));
   });
 

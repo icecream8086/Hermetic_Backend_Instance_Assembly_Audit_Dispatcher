@@ -30,7 +30,7 @@ const instance = await createApp(config);
 
 serve({ fetch: instance.app.fetch, port: config.server.port }, (info) => {
   // eslint-disable-next-line no-console
-  console.log(`[dev] Server listening on http://localhost:${info.port}`);
+  console.log(`[${new Date().toISOString()}] INFO: [dev] Server listening on http://localhost:${info.port}`);
 });
 
 process.on('SIGINT', () => {

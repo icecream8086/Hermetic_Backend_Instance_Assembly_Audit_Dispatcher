@@ -27,7 +27,7 @@ beforeAll(async () => {
   // Register root user
   await spec()
     .post('/api/users/register')
-    .withJson({ email: ROOT_EMAIL, password: ROOT_PW, name: 'Wheel', role: 'Admin' })
+    .withJson({ email: ROOT_EMAIL, password: ROOT_PW, name: 'Wheel', role: 'root' })
     .expectStatus(201)
     .stores('rootId', 'data.user.id')
     .stores('rootToken', 'data.token');

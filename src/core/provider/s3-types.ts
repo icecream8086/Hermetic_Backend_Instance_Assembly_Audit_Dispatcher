@@ -4,7 +4,7 @@
 // Each implementation translates to its native format internally.
 
 /** Discriminator for selecting the storage backend. */
-export type S3ProviderType = 'aws-s3' | 'alibaba-oss' | 'cloudflare-r2';
+export type S3ProviderType = 'aws-s3' | 'alibaba-oss' | 'cloudflare-r2' | 'minio';
 
 export interface S3PutObjectInput {
   readonly bucket: string;

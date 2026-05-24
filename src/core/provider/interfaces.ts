@@ -16,11 +16,13 @@ import type {
   NodeCapacity,
   NodeCondition,
 } from './types.ts';
+import type { RegionId } from '../region/types.ts';
+import type { IS3Provider } from './s3.ts';
 
 // ─── Container operations ───
 
 export interface DescribeContainerGroupsInput {
-  readonly region: string;
+  readonly region: RegionId;
   readonly sandboxName?: string;
   readonly sandboxId?: string;
   readonly status?: ContainerGroupStatus;
@@ -35,12 +37,12 @@ export interface DescribeContainerGroupsResult {
 }
 
 export interface DeleteContainerGroupInput {
-  readonly region: string;
+  readonly region: RegionId;
   readonly providerId: string;
 }
 
 export interface GetContainerLogInput {
-  readonly region: string;
+  readonly region: RegionId;
   readonly providerId: string;
   readonly containerName: string;
   readonly limitBytes?: number;
@@ -126,10 +128,36 @@ export interface IDnsProvider {
   deleteRecord(input: DeleteDnsRecordInput): Promise<void>;
 }
 
+// ─── Image operations ───
+
+export interface ImageInfo {
+  readonly id: string;
+  readonly tags: readonly string[];
+  readonly created?: number | undefined;
+  readonly size?: number | undefined;
+  readonly architecture?: string | undefined;
+  readonly os?: string | undefined;
+  readonly layers?: number | undefined;
+}
+
+export interface IImageProvider {
+  /** Pull an image from a registry. Returns image info. */
+  pull(image: string): Promise<ImageInfo>;
+
+  /** List locally available images. */
+  list(): Promise<readonly ImageInfo[]>;
+
+  /** Inspect a single image by ID or tag. */
+  inspect(id: string): Promise<ImageInfo | null>;
+
+  /** Remove an image. */
+  remove(id: string): Promise<void>;
+}
+
 // ─── Metrics operations ───
 
 export interface FetchMetricsInput {
-  readonly region: string;
+  readonly region: RegionId;
   readonly providerId: string;
   readonly periodSeconds?: number;
   readonly startTime?: number;
@@ -145,6 +173,25 @@ export interface IMetricsProvider {
   fetchMetrics(input: FetchMetricsInput): Promise<FetchMetricsResult>;
 }
 
+// ─── Network policy (multi-tenant isolation) ───
+
+export interface NetworkRule {
+  readonly direction: 'ingress' | 'egress';
+  readonly protocol?: 'tcp' | 'udp' | undefined;
+  readonly port?: number | undefined;
+  readonly cidr?: string | undefined;
+  readonly action: 'allow' | 'deny';
+}
+
+export interface INetworkPolicyProvider {
+  /** Ensure an isolated network exists for a tenant. Returns network name/ID. */
+  ensureNetwork(tenantId: string): Promise<string>;
+  /** Remove a network when no longer needed. */
+  removeNetwork(networkId: string): Promise<void>;
+  /** Optionally apply ingress/egress rules to a network. */
+  applyRules?(networkId: string, rules: readonly NetworkRule[]): Promise<void>;
+}
+
 // ─── Provider capability declaration ───
 
 /** Each provider declares which optional capabilities it supports. */
@@ -157,10 +204,56 @@ export interface ProviderCapabilities {
   readonly maxRuntimeSeconds: number;
 }
 
+export interface ProviderEntry {
+  readonly name: string;
+  readonly container: IContainerProvider;
+  readonly image: IImageProvider;
+}
+
 export interface IProviderRegistry {
   readonly container: IContainerProvider;
   readonly dns: IDnsProvider;
   readonly metrics: IMetricsProvider;
+  readonly image: IImageProvider;
   readonly virtualNode?: IVirtualNode | undefined;
+  readonly networkPolicy?: INetworkPolicyProvider | undefined;
   readonly capabilities: ProviderCapabilities;
+
+  /** Get a provider by type name ('stub' | 'podman' | 'alibaba'). */
+  provider(name: string): ProviderEntry | undefined;
+
+  /** Get a credential account by logical name ('prod' | 'dev' | ...). */
+  account(name: string): ProviderEntry | undefined;
+
+  /** List all registered credential account names. */
+  listAccounts(): string[];
+
+  /** List all registered providers by type. */
+  availableProviders(): readonly ProviderEntry[];
+
+  /** S3: get a named S3 provider account. */
+  s3Account(name?: string): IS3Provider | undefined;
+
+  /** S3: list all S3 account names. */
+  listS3Accounts(): string[];
+}
+
+// ─── Container group operations (Pod-level abstraction) ───
+// Separate from IContainerProvider because creating a container group/pod
+// is fundamentally different from creating individual containers.
+// - Podman: uses libpod pods API (pod create → add containers → start pod)
+// - ECI:   uses ContainerGroup API natively (single request)
+
+export interface IContainerGroupProvider {
+  /** Create a container group (pod) from a multi-container spec. */
+  createGroup(input: CreateContainerGroupInput): Promise<{ providerId: string }>;
+
+  /** Delete a container group by provider ID. */
+  deleteGroup(providerId: string): Promise<void>;
+
+  /** Get detailed status of a container group. */
+  getGroupStatus(providerId: string): Promise<ContainerGroupRuntime | null>;
+
+  /** List container groups with optional filters. */
+  describeGroups(input: DescribeContainerGroupsInput): Promise<DescribeContainerGroupsResult>;
 }

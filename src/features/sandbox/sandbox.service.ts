@@ -3,6 +3,7 @@ import type { ILogWriter } from '../../core/logger/interfaces.ts';
 import type {
   IContainerProvider,
   IMetricsProvider,
+  IProviderRegistry,
   MetricSnapshot,
   ContainerGroupRuntime,
   OciContainerStatus,
@@ -25,17 +26,20 @@ import type {
   ISandboxService,
   ISandboxMetricsService,
   ISandboxLogService,
+  ContainerHealth,
   LogQueryOptions,
   MetricTimeRange,
 } from './interfaces.ts';
 import type { ContainerLogResult } from '../../core/provider/interfaces.ts';
 import { LogLevel } from '../../core/types.ts';
 import { createFacility, generateVersionId } from '../../core/brand.ts';
+import type { RegionId } from '../../core/region/types.ts';
+import { createRegionId } from '../../core/region/types.ts';
 import { AppError } from '../../core/types.ts';
 
 const FACILITY = createFacility('sandbox-service');
 const KEY_PREFIX = 'sandbox:';
-
+const INDEX_KEY = 'sandbox:ids';
 // ─── Service ───
 
 export class SandboxService implements ISandboxService {
@@ -43,7 +47,15 @@ export class SandboxService implements ISandboxService {
     private readonly atomic: IAtomicStore,
     private readonly logger: ILogWriter,
     private readonly containerProvider: IContainerProvider,
+    private readonly providerRegistry?: IProviderRegistry | undefined,
   ) {}
+
+  /** Resolve the container provider, picking the account-specific one if requested. */
+  #container(account?: string): IContainerProvider {
+    if (!account || !this.providerRegistry) return this.containerProvider;
+    const entry = this.providerRegistry.account(account);
+    return entry?.container ?? this.containerProvider;
+  }
 
   async provision(input: CreateSandboxInput, idempotencyKey?: string): Promise<Sandbox> {
     if (idempotencyKey) {
@@ -63,6 +75,7 @@ export class SandboxService implements ISandboxService {
       status: SandboxStatus.Scheduling,
       version: generateVersionId(),
       config: input,
+      ...(input.creatorId ? { creatorId: input.creatorId } : {}),
       network: {} as NetworkInfo,
       containers: [] as ContainerRuntime[],
       events: [] as ContainerEvent[],
@@ -71,9 +84,13 @@ export class SandboxService implements ISandboxService {
     const created = await this.atomic.set<Sandbox>(`${KEY_PREFIX}${id}`, initial, null);
     if (!created) throw new AppError(500, 'CREATE_FAILED', 'Failed to persist initial sandbox state');
 
+    // Add to sandbox ID index
+    const idx = await this.atomic.get<string[]>(INDEX_KEY);
+    await this.atomic.set(INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
+
     // 2. Build provider input and create cloud resource
     const providerInput = toContainerGroupInput(input);
-    const { providerId } = await this.containerProvider.create(providerInput);
+    const { providerId } = await this.#container(input.account).create(providerInput);
 
     // 3. Transition to Running with provider details (no redundant re-read: we just
     //    wrote `initial` with OCC create-only at line 71, so it's the current state).
@@ -94,7 +111,7 @@ export class SandboxService implements ISandboxService {
 
     await this.logger.logAsync({
       facility: FACILITY,
-      level: LogLevel.INFO,
+      level: LogLevel.NOTICE,
       message: 'Sandbox provisioned',
       metadata: { sandboxId: id as string, providerId, name: input.name },
     });
@@ -105,6 +122,35 @@ export class SandboxService implements ISandboxService {
   async getById(id: SandboxId): Promise<Sandbox | null> {
     const entry = await this.atomic.get<Sandbox>(`${KEY_PREFIX}${id}`);
     return entry?.value ?? null;
+  }
+
+  async list(status?: SandboxStatus, limit = 50, cursor?: string): Promise<{ items: Sandbox[]; nextCursor?: string }> {
+    const idx = await this.atomic.get<string[]>(INDEX_KEY);
+    if (!idx) return { items: [] };
+
+    let ids = idx.value;
+    // Apply cursor (array index)
+    const startIdx = cursor ? parseInt(cursor, 10) : 0;
+    if (isNaN(startIdx) || startIdx >= ids.length) return { items: [] };
+
+    ids = ids.slice(startIdx, startIdx + limit);
+
+    const entries = await Promise.all(
+      ids.map(id => this.atomic.get<Sandbox>(`${KEY_PREFIX}${id}`)),
+    );
+
+    let items = entries.filter(e => e !== null).map(e => e!.value);
+
+    // Optional status filter
+    if (status) {
+      items = items.filter(s => s.status === status);
+    }
+
+    const nextCursorVal = startIdx + limit < (idx?.value.length ?? 0)
+      ? String(startIdx + limit)
+      : undefined;
+
+    return { items, ...(nextCursorVal !== undefined ? { nextCursor: nextCursorVal } : {}) };
   }
 
   async stop(id: SandboxId): Promise<Sandbox> {
@@ -122,9 +168,13 @@ export class SandboxService implements ISandboxService {
 
     await this.transition(id, SandboxStatus.Deleted, 'user requested termination');
 
+    // Remove from sandbox ID index
+    const idx = await this.atomic.get<string[]>(INDEX_KEY);
+    if (idx) await this.atomic.set(INDEX_KEY, idx.value.filter((i: string) => i !== id), idx.version);
+
     await this.logger.logAsync({
       facility: FACILITY,
-      level: LogLevel.INFO,
+      level: LogLevel.NOTICE,
       message: 'Sandbox terminated',
       metadata: { sandboxId: id as string },
     });
@@ -148,6 +198,27 @@ export class SandboxService implements ISandboxService {
     return null;
   }
 
+  async getHealth(id: SandboxId): Promise<readonly ContainerHealth[]> {
+    let sandbox = await this.getById(id);
+    if (!sandbox) throw new AppError(404, 'SANDBOX_NOT_FOUND', `Sandbox ${id} not found`);
+
+    // Auto-sync if containers haven't been populated yet
+    if (sandbox.containers.length === 0 && sandbox.status === SandboxStatus.Running) {
+      try {
+        await this.syncRuntime(id);
+        sandbox = (await this.getById(id))!;
+      } catch { /* stale data is acceptable */ }
+    }
+
+    return sandbox!.containers.map(c => ({
+      containerName: c.name,
+      status: c.health?.status ?? (c.state.state === 'Running' ? 'healthy' : c.state.state === 'Waiting' ? 'starting' : 'none'),
+      ready: c.state.ready,
+      startedAt: c.state.startTime,
+      message: c.health?.message ?? c.state.message,
+    }));
+  }
+
   async syncRuntime(id: SandboxId): Promise<ContainerGroupRuntime> {
     // Single read — reuse its version for OCC at write time, avoiding a redundant
     // second read before the set() below.
@@ -157,7 +228,7 @@ export class SandboxService implements ISandboxService {
 
     const result = await this.containerProvider.describe({
       region: sandbox.config.region,
-      sandboxId: id,
+      sandboxId: sandbox.providerId ?? String(id),
     });
 
     const runtime = result.sandboxes[0];
@@ -214,7 +285,7 @@ export class SandboxService implements ISandboxService {
 
     await this.logger.logAsync({
       facility: FACILITY,
-      level: LogLevel.INFO,
+      level: LogLevel.NOTICE,
       message: `Sandbox ${from.status} → ${to}`,
       metadata: { sandboxId: id as string, fromStatus: from.status, toStatus: to, reason },
     });
@@ -228,7 +299,7 @@ export class SandboxService implements ISandboxService {
 export class SandboxMetricsService implements ISandboxMetricsService {
   constructor(
     private readonly metricsProvider: IMetricsProvider,
-    private readonly defaultRegion: string = 'unknown',
+    private readonly defaultRegion: RegionId = createRegionId('unknown'),
   ) {}
 
   async collect(sandboxId: SandboxId): Promise<readonly MetricSnapshot[]> {
@@ -249,7 +320,7 @@ export class SandboxMetricsService implements ISandboxMetricsService {
 export class SandboxLogService implements ISandboxLogService {
   constructor(
     private readonly containerProvider: IContainerProvider,
-    private readonly defaultRegion: string = 'unknown',
+    private readonly defaultRegion: RegionId = createRegionId('unknown'),
   ) {}
 
   async getLogs(
@@ -283,9 +354,16 @@ export function toContainerGroupInput(input: CreateSandboxInput): CreateContaine
       name: c.name,
       image: c.image,
       args: c.args,
+      env: c.env?.map(e => ({ name: e.name, value: e.value, valueFrom: e.valueFrom })),
       tty: c.tty,
       stdin: c.stdin,
       imagePullPolicy: c.imagePullPolicy,
+      resources: c.resources,
+      livenessProbe: c.livenessProbe,
+      readinessProbe: c.readinessProbe,
+      startupProbe: c.startupProbe,
+      ports: c.ports,
+      networkMode: c.networkMode,
       volumeMounts: c.volumeMounts?.map(vm => ({
         volumeId: String(vm.volumeId),
         mountPath: vm.mountPath,
@@ -297,7 +375,7 @@ export function toContainerGroupInput(input: CreateSandboxInput): CreateContaine
     volumes: input.volumes?.map(v => ({
       id: String(v.id),
       type: v.type,
-      nfs: v.nfs ? { server: v.nfs.server, path: v.nfs.path, readOnly: v.nfs.readOnly } : undefined,
+      options: v.nfs ? { server: v.nfs.server, path: v.nfs.path, readOnly: v.nfs.readOnly } : undefined,
     })),
     network: {
       subnetIds: input.network.subnetIds,
@@ -342,7 +420,7 @@ function runtimeToContainers(r: ContainerGroupRuntime): ContainerRuntime[] {
       state: ociStatusToContainerState(c.status),
       ready: c.status === 'running',
       restartCount: 0,
-      ...(c.startedAt !== undefined ? { startTime: c.startedAt } : {}),
+      ...(c.startedAt ? { startTime: c.startedAt } : {}),
     },
     volumeMounts: c.mounts.map(m => ({
       volumeId: undefined as never,
@@ -350,6 +428,7 @@ function runtimeToContainers(r: ContainerGroupRuntime): ContainerRuntime[] {
       readOnly: false,
       ...(m.options?.includes('ro') ? { readOnly: true } : {}),
     })),
+    health: { status: c.health.status, lastCheckedAt: c.health.lastCheckedAt, message: c.health.message },
   }));
 }
 

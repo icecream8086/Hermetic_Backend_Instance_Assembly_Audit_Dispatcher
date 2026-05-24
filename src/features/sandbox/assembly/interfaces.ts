@@ -28,3 +28,16 @@ export interface IAssemblyResolver {
   /** Resolve an assembly template by name to a full CreateSandboxInput. */
   resolve(assemblyName: string): Promise<ResolveResult>;
 }
+
+// ─── Infra container manager ───
+
+export interface IInfraManager {
+  /** Create an infra (pause) container for shared namespaces and return its provider ID. */
+  createInfra(podName: string, infraImage?: string): Promise<string>;
+
+  /** Remove an infra container by provider ID. */
+  removeInfra(infraId: string): Promise<void>;
+
+  /** Check whether the infra container is still alive. */
+  isInfraAlive(infraId: string): Promise<boolean>;
+}

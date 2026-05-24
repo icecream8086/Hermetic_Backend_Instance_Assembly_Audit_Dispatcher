@@ -5,6 +5,7 @@ import type {
   Tag,
 } from './base.ts';
 import type { EnvVar, ProbeSpec, ResourceRequirements } from '../../core/provider/types.ts';
+import type { RegionId } from '../../core/region/types.ts';
 
 // ─── Brand types ───
 declare const SANDBOX_ID_BRAND: unique symbol;
@@ -94,9 +95,16 @@ export interface ContainerConfig {
   readonly imagePullPolicy?: 'Always' | 'IfNotPresent' | 'Never';
   readonly resources?: ResourceRequirements;
   readonly volumeMounts?: readonly VolumeMount[];
-  readonly livenessProbe?: ProbeSpec;
-  readonly readinessProbe?: ProbeSpec;
-  readonly startupProbe?: ProbeSpec;
+  readonly ports?: readonly {
+    readonly containerPort: number;
+    readonly hostPort?: number | undefined;
+    readonly protocol?: string | undefined;
+  }[] | undefined;
+  readonly livenessProbe?: ProbeSpec | undefined;
+  readonly readinessProbe?: ProbeSpec | undefined;
+  readonly startupProbe?: ProbeSpec | undefined;
+  /** Network mode: 'bridge' | 'host' | 'none' | 'container:<name|id>'. */
+  readonly networkMode?: string | undefined;
   readonly providerOverrides?: Record<string, unknown>;
 }
 
@@ -120,6 +128,11 @@ export interface ContainerRuntime {
   readonly memory: number;
   readonly state: ContainerState;
   readonly volumeMounts: readonly VolumeMount[];
+  readonly health?: {
+    readonly status: string;
+    readonly lastCheckedAt?: string | undefined;
+    readonly message?: string | undefined;
+  } | undefined;
 }
 
 // ─── Network ───
@@ -177,10 +190,10 @@ export interface PodCondition {
 // ─── Network config (input) ───
 
 export interface SandboxNetworkConfig {
-  readonly subnetIds?: readonly string[];
-  readonly securityGroupId?: string;
+  readonly subnetIds?: readonly string[] | undefined;
+  readonly securityGroupId?: string | undefined;
   readonly allocatePublicIp: boolean;
-  readonly publicIpBandwidth?: number;
+  readonly publicIpBandwidth?: number | undefined;
 }
 
 // ─── Sandbox ───
@@ -188,7 +201,7 @@ export interface SandboxNetworkConfig {
 export interface CreateSandboxInput {
   readonly name: string;
   readonly description?: string;
-  readonly region: string;
+  readonly region: RegionId;
   readonly resourceSpec: ResourceSpec;
   readonly spotStrategy: SpotStrategy;
   readonly restartPolicy: 'Always' | 'OnFailure' | 'Never';
@@ -197,6 +210,11 @@ export interface CreateSandboxInput {
   readonly volumes?: readonly Volume[];
   readonly network: SandboxNetworkConfig;
   readonly tags?: readonly Tag[];
+  readonly account?: string | undefined;
+  /** Max consecutive health check failures before auto-terminate. -1 = never terminate. */
+  readonly healthMaxRetries?: number | undefined;
+  /** User who created this sandbox. */
+  readonly creatorId?: string | undefined;
   readonly providerOverrides?: Record<string, unknown>;
 }
 
