@@ -28,6 +28,7 @@ export function createUserRouter(userService: IUserService): Hono<{ Variables: A
   const router = new Hono<{ Variables: AppContext }>();
 
   // POST /api/users/register
+  // First registered user automatically becomes Root (single-user init mode).
   router.post('/register', async (c) => {
     const body: unknown = await c.req.json();
     const parsed = RegisterUserSchema.safeParse(body);
@@ -35,13 +36,24 @@ export function createUserRouter(userService: IUserService): Hono<{ Variables: A
       return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
     }
 
-    // Always force role to Viewer on self-registration — escalation to
-    // root/Operator must go through admin-only endpoints.
+    // First-registration gate: atomically claim the init flag.
+    // Only the first concurrent request succeeds — subsequent registrations
+    // are always Viewer.
+    const atomic = c.var.stores.atomic;
+    const initKey = '_sys:initialized';
+    const initEntry = await atomic.get<boolean>(initKey);
+    const isFirst = initEntry?.value !== true;
+    let role = UserRole.Viewer;
+    if (isFirst) {
+      const claimed = await atomic.set(initKey, true, null);
+      if (claimed) role = UserRole.Root;
+    }
+
     const { user, token } = await userService.register({
       email: parsed.data.email,
       password: parsed.data.password,
       name: parsed.data.name,
-      role: UserRole.Viewer,
+      role,
     });
 
     return c.json(ok(LoginResponseSchema.parse({ token, user: userToResponse(user) })), 201);
@@ -335,6 +347,18 @@ export const userRouteMeta: RouteMeta[] = [
     method: 'DELETE',
     path: '/:id/public-key',
     description: '清除用户 Ed25519 公钥',
+    responseDescription: '{ ok: true }',
+  },
+  {
+    method: 'GET',
+    path: '/sessions',
+    description: '列出当前用户的活跃 session。管理员可加 ?userId= 查看任意用户',
+    responseDescription: 'Session[] — token, tokenHint',
+  },
+  {
+    method: 'DELETE',
+    path: '/sessions/:token',
+    description: '吊销指定 session（从 store 删除 + 从用户索引移除）',
     responseDescription: '{ ok: true }',
   },
 ];

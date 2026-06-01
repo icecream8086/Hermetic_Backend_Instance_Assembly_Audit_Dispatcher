@@ -176,11 +176,21 @@ collect('Sandboxes', '/api/sandboxes', createSandboxRouter(stubSandboxSvc as any
 collect('Platforms', '/api/platforms', createPlatformsRouter(stubRegistry as any), platformsRouteMeta);
 
 // Manually-added routes
-routes.push({
-  method: 'POST', path: '/__become-wheel', tag: 'Dev',
-  meta: { method: 'POST', path: '/__become-wheel', description: 'Add user to simulate_wheel group (localhost only)', requestBody: { userId: 'uuid-here' }, responseDescription: '{ success, data }' },
-});
-tagSet.add('Dev');
+function addRoute(method: string, path: string, tag: string, meta?: RouteMeta) {
+  routes.push({ method, path, tag, meta });
+  tagSet.add(tag);
+}
+addRoute('POST', '/__become-wheel', 'Dev', { method: 'POST', path: '/__become-wheel', description: 'Add user to wheel group for full privileges (localhost only)', requestBody: { userId: 'uuid-here' }, responseDescription: '{ success, data }' });
+addRoute('POST', '/__tick', 'Dev', { method: 'POST', path: '/__tick', description: 'Manually trigger event loop tick', responseDescription: '{ ok, queueSize, processedCount, running }' });
+addRoute('POST', '/__admin/migrate-user-index', 'Dev', { method: 'POST', path: '/__admin/migrate-user-index', description: 'Rebuild sharded user index', requestBody: { ids: ['uuid-1'] }, responseDescription: '{ migrated: number }' });
+addRoute('GET', '/api/openapi.json', 'Public', { method: 'GET', path: '/api/openapi.json', description: 'OpenAPI 3.0 specification (no auth required)', responseDescription: 'OpenAPI 3.0 JSON' });
+addRoute('POST', '/api/events', 'Events', { method: 'POST', path: '/', description: 'Enqueue an event', requestBody: { type: 'my-event', payload: {} }, responseDescription: '{ id }' });
+addRoute('GET', '/api/events/loop/status', 'Events', { method: 'GET', path: '/loop/status', description: 'Event loop status', responseDescription: 'EventLoopStatus' });
+addRoute('POST', '/api/events/loop/start', 'Events', { method: 'POST', path: '/loop/start', description: 'Start event loop', responseDescription: '{ ok }' });
+addRoute('POST', '/api/events/loop/stop', 'Events', { method: 'POST', path: '/loop/stop', description: 'Stop event loop', responseDescription: '{ ok }' });
+addRoute('POST', '/api/events/loop/pause', 'Events', { method: 'POST', path: '/loop/pause', description: 'Pause event loop', responseDescription: '{ ok }' });
+addRoute('POST', '/api/events/loop/resume', 'Events', { method: 'POST', path: '/loop/resume', description: 'Resume event loop', responseDescription: '{ ok }' });
+addRoute('POST', '/api/events/loop/configure', 'Events', { method: 'POST', path: '/loop/configure', description: 'Reconfigure event loop', requestBody: { intervalMs: 5000 }, responseDescription: 'EventLoopConfig' });
 
 // ─── Convert routes to OpenAPI paths ───
 

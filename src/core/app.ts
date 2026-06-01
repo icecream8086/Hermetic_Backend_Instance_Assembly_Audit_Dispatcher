@@ -167,8 +167,10 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
         { name: 'perm.viewer', desc: 'Read-only', rules: [{ effect: 'allow', actions: ['read'], priority: 70 }] },
         { name: 'perm.auth', desc: 'Authentication only', rules: [{ effect: 'allow', actions: ['login'], resource: 'session', priority: 60 }, { effect: 'deny', actions: ['*'], resource: '*', priority: 50 }] },
       ];
+      const sysGroupIds: Record<string, string> = {};
       for (const g of sysGroups) {
         const id = `sysgrp_${crypto.randomUUID()}`;
+        sysGroupIds[g.name] = id;
         await stores.atomic.set('sysgroup:' + id, { id, name: g.name, description: g.desc, rules: g.rules, priority: g.rules[0]!.priority, dependsOn: [], createdAt: now, updatedAt: now }, null);
         const idx = await stores.atomic.get<string[]>('sysgroup:ids');
         await stores.atomic.set('sysgroup:ids', [...(idx?.value ?? []), id], idx?.version ?? null);
@@ -189,6 +191,31 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
         await stores.atomic.set('usergroup:' + id, { id, name: g.name, description: g.desc, memberIds: [], dependsOn: [], createdAt: now, updatedAt: now }, null);
         const ugIdx = await stores.atomic.get<string[]>('usergroup:ids');
         await stores.atomic.set('usergroup:ids', [...(ugIdx?.value ?? []), id], ugIdx?.version ?? null);
+        count++;
+      }
+
+      // Link user groups → system group rules via permission groups.
+      // This makes checkPermission() evaluate sysadmin/operator/viewer rules
+      // for members of wheel/root/users respectively.
+      const permGroupBindings: Array<{ userGroupName: string; sysGroupName: string }> = [
+        { userGroupName: 'wheel', sysGroupName: 'perm.sysadmin' },
+        { userGroupName: 'root', sysGroupName: 'perm.operator' },
+        { userGroupName: 'users', sysGroupName: 'perm.viewer' },
+      ];
+      for (const b of permGroupBindings) {
+        const sgEntry = await stores.atomic.get<any>('sysgroup:' + sysGroupIds[b.sysGroupName]);
+        if (!sgEntry) continue;
+        const ugId = userGroupIds[b.userGroupName];
+        if (!ugId) continue;
+        const pgId = `permgrp_${crypto.randomUUID()}`;
+        await stores.atomic.set('permgroup:' + pgId, {
+          id: pgId, name: b.sysGroupName,
+          rules: sgEntry.value.rules, userGroupIds: [ugId],
+          userIds: [], dependsOn: [],
+          createdAt: now, updatedAt: now,
+        }, null);
+        const pgIdx = await stores.atomic.get<string[]>('permgroup:ids');
+        await stores.atomic.set('permgroup:ids', [...(pgIdx?.value ?? []), pgId], pgIdx?.version ?? null);
         count++;
       }
 
@@ -274,7 +301,11 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
     await next();
   });
 
-  // 9. Dev-only: localhost → add any user to simulate_wheel group (bypasses auth)
+  // 9. Dev-only: localhost → add user to the seed 'wheel' group (bypasses auth)
+  // NOTE: This adds to wheel group ONLY. Does NOT elevate role to 'root'.
+  // The permission engine's checkRouteAccess requires DUAL verification:
+  //   wheel group membership AND role === 'root' (Linux sudo model).
+  // Role must come from first-user auto-promotion or be set by an existing root.
   app.post('/__become-wheel', async (c) => {
     const ip = c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ?? c.req.header('cf-connecting-ip');
     if (ip && ip !== '127.0.0.1' && ip !== '::1' && !ip.startsWith('::ffff:127.')) {
@@ -284,53 +315,49 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
     const { userId } = await c.req.json<{ userId: string }>();
     if (!userId) return c.json({ success: false, error: 'userId required' }, 400);
 
-    // Find or create simulate_wheel group
+    // Find the seed 'wheel' group
     const ugEntry = await atomic.get<string[]>('usergroup:ids');
-    let groupId: string | null = null;
+    let wheelGroupId: string | null = null;
     if (ugEntry) {
       for (const id of ugEntry.value) {
         const g = await atomic.get<any>('usergroup:' + id);
-        if (g?.value?.name === 'simulate_wheel') { groupId = id; break; }
+        if (g?.value?.name === 'wheel') { wheelGroupId = id; break; }
       }
     }
-    if (!groupId) {
-      groupId = `usergrp_${crypto.randomUUID()}`;
-      const now = Date.now();
-      await atomic.set('usergroup:' + groupId, { id: groupId, name: 'simulate_wheel', memberIds: [userId], createdAt: now, updatedAt: now }, null);
-      await atomic.set('usergroup:ids', [...(ugEntry?.value ?? []), groupId], ugEntry?.version ?? null);
-      for (const acl of [
-        { method: '*', pathPrefix: '/api', matchType: 'prefix', effect: 'allow', userGroupId: groupId, priority: 1000 },
-        { method: '*', pathPrefix: '/api', matchType: 'prefix', effect: 'allow', userId, priority: 999 },
-      ]) {
+
+    if (!wheelGroupId) {
+      return c.json({ success: false, error: 'wheel group not found — seed data may not have been initialized' }, 500);
+    }
+
+    const now = Date.now();
+    const gEntry = await atomic.get<any>('usergroup:' + wheelGroupId);
+    if (!gEntry) {
+      return c.json({ success: false, error: 'wheel group not found in store' }, 500);
+    }
+
+    // Add user to wheel group if not already a member
+    if (!gEntry.value.memberIds.includes(userId)) {
+      gEntry.value.memberIds.push(userId);
+      gEntry.value.updatedAt = now;
+      await atomic.set('usergroup:' + wheelGroupId, gEntry.value, gEntry.version);
+    }
+
+    // Ensure user-level route ACL exists
+    const raEntry = await atomic.get<string[]>('routeacl:ids');
+    if (raEntry) {
+      const hasUserAcl = raEntry.value.some(async (id) => {
+        const a = await atomic.get<any>('routeacl:' + id);
+        return a?.value?.userId === userId;
+      });
+      if (!hasUserAcl) {
         const aclId = `routeacl_${crypto.randomUUID()}`;
-        await atomic.set('routeacl:' + aclId, { id: aclId, ...acl, createdAt: now, updatedAt: now }, null);
-        const raEntry = await atomic.get<string[]>('routeacl:ids');
-        await atomic.set('routeacl:ids', [...(raEntry?.value ?? []), aclId], raEntry?.version ?? null);
-      }
-    } else {
-      // Group exists — add user if not already a member
-      const gEntry = await atomic.get<any>('usergroup:' + groupId);
-      if (gEntry && !gEntry.value.memberIds.includes(userId)) {
-        gEntry.value.memberIds.push(userId);
-        gEntry.value.updatedAt = Date.now();
-        await atomic.set('usergroup:' + groupId, gEntry.value, gEntry.version);
-      }
-      // Ensure user-level ACL exists
-      const raEntry = await atomic.get<string[]>('routeacl:ids');
-      if (raEntry) {
-        const hasUserAcl = raEntry.value.some(async (id) => {
-          const a = await atomic.get<any>('routeacl:' + id);
-          return a?.value?.userId === userId;
-        });
-        if (!hasUserAcl) {
-          const aclId = `routeacl_${crypto.randomUUID()}`;
-          await atomic.set('routeacl:' + aclId, { id: aclId, method: '*', pathPrefix: '/api', matchType: 'prefix', effect: 'allow', userId, priority: 999, createdAt: Date.now(), updatedAt: Date.now() }, null);
-          await atomic.set('routeacl:ids', [...raEntry.value, aclId], raEntry.version);
-        }
+        await atomic.set('routeacl:' + aclId, { id: aclId, method: '*', pathPrefix: '/api', matchType: 'prefix', effect: 'allow', userId, priority: 999, createdAt: now, updatedAt: now }, null);
+        await atomic.set('routeacl:ids', [...raEntry.value, aclId], raEntry.version);
       }
     }
-    console.log(`[${new Date().toISOString()}] INFO: [become-wheel] userId=${userId} added to simulate_wheel`);
-    return c.json({ success: true, data: { message: 'Added to simulate_wheel' } });
+
+    console.log(`[${new Date().toISOString()}] INFO: [become-wheel] userId=${userId} added to wheel group`);
+    return c.json({ success: true, data: { message: 'Added to wheel group — user now has elevated privileges' } });
   });
 
   // 10. Auth + route ACL middleware
@@ -348,6 +375,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
         '/api/users/login',
         '/api/users/login-info',
         '/api/users/no-password-login',
+        '/api/openapi.json',
       ],
     }));
   }

@@ -111,10 +111,37 @@ const stubRegistry: any = { availableProviders: () => [{ name: 'stub' }, { name:
 collect('plf', 'Plf', '/api/platforms', createPlatformsRouter(stubRegistry as any), () => true, platformsRouteMeta);
 
 // Manually-added routes (not in any feature router)
+// Dev-only
 routes.push({
   method: 'POST', path: '/__become-wheel', fileTag: 'auth', tag: 'Dev',
-  meta: { method: 'POST', path: '/__become-wheel', description: '将用户加入 simulate_wheel 组（仅 localhost，先 register 拿到 userId）', requestBody: { userId: 'uuid-here' }, responseDescription: '{ success, data }' },
+  meta: { method: 'POST', path: '/__become-wheel', description: '[DEV] 将用户加入 wheel 组获取完整权限（仅 localhost）', requestBody: { userId: 'uuid-here' }, responseDescription: '{ success, data }' },
 });
+routes.push({
+  method: 'POST', path: '/__tick', fileTag: 'events', tag: 'Dev',
+  meta: { method: 'POST', path: '/__tick', description: '[DEV] 手动触发事件循环 tick', responseDescription: '{ ok, queueSize, processedCount, running }' },
+});
+routes.push({
+  method: 'POST', path: '/__admin/migrate-user-index', fileTag: 'users', tag: 'Dev',
+  meta: { method: 'POST', path: '/__admin/migrate-user-index', description: '[DEV] 重建分片用户索引', requestBody: { ids: ['uuid-1', 'uuid-2'] }, responseDescription: '{ migrated: number }' },
+});
+// Public
+routes.push({
+  method: 'GET', path: '/api/openapi.json', fileTag: 'info', tag: 'Public',
+  meta: { method: 'GET', path: '/api/openapi.json', description: 'OpenAPI 3.0 规范（无需认证）', responseDescription: 'OpenAPI 3.0 JSON' },
+});
+// Event bus
+const eventMetas: RouteMeta[] = [
+  { method: 'POST', path: '/', description: '入队一个事件', requestBody: { type: 'my-event', payload: {} }, responseDescription: '{ id }' },
+  { method: 'GET', path: '/loop/status', description: '事件循环状态', responseDescription: 'EventLoopStatus' },
+  { method: 'POST', path: '/loop/start', description: '启动事件循环', responseDescription: '{ ok }' },
+  { method: 'POST', path: '/loop/stop', description: '停止事件循环', responseDescription: '{ ok }' },
+  { method: 'POST', path: '/loop/pause', description: '暂停事件循环', responseDescription: '{ ok }' },
+  { method: 'POST', path: '/loop/resume', description: '恢复事件循环', responseDescription: '{ ok }' },
+  { method: 'POST', path: '/loop/configure', description: '重新配置事件循环', requestBody: { intervalMs: 5000 }, responseDescription: 'EventLoopConfig' },
+];
+for (const m of eventMetas) {
+  routes.push({ method: m.method, path: `/api/events${m.path}`, fileTag: 'events', tag: 'Events', meta: m });
+}
 
 // ─── Generate .http files ───
 
@@ -122,7 +149,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const httpDir = resolve(__dirname, '..', 'http');
 mkdirSync(httpDir, { recursive: true });
 
-const fileTagOrder = ['info', 'auth', 'sysgrp', 'tpl', 'img', 'sbx', 'plf', 'perm', 'audit', 'users'];
+const fileTagOrder = ['info', 'auth', 'sysgrp', 'tpl', 'img', 'sbx', 'plf', 'perm', 'audit', 'users', 'events'];
 const fileTagTitle: Record<string, string> = {
   info: 'Info',
   auth: 'Auth',
@@ -134,6 +161,7 @@ const fileTagTitle: Record<string, string> = {
   perm: 'Perm',
   audit: 'Audit',
   users: 'Users',
+  events: 'Events',
 };
 
 for (const ft of fileTagOrder) {

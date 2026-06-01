@@ -24,6 +24,7 @@ export const LoginPolicySchema = z.object({
   enabled: z.boolean(),
   timeRanges: z.array(LoginTimeRangeSchema).default([]),
   allowedCIDRs: z.array(z.string()).default([]),
+  passwordLoginDisabled: z.boolean().optional(),
 });
 
 export const PublicKeySchema = z.string().regex(/^[A-Za-z0-9+/]{43}=?$/, 'Invalid Ed25519 public key (base64, 32 bytes)');

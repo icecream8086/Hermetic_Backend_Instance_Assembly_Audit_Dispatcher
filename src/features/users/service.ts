@@ -59,7 +59,7 @@ function encodeToBuffer(input: string): ArrayBuffer {
   return buffer;
 }
 
-async function hashPassword(password: string): Promise<string> {
+export async function hashPassword(password: string): Promise<string> {
   return measure('PBKDF2 hash', async () => {
     const salt = new Uint8Array(crypto.getRandomValues(new Uint8Array(SALT_LENGTH)));
     const key = await crypto.subtle.importKey('raw', encodeToBuffer(password), 'PBKDF2', false, ['deriveBits']);
@@ -290,6 +290,10 @@ export class UserService implements IUserService {
       if (!policy.enabled) {
         recordAttempt(email, false, ip);
         throw new AppError(403, 'LOGIN_DISABLED', 'Login disabled for this account');
+      }
+      if (policy.passwordLoginDisabled) {
+        recordAttempt(email, false, ip);
+        throw new AppError(403, 'PASSWORD_LOGIN_DISABLED', 'Password login disabled for this account — use key-based authentication');
       }
       if (policy.timeRanges.length) {
         const now = new Date();
@@ -557,7 +561,8 @@ export class UserService implements IUserService {
     if (!entry) return { exists: false, methods: [] };
 
     const user = entry.value;
-    const methods: ('password' | 'no-password')[] = ['password'];
+    const methods: ('password' | 'no-password')[] = [];
+    if (!user.loginPolicy?.passwordLoginDisabled) methods.push('password');
     if (user.publicKeyEd25519) methods.push('no-password');
 
     const policy = user.loginPolicy;

@@ -73,6 +73,8 @@ export interface LoginPolicy {
   timeRanges: LoginTimeRange[];
   /** CIDR whitelist, empty = no restriction */
   allowedCIDRs: string[];
+  /** true = disable password login, require key-based (no-password) auth */
+  passwordLoginDisabled?: boolean | undefined;
 }
 
 /** Runtime context passed into login() for policy evaluation. */

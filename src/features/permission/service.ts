@@ -523,7 +523,11 @@ export class PermissionService implements IPermissionService {
       .map(g => g.id);
     const userGroupIds = this.#resolveDag(allGroups, directGroupIds);
 
-    // Dual-check: wheel group access requires Admin role (Linux sudo model)
+    // Dual-check: wheel group access requires role === 'root' (like Linux sudo: wheel group + sudoer).
+    // Being in the wheel group alone is NOT sufficient — the user role must also be 'root'.
+    // This prevents privilege escalation via group membership manipulation.
+    // __become-wheel only adds to wheel group; role must be 'root' from registration
+    // (first-registered-user auto-promotion) or explicitly set by a root user.
     const wheelGroupIds = allGroups.filter(g => g.name === 'wheel').map(g => g.id);
     const isWheel = wheelGroupIds.some(wgId => userGroupIds.includes(wgId as any));
     let wheelElevated = false;

@@ -10,20 +10,30 @@ interface RawInspect {
   Architecture?: string; Os?: string; RootFS?: { Layers?: string[] };
 }
 
+/**
+ * Podman image provider. When the Podman daemon is unreachable, list()
+ * returns [] and other methods return null / no-op instead of throwing,
+ * so the API returns empty results rather than 502 errors.
+ */
 export class PodmanImageProvider implements IImageProvider {
-  private ep: string;
-  constructor(endpoint?: string) { this.ep = endpoint ?? ENDPOINT; }
+  readonly #ep: string;
+
+  constructor(endpoint?: string) {
+    this.#ep = endpoint ?? ENDPOINT;
+  }
 
   async pull(image: string): Promise<ImageInfo> {
     const [name, tag] = image.includes(':') ? image.split(':') : [image, 'latest'];
-    const resp = await fetch(`${this.ep}/images/create?fromImage=${encodeURIComponent(name!)}&tag=${encodeURIComponent(tag!)}`, { method: 'POST' });
+    const resp = await this.#fetch(`${this.#ep}/images/create?fromImage=${encodeURIComponent(name!)}&tag=${encodeURIComponent(tag!)}`, { method: 'POST' });
+    if (!resp) throw new Error('Podman daemon unreachable');
     if (!resp.ok) throw new Error(`Podman pull failed (${resp.status}): ${await resp.text().catch(() => '')}`);
     return this.inspect(image).then(r => r!);
   }
 
   async list(): Promise<readonly ImageInfo[]> {
-    const resp = await fetch(`${this.ep}/images/json`);
-    if (!resp.ok) throw new Error(`Podman list failed: ${resp.status}`);
+    const resp = await this.#fetch(`${this.#ep}/images/json`);
+    if (!resp) return [];
+    if (!resp.ok) return [];
     const list: RawImage[] = await resp.json();
     return list.map(i => ({
       id: i.Id, tags: i.RepoTags ?? [],
@@ -32,9 +42,10 @@ export class PodmanImageProvider implements IImageProvider {
   }
 
   async inspect(id: string): Promise<ImageInfo | null> {
-    const resp = await fetch(`${this.ep}/images/${encodeURIComponent(id)}/json`);
+    const resp = await this.#fetch(`${this.#ep}/images/${encodeURIComponent(id)}/json`);
+    if (!resp) return null;
     if (resp.status === 404) return null;
-    if (!resp.ok) throw new Error(`Podman inspect failed: ${resp.status}`);
+    if (!resp.ok) return null;
     const info: RawInspect = await resp.json();
     return {
       id: info.Id, tags: info.RepoTags ?? [],
@@ -46,8 +57,18 @@ export class PodmanImageProvider implements IImageProvider {
   }
 
   async remove(id: string): Promise<void> {
-    const resp = await fetch(`${this.ep}/images/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    const resp = await this.#fetch(`${this.#ep}/images/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!resp) return;
     if (resp.status === 404) return;
     if (!resp.ok) throw new Error(`Podman remove failed: ${resp.status}`);
+  }
+
+  /** Fetch with connection error protection. Returns null when Podman is down. */
+  async #fetch(url: string, init?: RequestInit): Promise<Response | null> {
+    try {
+      return await fetch(url, init);
+    } catch {
+      return null;
+    }
   }
 }

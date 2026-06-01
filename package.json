@@ -10,7 +10,7 @@
     "pretypecheck": "npm run generate",
     "predeploy": "npm run generate",
     "dev": "tsx watch src/dev.ts",
-    "dev:worker": "wrangler dev",
+    "dev:worker": "wrangler dev --log-level debug",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
