@@ -1,8 +1,8 @@
 {
   "name": "nginx-demo",
-  "description": "Nginx demo running on Podman (local WSL)",
-  "spec": {
-    "provider": "podman",
+  "description": "Nginx demo running on Podman (local WSL) — bash /dev/tcp health check",
+
+  "container": {
     "region": "local",
     "containers": [
       {
@@ -13,17 +13,40 @@
         ],
         "resources": {
           "limits": { "cpu": 0.5, "memory": 128 }
-        },
-        "readinessProbe": {
-          "tcpSocket": { "port": 80 },
-          "periodSeconds": 5,
-          "initialDelaySeconds": 2
         }
       }
     ],
-    "network": {
-      "allocatePublicIp": false
-    },
     "restartPolicy": "Always"
+  },
+
+  "healthChecks": [
+    {
+      "name": "nginx-liveness",
+      "target": "container:nginx",
+      "type": "liveness",
+      "probe": { "exec": { "command": ["/bin/bash", "-c", "exec 3<>/dev/tcp/localhost/8080 || exit 1"] } },
+      "initialDelaySeconds": 10,
+      "periodSeconds": 15,
+      "timeoutSeconds": 5,
+      "failureThreshold": 3
+    },
+    {
+      "name": "nginx-readiness",
+      "target": "container:nginx",
+      "type": "readiness",
+      "probe": { "exec": { "command": ["/bin/bash", "-c", "exec 3<>/dev/tcp/localhost/8080 || exit 1"] } },
+      "periodSeconds": 5,
+      "initialDelaySeconds": 2
+    }
+  ],
+
+  "network": {
+    "publicIp": { "allocate": false }
+  },
+
+  "extensions": {
+    "providerOverrides": {
+      "podman": { "capAdd": ["SYS_PTRACE"] }
+    }
   }
 }

@@ -77,6 +77,17 @@ export interface AuthzConfig {
   enabled: boolean;
 }
 
+export interface CorsConfig {
+  /** Comma-separated allowed origins (default: 'http://localhost:8086'). */
+  origins: string[];
+}
+
+/** Audit backend selection. */
+export interface AuditConfig {
+  /** Which audit backend to use. */
+  backend: 'kv' | 'workers' | 'none' | 'local';
+}
+
 export interface AppConfig {
   storage: StorageConfig;
   log: LogConfig;
@@ -88,4 +99,7 @@ export interface AppConfig {
   };
   features: Record<string, boolean>;
   authz?: AuthzConfig | undefined;
+  cors?: CorsConfig | undefined;
+  /** Audit backend config — defaults to 'local' in dev, 'workers' in production. */
+  audit?: AuditConfig | undefined;
 }

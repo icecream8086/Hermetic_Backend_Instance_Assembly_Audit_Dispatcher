@@ -1,4 +1,4 @@
-import type { IImageProvider, ImageInfo } from '../../core/provider/interfaces.ts';
+import type { IImageProvider, ImageInfo, ListImagesOptions } from '../../core/provider/interfaces.ts';
 import { rpcCall } from './eci-signer.ts';
 
 /** Parse an image reference like "registry:5000/repo:tag" into name and tag. */
@@ -53,11 +53,15 @@ export class AlibabaEciImageProvider implements IImageProvider {
     };
   }
 
-  async list(): Promise<readonly ImageInfo[]> {
+  async list(options?: ListImagesOptions): Promise<readonly ImageInfo[]> {
     try {
-      const resp = await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret, 'DescribeImageCaches', {
+      const params: Record<string, string | undefined> = {
         RegionId: this.region,
-      });
+      };
+      if (options?.limit) params['MaxResults'] = String(options.limit);
+      // Note: Alibaba uses NextToken for offset-style pagination. For simplicity
+      // here we pass limit only. Full next-token iteration would require state.
+      const resp = await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret, 'DescribeImageCaches', params);
       const caches: any[] = resp.ImageCaches ?? [];
       return caches.map((c: any) => ({
         id: c.ImageCacheId ?? '',

@@ -22,6 +22,7 @@ export class AlibabaOssProvider implements IS3Provider {
   readonly #accessKeySecret: string;
   readonly #endpoint: string;
   readonly #config: S3ProviderConfig;
+  #clockOffset = 0; // ms to add to Date.now() for clock skew compensation
 
   constructor(
     accessKeyId: string,
@@ -36,33 +37,63 @@ export class AlibabaOssProvider implements IS3Provider {
     this.#config = config ?? {};
   }
 
+  #signingDate(): string {
+    return new Date(Date.now() + this.#clockOffset).toUTCString();
+  }
+
+  /** Extract server time from Date header on any response to calibrate clock offset. */
+  #calibrateFromResponse(res: Response): void {
+    const dateHeader = res.headers.get('date');
+    if (dateHeader) {
+      const serverTs = new Date(dateHeader).getTime();
+      if (!isNaN(serverTs)) {
+        this.#clockOffset = serverTs - Date.now();
+      }
+    }
+  }
+
   #bucket(bucket: string): string {
     return this.#config.bucketNameMapping?.[bucket] ?? bucket;
   }
 
+  async #signedFetch(url: string, method: string, resource: string, body?: BodyInit, extraHeaders?: Record<string, string>): Promise<Response> {
+    for (let attempt = 0; attempt <= 2; attempt++) {
+      const date = this.#signingDate();
+      const contentType = extraHeaders?.['Content-Type'] ?? '';
+      const contentMD5 = '';
+      const stringToSign = `${method}\n${contentMD5}\n${contentType}\n${date}\n${resource}`;
+      const auth = `OSS ${this.#accessKeyId}:${await hmacSha1Base64(this.#accessKeySecret, stringToSign)}`;
+
+      const headers: Record<string, string> = { Authorization: auth, Date: date, ...extraHeaders };
+      if (contentType) headers['Content-Type'] = contentType;
+      const res = await fetch(url, { method, headers, ...(body !== undefined ? { body } : {}) });
+
+      if (res.ok || res.status === 404) {
+        this.#calibrateFromResponse(res);
+        return res;
+      }
+
+      // On 403, try to calibrate from error response and retry once
+      if (res.status === 403 && attempt < 2) {
+        this.#calibrateFromResponse(res);
+        continue;
+      }
+
+      throw new Error(`OSS ${method} failed: ${res.status} ${await res.text()}`);
+    }
+    throw new Error(`OSS ${method} failed after retries`);
+  }
+
   async putObject(input: S3PutObjectInput): Promise<{ etag: string }> {
     const bodyBuf = await toArrayBuffer(input.body);
-    const contentType = input.contentType ?? 'application/octet-stream';
-    const date = new Date().toUTCString();
     const bucket = this.#bucket(input.bucket);
     const resource = `/${bucket}/${encodeKey(input.key)}`;
-
-    const stringToSign = `PUT\n\n${contentType}\n${date}\n${resource}`;
-    const auth = `OSS ${this.#accessKeyId}:${await hmacSha1Base64(this.#accessKeySecret, stringToSign)}`;
-
     const url = `${this.#endpoint}${resource}`;
-    const res = await fetch(url, {
-      method: 'PUT',
-      headers: {
-        Authorization: auth,
-        'Content-Type': contentType,
-        Date: date,
-        ...(input.cacheControl ? { 'Cache-Control': input.cacheControl } : {}),
-      },
-      body: bodyBuf,
-    });
+    const extraHeaders: Record<string, string> = {};
+    extraHeaders['Content-Type'] = input.contentType ?? 'application/octet-stream';
+    if (input.cacheControl) extraHeaders['Cache-Control'] = input.cacheControl;
 
-    if (!res.ok) throw new Error(`OSS putObject failed: ${res.status} ${await res.text()}`);
+    const res = await this.#signedFetch(url, 'PUT', resource, bodyBuf, extraHeaders);
     return { etag: (res.headers.get('etag') ?? '').replace(/"/g, '') };
   }
 
@@ -72,12 +103,9 @@ export class AlibabaOssProvider implements IS3Provider {
 
   async deleteObject(bucket: string, key: string): Promise<void> {
     const resource = `/${this.#bucket(bucket)}/${encodeKey(key)}`;
-    const date = new Date().toUTCString();
-    const auth = `OSS ${this.#accessKeyId}:${await hmacSha1Base64(this.#accessKeySecret, `DELETE\n\n\n${date}\n${resource}`)}`;
-
     const url = `${this.#endpoint}${resource}`;
-    const res = await fetch(url, { method: 'DELETE', headers: { Authorization: auth, Date: date } });
-    if (!res.ok && res.status !== 204 && res.status !== 404) {
+    const res = await this.#signedFetch(url, 'DELETE', resource);
+    if (res.status !== 204 && res.status !== 404) {
       throw new Error(`OSS deleteObject failed: ${res.status} ${await res.text()}`);
     }
   }
@@ -85,13 +113,9 @@ export class AlibabaOssProvider implements IS3Provider {
   async headObject(bucket: string, key: string): Promise<S3ObjectInfo | null> {
     try {
       const resource = `/${this.#bucket(bucket)}/${encodeKey(key)}`;
-      const date = new Date().toUTCString();
-      const auth = `OSS ${this.#accessKeyId}:${await hmacSha1Base64(this.#accessKeySecret, `HEAD\n\n\n${date}\n${resource}`)}`;
-
       const url = `${this.#endpoint}${resource}`;
-      const res = await fetch(url, { method: 'HEAD', headers: { Authorization: auth, Date: date } });
+      const res = await this.#signedFetch(url, 'HEAD', resource);
       if (res.status === 404) return null;
-      if (!res.ok) throw new Error(`OSS headObject failed: ${res.status}`);
       return parseObjectInfo(key, res);
     } catch {
       return null;
@@ -109,29 +133,21 @@ export class AlibabaOssProvider implements IS3Provider {
 
     const queryString = qs.toString();
     const resource = `/${this.#bucket(bucket)}${queryString ? `?${queryString}` : ''}`;
-    const date = new Date().toUTCString();
-    const auth = `OSS ${this.#accessKeyId}:${await hmacSha1Base64(this.#accessKeySecret, `GET\n\n\n${date}\n${resource}`)}`;
-
     const url = `${this.#endpoint}/${this.#bucket(bucket)}${queryString ? `?${queryString}` : ''}`;
-    const headers: Record<string, string> = { Authorization: auth, Date: date };
+    const extraHeaders: Record<string, string> = {};
     if (options?.continuationToken) {
-      headers['x-oss-continuation-token'] = options.continuationToken;
+      extraHeaders['x-oss-continuation-token'] = options.continuationToken;
     }
 
-    const res = await fetch(url, { headers });
-    if (!res.ok) throw new Error(`OSS listObjects failed: ${res.status} ${await res.text()}`);
+    const res = await this.#signedFetch(url, 'GET', resource, undefined, extraHeaders);
     return parseListResult(await res.text());
   }
 
   async #fetchObject(method: string, bucket: string, key: string): Promise<S3GetObjectResult | null> {
     const resource = `/${this.#bucket(bucket)}/${encodeKey(key)}`;
-    const date = new Date().toUTCString();
-    const auth = `OSS ${this.#accessKeyId}:${await hmacSha1Base64(this.#accessKeySecret, `${method}\n\n\n${date}\n${resource}`)}`;
-
     const url = `${this.#endpoint}${resource}`;
-    const res = await fetch(url, { method, headers: { Authorization: auth, Date: date } });
+    const res = await this.#signedFetch(url, method, resource);
     if (res.status === 404) return null;
-    if (!res.ok) throw new Error(`OSS ${method} failed: ${res.status} ${await res.text()}`);
 
     return {
       body: res.body!,

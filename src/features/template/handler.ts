@@ -4,20 +4,22 @@ import type { RouteMeta } from '../../core/http-docs/types.ts';
 import { ok, fail } from '../../core/response.ts';
 import type { AppContext } from '../../core/app.ts';
 import type { ISandboxService } from '../sandbox/interfaces.ts';
-import type { SandboxTemplate, CreateTemplateInput, UpdateTemplateInput, TemplateSpec, TemplateContainer } from './types.ts';
+import type { SandboxTemplate, CreateTemplateInput, UpdateTemplateInput } from './types.ts';
+import { KernLevel } from '../../core/audit/kern-level.ts';
 import { TemplateVisibility } from './types.ts';
 import type { IProviderRegistry } from '../../core/provider/interfaces.ts';
 import { applyTemplate } from './applicator.ts';
 import { SandboxService } from '../sandbox/sandbox.service.ts';
 import { ConsoleLogger } from '../../core/logger/console-logger.ts';
+import { SandboxStatus } from '../sandbox/types.ts';
 
 type PermissionCheckFn = { check(params: { userId: string; action: string; resource: string; ip?: string }): Promise<{ allowed: boolean; reason: string }> };
 
-async function requirePerm(c: any, checker: PermissionCheckFn | undefined, action: string, resource: string): Promise<Response | null> {
+async function requirePerm(c: any, checker: PermissionCheckFn | undefined, action: string, resource: string, resourceOwnerId?: string): Promise<Response | null> {
   if (!checker) return null;
   const user = (c as any).var?.currentUser;
   if (!user) return null;
-  const result = await checker.check({ userId: user.id, action, resource });
+  const result = await checker.check({ userId: user.id, action, resource, ...(resourceOwnerId ? { resourceOwnerId } : {}) });
   if (!result.allowed) return c.json(fail('FORBIDDEN', result.reason), 403);
   return null;
 }
@@ -30,17 +32,6 @@ function genId(): string { return `tpl_${crypto.randomUUID()}`; }
 /** Check if the current user has root-level privileges. */
 function isUserRoot(user: { role?: string } | undefined): boolean {
   return user?.role === 'root' || user?.role === 'Operator' || user?.role === 'wheel';
-}
-
-/**
- * For non-root users: replace all liveness probes with a safe TCP probe.
- */
-function enforceSafeProbes(containers: readonly TemplateContainer[] | undefined): readonly TemplateContainer[] | undefined {
-  if (!containers) return undefined;
-  return containers.map((c: any) => ({
-    ...c,
-    livenessProbe: { tcpSocket: { port: c.ports?.[0]?.containerPort ?? 80 }, periodSeconds: 30, failureThreshold: 3 },
-  }));
 }
 
 // ─── DAG resolver ───
@@ -68,8 +59,10 @@ function deepMerge(parent: any, child: any): any {
   if (!child) return parent;
   const out = { ...parent };
   for (const k of Object.keys(child)) {
-    if (k === 'containers' || k === 'initContainers' || k === 'storage') {
+    if (k === 'containers' || k === 'initContainers') {
       out[k] = mergeByName(out[k], child[k]);
+    } else if (k === 'healthChecks') {
+      out[k] = mergeHealthChecks(out[k], child[k]);
     } else if (typeof child[k] === 'object' && child[k] !== null && !Array.isArray(child[k]) && typeof parent[k] === 'object' && parent[k] !== null) {
       out[k] = deepMerge(parent[k], child[k]);
     } else {
@@ -92,17 +85,40 @@ function mergeByName(parent: any[] | undefined, child: any[] | undefined): any[]
   return [...map.values()];
 }
 
+/** Merge health checks by target+name — same target+name = merge fields. */
+function mergeHealthChecks(parent: any[] | undefined, child: any[] | undefined): any[] {
+  if (!child) return parent ?? [];
+  if (!parent) return child;
+  const keyFn = (h: any) => `${h.target}:${h.name}`;
+  const map = new Map<string, any>();
+  for (const h of parent) map.set(keyFn(h), h);
+  for (const h of child) {
+    const k = keyFn(h);
+    const existing = map.get(k);
+    if (existing) map.set(k, deepMerge(existing, h));
+    else map.set(k, h);
+  }
+  return [...map.values()];
+}
+
 async function resolveTemplate(atomic: IAtomicStore, id: string): Promise<SandboxTemplate> {
   const all = await listAll(atomic);
   const tpl = all.find(t => t.id === id);
   if (!tpl) throw Object.assign(new Error('Template not found'), { status: 404 });
 
+  // chain = [parent, child, ...] (root first — child overrides parent)
   const chain = resolveDag(all, [id]).reverse();
-  let mergedSpec: TemplateSpec = {} as TemplateSpec;
+  let merged: any = {};
   for (const t of chain) {
-    mergedSpec = deepMerge(mergedSpec, t.spec) as TemplateSpec;
+    merged = deepMerge(merged, {
+      ...(t.container ? { container: t.container } : {}),
+      ...(t.healthChecks ? { healthChecks: t.healthChecks } : {}),
+      ...(t.network ? { network: t.network } : {}),
+      ...(t.extensions ? { extensions: t.extensions } : {}),
+    });
   }
-  return { ...tpl, spec: mergedSpec };
+  // Keep original metadata, merge runtime fields
+  return { ...tpl, ...merged } as SandboxTemplate;
 }
 
 async function listAll(atomic: IAtomicStore): Promise<SandboxTemplate[]> {
@@ -113,76 +129,117 @@ async function listAll(atomic: IAtomicStore): Promise<SandboxTemplate[]> {
 }
 
 // ─── Instance limit enforcement ───
+// Lock key uses template name (hash) — renaming the template = different lock.
+// Inherited templates must redeclare their own instanceLimit (not merged by DAG).
+// Counts actual Running sandboxes by scanning the sandbox index.
 
-/** Counter key for total instances of a template. */
-function countKey(tplId: string): string { return `tpl:cnt:${tplId}`; }
-/** Counter key for per-user instances of a template. */
-function userCountKey(tplId: string, userId: string): string { return `tpl:cnt:${tplId}:${userId}`; }
-/** Binding key for domain+port claim. */
-function bindingKey(domain: string, port: number): string { return `tpl:bind:${domain}:${port}`; }
+/** Lock key based on template name (hash for atomic store key safety). */
+function lockKey(tplName: string, suffix = ''): string {
+  let h = 5381;
+  for (let i = 0; i < tplName.length; i++) h = ((h << 5) + h) + tplName.charCodeAt(i);
+  return `tpl:lock:${Math.abs(h).toString(36)}${suffix}`;
+}
 
-/**
- * Check and claim an instance slot for a template.
- * Throws an HTTP-like error (with `status` property) if the limit is exceeded.
- * On success, increments the relevant counters.
- */
+const SANDBOX_INDEX_KEY = 'sandbox:ids';
+const SANDBOX_PREFIX = 'sandbox:';
+
+/** Sandbox statuses that are considered "live" — count against the limit. */
+const LIVE_STATUSES: string[] = [
+  SandboxStatus.Pending,
+  SandboxStatus.Scheduling,
+  SandboxStatus.Running,
+  SandboxStatus.Stopped,       // Stopped can be restarted
+  SandboxStatus.Terminated,    // Terminated still has provider resources
+];
+
+/** Count running sandboxes for a given template name. */
+async function countRunningForTemplate(atomic: IAtomicStore, tplName: string): Promise<number> {
+  const idx = await atomic.get<string[]>(SANDBOX_INDEX_KEY);
+  if (!idx) return 0;
+  let count = 0;
+  for (const sid of idx.value) {
+    const entry = await atomic.get<any>(SANDBOX_PREFIX + sid);
+    if (entry?.value?.name === tplName && LIVE_STATUSES.includes(entry.value.status)) {
+      count++;
+    }
+  }
+  return count;
+}
+
 async function claimInstanceSlot(
   atomic: IAtomicStore,
   tpl: SandboxTemplate,
   userId: string,
 ): Promise<void> {
-  const limit = tpl.spec.instanceLimit;
-  if (!limit) return; // no limit = always allowed
-
-  const { type, max } = limit;
-
-  if (type === 'fixed') {
-    // Fixed: only one instance ever. Check the binary marker.
-    const key = countKey(tpl.id);
-    const entry = await atomic.get<number>(key);
-    if (entry && entry.value >= max) {
-      const err: any = new Error(`Template "${tpl.name}" is fixed to ${max} instance(s) — already used`);
+  // singleton mode → acts as instanceLimit { type: 'fixed', max: 1 }
+  if (tpl.singleton) {
+    const runningCount = await countRunningForTemplate(atomic, tpl.name);
+    if (runningCount >= 1) {
+      const err: any = new Error(`Template "${tpl.name}" is singleton — only 1 instance allowed at a time (${runningCount} running)`);
       err.status = 429;
       throw err;
     }
+    const key = lockKey(tpl.name);
+    const entry = await atomic.get<number>(key);
     await atomic.set(key, (entry?.value ?? 0) + 1, entry?.version ?? null);
     return;
   }
 
-  if (type === 'perSystem') {
-    const key = countKey(tpl.id);
-    const entry = await atomic.get<number>(key);
-    if (entry && entry.value >= max) {
-      const err: any = new Error(`Template "${tpl.name}" system limit of ${max} reached`);
+  const limit = tpl.instanceLimit;
+  if (!limit) return;
+
+  const { type, max } = limit;
+  const baseKey = lockKey(tpl.name);
+  const userKey = lockKey(tpl.name, ':' + userId);
+
+  // Check actual running count first (always run to ensure consistency)
+  const runningCount = await countRunningForTemplate(atomic, tpl.name);
+
+  if (type === 'fixed' || type === 'perSystem') {
+    if (runningCount >= max) {
+      const err: any = new Error(`Template "${tpl.name}" has ${runningCount} running instance(s) — limit is ${max}`);
       err.status = 429;
       throw err;
     }
-    await atomic.set(key, (entry?.value ?? 0) + 1, entry?.version ?? null);
+    // Atomic counter for OCC across concurrent requests
+    const entry = await atomic.get<number>(baseKey);
+    await atomic.set(baseKey, (entry?.value ?? 0) + 1, entry?.version ?? null);
     return;
   }
 
   if (type === 'perUser') {
-    const key = userCountKey(tpl.id, userId);
-    const entry = await atomic.get<number>(key);
-    if (entry && entry.value >= max) {
-      const err: any = new Error(`Template "${tpl.name}" per-user limit of ${max} reached`);
+    // Count only this user's running sandboxes for this template
+    const idx = await atomic.get<string[]>(SANDBOX_INDEX_KEY);
+    let userCount = 0;
+    if (idx) {
+      for (const sid of idx.value) {
+        const entry = await atomic.get<any>(SANDBOX_PREFIX + sid);
+        if (entry?.value?.name === tpl.name
+            && LIVE_STATUSES.includes(entry.value.status)
+            && entry.value.config?.creatorId === userId) {
+          userCount++;
+        }
+      }
+    }
+    if (userCount >= max) {
+      const err: any = new Error(`Template "${tpl.name}" per-user limit of ${max} reached (${userCount} running)`);
       err.status = 429;
       throw err;
     }
-    await atomic.set(key, (entry?.value ?? 0) + 1, entry?.version ?? null);
+    // Atomic counter for OCC
+    const entry = await atomic.get<number>(userKey);
+    await atomic.set(userKey, (entry?.value ?? 0) + 1, entry?.version ?? null);
     return;
   }
 }
 
-/**
- * Claim a resource binding (domain:port) — prevents two users from binding
- * the same domain+port.
- */
+function bindingKey(domain: string, port: number): string { return `tpl:bind:${domain}:${port}`; }
+
 async function claimResourceBinding(
   atomic: IAtomicStore,
   tpl: SandboxTemplate,
 ): Promise<void> {
-  const binding = tpl.spec.resourceBinding;
+  const binding = tpl.resourceBinding;
   if (!binding?.domain || !binding.port) return;
 
   const key = bindingKey(binding.domain, binding.port);
@@ -195,13 +252,10 @@ async function claimResourceBinding(
   await atomic.set(key, tpl.id, null);
 }
 
-// ─── Visibility check ───
-
-/** Check if the current user can access (view/apply) a template. */
 function canAccessTemplate(tpl: SandboxTemplate, user: { id: string; role?: string } | undefined): boolean {
-  if (isUserRoot(user)) return true; // root can see everything
-  if (!tpl.spec.visibility || tpl.spec.visibility === TemplateVisibility.PUBLIC) return true;
-  if (tpl.spec.visibility === TemplateVisibility.PRIVATE) {
+  if (isUserRoot(user)) return true;
+  if (!tpl.visibility || tpl.visibility === TemplateVisibility.PUBLIC) return true;
+  if (tpl.visibility === TemplateVisibility.PRIVATE) {
     return tpl.creatorId === user?.id;
   }
   return true;
@@ -215,12 +269,18 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
   // POST / — create a template
   router.post('/', async (c) => {
     { const r = await requirePerm(c, permissionChecker, 'create', 'template'); if (r) return r; }
-    const body = await c.req.json() as CreateTemplateInput;
-    if (!body.name || !body.spec) return c.json(fail('VALIDATION_ERROR', 'name and spec required'), 400);
+    const body: CreateTemplateInput = await c.req.json();
+    if (!body.name) return c.json(fail('VALIDATION_ERROR', 'name is required'), 400);
 
     const user = (c as any).var?.currentUser as { id: string; role?: string } | undefined;
-    if (!isUserRoot(user) && body.spec.containers) {
-      body.spec = { ...body.spec, containers: enforceSafeProbes(body.spec.containers) as any };
+    if (!isUserRoot(user) && body.healthChecks) {
+      // Non-root users cannot set liveness checks — force safe defaults
+      body.healthChecks = body.healthChecks.filter(h => h.type !== 'liveness');
+    }
+
+    // Mutex: singleton and instanceLimit cannot both be set
+    if (body.singleton && body.instanceLimit) {
+      return c.json(fail('VALIDATION_ERROR', 'singleton and instanceLimit are mutually exclusive'), 400);
     }
 
     const now = Date.now();
@@ -228,24 +288,50 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
       id: genId(),
       name: body.name,
       description: body.description,
-      spec: body.spec as TemplateSpec,
+      apiVersion: body.apiVersion ?? 'hbi-aad/v1',
+      kind: body.kind ?? 'Container',
+      metadata: body.metadata,
       dependsOn: body.dependsOn,
       creatorId: user?.id,
       createdAt: now,
       updatedAt: now,
+      visibility: undefined,
+      singleton: body.singleton,
+      instanceLimit: body.instanceLimit,
+      resourceBinding: body.resourceBinding,
+      container: body.container,
+      healthChecks: body.healthChecks,
+      network: body.network,
+      extensions: body.extensions,
     };
     await atomic.set(PREFIX + tpl.id, tpl, null);
     const idx = await atomic.get<string[]>(INDEX_KEY);
     await atomic.set(INDEX_KEY, [...(idx?.value ?? []), tpl.id], idx?.version ?? null);
+    c.var.audit?.write({
+      level: KernLevel.NOTICE,
+      facility: 'template',
+      message: `Template created — ${tpl.name}`,
+      metadata: { eventType: 'template.created', templateId: tpl.id, actorId: user?.id },
+    });
     return c.json(ok(tpl), 201);
   });
 
-  // GET / — list all templates (filtered by visibility)
+  // GET / — list all templates (paginated, filtered by visibility)
   router.get('/', async (c) => {
     const user = (c as any).var?.currentUser as { id: string; role?: string } | undefined;
-    const all = await listAll(atomic);
-    const visible = user ? all.filter(t => canAccessTemplate(t, user)) : all;
-    return c.json(ok(visible));
+    const page = parseInt(c.req.query('page') ?? '') || 1;
+    const limit = parseInt(c.req.query('limit') ?? '') || 50;
+    const idx = await atomic.get<string[]>(INDEX_KEY);
+    const allIds = idx?.value ?? [];
+
+    const entries = await Promise.all(allIds.map(id => atomic.get<SandboxTemplate>(PREFIX + id)));
+    let visible = entries.filter(e => e).map(e => e!.value);
+    if (user) visible = visible.filter(t => canAccessTemplate(t, user));
+
+    const total = visible.length;
+    const start = (page - 1) * limit;
+    const items = visible.slice(start, start + limit);
+    return c.json(ok({ items, total, page, limit }));
   });
 
   // GET /:id — get a template (raw, unresolved)
@@ -282,22 +368,15 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
 
       const user = (c as any).var?.currentUser as { id: string; role?: string } | undefined;
 
-      // Visibility check
       if (!canAccessTemplate(resolved, user)) {
         return c.json(fail('TEMPLATE_NOT_FOUND', 'Template not found'), 404);
       }
 
-      // Instance limit check
       await claimInstanceSlot(atomic, resolved, user?.id ?? 'anonymous');
       await claimResourceBinding(atomic, resolved);
 
-      // Non-root users: force safe probes
-      let spec = resolved.spec;
-      if (!isUserRoot(user) && spec.containers) {
-        spec = { ...spec, containers: enforceSafeProbes(spec.containers) as any };
-      }
-
-      const providerName = body.provider ?? spec.provider;
+      // Provider selection: body.provider overrides template providerOverrides
+      const providerName = body.provider;
       let svc = sandboxService;
       if (providerName && providers) {
         const entry = providers.provider(providerName);
@@ -306,47 +385,79 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
       }
       if (!svc) return c.json(fail('SERVICE_UNAVAILABLE', 'Sandbox service not available'), 503);
 
-      const input = applyTemplate({ ...resolved, spec }, body.name, body.region);
+      const input = applyTemplate(resolved, body.name, body.region);
       const sandbox = await svc.provision(
         user?.id ? { ...input, creatorId: user.id } : input,
       );
+      c.var.audit?.write({
+        level: KernLevel.NOTICE,
+        facility: 'template',
+        message: `Template applied — ${resolved.name} → sandbox ${sandbox.id}`,
+        metadata: { eventType: 'template.applied', templateId: resolved.id, sandboxId: sandbox.id, actorId: user?.id },
+      });
       return c.json(ok(sandbox), 201);
     } catch (e: any) {
+      console.error(`[debug] template apply failed:`, { message: e.message, stack: e.stack, status: e.status, templateId: c.req.param('id') });
       return c.json(fail(e.status === 404 ? 'TEMPLATE_NOT_FOUND' : 'APPLY_FAILED', e.message), e.status ?? 500);
     }
   });
 
   // PUT /:id — update a template
   router.put('/:id', async (c) => {
-    { const r = await requirePerm(c, permissionChecker, 'update', 'template'); if (r) return r; }
     const entry = await atomic.get<SandboxTemplate>(PREFIX + c.req.param('id'));
     if (!entry) return c.json(fail('TEMPLATE_NOT_FOUND', 'Template not found'), 404);
-    const body = await c.req.json() as UpdateTemplateInput;
+    { const r = await requirePerm(c, permissionChecker, 'update', 'template', entry.value.creatorId); if (r) return r; }
+    const body: UpdateTemplateInput = await c.req.json();
 
-    const user = (c as any).var?.currentUser as { id: string; role?: string } | undefined;
-    if (!isUserRoot(user) && body.spec?.containers) {
-      body.spec = { ...body.spec, containers: enforceSafeProbes(body.spec.containers) as any };
+    // Mutex: singleton and instanceLimit cannot both be set
+    if (body.singleton && body.instanceLimit) {
+      return c.json(fail('VALIDATION_ERROR', 'singleton and instanceLimit are mutually exclusive'), 400);
     }
+
     const updated: SandboxTemplate = {
       ...entry.value,
       ...(body.name !== undefined ? { name: body.name } : {}),
       ...(body.description !== undefined ? { description: body.description ?? undefined } : {}),
-      ...(body.spec !== undefined ? { spec: body.spec as TemplateSpec } : {}),
+      ...(body.metadata !== undefined ? { metadata: body.metadata } : {}),
+      ...(body.singleton !== undefined ? { singleton: body.singleton } : {}),
+      ...(body.instanceLimit !== undefined ? { instanceLimit: body.instanceLimit ?? undefined } : {}),
+      ...(body.resourceBinding !== undefined ? { resourceBinding: body.resourceBinding ?? undefined } : {}),
+      ...(body.container !== undefined ? { container: body.container } : {}),
+      ...(body.healthChecks !== undefined ? { healthChecks: body.healthChecks } : {}),
+      ...(body.network !== undefined ? { network: body.network } : {}),
+      ...(body.extensions !== undefined ? { extensions: body.extensions } : {}),
       ...(body.dependsOn !== undefined ? { dependsOn: body.dependsOn ?? [] } : {}),
       updatedAt: Date.now(),
     };
     await atomic.set(PREFIX + updated.id, updated, entry.version);
+    const user = (c as any).var?.currentUser as { id: string; role?: string } | undefined;
+    c.var.audit?.write({
+      level: KernLevel.INFO,
+      facility: 'template',
+      message: `Template updated — ${updated.name}`,
+      metadata: { eventType: 'template.updated', templateId: updated.id, actorId: user?.id },
+    });
     return c.json(ok(updated));
   });
 
   // DELETE /:id — delete a template
   router.delete('/:id', async (c) => {
-    { const r = await requirePerm(c, permissionChecker, 'delete', 'template'); if (r) return r; }
     const entry = await atomic.get<SandboxTemplate>(PREFIX + c.req.param('id'));
     if (!entry) return c.json(fail('TEMPLATE_NOT_FOUND', 'Template not found'), 404);
+    if (entry.value.name === 'nginx' && !entry.value.creatorId) {
+      return c.json(fail('MAC_DENIED', 'Cannot delete seed template "nginx" — protected by system policy'), 403);
+    }
+    { const r = await requirePerm(c, permissionChecker, 'delete', 'template', entry.value.creatorId); if (r) return r; }
+    const user = (c as any).var?.currentUser as { id: string; role?: string } | undefined;
     await atomic.set(PREFIX + c.req.param('id'), null, entry.version);
     const idx = await atomic.get<string[]>(INDEX_KEY);
     if (idx) await atomic.set(INDEX_KEY, idx.value.filter((i: string) => i !== c.req.param('id')), idx.version);
+    c.var.audit?.write({
+      level: KernLevel.WARNING,
+      facility: 'template',
+      message: `Template deleted — ${entry.value.name}`,
+      metadata: { eventType: 'template.deleted', templateId: c.req.param('id'), actorId: user?.id },
+    });
     return c.json(ok(null));
   });
 
@@ -354,11 +465,11 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
 }
 
 export const templateRouteMeta: RouteMeta[] = [
-  { method: 'POST', path: '/', description: '创建沙箱模板 — visibility 控制可见性，instanceLimit 控制实例上限', requestBody: { name: 'mc-server', spec: { region: 'cn-hangzhou', containers: [{ name: 'app', image: 'nginx' }], visibility: 'private', instanceLimit: { type: 'perUser', max: 3 } } }, responseDescription: 'SandboxTemplate' },
+  { method: 'POST', path: '/', description: '创建沙箱模板 — container 定义无状态容器，healthChecks 独立配置健康检查，providerOverrides 传递厂商特有参数，instanceLimit 设置实例数量限制', requestBody: { name: 'mc-server', container: { region: 'cn-hangzhou', containers: [{ name: 'app', image: 'nginx' }] }, instanceLimit: { type: 'fixed', max: 1 } }, responseDescription: 'SandboxTemplate' },
   { method: 'GET', path: '/', description: '列出所有模板（按 visibility 过滤 — private 模板仅创建者可见）', responseDescription: 'SandboxTemplate[]' },
   { method: 'GET', path: '/:id', description: '按 ID 获取模板', responseDescription: 'SandboxTemplate' },
   { method: 'GET', path: '/:id/resolved', description: '获取模板解析结果 — 合并 DAG 继承链后完整的 spec', responseDescription: 'SandboxTemplate' },
-  { method: 'POST', path: '/:id/apply', description: '应用模板创建沙箱 — 检查 visibility、instanceLimit、resourceBinding（domain:port 排他）', requestBody: { name: 'my-sandbox' }, responseDescription: 'Sandbox' },
+  { method: 'POST', path: '/:id/apply', description: '应用模板创建沙箱 — 检查 visibility、instanceLimit（基于模板名的实时运行计数锁）、resourceBinding（domain:port 排他）', requestBody: { name: 'my-sandbox' }, responseDescription: 'Sandbox' },
   { method: 'PUT', path: '/:id', description: '更新模板', requestBody: { name: 'updated-name' }, responseDescription: 'SandboxTemplate' },
   { method: 'DELETE', path: '/:id', description: '删除模板', responseDescription: '{ ok: true }' },
 ];

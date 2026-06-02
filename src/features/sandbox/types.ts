@@ -34,7 +34,7 @@ export enum SandboxStatus {
 
 export const VALID_TRANSITIONS: Readonly<Record<SandboxStatus, readonly SandboxStatus[]>> = {
   [SandboxStatus.Pending]: [SandboxStatus.Scheduling, SandboxStatus.Running, SandboxStatus.Failed, SandboxStatus.Deleted],
-  [SandboxStatus.Scheduling]: [SandboxStatus.Running, SandboxStatus.Failed],
+  [SandboxStatus.Scheduling]: [SandboxStatus.Running, SandboxStatus.Failed, SandboxStatus.Deleted],
   [SandboxStatus.Running]: [SandboxStatus.Stopped, SandboxStatus.Terminated, SandboxStatus.Deleted],
   [SandboxStatus.Stopped]: [SandboxStatus.Running, SandboxStatus.Terminated, SandboxStatus.Deleted],
   [SandboxStatus.Terminated]: [SandboxStatus.Deleted],
@@ -88,6 +88,7 @@ export interface VolumeMount {
 export interface ContainerConfig {
   readonly name: string;
   readonly image: string;
+  readonly command?: readonly string[];
   readonly args?: readonly string[];
   readonly env?: readonly EnvVar[];
   readonly tty?: boolean;

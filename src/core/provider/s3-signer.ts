@@ -123,6 +123,20 @@ export async function payloadHash(body: BufferSource | string): Promise<string> 
 }
 
 /**
+ * Extract the server timestamp from an AWS S3 XML error response.
+ * AWS returns a <ServerTime> element inside the <Error> body for
+ * RequestTimeTooSkewed errors. Returns null if no server time is found.
+ */
+export function extractServerTimeFromError(body: string): Date | null {
+  const match = body.match(/<ServerTime>(.+?)<\/ServerTime>/);
+  if (match) {
+    const d = new Date(match[1]!);
+    if (!isNaN(d.getTime())) return d;
+  }
+  return null;
+}
+
+/**
  * Generate a presigned URL for S3-compatible services using SigV4 query-string auth.
  *
  * The returned URL includes all required `X-Amz-*` query parameters and the
@@ -136,6 +150,10 @@ export async function signPresignedUrl(
   service: string,
   expiresInSeconds: number,
   now: Date,
+  /** The endpoint hostname used for both signing and the final URL.
+   *  Must match the actual S3-compatible service endpoint (e.g. "s3.us-east-1.amazonaws.com",
+   *  "my-bucket.account.r2.cloudflarestorage.com", "192.168.1.100:9000"). */
+  hostname: string,
 ): Promise<URL> {
   const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '');
   const dateStamp = amzDate.slice(0, 8);
@@ -155,8 +173,9 @@ export async function signPresignedUrl(
 
   const canonicalQueryString = params.toString();
 
-  // Canonical request with host-only signed headers
-  const hostname = new URL(`https://s3.${region}.amazonaws.com`).hostname;
+  // Canonical request with host-only signed headers — signed host MUST match
+  // the actual endpoint the client will connect to, otherwise the service
+  // rejects the signature. Caller passes the correct hostname.
   const canonicalRequest = [
     method,
     canonicalUri,
@@ -176,7 +195,7 @@ export async function signPresignedUrl(
 
   params.set('X-Amz-Signature', signature);
 
-  const url = new URL(`https://s3.${region}.amazonaws.com${canonicalUri}`);
+  const url = new URL(`https://${hostname}${canonicalUri}`);
   url.search = params.toString();
   return url;
 }

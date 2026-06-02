@@ -22,20 +22,20 @@ let parentId: string;
 let childId: string;
 
 describe('Template DAG inheritance', () => {
-  it('create parent template with base spec', async () => {
+  it('create parent template with base container spec', async () => {
     await spec()
       .post('/api/templates/')
       .withJson({
         name: 'base-nginx',
-        spec: {
+        container: {
           region: 'cn-hangzhou',
           containers: [
             { name: 'nginx', image: 'nginx:latest', ports: [{ containerPort: 80 }] },
             { name: 'sidecar', image: 'busybox', command: ['sleep', '3600'] },
           ],
-          network: { allocatePublicIp: true },
           restartPolicy: 'Always',
         },
+        network: { publicIp: { allocate: true } },
       })
       .expectStatus(201)
       .expect((ctx) => { parentId = ctx.res.body?.data?.id; });
@@ -47,7 +47,7 @@ describe('Template DAG inheritance', () => {
       .withJson({
         name: 'custom-nginx',
         dependsOn: [parentId],
-        spec: {
+        container: {
           region: 'us-west-1',
           containers: [
             { name: 'nginx', image: 'nginx:alpine', resources: { limits: { cpu: 2, memory: 1024 } } },
@@ -64,17 +64,20 @@ describe('Template DAG inheritance', () => {
       .get(`/api/templates/${childId}/resolved`)
       .expectStatus(200)
       .expect((ctx) => {
-        const spec = ctx.res.body?.data?.spec;
-        if (!spec) throw new Error('No spec');
+        const data = ctx.res.body?.data;
+        if (!data) throw new Error('No data');
+
+        const container = data.container;
+        if (!container) throw new Error('No container block');
 
         // Child overrides region
-        if (spec.region !== 'us-west-1') throw new Error(`Expected us-west-1, got ${spec.region}`);
+        if (container.region !== 'us-west-1') throw new Error(`Expected us-west-1, got ${container.region}`);
 
         // restartPolicy inherited from parent
-        if (spec.restartPolicy !== 'Always') throw new Error('restartPolicy should be inherited');
+        if (container.restartPolicy !== 'Always') throw new Error('restartPolicy should be inherited');
 
         // Containers merged by name: nginx from child, sidecar from parent
-        const containers = spec.containers;
+        const containers = container.containers;
         if (!containers || containers.length !== 3) throw new Error(`Expected 3 containers, got ${containers?.length}`);
 
         const nginx = containers.find((c: any) => c.name === 'nginx');
@@ -89,6 +92,9 @@ describe('Template DAG inheritance', () => {
         const logger = containers.find((c: any) => c.name === 'logger');
         if (!logger) throw new Error('logger container missing (from child)');
         if (logger.env?.[0]?.value !== 'custom.conf') throw new Error('logger env should be from child');
+
+        // network inherited from parent
+        if (!data.network?.publicIp?.allocate) throw new Error('network.publicIp.allocate should be inherited from parent');
       });
   });
 
@@ -107,7 +113,7 @@ describe('deepMerge by-name container merging', () => {
       .withJson({
         name: 'grandchild',
         dependsOn: [childId],
-        spec: {
+        container: {
           containers: [
             { name: 'nginx', env: [{ name: 'NGINX_HOST', value: 'example.com' }] },
           ],
@@ -121,15 +127,17 @@ describe('deepMerge by-name container merging', () => {
       .get(`/api/templates/${grandchildId}/resolved`)
       .expectStatus(200)
       .expect((ctx) => {
-        const spec = ctx.res.body?.data?.spec;
-        if (!spec) throw new Error('No spec');
+        const data = ctx.res.body?.data;
+        if (!data) throw new Error('No data');
 
-        const containers = spec.containers;
+        const container = data.container;
+        if (!container) throw new Error('No container block');
+
+        const containers = container.containers;
         if (!containers || containers.length !== 3) throw new Error(`Expected 3 containers, got ${containers?.length}`);
 
         const nginx = containers.find((c: any) => c.name === 'nginx');
         if (!nginx) throw new Error('nginx missing');
-        // Three levels of merge: parent's ports, child's image, grandchild's env
         if (nginx.image !== 'nginx:alpine') throw new Error('image should be from child');
         const env = nginx.env?.find?.((e: any) => e.name === 'NGINX_HOST');
         if (!env || env.value !== 'example.com') throw new Error('env should be from grandchild');

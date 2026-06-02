@@ -8,7 +8,7 @@ import type { IProviderRegistry } from '../../core/provider/interfaces.ts';
 function createSandboxService(deps: FeatureDeps, providers: IProviderRegistry, providerName?: string): SandboxService {
   const entry = providerName ? providers.provider(providerName) : undefined;
   const container = entry?.container ?? providers.container;
-  return new SandboxService(deps.stores.atomic, new ConsoleLogger(), container);
+  return new SandboxService(deps.stores.atomic, new ConsoleLogger(), container, undefined, undefined, deps.audit);
 }
 
 export function createRouter(deps: FeatureDeps): Hono<any> {

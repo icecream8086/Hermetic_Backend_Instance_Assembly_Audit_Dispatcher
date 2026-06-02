@@ -51,6 +51,9 @@ export class AlibabaEciContainerProvider implements IContainerProvider {
       const idx = `Container.${i + 1}`;
       params[`${idx}.Name`] = c.name;
       params[`${idx}.Image`] = c.image;
+      if (c.command?.length) {
+        params[`${idx}.Command`] = c.command.join(' ');
+      }
       if (c.args?.length) {
         params[`${idx}.Args`] = c.args.join(' ');
       }

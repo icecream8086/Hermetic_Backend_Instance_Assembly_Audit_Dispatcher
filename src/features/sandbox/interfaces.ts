@@ -30,7 +30,7 @@ export interface ISandboxService {
   stop(id: SandboxId): Promise<Sandbox>;
 
   /** Destroy a sandbox and release all provider resources. */
-  terminate(id: SandboxId): Promise<void>;
+  terminate(id: SandboxId, actorId?: string): Promise<void>;
 
   /** Force a state transition (admin use only). */
   forceTransition(id: SandboxId, to: SandboxStatus, reason: string): Promise<Sandbox>;

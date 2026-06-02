@@ -9,6 +9,7 @@ import { createRouter as templateRouter } from './template/index.ts';
 import { createRouter as imageRouter } from './image/index.ts';
 import { createRouter as sandboxRouter } from './sandbox/index.ts';
 import { createRouter as platformsRouter } from './platforms/index.ts';
+import { createRouter as networkRouter } from './network/index.ts';
 
 import type { FeatureDeps } from '../core/app.ts';
 import type { Hono } from 'hono';
@@ -27,5 +28,6 @@ export function getFeatures(): RegisteredFeature[] {
   { path: '/api/templates', mount: (deps) => templateRouter(deps) },
   { path: '/api/images', mount: (deps) => imageRouter(deps) },
   { path: '/api/sandboxes', mount: (deps) => sandboxRouter(deps) },
-  { path: '/api/platforms', mount: (deps) => platformsRouter(deps) },  ];
+  { path: '/api/platforms', mount: (deps) => platformsRouter(deps) },
+  { path: '/api/networks', mount: (deps) => networkRouter(deps) },  ];
 }

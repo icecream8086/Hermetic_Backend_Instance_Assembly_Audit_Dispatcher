@@ -1,4 +1,5 @@
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
+import { TransactConflictError } from '../../core/store/interfaces.ts';
 import { AppError } from '../../core/types.ts';
 
 export interface PaginatedResult<T> {
@@ -50,14 +51,42 @@ export class CrudStore<T extends { id: string }> {
   async delete(id: string): Promise<T> {
     const entry = await this.atomic.get<T>(this.prefix + id);
     if (!entry) throw new AppError(404, this.notFoundCode, `${this.notFoundCode}: ${id}`);
-    await this.atomic.set(this.prefix + id, null, entry.version);
-    await this.#removeFromIndex(id);
+    // Atomically remove entity + update index
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        await this.atomic.transact(async (txn) => {
+          const e = await txn.get<T>(this.prefix + id);
+          if (!e) throw new AppError(404, this.notFoundCode, `${this.notFoundCode}: ${id}`);
+          const idx = await txn.get<string[]>(this.indexKey);
+          if (idx) txn.set(this.indexKey, idx.filter((i: string) => i !== id));
+          txn.set(this.prefix + id, null);
+        });
+        break;
+      } catch (err) {
+        if (err instanceof TransactConflictError && attempt < 2) continue;
+        throw err;
+      }
+    }
     return entry.value;
   }
 
   async insert(entity: T): Promise<void> {
-    await this.atomic.set(this.prefix + entity.id, entity, null);
-    await this.#addToIndex(entity.id);
+    // Atomically create entity + update index
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        await this.atomic.transact(async (txn) => {
+          const existing = await txn.get<T>(this.prefix + entity.id);
+          if (existing) throw new AppError(409, 'CONFLICT', `${this.notFoundCode}: id ${entity.id} already exists`);
+          const idx = await txn.get<string[]>(this.indexKey);
+          txn.set(this.indexKey, [...(idx ?? []), entity.id]);
+          txn.set(this.prefix + entity.id, entity);
+        });
+        break;
+      } catch (err) {
+        if (err instanceof TransactConflictError && attempt < 2) continue;
+        throw err;
+      }
+    }
   }
 
   async commitUpdate(id: string, updated: T, expectedVersion: string): Promise<void> {
@@ -83,23 +112,4 @@ export class CrudStore<T extends { id: string }> {
       .map(e => e.value);
   }
 
-  async #addToIndex(id: string): Promise<void> {
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const entry = await this.atomic.get<string[]>(this.indexKey);
-      const ids = entry?.value ?? [];
-      ids.push(id);
-      const ver = await this.atomic.set(this.indexKey, ids, entry?.version ?? null);
-      if (ver) return;
-    }
-  }
-
-  async #removeFromIndex(id: string): Promise<void> {
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const entry = await this.atomic.get<string[]>(this.indexKey);
-      if (!entry) return;
-      const ids = entry.value.filter((i: string) => i !== id);
-      const ver = await this.atomic.set(this.indexKey, ids, entry.version);
-      if (ver) return;
-    }
-  }
 }

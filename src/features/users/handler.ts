@@ -8,9 +8,24 @@ import type { UserResponse } from './schema.ts';
 import { createUserId, createSessionToken, UserRole } from './types.ts';
 import { ok, fail } from '../../core/response.ts';
 
+// ─── Avatar constants ───
+const AVATAR_MAX_SIZE = 1048576; // 1 MB
+const AVATAR_META_PREFIX = 'avatar:meta:';
+const AVATAR_BLOB_PREFIX = 'avatar:';
+const ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+
+/** Minimal magic-byte detection for uploaded images. */
+function detectImageType(buf: Uint8Array): string | null {
+  if (buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) return 'image/jpeg';
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47) return 'image/png';
+  if (buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46) return 'image/webp'; // RIFF header
+  if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) return 'image/gif';
+  return null;
+}
+
 // ─── Response helpers ───
 
-function userToResponse(user: { id: string; email: string; name: string; role: UserRole; createdAt: number; updatedAt: number; privateKeyEd25519?: string }): UserResponse {
+function userToResponse(user: { id: string; email: string; name: string; role: UserRole; createdAt: number; updatedAt: number }): UserResponse {
   return UserResponseSchema.parse({
     id: user.id,
     email: user.email,
@@ -18,7 +33,6 @@ function userToResponse(user: { id: string; email: string; name: string; role: U
     role: user.role,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
-    privateKeyEd25519: user.privateKeyEd25519 ?? '',
   });
 }
 
@@ -105,21 +119,22 @@ export function createUserRouter(userService: IUserService): Hono<{ Variables: A
 
     // Construct input with all properties present (EOPT-safe)
     const data = parsed.data;
+    const actorId = (c as any).var?.currentUser?.id;
     const user = await userService.update(id, {
       name: data.name,
       password: data.password,
       role: data.role,
       loginPolicy: data.loginPolicy,
       publicKeyEd25519: data.publicKeyEd25519,
-      privateKeyEd25519: data.privateKeyEd25519,
-    });
+    }, actorId);
     return c.json(ok(userToResponse(user)));
   });
 
   // DELETE /api/users/:id
   router.delete('/:id', async (c) => {
     const id = createUserId(c.req.param('id'));
-    await userService.delete(id);
+    const actorId = (c as any).var?.currentUser?.id;
+    await userService.delete(id, actorId);
     return c.json(ok(null));
   });
 
@@ -141,8 +156,10 @@ export function createUserRouter(userService: IUserService): Hono<{ Variables: A
 
   // GET /api/users
   router.get('/', async (c) => {
-    const users = await userService.list();
-    return c.json(ok(users.map(userToResponse)));
+    const page = parseInt(c.req.query('page') ?? '') || 1;
+    const limit = parseInt(c.req.query('limit') ?? '') || 50;
+    const { items, total } = await userService.listPaginated(page, limit);
+    return c.json(ok({ items: items.map(userToResponse), total, page, limit }));
   });
 
   // ─── Login policy CRUD ───
@@ -163,14 +180,15 @@ export function createUserRouter(userService: IUserService): Hono<{ Variables: A
     const user = await userService.update(id, {
       name: undefined, password: undefined, role: undefined,
       loginPolicy: parsed.data,
-      publicKeyEd25519: undefined, privateKeyEd25519: undefined,
+      publicKeyEd25519: undefined,
     });
     return c.json(ok(user.loginPolicy ?? null));
   });
 
   router.delete('/:id/login-policy', async (c) => {
     const id = createUserId(c.req.param('id'));
-    await userService.clearLoginPolicy(id);
+    const actorId = (c as any).var?.currentUser?.id;
+    await userService.clearLoginPolicy(id, actorId);
     return c.json(ok(null));
   });
 
@@ -191,14 +209,96 @@ export function createUserRouter(userService: IUserService): Hono<{ Variables: A
     }
     const user = await userService.update(id, {
       name: undefined, password: undefined, role: undefined,
-      loginPolicy: undefined, publicKeyEd25519: parsed.data.publicKey, privateKeyEd25519: undefined,
+      loginPolicy: undefined, publicKeyEd25519: parsed.data.publicKey,
     });
     return c.json(ok(user.publicKeyEd25519 ?? null));
   });
 
   router.delete('/:id/public-key', async (c) => {
     const id = createUserId(c.req.param('id'));
-    await userService.clearPublicKey(id);
+    const actorId = (c as any).var?.currentUser?.id;
+    await userService.clearPublicKey(id, actorId);
+    return c.json(ok(null));
+  });
+
+  // ─── Avatar ───
+
+  router.get('/:id/avatar', async (c) => {
+    const targetId = createUserId(c.req.param('id'));
+    const blobStore = c.var.stores.blob;
+    const atomic = c.var.stores.atomic;
+    const metaEntry = await atomic.get<{ contentType: string }>(AVATAR_META_PREFIX + targetId);
+    const stream = await blobStore.get(AVATAR_BLOB_PREFIX + targetId);
+    if (!stream) return c.json(fail('AVATAR_NOT_FOUND', 'No avatar'), 404);
+    return new Response(stream as any, {
+      status: 200,
+      headers: {
+        'Content-Type': metaEntry?.value.contentType ?? 'application/octet-stream',
+        'Cache-Control': 'public, max-age=86400',
+      },
+    });
+  });
+
+  router.put('/:id/avatar', async (c) => {
+    const user = (c as any).var?.currentUser as { id: string; role?: string } | undefined;
+    if (!user) return c.json(fail('UNAUTHORIZED', 'Authentication required'), 401);
+    const targetId = createUserId(c.req.param('id'));
+    const isAdmin = user.role === 'root' || user.role === 'Operator' || user.role === 'wheel';
+    if (user.id !== targetId && !isAdmin) {
+      return c.json(fail('FORBIDDEN', 'Can only upload your own avatar'), 403);
+    }
+
+    // Read raw body (Hono buffers multipart; we use it as bytes)
+    const blob = await c.req.blob();
+    if (blob.size > AVATAR_MAX_SIZE) {
+      return c.json(fail('AVATAR_TOO_LARGE', `Avatar must be under ${AVATAR_MAX_SIZE / 1024} KB`), 413);
+    }
+    if (blob.size === 0) {
+      return c.json(fail('AVATAR_EMPTY', 'Avatar cannot be empty'), 400);
+    }
+
+    // Validate magic bytes first (before trusting Content-Type)
+    const buf = new Uint8Array(await blob.arrayBuffer());
+    const detectedType = detectImageType(buf);
+    if (!detectedType) {
+      return c.json(fail('AVATAR_INVALID', 'File is not a valid image (JPEG/PNG/WebP/GIF)'), 415);
+    }
+
+    // Cross-check with declared Content-Type (if provided)
+    const declaredType = blob.type;
+    if (declaredType && !ALLOWED_MIME.has(declaredType)) {
+      return c.json(fail('AVATAR_UNSUPPORTED_TYPE', `Unsupported image type: ${declaredType}`), 415);
+    }
+
+    // Store to blob store
+    const blobStore = c.var.stores.blob;
+    const atomic = c.var.stores.atomic;
+    const blobKey = AVATAR_BLOB_PREFIX + targetId;
+    const metaKey = AVATAR_META_PREFIX + targetId;
+
+    await blobStore.put(blobKey, buf as any, { contentType: detectedType, contentLength: buf.length });
+
+    // Track metadata in atomic store
+    const metaEntry = await atomic.get<{ contentType: string; size: number; updatedAt: number }>(metaKey);
+    await atomic.set(metaKey, { contentType: detectedType, size: buf.length, updatedAt: Date.now() }, metaEntry?.version ?? null);
+
+    return c.json(ok({ size: buf.length, contentType: detectedType }), 201);
+  });
+
+  router.delete('/:id/avatar', async (c) => {
+    const user = (c as any).var?.currentUser as { id: string; role?: string } | undefined;
+    if (!user) return c.json(fail('UNAUTHORIZED', 'Authentication required'), 401);
+    const targetId = createUserId(c.req.param('id'));
+    const isAdmin = user.role === 'root' || user.role === 'Operator' || user.role === 'wheel';
+    if (user.id !== targetId && !isAdmin) {
+      return c.json(fail('FORBIDDEN', 'Can only delete your own avatar'), 403);
+    }
+
+    const blobStore = c.var.stores.blob;
+    const atomic = c.var.stores.atomic;
+    await blobStore.delete(AVATAR_BLOB_PREFIX + targetId);
+    const metaEntry = await atomic.get<any>(AVATAR_META_PREFIX + targetId);
+    if (metaEntry) await atomic.set(AVATAR_META_PREFIX + targetId, null, metaEntry.version);
     return c.json(ok(null));
   });
 
@@ -228,7 +328,7 @@ export function createUserRouter(userService: IUserService): Hono<{ Variables: A
     if (!user) return c.json(fail('UNAUTHORIZED', 'Authentication required'), 401);
 
     const token = createSessionToken(c.req.param('token'));
-    await userService.revokeSession(token);
+    await userService.revokeSession(token, user.id);
     return c.json(ok(null));
   });
 
@@ -284,13 +384,13 @@ export const userRouteMeta: RouteMeta[] = [
     method: 'GET',
     path: '/:id',
     description: '按 ID 获取用户',
-    responseDescription: 'UserResponse — 含 privateKeyEd25519',
+    responseDescription: 'UserResponse',
   },
   {
     method: 'PUT',
     path: '/:id',
     description: '更新用户信息',
-    requestBody: { name: 'New Name', role: 'Viewer', privateKeyEd25519: 'sk-...' },
+    requestBody: { name: 'New Name', role: 'Viewer', publicKeyEd25519: 'base64-pubkey' },
     responseDescription: 'UserResponse',
   },
   {
@@ -347,6 +447,25 @@ export const userRouteMeta: RouteMeta[] = [
     method: 'DELETE',
     path: '/:id/public-key',
     description: '清除用户 Ed25519 公钥',
+    responseDescription: '{ ok: true }',
+  },
+  {
+    method: 'GET',
+    path: '/:id/avatar',
+    description: '获取用户头像（公开，无认证要求）',
+    responseDescription: 'image/* binary — 404 if no avatar',
+  },
+  {
+    method: 'PUT',
+    path: '/:id/avatar',
+    description: '上传用户头像（multipart, max 1MB, JPEG/PNG/WebP/GIF）',
+    requestBody: 'binary image data',
+    responseDescription: '{ size, contentType }',
+  },
+  {
+    method: 'DELETE',
+    path: '/:id/avatar',
+    description: '删除用户头像',
     responseDescription: '{ ok: true }',
   },
   {

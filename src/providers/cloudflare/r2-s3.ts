@@ -2,6 +2,10 @@
 // Uses the S3 API with SigV4 signing.
 // Endpoint: https://{account-id}.r2.cloudflarestorage.com
 // Auth: R2 Access Key ID + Secret Access Key (from R2 token)
+//
+// Clock skew compensation: R2 uses SigV4 like AWS S3. If Workers Date.now()
+// is skewed, R2 rejects the signature. On error we parse the server time
+// from the response and retry with corrected signing time.
 
 import type {
   IS3Provider,
@@ -11,14 +15,17 @@ import type {
   S3ListObjectsResult,
 } from '../../core/provider/s3.ts';
 import type { S3ProviderConfig } from '../../core/provider/s3-types.ts';
-import { signSigV4, emptyPayloadHash, payloadHash } from '../../core/provider/s3-signer.ts';
+import { signSigV4, emptyPayloadHash, payloadHash, extractServerTimeFromError } from '../../core/provider/s3-signer.ts';
 import type { SigV4Credentials } from '../../core/provider/s3-signer.ts';
+
+const CLOCK_SKEW_RETRIES = 2;
 
 export class CloudflareR2S3Provider implements IS3Provider {
   readonly type = 'cloudflare-r2' as const;
   readonly #endpoint: string;
   readonly #credentials: SigV4Credentials;
   readonly #config: S3ProviderConfig;
+  #clockOffset = 0; // ms to add to Date.now() for clock skew compensation
 
   constructor(
     credentials: SigV4Credentials,
@@ -30,8 +37,38 @@ export class CloudflareR2S3Provider implements IS3Provider {
     this.#config = config ?? {};
   }
 
+  #signingTime(): Date {
+    return new Date(Date.now() + this.#clockOffset);
+  }
+
   #bucket(bucket: string): string {
     return this.#config.bucketNameMapping?.[bucket] ?? bucket;
+  }
+
+  /** Sign, fetch, and retry once on clock skew error. */
+  async #signedFetch(url: string, method: string, path: string, queryString: string, amzHeaders: Record<string, string>, bodyHash: string, body?: BodyInit): Promise<Response> {
+    for (let attempt = 0; attempt <= CLOCK_SKEW_RETRIES; attempt++) {
+      const authHeaders = await signSigV4(method, path, queryString, amzHeaders, bodyHash, this.#credentials, 'auto', 's3', this.#signingTime());
+      const res = await fetch(url, { method, headers: { ...amzHeaders, ...authHeaders }, ...(body !== undefined ? { body } : {}) });
+
+      if (res.ok || res.status === 404) return res;
+
+      // Clock skew detection on 403 errors
+      if (res.status === 403 && attempt < CLOCK_SKEW_RETRIES) {
+        const bodyText = await res.clone().text().catch(() => '');
+        const serverTime = extractServerTimeFromError(bodyText);
+        if (serverTime) {
+          const serverTs = serverTime.getTime();
+          if (!isNaN(serverTs)) {
+            this.#clockOffset = serverTs - Date.now();
+            continue;
+          }
+        }
+      }
+
+      throw new Error(`R2 ${method} failed: ${res.status} ${await res.text()}`);
+    }
+    throw new Error(`R2 ${method} failed after ${CLOCK_SKEW_RETRIES} retries`);
   }
 
   async putObject(input: S3PutObjectInput): Promise<{ etag: string }> {
@@ -46,10 +83,7 @@ export class CloudflareR2S3Provider implements IS3Provider {
     if (input.cacheControl) amzHeaders['cache-control'] = input.cacheControl;
     amzHeaders['x-amz-content-sha256'] = bodyHash;
 
-    const authHeaders = await signSigV4('PUT', path, '', amzHeaders, bodyHash, this.#credentials, 'auto', 's3', new Date());
-
-    const res = await fetch(url, { method: 'PUT', headers: { ...amzHeaders, ...authHeaders }, body: bodyBuf });
-    if (!res.ok) throw new Error(`R2 putObject failed: ${res.status} ${await res.text()}`);
+    const res = await this.#signedFetch(url, 'PUT', path, '', amzHeaders, bodyHash, bodyBuf);
     return { etag: (res.headers.get('etag') ?? '').replace(/"/g, '') };
   }
 
@@ -60,10 +94,9 @@ export class CloudflareR2S3Provider implements IS3Provider {
   async deleteObject(bucket: string, key: string): Promise<void> {
     const path = `/${this.#bucket(bucket)}/${encodeKey(key)}`;
     const url = `${this.#endpoint}${path}`;
-    const authHeaders = await signSigV4('DELETE', path, '', { host: new URL(url).host }, emptyPayloadHash(), this.#credentials, 'auto', 's3', new Date());
-
-    const res = await fetch(url, { method: 'DELETE', headers: authHeaders });
-    if (!res.ok && res.status !== 204 && res.status !== 404) {
+    const amzHeaders: Record<string, string> = { host: new URL(url).host };
+    const res = await this.#signedFetch(url, 'DELETE', path, '', amzHeaders, emptyPayloadHash());
+    if (res.status !== 204 && res.status !== 404) {
       throw new Error(`R2 deleteObject failed: ${res.status} ${await res.text()}`);
     }
   }
@@ -72,11 +105,9 @@ export class CloudflareR2S3Provider implements IS3Provider {
     try {
       const path = `/${this.#bucket(bucket)}/${encodeKey(key)}`;
       const url = `${this.#endpoint}${path}`;
-      const authHeaders = await signSigV4('HEAD', path, '', { host: new URL(url).host }, emptyPayloadHash(), this.#credentials, 'auto', 's3', new Date());
-
-      const res = await fetch(url, { method: 'HEAD', headers: authHeaders });
+      const amzHeaders: Record<string, string> = { host: new URL(url).host };
+      const res = await this.#signedFetch(url, 'HEAD', path, '', amzHeaders, emptyPayloadHash());
       if (res.status === 404) return null;
-      if (!res.ok) throw new Error(`R2 headObject failed: ${res.status}`);
       return parseObjectInfo(key, res);
     } catch {
       return null;
@@ -96,22 +127,19 @@ export class CloudflareR2S3Provider implements IS3Provider {
     const queryString = qs.toString();
     const path = `/${this.#bucket(bucket)}`;
     const url = `${this.#endpoint}${path}?${queryString}`;
+    const amzHeaders: Record<string, string> = { host: new URL(url).host };
 
-    const authHeaders = await signSigV4('GET', path, queryString, { host: new URL(url).host }, emptyPayloadHash(), this.#credentials, 'auto', 's3', new Date());
-
-    const res = await fetch(url, { headers: authHeaders });
-    if (!res.ok) throw new Error(`R2 listObjects failed: ${res.status} ${await res.text()}`);
+    const res = await this.#signedFetch(url, 'GET', path, queryString, amzHeaders, emptyPayloadHash());
     return parseListResult(await res.text());
   }
 
   async #fetchObject(method: string, bucket: string, key: string): Promise<S3GetObjectResult | null> {
     const path = `/${this.#bucket(bucket)}/${encodeKey(key)}`;
     const url = `${this.#endpoint}${path}`;
-    const authHeaders = await signSigV4(method, path, '', { host: new URL(url).host }, emptyPayloadHash(), this.#credentials, 'auto', 's3', new Date());
+    const amzHeaders: Record<string, string> = { host: new URL(url).host };
 
-    const res = await fetch(url, { method, headers: authHeaders });
+    const res = await this.#signedFetch(url, method, path, '', amzHeaders, emptyPayloadHash());
     if (res.status === 404) return null;
-    if (!res.ok) throw new Error(`R2 ${method} failed: ${res.status} ${await res.text()}`);
 
     return {
       body: res.body!,

@@ -29,11 +29,11 @@ describe('System group CRUD', () => {
       .get('/api/system-groups')
       .expectStatus(200)
       .expect((ctx) => {
-        const data = ctx.res.body?.data;
-        if (!Array.isArray(data) || data.length === 0) throw new Error('Expected at least 1 seeded system group');
-        const names = data.map((g: any) => g.name);
+        const items = ctx.res.body?.data?.items;
+        if (!Array.isArray(items) || items.length === 0) throw new Error('Expected at least 1 seeded system group');
+        const names = items.map((g: any) => g.name);
         if (!names.includes('perm.sysadmin')) throw new Error('Expected perm.sysadmin in seeded groups');
-        firstId = data[0].id;
+        firstId = items[0].id;
       });
 
     // Now fetch that first group by ID
@@ -102,8 +102,8 @@ describe('System group CRUD', () => {
       .get('/api/system-groups')
       .expectStatus(200)
       .expect((ctx) => {
-        const data = ctx.res.body?.data ?? [];
-        const names = data.map((g: any) => g.name);
+        const items = ctx.res.body?.data?.items ?? [];
+        const names = items.map((g: any) => g.name);
         if (!names.includes('sys.custom.v2')) throw new Error('Expected sys.custom.v2');
         if (!names.includes('sys.multi')) throw new Error('Expected sys.multi');
       });

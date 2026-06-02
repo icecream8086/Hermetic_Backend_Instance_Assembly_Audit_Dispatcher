@@ -124,6 +124,8 @@ export function loadConfig(overrides?: Partial<AppConfig>): AppConfig {
       : undefined,
   };
 
+  const corsOriginsRaw = process.env['CORS_ORIGINS'] ?? 'http://localhost:8086';
+
   return {
     storage: storageConfig,
     log: logConfig,
@@ -136,5 +138,6 @@ export function loadConfig(overrides?: Partial<AppConfig>): AppConfig {
     },
     features: overrides?.features ?? {},
     authz: overrides?.authz,
+    cors: overrides?.cors ?? { origins: corsOriginsRaw.split(',').map(s => s.trim()).filter(Boolean) },
   };
 }

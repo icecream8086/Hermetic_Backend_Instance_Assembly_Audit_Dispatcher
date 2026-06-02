@@ -4,6 +4,7 @@ import { loadConfig } from './config/env.ts';
 // DO classes must be exported at module scope for wrangler to discover them
 export { AtomicStoreDO } from './core/store/adapters/durable-object.ts';
 export { AlarmTimerDO } from './core/scheduler/alarm-timer-do.ts';
+export { NotificationDO } from './core/notification/do.ts';
 
 let _appPromise: Promise<AppInstance> | null = null;
 

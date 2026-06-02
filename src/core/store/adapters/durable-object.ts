@@ -186,8 +186,10 @@ export class AtomicStoreDO implements DurableObject {
       let start: string | undefined;
       let nextExpiry = Infinity;
 
-      // Scan TTL markers in expiry order — never touches non-expirable keys
-      for (let batch = 0; batch < 10; batch++) {
+      // Scan TTL markers in expiry order — never touches non-expirable keys.
+      // Uses a while loop so ALL expired keys are cleaned up in one alarm
+      // cycle regardless of volume (no artificial 2000-key cap).
+      while (true) {
         const listOpts: DurableObjectListOptions = { prefix: TTL_MARKER_PREFIX, limit: 200 };
         if (start !== undefined) listOpts.start = start;
         const result = await this.ctx.storage.list<{ expiresAt: number }>(listOpts);

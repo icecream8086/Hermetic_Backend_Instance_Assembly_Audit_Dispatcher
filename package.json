@@ -29,7 +29,8 @@
       "template": "/api/templates",
       "image": "/api/images",
       "sandbox": "/api/sandboxes",
-      "platforms": "/api/platforms"
+      "platforms": "/api/platforms",
+      "network": "/api/networks"
     }
   },
   "dependencies": {

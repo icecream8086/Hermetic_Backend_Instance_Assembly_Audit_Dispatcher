@@ -140,12 +140,19 @@ export interface ImageInfo {
   readonly layers?: number | undefined;
 }
 
+/** Optional pagination / filter params for list(). */
+export interface ListImagesOptions {
+  readonly limit?: number;
+  readonly offset?: number;
+  readonly search?: string;
+}
+
 export interface IImageProvider {
   /** Pull an image from a registry. Returns image info. */
   pull(image: string): Promise<ImageInfo>;
 
   /** List locally available images. */
-  list(): Promise<readonly ImageInfo[]>;
+  list(options?: ListImagesOptions): Promise<readonly ImageInfo[]>;
 
   /** Inspect a single image by ID or tag. */
   inspect(id: string): Promise<ImageInfo | null>;

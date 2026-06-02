@@ -135,6 +135,7 @@ export class PodmanContainerGroupProvider implements IContainerGroupProvider {
       const body: Record<string, unknown> = {
         name: c.name,
         Image: c.image ?? '',
+        Entrypoint: c.command ? [...c.command] : undefined,
         Cmd: c.args ? [...c.args] : undefined,
         Env: env.length ? env : undefined,
         Labels: { 'managed-by': 'hbi-aad', service: c.name },

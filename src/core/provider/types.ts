@@ -282,6 +282,7 @@ export interface ContainerPortConfig {
 export interface ContainerCreateConfig {
   readonly name: string;
   readonly image: string;
+  readonly command?: readonly string[] | undefined;
   readonly args?: readonly string[] | undefined;
   readonly env?: readonly EnvVar[] | undefined;
   readonly tty?: boolean | undefined;

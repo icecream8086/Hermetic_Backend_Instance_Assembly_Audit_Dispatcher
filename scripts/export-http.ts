@@ -9,6 +9,7 @@ import { createTemplateRouter, templateRouteMeta } from '../src/features/templat
 import { createImageRouter, imageRouteMeta } from '../src/features/image/handler.ts';
 import { createSandboxRouter, sandboxRouteMeta } from '../src/features/sandbox/handler.ts';
 import { createPlatformsRouter, platformsRouteMeta } from '../src/features/platforms/handler.ts';
+import { createNetworkRouter, networkRouteMeta } from '../src/features/network/handler.ts';
 import type { RouteMeta } from '../src/core/http-docs/types.ts';
 import { createAuditRouter } from '../src/core/audit/audit-router.ts';
 import { WorkersAuditLogger } from '../src/core/audit/workers-audit-logger.ts';
@@ -29,7 +30,7 @@ function collect(
   fileTag: string,
   label: string,
   basePath: string,
-  app: ReturnType<typeof createInfoHandler | typeof createUserRouter | typeof createAuditRouter | typeof createPermissionRouter>,
+  app: { routes: Array<{ method: string; path: string }> },
   pathFilter: (relPath: string) => boolean,
   metaList?: RouteMeta[],
 ) {
@@ -109,6 +110,13 @@ collect('sbx', 'Sbx', '/api/sandboxes', createSandboxRouter(stubSandboxSvc as an
 
 const stubRegistry: any = { availableProviders: () => [{ name: 'stub' }, { name: 'podman' }] };
 collect('plf', 'Plf', '/api/platforms', createPlatformsRouter(stubRegistry as any), () => true, platformsRouteMeta);
+collect('net', 'Net', '/api/networks', createNetworkRouter({
+  create: async () => ({} as any),
+  list: async () => ({ items: [], total: 0, page: 1, limit: 20 }),
+  get: async () => null,
+  update: async () => ({} as any),
+  delete: async () => {},
+}), () => true, networkRouteMeta);
 
 // Manually-added routes (not in any feature router)
 // Dev-only
@@ -129,6 +137,11 @@ routes.push({
   method: 'GET', path: '/api/openapi.json', fileTag: 'info', tag: 'Public',
   meta: { method: 'GET', path: '/api/openapi.json', description: 'OpenAPI 3.0 规范（无需认证）', responseDescription: 'OpenAPI 3.0 JSON' },
 });
+// WebSocket notifications
+routes.push({
+  method: 'GET', path: '/api/ws/notifications', fileTag: 'info', tag: 'Notifications',
+  meta: { method: 'GET', path: '/api/ws/notifications', description: 'WebSocket 升级到全局通知频道（需要 Workers 部署 + DO 绑定）', responseDescription: '101 WebSocket Upgrade' },
+});
 // Event bus
 const eventMetas: RouteMeta[] = [
   { method: 'POST', path: '/', description: '入队一个事件', requestBody: { type: 'my-event', payload: {} }, responseDescription: '{ id }' },
@@ -142,6 +155,12 @@ const eventMetas: RouteMeta[] = [
 for (const m of eventMetas) {
   routes.push({ method: m.method, path: `/api/events${m.path}`, fileTag: 'events', tag: 'Events', meta: m });
 }
+
+// Sudo
+routes.push({
+  method: 'POST', path: '/api/sudo', fileTag: 'auth', tag: 'Dev',
+  meta: { method: 'POST', path: '/api/sudo', description: '[DEV] 临时提权 — wheel 组成员调用后获得 30 分钟管理员权限', requestBody: {}, responseDescription: '{ expiry, durationMs }' },
+});
 
 // ─── Generate .http files ───
 

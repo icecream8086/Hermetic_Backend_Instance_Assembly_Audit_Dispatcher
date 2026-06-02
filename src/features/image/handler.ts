@@ -2,14 +2,15 @@ import { Hono } from 'hono';
 import type { RouteMeta } from '../../core/http-docs/types.ts';
 import type { AppContext } from '../../core/app.ts';
 import { ok, fail } from '../../core/response.ts';
+import { KernLevel } from '../../core/audit/kern-level.ts';
 
 type PermissionCheckFn = { check(params: { userId: string; action: string; resource: string; ip?: string }): Promise<{ allowed: boolean; reason: string }> };
 
-async function requirePerm(c: any, checker: PermissionCheckFn | undefined, action: string, resource: string): Promise<Response | null> {
+async function requirePerm(c: any, checker: PermissionCheckFn | undefined, action: string, resource: string, resourceOwnerId?: string): Promise<Response | null> {
   if (!checker) return null;
   const user = (c as any).var?.currentUser;
   if (!user) return null;
-  const result = await checker.check({ userId: user.id, action, resource });
+  const result = await checker.check({ userId: user.id, action, resource, ...(resourceOwnerId ? { resourceOwnerId } : {}) });
   if (!result.allowed) return c.json(fail('FORBIDDEN', result.reason), 403);
   return null;
 }
@@ -19,12 +20,18 @@ export function createImageRouter(permissionChecker?: PermissionCheckFn): Hono<{
 
   router.get('/', async (c) => {
     try {
-      const platform = c.req.query('platform'); // e.g. "linux/amd64"
-      let images = await c.var.providers.image.list();
-      if (platform) {
-        images = images.filter(i => i.architecture === platform);
-      }
-      return c.json(ok(images));
+      const platform = c.req.query('platform');
+      const page = parseInt(c.req.query('page') ?? '') || 1;
+      const limit = parseInt(c.req.query('limit') ?? '') || 50;
+      // Pass limit/offset hint to provider — providers that support server-side
+      // pagination (e.g. Alibaba) can reduce data transfer. Those that don't
+      // ignore the params and return everything; the handler slices below.
+      const offset = (page - 1) * limit;
+      let images = await c.var.providers.image.list({ limit, offset });
+      if (platform) images = images.filter(i => i.architecture === platform);
+      const total = images.length;
+      const start = (page - 1) * limit;
+      return c.json(ok({ items: images.slice(start, start + limit), total, page, limit }));
     } catch (e: any) {
       return c.json(fail('PROVIDER_ERROR', e.message), 502);
     }
@@ -38,6 +45,13 @@ export function createImageRouter(permissionChecker?: PermissionCheckFn): Hono<{
     // or private registry: "registry.mycompany.com/myimage:v1"
     try {
       const info = await c.var.providers.image.pull(image);
+      const user = (c as any).var?.currentUser as { id: string } | undefined;
+      c.var.audit?.write({
+        level: KernLevel.NOTICE,
+        facility: 'image',
+        message: `Image pulled — ${image}`,
+        metadata: { eventType: 'image.pulled', image, actorId: user?.id },
+      });
       return c.json(ok(info));
     } catch (e: any) {
       return c.json(fail('PULL_FAILED', e.message), 502);

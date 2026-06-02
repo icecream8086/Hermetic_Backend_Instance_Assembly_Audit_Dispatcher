@@ -66,6 +66,8 @@ export function createProviderRegistry(
   ]);
 
   // Find the effective default
+  // [debug] provider selection
+  console.error(`[debug] provider selection: config.container="${config.container}", PODMAN_ENDPOINT="${process.env['PODMAN_ENDPOINT']}", PROVIDER_CONTAINER="${process.env['PROVIDER_CONTAINER']}"`);
   const isAlibaba = config.container === 'alibaba' && accounts.length > 0;
   const def = isAlibaba
     ? typeEntries.get('alibaba')!

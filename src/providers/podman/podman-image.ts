@@ -1,4 +1,4 @@
-import type { IImageProvider, ImageInfo } from '../../core/provider/interfaces.ts';
+import type { IImageProvider, ImageInfo, ListImagesOptions } from '../../core/provider/interfaces.ts';
 
 const ENDPOINT = process.env['PODMAN_ENDPOINT'] ?? 'http://127.0.0.1:8080';
 
@@ -30,8 +30,15 @@ export class PodmanImageProvider implements IImageProvider {
     return this.inspect(image).then(r => r!);
   }
 
-  async list(): Promise<readonly ImageInfo[]> {
-    const resp = await this.#fetch(`${this.#ep}/images/json`);
+  async list(options?: ListImagesOptions): Promise<readonly ImageInfo[]> {
+    let url = `${this.#ep}/images/json`;
+    if (options?.limit !== undefined || options?.offset !== undefined) {
+      const params = new URLSearchParams();
+      if (options.limit !== undefined) params.set('limit', String(options.limit));
+      if (options.offset !== undefined) params.set('offset', String(options.offset));
+      url += '?' + params.toString();
+    }
+    const resp = await this.#fetch(url);
     if (!resp) return [];
     if (!resp.ok) return [];
     const list: RawImage[] = await resp.json();

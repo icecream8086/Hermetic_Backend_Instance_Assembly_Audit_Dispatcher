@@ -43,8 +43,10 @@ export interface User {
   name: string;
   role: UserRole;
   loginPolicy?: LoginPolicy;
+  /** Ed25519 public key for key-based (no-password) login.
+   *  The private key is NEVER stored server-side — it is generated on the
+   *  client and only returned once in the registration response. */
   publicKeyEd25519?: string;
-  privateKeyEd25519?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -55,6 +57,10 @@ export interface Session {
   token: SessionToken;
   userId: UserId;
   createdAt: number;
+  /** Absolute expiry timestamp. Checked against Date.now() at validation time
+   *  instead of computing TTL from createdAt, so clock drift between the
+   *  creating and validating isolate cancels out to first order. */
+  expiresAt: number;
 }
 
 // ─── Login policy ───
@@ -116,7 +122,6 @@ export interface UpdateUserInput {
   role: UserRole | undefined;
   loginPolicy: LoginPolicy | undefined;
   publicKeyEd25519: string | undefined;
-  privateKeyEd25519: string | undefined;
 }
 
 export interface NoPasswordLoginInput {

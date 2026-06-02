@@ -17,9 +17,18 @@ class_name = "AtomicStoreDO"
 name = "ALARM_TIMER_DO"
 class_name = "AlarmTimerDO"
 
+# ─── Durable Object for WebSocket notification broadcast ───
+[[durable_objects.bindings]]
+name = "NOTIFICATION_DO"
+class_name = "NotificationDO"
+
 [[migrations]]
 tag = "v1"
 new_classes = ["AtomicStoreDO"]
+
+[[migrations]]
+tag = "v5-realtime"
+new_classes = ["NotificationDO"]
 
 # ─── KV for state storage (eventual consistency fallback) ───
 [[kv_namespaces]]

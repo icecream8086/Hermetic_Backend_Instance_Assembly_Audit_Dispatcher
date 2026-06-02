@@ -1,4 +1,9 @@
-import type { IAtomicStore } from '../../core/store/interfaces.ts';
+import type { IAtomicStore, IStoreTransaction } from '../../core/store/interfaces.ts';
+import { TransactConflictError } from '../../core/store/interfaces.ts';
+
+// ─── MAC (Mandatory Access Control) — immutable rules, never modifiable via API ───
+const MAC_KEY = '_init:mac-policy';
+let _macRules: PermissionRule[] = [];
 import type { ILogWriter } from '../../core/logger/interfaces.ts';
 import type { IAuditWriter } from '../../core/audit/types.ts';
 import { createFacility } from '../../core/brand.ts';
@@ -107,6 +112,34 @@ const TEMPLATES: Template[] = [
       { effect: 'deny', actions: ['*'], resource: '*', priority: 50 },
     ],
   },
+  {
+    id: 'daemon',
+    name: 'Daemon Service Account',
+    description: 'Key-only auth, sandbox CRUD on $self, no user management. For automated service accounts / API integrations',
+    rules: [
+      { effect: 'allow', actions: ['login'], resource: 'session', priority: 60 },
+      { effect: 'allow', actions: ['read', 'update'], resource: 'sandbox:$self', priority: 50 },
+      { effect: 'allow', actions: ['read'], resource: 'image', priority: 50 },
+      { effect: 'allow', actions: ['read'], resource: 'template', priority: 50 },
+      { effect: 'deny', actions: ['admin', 'delete', 'create'], resource: 'user', priority: 99 },
+      { effect: 'deny', actions: ['admin', 'create', 'update', 'delete'], resource: 'usergroup', priority: 99 },
+      { effect: 'deny', actions: ['admin', 'create', 'update', 'delete'], resource: 'permgroup', priority: 99 },
+      { effect: 'deny', actions: ['admin', 'create', 'update', 'delete'], resource: 'routeacl', priority: 99 },
+    ],
+  },
+  {
+    id: 'service-api',
+    name: 'Service API Key',
+    description: 'Full API access via key-only auth. Creates and manages sandboxes, reads images/templates. No user/group management',
+    rules: [
+      { effect: 'allow', actions: ['login'], resource: 'session', priority: 60 },
+      { effect: 'allow', actions: ['create', 'read', 'update', 'delete'], resource: 'sandbox:$self', priority: 50 },
+      { effect: 'allow', actions: ['read'], resource: 'image', priority: 50 },
+      { effect: 'allow', actions: ['read'], resource: 'template', priority: 50 },
+      { effect: 'deny', actions: ['admin', 'create', 'update', 'delete'], resource: 'user', priority: 99 },
+      { effect: 'deny', actions: ['admin', 'create', 'update', 'delete'], resource: 'usergroup', priority: 99 },
+    ],
+  },
 ];
 
 export interface IPermissionService {
@@ -170,6 +203,15 @@ export interface IPermissionService {
 
   // Permission check
   check(input: PermissionCheckInput): Promise<PolicyMatchResult>;
+
+  // MAC — immutable system rules
+  loadMacRules(): Promise<void>;
+  seedMacRules(rules: PermissionRule[]): Promise<void>;
+
+  // Temporary elevation (sudo)
+  grantTempElevation(userId: string, durationMs?: number): Promise<number>;
+  revokeTempElevation(userId: string): Promise<void>;
+  listTempElevations(): Promise<Array<{ userId: string; expiry: number }>>;
 }
 
 export class PermissionService implements IPermissionService {
@@ -178,6 +220,15 @@ export class PermissionService implements IPermissionService {
   private readonly pgStore: CrudStore<PermissionGroup>;
   private readonly routeAclStore: CrudStore<RouteAcl>;
   private readonly userTplStore: CrudStore<UserTemplate>;
+
+  // In-memory cache for check() — avoids N+1 reads on every auth request.
+  // Invalidated on any write through this service.
+  #cache: {
+    policies: { ts: number; data: StoredPolicy[] } | null;
+    userGroups: { ts: number; data: UserGroup[] } | null;
+    permGroups: { ts: number; data: PermissionGroup[] } | null;
+  } = { policies: null, userGroups: null, permGroups: null };
+  readonly #CACHE_TTL = 5_000; // 5s — policy data changes infrequently, but cache should not lag admin actions
 
   constructor(
     private readonly atomic: IAtomicStore,
@@ -189,6 +240,56 @@ export class PermissionService implements IPermissionService {
     this.pgStore = new CrudStore(atomic, PERMGROUP_PREFIX, PERMGROUP_INDEX_KEY, 'PERMGROUP_NOT_FOUND');
     this.routeAclStore = new CrudStore(atomic, ROUTEACL_PREFIX, ROUTEACL_INDEX_KEY, 'ROUTEACL_NOT_FOUND');
     this.userTplStore = new CrudStore(atomic, USERTPL_PREFIX, USERTPL_INDEX_KEY, 'USERTPL_NOT_FOUND');
+    // Eagerly load MAC rules on construction so check() sees them even on cold start
+    this.loadMacRules().catch(() => {});
+  }
+
+  #invalidateCache(): void {
+    this.#cache.policies = null;
+    this.#cache.userGroups = null;
+    this.#cache.permGroups = null;
+  }
+
+  async #transactWithRetry<T>(fn: (txn: IStoreTransaction) => Promise<T>, maxRetries = 3): Promise<T> {
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        return await this.atomic.transact(fn);
+      } catch (err) {
+        if (err instanceof TransactConflictError && attempt < maxRetries - 1) continue;
+        throw err;
+      }
+    }
+    throw new AppError(409, 'CONFLICT', 'Transaction failed after retries');
+  }
+
+  async #cachedPolicyList(): Promise<StoredPolicy[]> {
+    const now = Date.now();
+    if (this.#cache.policies && now - this.#cache.policies.ts < this.#CACHE_TTL) {
+      return this.#cache.policies.data;
+    }
+    const data = await this.policyStore.list();
+    this.#cache.policies = { ts: now, data };
+    return data;
+  }
+
+  async #cachedUserGroupList(): Promise<UserGroup[]> {
+    const now = Date.now();
+    if (this.#cache.userGroups && now - this.#cache.userGroups.ts < this.#CACHE_TTL) {
+      return this.#cache.userGroups.data;
+    }
+    const data = await this.ugStore.list();
+    this.#cache.userGroups = { ts: now, data };
+    return data;
+  }
+
+  async #cachedPermGroupList(): Promise<PermissionGroup[]> {
+    const now = Date.now();
+    if (this.#cache.permGroups && now - this.#cache.permGroups.ts < this.#CACHE_TTL) {
+      return this.#cache.permGroups.data;
+    }
+    const data = await this.pgStore.list();
+    this.#cache.permGroups = { ts: now, data };
+    return data;
   }
 
   // ═══════════════════════════════════════════
@@ -205,6 +306,7 @@ export class PermissionService implements IPermissionService {
       priority: input.priority ?? 0, enabled: true, createdAt: now, updatedAt: now,
     };
     await this.policyStore.insert(policy);
+    this.#invalidateCache();
     await this.logger.logAsync({ facility: FACILITY, level: LogLevel.INFO, message: 'Policy created', metadata: { policyId: id, name: input.name, effect: input.effect } });
     permLogAudit(this.logger, this.audit, 'perm.policy.created', actor, { entityType: 'policy', entityId: id as string, newValue: policy }, KernLevel.NOTICE);
     return policy;
@@ -224,6 +326,7 @@ export class PermissionService implements IPermissionService {
 
   async deletePolicy(id: string, actor?: AuditActor): Promise<void> {
     const oldValue = await this.policyStore.delete(id);
+    this.#invalidateCache();
     permLogAudit(this.logger, this.audit, 'perm.policy.deleted', actor, { entityType: 'policy', entityId: id, oldValue }, KernLevel.WARNING);
   }
 
@@ -245,6 +348,7 @@ export class PermissionService implements IPermissionService {
     };
     const newVersion = await this.atomic.set(POLICY_PREFIX + id, updated, entry.version);
     if (!newVersion) throw new AppError(409, 'CONFLICT', 'Concurrent modification detected');
+    this.#invalidateCache();
     permLogAudit(this.logger, this.audit, 'perm.policy.updated', actor, {
       entityType: 'policy', entityId: id,
       changes: computeChanges(entry.value as unknown as Record<string, unknown>, updated as unknown as Record<string, unknown>),
@@ -267,6 +371,7 @@ export class PermissionService implements IPermissionService {
       createdAt: now, updatedAt: now,
     };
     await this.ugStore.insert(group);
+    this.#invalidateCache();
     await this.logger.logAsync({ facility: FACILITY, level: LogLevel.INFO, message: 'User group created', metadata: { groupId: id, name: input.name, memberCount: group.memberIds.length } });
     permLogAudit(this.logger, this.audit, 'perm.userGroup.created', actor, { entityType: 'userGroup', entityId: id as string, newValue: group }, KernLevel.NOTICE);
     return group;
@@ -297,12 +402,14 @@ export class PermissionService implements IPermissionService {
     };
     const newVersion = await this.atomic.set(USERGROUP_PREFIX + id, updated, entry.version);
     if (!newVersion) throw new AppError(409, 'CONFLICT', 'Concurrent modification detected');
+    this.#invalidateCache();
     permLogAudit(this.logger, this.audit, 'perm.userGroup.updated', actor, { entityType: 'userGroup', entityId: id, changes: computeChanges(entry.value as unknown as Record<string, unknown>, updated as unknown as Record<string, unknown>) }, KernLevel.NOTICE);
     return updated;
   }
 
   async deleteUserGroup(id: string, actor?: AuditActor): Promise<void> {
     const oldValue = await this.ugStore.delete(id);
+    this.#invalidateCache();
     permLogAudit(this.logger, this.audit, 'perm.userGroup.deleted', actor, { entityType: 'userGroup', entityId: id, oldValue }, KernLevel.WARNING);
   }
 
@@ -322,6 +429,7 @@ export class PermissionService implements IPermissionService {
       createdAt: now, updatedAt: now,
     };
     await this.pgStore.insert(group);
+    this.#invalidateCache();
     await this.logger.logAsync({ facility: FACILITY, level: LogLevel.INFO, message: 'Permission group created', metadata: { groupId: id, name: input.name, ruleCount: group.rules.length } });
     permLogAudit(this.logger, this.audit, 'perm.permissionGroup.created', actor, { entityType: 'permissionGroup', entityId: id as string, newValue: group }, KernLevel.NOTICE);
     return group;
@@ -354,12 +462,19 @@ export class PermissionService implements IPermissionService {
     };
     const newVersion = await this.atomic.set(PERMGROUP_PREFIX + id, updated, entry.version);
     if (!newVersion) throw new AppError(409, 'CONFLICT', 'Concurrent modification detected');
+    this.#invalidateCache();
     permLogAudit(this.logger, this.audit, 'perm.permissionGroup.updated', actor, { entityType: 'permissionGroup', entityId: id, changes: computeChanges(entry.value as unknown as Record<string, unknown>, updated as unknown as Record<string, unknown>) }, KernLevel.NOTICE);
     return updated;
   }
 
   async deletePermGroup(id: string, actor?: AuditActor): Promise<void> {
+    // MAC guard: seed permission groups (names starting with perm.) cannot be deleted
+    const oldEntry = await this.pgStore.get(id);
+    if (oldEntry && oldEntry.name.startsWith('perm.')) {
+      throw new AppError(403, 'MAC_DENIED', `Cannot delete seed permission group "${oldEntry.name}" — protected by system policy`);
+    }
     const oldValue = await this.pgStore.delete(id);
+    this.#invalidateCache();
     permLogAudit(this.logger, this.audit, 'perm.permissionGroup.deleted', actor, { entityType: 'permissionGroup', entityId: id, oldValue }, KernLevel.WARNING);
   }
 
@@ -455,6 +570,7 @@ export class PermissionService implements IPermissionService {
       priority: input.priority ?? 0, createdAt: now, updatedAt: now,
     };
     await this.routeAclStore.insert(acl);
+    this.#invalidateCache();
     permLogAudit(this.logger, this.audit, 'perm.routeAcl.created', actor, { entityType: 'routeAcl', entityId: id as string, newValue: acl }, KernLevel.NOTICE);
     return acl;
   }
@@ -487,12 +603,14 @@ export class PermissionService implements IPermissionService {
     };
     const newVersion = await this.atomic.set(ROUTEACL_PREFIX + id, updated, entry.version);
     if (!newVersion) throw new AppError(409, 'CONFLICT', 'Concurrent modification detected');
+    this.#invalidateCache();
     permLogAudit(this.logger, this.audit, 'perm.routeAcl.updated', actor, { entityType: 'routeAcl', entityId: id, changes: computeChanges(entry.value as unknown as Record<string, unknown>, updated as unknown as Record<string, unknown>) }, KernLevel.NOTICE);
     return updated;
   }
 
   async deleteRouteAcl(id: string, actor?: AuditActor): Promise<void> {
     const oldValue = await this.routeAclStore.delete(id);
+    this.#invalidateCache();
     permLogAudit(this.logger, this.audit, 'perm.routeAcl.deleted', actor, { entityType: 'routeAcl', entityId: id, oldValue }, KernLevel.WARNING);
   }
 
@@ -645,7 +763,118 @@ export class PermissionService implements IPermissionService {
     };
     await this.atomic.set(LOG_POLICY_KEY, updated, existing?.version ?? null);
     setActivePolicy(updated);
+    this.audit?.write({
+      level: KernLevel.NOTICE,
+      facility: 'perm-audit',
+      message: 'Log policy updated',
+      metadata: {
+        eventType: 'perm.logPolicy.updated',
+        actorId: actor?.userId,
+        changes: input,
+      },
+    });
     return updated;
+  }
+
+  // ═══════════════════════════════════════════
+  // MAC — immutable rules (loaded from store, never modified via API)
+  // ═══════════════════════════════════════════
+
+  /** Load MAC rules from store (called on app startup). */
+  async loadMacRules(): Promise<void> {
+    try {
+      const entry = await this.atomic.get<{ rules: PermissionRule[] }>(MAC_KEY);
+      if (entry) _macRules = entry.value.rules;
+    } catch { _macRules = []; }
+  }
+
+  /** Seed MAC rules (called on first startup only). */
+  async seedMacRules(rules: PermissionRule[]): Promise<void> {
+    const entry = await this.atomic.get<any>(MAC_KEY);
+    if (entry === null) {
+      await this.atomic.set(MAC_KEY, { rules }, null);
+      _macRules = rules;
+    }
+  }
+
+  // ═══════════════════════════════════════════
+  // Temporary privilege elevation (sudo)
+  // ═══════════════════════════════════════════
+
+  /** Grant temporary elevation to a user in wheel group. Returns expiry timestamp. */
+  async grantTempElevation(userId: string, durationMs = 30 * 60 * 1000): Promise<number> {
+    // Verify user is in wheel group
+    const wheelGroup = (await this.#cachedUserGroupList()).find(g => g.name === 'wheel');
+    if (!wheelGroup || !wheelGroup.memberIds.includes(userId)) {
+      throw new AppError(403, 'NOT_WHEEL', 'Only wheel members can request elevation');
+    }
+    const expiry = Date.now() + durationMs;
+    // Atomically upsert elevation + maintain index
+    await this.#transactWithRetry(async (txn) => {
+      const existing = await txn.get<{ expiry: number }>(`temp:elev:${userId}`);
+      if (existing) {
+        txn.set(`temp:elev:${userId}`, { expiry, role: 'root' });
+      } else {
+        txn.set(`temp:elev:${userId}`, { expiry, role: 'root' });
+        const idx = await txn.get<string[]>(`temp:elev:ids`);
+        txn.set(`temp:elev:ids`, [...(idx ?? []), userId]);
+      }
+    });
+    this.audit?.write({
+      level: KernLevel.WARNING,
+      facility: 'perm-audit',
+      message: 'Temporary elevation granted',
+      metadata: { eventType: 'perm.sudo.granted', userId, expiry, durationMs },
+    });
+    return expiry;
+  }
+
+  /** Check if a user has temporary elevation. */
+  async #checkTempElevation(userId: string): Promise<boolean> {
+    const entry = await this.atomic.get<{ expiry: number }>(`temp:elev:${userId}`);
+    if (!entry) return false;
+    if (Date.now() > entry.value.expiry) {
+      await this.atomic.set(`temp:elev:${userId}`, null, entry.version);
+      return false;
+    }
+    return true;
+  }
+
+  /** Revoke temporary elevation. */
+  async revokeTempElevation(userId: string): Promise<void> {
+    await this.#transactWithRetry(async (txn) => {
+      const existing = await txn.get<any>(`temp:elev:${userId}`);
+      if (!existing) return;
+      txn.set(`temp:elev:${userId}`, null);
+      const idx = await txn.get<string[]>(`temp:elev:ids`);
+      if (idx) txn.set(`temp:elev:ids`, idx.filter((id: string) => id !== userId));
+    });
+    this.audit?.write({
+      level: KernLevel.NOTICE,
+      facility: 'perm-audit',
+      message: 'Temporary elevation revoked',
+      metadata: { eventType: 'perm.sudo.revoked', userId },
+    });
+  }
+
+  /** List active temp elevations (admin use). */
+  async listTempElevations(): Promise<Array<{ userId: string; expiry: number }>> {
+    const idx = await this.atomic.get<string[]>(`temp:elev:ids`);
+    if (!idx) return [];
+    const result: Array<{ userId: string; expiry: number }> = [];
+    const now = Date.now();
+    const cleaned: string[] = [];
+    for (const uid of idx.value) {
+      const e = await this.atomic.get<{ expiry: number }>(`temp:elev:${uid}`);
+      if (!e || now > e.value.expiry) continue;
+      result.push({ userId: uid, expiry: e.value.expiry });
+      cleaned.push(uid);
+    }
+    // Clean up stale index entries
+    if (cleaned.length !== idx.value.length) {
+      await this.atomic.set('temp:elev:ids', cleaned, idx.version);
+    }
+    return result;
   }
 
   // ═══════════════════════════════════════════
@@ -653,7 +882,7 @@ export class PermissionService implements IPermissionService {
   // ═══════════════════════════════════════════
 
   async check(input: PermissionCheckInput): Promise<PolicyMatchResult> {
-    const { userId, action, resource, ip, timestamp } = input;
+    const { userId, action, resource, ip, timestamp, resourceOwnerId } = input;
     const now = timestamp ?? Date.now();
 
     // 1. Load user
@@ -682,11 +911,38 @@ export class PermissionService implements IPermissionService {
     const hasPublicKey = !!user.publicKeyEd25519;
     const userRole = user.role ?? '';
 
-    // 3. Load all policies (individual + group)
+    // 2b. MAC evaluation — immutable rules that CANNOT be overridden.
+    // These run before any regular policy/group rules. If a MAC deny matches,
+    // it's final regardless of what other rules (or admin) say.
+    for (const macRule of _macRules) {
+      if (!(macRule.actions.includes('*') || macRule.actions.includes(action))) continue;
+      const mr = macRule.resource;
+      if (!mr || mr === '*') {
+        if (macRule.effect === 'deny') return { allowed: false, reason: `MAC: ${macRule.description ?? 'Denied by system policy'}` };
+        continue;
+      }
+      // Prefix match: if resource ends with ':', match resource that starts with
+      // the prefix (with or without colon). E.g. resource '_init:' matches '_init:mac-policy' and '_init'.
+      if (mr.endsWith(':')) {
+        if (resource === mr.slice(0, -1) || resource.startsWith(mr)) {
+          if (macRule.effect === 'deny') return { allowed: false, reason: `MAC: ${macRule.description ?? 'Denied by system policy'}` };
+        }
+        continue;
+      }
+      // Exact match
+      if (mr === resource) {
+        if (macRule.effect === 'deny') return { allowed: false, reason: `MAC: ${macRule.description ?? 'Denied by system policy'}` };
+      }
+    }
+
+    // 2c. Check temporary elevation (sudo) — if active, user is treated as root
+    const isElevated = userRole === 'root' || await this.#checkTempElevation(userId);
+
+    // 3. Load all policies (individual + group) — cached for performance
     const [allPolicies, allUserGroups, allPermGroups] = await Promise.all([
-      this.policyStore.list(),
-      this.ugStore.list(),
-      this.pgStore.list(),
+      this.#cachedPolicyList(),
+      this.#cachedUserGroupList(),
+      this.#cachedPermGroupList(),
     ]);
 
     // 3a. Find user's group IDs (resolve DAG)
@@ -698,7 +954,7 @@ export class PermissionService implements IPermissionService {
     // Dual-check: wheel group permission groups require Admin role
     const wheelGroupIds = allUserGroups.filter(g => g.name === 'wheel').map(g => g.id);
     const userIsElevated = wheelGroupIds.some(wgId => userGroupIds.includes(wgId as any))
-      && userRole === 'root';
+      && isElevated;
 
     // 3b. Collect rules from permission groups (resolve DAG for each matched group)
     const groupRules: Array<{ rule: PermissionRule; groupName: string }> = [];
@@ -752,7 +1008,11 @@ export class PermissionService implements IPermissionService {
       return item.actions.includes(action);
     }).filter(item => {
       if (!item.resource || item.resource === '*') return true;
-      return item.resource === resource;
+      // Direct match
+      if (item.resource === resource) return true;
+      // $self match: resource:$self matches when the acting user is the owner
+      if (resourceOwnerId && resourceOwnerId === userId && item.resource === `${resource}:$self`) return true;
+      return false;
     }).sort((a, b) => b.priority - a.priority);
 
     // 5. Evaluate (deny-overrides)

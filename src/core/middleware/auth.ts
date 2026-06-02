@@ -57,7 +57,20 @@ export function authz(config: AuthzConfig): MiddlewareHandler<{ Variables: AppCo
     }
 
     // 1. Skip public paths
-    if (config.publicPaths.some(p => path.startsWith(p))) {
+    // Exact/startsWith matches: skip auth for all methods (register, login, etc.)
+    // Wildcard (*) matches: skip auth only for GET requests (e.g. avatar display)
+    if (config.publicPaths.some(p => {
+      if (p.includes('*')) {
+        if (method !== 'GET') return false;
+        const star = p.indexOf('*');
+        const prefix = p.slice(0, star);
+        const suffix = p.slice(star + 1);
+        if (!suffix || !path.startsWith(prefix) || !path.endsWith(suffix)) return false;
+        const middle = path.slice(prefix.length, path.length - suffix.length);
+        return !middle.includes('/');
+      }
+      return path.startsWith(p);
+    })) {
       await next();
       return;
     }
@@ -75,12 +88,13 @@ export function authz(config: AuthzConfig): MiddlewareHandler<{ Variables: AppCo
     }
 
     // 3. Validate session
-    const sessionEntry = await config.store.get<{ userId: string; createdAt: number }>(TOKEN_PREFIX + token).catch(() => null);
+    const sessionEntry = await config.store.get<{ userId: string; createdAt: number; expiresAt?: number }>(TOKEN_PREFIX + token).catch(() => null);
     if (!sessionEntry) {
       secAudit('perm.unauthorized', KernLevel.WARNING, { reason: 'invalid_token' });
       return c.json({ success: false, data: null, error: { code: 'UNAUTHORIZED', message: 'Invalid or expired token' } }, 401);
     }
-    if (Date.now() - sessionEntry.value.createdAt > SESSION_TTL_MS) {
+    const expiresAt = sessionEntry.value.expiresAt ?? (sessionEntry.value.createdAt + SESSION_TTL_MS);
+    if (Date.now() >= expiresAt) {
       secAudit('perm.unauthorized', KernLevel.WARNING, { reason: 'token_expired' });
       return c.json({ success: false, data: null, error: { code: 'UNAUTHORIZED', message: 'Token expired' } }, 401);
     }

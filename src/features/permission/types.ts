@@ -98,6 +98,7 @@ export interface PermissionRule {
   actions: string[];
   resource?: string | undefined;
   priority: number;
+  description?: string | undefined;
 }
 
 // ─── Permission group ───
@@ -265,6 +266,9 @@ export interface PermissionCheckInput {
   ip?: string | undefined;
   timestamp?: number | undefined;
   context?: Record<string, unknown> | undefined;
+  /** If set, the resource is owned by this user ID. Rules with `resource:$self`
+   *  match when the acting user === the resource owner. */
+  resourceOwnerId?: string | undefined;
 }
 
 export interface PolicyMatchResult {

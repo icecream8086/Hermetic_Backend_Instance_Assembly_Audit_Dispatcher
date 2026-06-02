@@ -17,6 +17,23 @@ import {
 } from './schema.ts';
 import { ok, fail } from '../../core/response.ts';
 import type { AuditActor } from './audit.ts';
+import { z } from 'zod';
+
+const LogLevelEnum = z.enum(['debug', 'info', 'warn', 'warning', 'error', 'none', 'notice', 'fatal']);
+
+const KNOWN_FACILITIES = [
+  'user-service', 'perm', 'perm-audit', 'authz', 'sysgrp',
+  'sandbox', 'sandbox-service', 'template', 'image', 'dns', 'dns-service', 'quota', 'http',
+] as const;
+
+const UpdateLogPolicySchema = z.object({
+  defaultLevel: LogLevelEnum.optional(),
+  auditLevel: LogLevelEnum.optional(),
+  facilities: z.array(z.object({
+    facility: z.enum(KNOWN_FACILITIES),
+    level: LogLevelEnum,
+  })).optional(),
+});
 
 function actorFrom(c: any): AuditActor | undefined {
   const u = c.var?.currentUser;
@@ -272,7 +289,9 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
   router.put('/log-policy', async (c) => {
     { const r = requireRoot(c); if (r) return r; }
     const body: unknown = await c.req.json();
-    const policy = await svc.updateLogPolicy(body as any, actorFrom(c));
+    const parsed = UpdateLogPolicySchema.safeParse(body);
+    if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
+    const policy = await svc.updateLogPolicy(parsed.data as any, actorFrom(c));
     return c.json(ok(policy));
   });
 
@@ -281,6 +300,7 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
   // ═══════════════════════════════════════
 
   router.post('/compare/perm-groups', async (c) => {
+    { const r = requireRoot(c); if (r) return r; }
     const { idA, idB } = await c.req.json<{ idA: string; idB: string }>();
     if (!idA || !idB) return c.json(fail('VALIDATION_ERROR', 'idA and idB required'), 400);
     try { return c.json(ok(await svc.comparePermGroups(idA, idB))); }
@@ -288,6 +308,7 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
   });
 
   router.post('/compare/user-groups', async (c) => {
+    { const r = requireRoot(c); if (r) return r; }
     const { idA, idB } = await c.req.json<{ idA: string; idB: string }>();
     if (!idA || !idB) return c.json(fail('VALIDATION_ERROR', 'idA and idB required'), 400);
     try { return c.json(ok(await svc.compareUserGroups(idA, idB))); }

@@ -8,11 +8,15 @@ export function createPlatformsRouter(registry: IProviderRegistry): Hono<{ Varia
   const router = new Hono<{ Variables: AppContext }>();
 
   router.get('/', async (c) => {
+    const page = parseInt(c.req.query('page') ?? '') || 1;
+    const limit = parseInt(c.req.query('limit') ?? '') || 50;
     const platforms = registry.availableProviders().map(p => ({
       name: p.name,
       containerAvailable: true,
     }));
-    return c.json(ok(platforms));
+    const total = platforms.length;
+    const start = (page - 1) * limit;
+    return c.json(ok({ items: platforms.slice(start, start + limit), total, page, limit }));
   });
 
   return router;

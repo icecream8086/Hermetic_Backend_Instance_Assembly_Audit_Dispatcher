@@ -52,7 +52,7 @@ describe('Auth integration', () => {
       .expectStatus(201)
       .expectJson('data.user.email', email)
       .expectJson('data.user.name', 'Alice')
-      .expectJson('data.user.role', 'Viewer')
+      .expectJson('data.user.role', 'root')
       // .stores() implicitly asserts the path exists — if data.token is missing the test fails
       .stores('token', 'data.token')
       .stores('userId', 'data.user.id');
@@ -95,7 +95,7 @@ describe('Auth integration', () => {
     await spec()
       .get('/api/users/')
       .expectStatus(200)
-      .expectJson('data[0].email', email);
+      .expectJson('data.items[0].email', email);
   });
 
   it('get user by id', async () => {

@@ -11,6 +11,8 @@ import { DnsRecordStatus } from './types.ts';
 import { LogLevel } from '../../core/types.ts';
 import { createFacility } from '../../core/brand.ts';
 import { AppError } from '../../core/types.ts';
+import type { IAuditWriter } from '../../core/audit/types.ts';
+import { KernLevel } from '../../core/audit/kern-level.ts';
 
 const FACILITY = createFacility('dns-service');
 const KEY_PREFIX = 'dns:';
@@ -20,6 +22,7 @@ export class DnsService implements IDnsService {
     private readonly atomic: IAtomicStore,
     private readonly logger: ILogWriter,
     private readonly dnsProvider: IDnsProvider,
+    private readonly audit?: IAuditWriter,
   ) {}
 
   async syncRecord(input: DnsSyncInput): Promise<DnsRecord> {
@@ -65,6 +68,13 @@ export class DnsService implements IDnsService {
       metadata: { dnsRecordId: id as string, domain, type, value },
     });
 
+    this.audit?.write({
+      level: KernLevel.INFO,
+      facility: FACILITY,
+      message: `DNS record synced — ${type} ${domain} → ${value}`,
+      metadata: { eventType: 'dns.synced', dnsRecordId: id as string, domain, type, value },
+    });
+
     return record;
   }
 
@@ -84,6 +94,13 @@ export class DnsService implements IDnsService {
       level: LogLevel.INFO,
       message: `DNS record deleted ${entry.value.domain}`,
       metadata: { dnsRecordId: id as string, domain: entry.value.domain },
+    });
+
+    this.audit?.write({
+      level: KernLevel.INFO,
+      facility: FACILITY,
+      message: `DNS record deleted — ${entry.value.domain}`,
+      metadata: { eventType: 'dns.deleted', dnsRecordId: id as string, domain: entry.value.domain },
     });
   }
 

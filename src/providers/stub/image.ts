@@ -1,4 +1,4 @@
-import type { IImageProvider, ImageInfo } from '../../core/provider/interfaces.ts';
+import type { IImageProvider, ImageInfo, ListImagesOptions } from '../../core/provider/interfaces.ts';
 
 export class StubImageProvider implements IImageProvider {
   private images = new Map<string, ImageInfo>();
@@ -11,7 +11,7 @@ export class StubImageProvider implements IImageProvider {
     return info;
   }
 
-  async list(): Promise<readonly ImageInfo[]> {
+  async list(_options?: ListImagesOptions): Promise<readonly ImageInfo[]> {
     return [...this.images.values()];
   }
 

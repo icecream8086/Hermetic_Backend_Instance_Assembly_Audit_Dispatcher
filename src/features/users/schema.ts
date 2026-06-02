@@ -40,7 +40,6 @@ export const UpdateUserSchema = z.object({
   role: z.nativeEnum(UserRole).optional(),
   loginPolicy: LoginPolicySchema.optional(),
   publicKeyEd25519: PublicKeySchema.optional(),
-  privateKeyEd25519: z.string().optional(),
 });
 
 // ─── Response schemas ───
@@ -52,7 +51,14 @@ export const UserResponseSchema = z.object({
   role: z.nativeEnum(UserRole),
   createdAt: z.number(),
   updatedAt: z.number(),
-  privateKeyEd25519: z.string().default(''),
+});
+
+// Separate schema for registration response — includes private key only at creation time.
+// After registration the private key is NEVER returned by any other endpoint.
+export const RegisterResponseSchema = z.object({
+  token: z.string(),
+  user: UserResponseSchema,
+  privateKeyEd25519: z.string().optional(),
 });
 
 export const LoginResponseSchema = z.object({

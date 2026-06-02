@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { IAuditReader, AuditFilter } from './types.ts';
 import { KernLevel } from './kern-level.ts';
-import { ok } from '../response.ts';
+import { ok, fail } from '../response.ts';
 
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 500;
@@ -12,16 +12,28 @@ function intParam(raw: string | undefined, fallback: number, min: number, max: n
   return Number.isFinite(n) ? Math.min(Math.max(n, min), max) : fallback;
 }
 
+/** Reject non-root users on admin endpoints. No-op when authz is disabled (no currentUser). */
+function requireRoot(c: any): Response | null {
+  const user = c.var?.currentUser;
+  if (!user) return null; // authz disabled — allow
+  const isRoot = user.role === 'root' || user.role === 'Operator' || user.role === 'wheel';
+  if (!isRoot) {
+    return c.json(fail('FORBIDDEN', 'Admin access required'), 403);
+  }
+  return null;
+}
+
 /**
  * 审计日志查询路由 — Cloudflare Log API CRUD 转发层。
  *
- * 查询穿透到 IAuditReader，当前返回空集（纯转发接口，等待对接 Logpush 后端）。
- * 实时日志请使用 `wrangler tail` 或 Cloudflare Dashboard。
+ * 查询穿透到 IAuditReader。需要 root 权限访问。
  */
 export function createAuditRouter(reader: IAuditReader): Hono {
   const router = new Hono();
 
   router.get('/logs', (c) => {
+    { const r = requireRoot(c); if (r) return r; }
+
     const filter: AuditFilter = {};
     const levelMin = c.req.query('levelMin');
     const levelMax = c.req.query('levelMax');
@@ -41,6 +53,7 @@ export function createAuditRouter(reader: IAuditReader): Hono {
   });
 
   router.get('/logs/stats', (c) => {
+    { const r = requireRoot(c); if (r) return r; }
     const result = reader.query({ limit: 1 });
     return c.json(ok({ count: result.total, capacity: 500 }));
   });

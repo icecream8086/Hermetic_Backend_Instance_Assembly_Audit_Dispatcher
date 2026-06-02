@@ -1,0 +1,175 @@
+{
+  "name": "full-featured-template",
+  "description": "Complete template spec example covering all field groups",
+
+  "dependsOn": ["tpl_parent_uuid_1", "tpl_parent_uuid_2"],
+  "visibility": "public",
+  "instanceLimit": { "type": "perUser", "max": 3 },
+  "resourceBinding": { "domain": "app.example.com", "port": 443 },
+  "userGroupIds": ["usergrp_users", "usergrp_developers"],
+
+  "container": {
+    "region": "local",
+    "zone": "cn-hangzhou-f",
+    "account": "default",
+    "restartPolicy": "Always",
+    "containers": [
+      {
+        "name": "app",
+        "image": "docker.io/library/nginx:latest",
+        "command": ["nginx"],
+        "args": ["-g", "daemon off;"],
+        "env": [
+          { "name": "APP_ENV", "value": "production" },
+          { "name": "DB_URL", "valueFrom": "secret:db-credentials:url" }
+        ],
+        "ports": [
+          { "containerPort": 80, "protocol": "TCP" },
+          { "containerPort": 443, "protocol": "TCP" }
+        ],
+        "resources": {
+          "requests": { "cpu": 0.25, "memory": 128 },
+          "limits":   { "cpu": 1.0,  "memory": 512, "gpu": 0 }
+        }
+      },
+      {
+        "name": "sidecar-logger",
+        "image": "docker.io/library/busybox:latest",
+        "command": ["sh", "-c", "tail -f /var/log/app/*.log"],
+        "resources": {
+          "limits": { "cpu": 0.1, "memory": 64 }
+        }
+      }
+    ],
+    "initContainers": [
+      {
+        "name": "init-db",
+        "image": "docker.io/library/alpine:latest",
+        "command": ["sh", "-c", "until nc -z db-host 5432; do sleep 1; done"],
+        "resources": { "limits": { "cpu": 0.25, "memory": 64 } }
+      }
+    ]
+  },
+
+  "healthChecks": [
+    {
+      "name": "app-liveness",
+      "target": "container:app",
+      "type": "liveness",
+      "probe": { "httpGet": { "path": "/health", "port": 8080, "scheme": "HTTP" } },
+      "initialDelaySeconds": 10, "periodSeconds": 30, "timeoutSeconds": 5,
+      "failureThreshold": 3, "successThreshold": 1
+    },
+    {
+      "name": "app-readiness",
+      "target": "container:app",
+      "type": "readiness",
+      "probe": { "tcpSocket": { "port": 80 } },
+      "periodSeconds": 5, "initialDelaySeconds": 2, "timeoutSeconds": 3
+    },
+    {
+      "name": "sidecar-startup",
+      "target": "container:sidecar-logger",
+      "type": "startup",
+      "probe": { "exec": { "command": ["cat", "/tmp/ready"] } },
+      "initialDelaySeconds": 1, "periodSeconds": 10, "failureThreshold": 30
+    },
+    {
+      "name": "init-db-check",
+      "target": "init:init-db",
+      "type": "readiness",
+      "probe": { "tcpSocket": { "port": 5432 } },
+      "periodSeconds": 5
+    }
+  ],
+
+  "network": {
+    "mode": "public",
+    "publicIp": { "allocate": true, "bandwidth": 100 },
+    "vpc": {
+      "id": "vpc-xxxxxxxx",
+      "subnetIds": ["subnet-xxxx", "subnet-yyyy"],
+      "securityGroupId": "sg-xxxxxxxx"
+    }
+  },
+
+  "extensions": {
+    "storage": [
+      {
+        "name": "app-data", "type": "nfs",
+        "mountPath": "/var/lib/app",
+        "nfs": { "server": "192.168.45.202", "path": "/nfsshare/app-data", "readOnly": false },
+        "providerOverrides": { "alibaba": { "nasPath": "/data/app", "server": "nas-xxx.cn-hangzhou.nas.aliyuncs.com" } }
+      },
+      {
+        "name": "logs", "type": "hostPath",
+        "mountPath": "/var/log/app",
+        "hostPath": { "path": "/var/log/app" }
+      },
+      {
+        "name": "tmp-cache", "type": "emptyDir",
+        "mountPath": "/cache", "size": 1
+      },
+      {
+        "name": "static-assets", "type": "oss",
+        "mountPath": "/app/static",
+        "oss": { "bucket": "my-assets", "path": "/static", "readOnly": true },
+        "providerOverrides": { "alibaba": { "endpoint": "oss-cn-hangzhou.aliyuncs.com" } }
+      }
+    ],
+    "spotStrategy": "SpotWithPriceLimit",
+    "providerOverrides": {
+      "podman": {
+        "capAdd": ["SYS_PTRACE"],
+        "privileged": false,
+        "networkMode": "host",
+        "securityOpt": ["no-new-privileges"],
+        "tmpfs": { "/tmp": "size=64M" }
+      },
+      "alibaba": {
+        "instanceType": "ecs.c7.xlarge",
+        "eipBandwidth": 100, "eipISP": "BGP", "spotPriceLimit": 0.5,
+        "gpuSpec": "NVIDIA A10", "ramRoleName": "ECSAccessOSS",
+        "resourceGroupId": "rg-xxxx", "autoCreateEip": true,
+        "tags": [
+          { "key": "Environment", "value": "production" },
+          { "key": "Team", "value": "platform" }
+        ],
+        "dnsConfig": {
+          "nameServers": ["8.8.8.8", "114.114.114.114"],
+          "searches": ["internal.example.com"],
+          "options": [{ "name": "ndots", "value": "2" }]
+        },
+        "hostAliases": [ { "hostname": "db.internal", "ip": "10.0.0.100" } ],
+        "logConfig": { "type": "fluentd", "fluentd": { "endpoint": "192.168.0.1:24224" } },
+        "dataDisk": [{
+          "size": 40, "category": "cloud_essd", "performanceLevel": "PL1",
+          "deleteWithInstance": true, "encrypted": true, "kmsKeyId": "kms-xxxx"
+        }],
+        "schedulerOptions": {
+          "privatePool": { "id": "eap-xxxx", "matchCriteria": "Open" },
+          "deploymentSetId": "ds-xxxx"
+        },
+        "imageOptions": {
+          "imageCache": true,
+          "imageRegistryCredential": [
+            { "server": "registry.example.com", "username": "robot$account", "password": "..." }
+          ]
+        },
+        "securityOptions": {
+          "enableSensitiveOSParameter": false, "enableSlm": true,
+          "securityHardening": true,
+          "confidentialComputing": { "enabled": true, "type": "TDX" }
+        }
+      },
+      "stub": { "simulateDelayMs": 500, "simulateFailureRate": 0.0 }
+    },
+    "healthMaxRetries": 10,
+    "autoStart": true,
+    "webTerminal": true,
+    "lifecycleHooks": {
+      "postStart": { "exec": { "command": ["/bin/sh", "-c", "echo started > /tmp/status"] } },
+      "preStop":  { "exec": { "command": ["/bin/sh", "-c", "echo stopping > /tmp/status; sleep 5"] } }
+    }
+  }
+}

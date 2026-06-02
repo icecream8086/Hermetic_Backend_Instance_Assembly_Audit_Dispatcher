@@ -9,7 +9,8 @@
  *
  * On each alarm fire, the DO:
  * 1. Calls back to the Worker via `fetch(callbackUrl)` to trigger a tick.
- * 2. Re-schedules the next alarm.
+ * 2. Re-schedules the next alarm using algebraic scheduling
+ *    (firstAlarmAt + n * intervalMs) to prevent cumulative drift.
  *
  * Note: Uses `_`-prefixed properties instead of `#` private fields to avoid
  * a workerd crash on Windows when private fields are used in Durable Object
@@ -34,6 +35,8 @@ export class AlarmTimerDO implements DurableObject {
   _callbackUrl = '';
   _running = false;
   _tickCount = 0;
+  /** Absolute timestamp of the first alarm (set on /start). Used for algebraic re-scheduling. */
+  _firstAlarmAt = 0;
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
@@ -43,7 +46,12 @@ export class AlarmTimerDO implements DurableObject {
       this._intervalMs = Math.max(body.intervalMs, AlarmTimerDO.MIN_INTERVAL);
       this._callbackUrl = body.callbackUrl ?? '';
       this._running = true;
-      await this.ctx.storage.setAlarm(Date.now() + this._intervalMs);
+      this._tickCount = 0;
+      // Use algebraic scheduling: record first alarm time so subsequent
+      // alarms use firstAlarmAt + n * intervalMs instead of Date.now() + interval.
+      // This prevents cumulative drift from DO alarm jitter.
+      this._firstAlarmAt = Date.now();
+      await this.ctx.storage.setAlarm(this._firstAlarmAt + this._intervalMs);
       return Response.json({
         ok: true,
         intervalMs: this._intervalMs,
@@ -84,6 +92,12 @@ export class AlarmTimerDO implements DurableObject {
       }
     }
 
-    await this.ctx.storage.setAlarm(Date.now() + this._intervalMs);
+    // Algebraic scheduling: compute next alarm from firstAlarmAt to avoid
+    // accumulating DO alarm jitter. If firstAlarmAt is 0 (backward compat),
+    // fall back to Date.now() + interval.
+    const nextAt = this._firstAlarmAt > 0
+      ? this._firstAlarmAt + this._tickCount * this._intervalMs
+      : Date.now() + this._intervalMs;
+    await this.ctx.storage.setAlarm(nextAt);
   }
 }

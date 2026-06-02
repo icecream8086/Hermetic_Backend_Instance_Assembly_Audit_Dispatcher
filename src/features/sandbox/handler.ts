@@ -9,11 +9,11 @@ import { ok, fail } from '../../core/response.ts';
 
 type PermissionCheckFn = { check(params: { userId: string; action: string; resource: string; ip?: string }): Promise<{ allowed: boolean; reason: string }> };
 
-async function requirePerm(c: any, checker: PermissionCheckFn | undefined, action: string, resource: string): Promise<Response | null> {
+async function requirePerm(c: any, checker: PermissionCheckFn | undefined, action: string, resource: string, resourceOwnerId?: string): Promise<Response | null> {
   if (!checker) return null;
   const user = (c as any).var?.currentUser;
   if (!user) return null;
-  const result = await checker.check({ userId: user.id, action, resource });
+  const result = await checker.check({ userId: user.id, action, resource, ...(resourceOwnerId ? { resourceOwnerId } : {}) });
   if (!result.allowed) return c.json(fail('FORBIDDEN', result.reason), 403);
   return null;
 }
@@ -45,6 +45,7 @@ export function createSandboxRouter(
 
   // GET / — list all sandboxes (paginated)
   router.get('/', async (c) => {
+    { const r = await requirePerm(c, permissionChecker, 'read', 'sandbox'); if (r) return r; }
     const status = c.req.query('status') as any || undefined;
     const limit = parseInt(c.req.query('limit') ?? '50');
     const cursor = c.req.query('cursor');
@@ -54,6 +55,7 @@ export function createSandboxRouter(
 
   // GET /:id — get a single sandbox
   router.get('/:id', async (c) => {
+    { const r = await requirePerm(c, permissionChecker, 'read', 'sandbox'); if (r) return r; }
     const id = createSandboxId(c.req.param('id'));
     const sandbox = await svc.getById(id);
     if (!sandbox) return c.json(fail('SANDBOX_NOT_FOUND', 'Sandbox not found'), 404);
@@ -62,11 +64,13 @@ export function createSandboxRouter(
 
   // POST /:id/stop — stop a sandbox
   router.post('/:id/stop', async (c) => {
-    { const r = await requirePerm(c, permissionChecker, 'update', 'sandbox'); if (r) return r; }
     const id = createSandboxId(c.req.param('id'));
+    const sandbox = await svc.getById(id);
+    const ownerId = sandbox?.config?.creatorId;
+    { const r = await requirePerm(c, permissionChecker, 'update', 'sandbox', ownerId); if (r) return r; }
     try {
-      const sandbox = await svc.stop(id);
-      return c.json(ok(sandbox));
+      const stopped = await svc.stop(id);
+      return c.json(ok(stopped));
     } catch (e: any) {
       return c.json(fail('STOP_FAILED', e.message), 409);
     }
@@ -74,10 +78,13 @@ export function createSandboxRouter(
 
   // DELETE /:id — terminate and delete a sandbox
   router.delete('/:id', async (c) => {
-    { const r = await requirePerm(c, permissionChecker, 'delete', 'sandbox'); if (r) return r; }
     const id = createSandboxId(c.req.param('id'));
+    const sandbox = await svc.getById(id);
+    const ownerId = sandbox?.config?.creatorId;
+    const actorId = (c as any).var?.currentUser?.id;
+    { const r = await requirePerm(c, permissionChecker, 'delete', 'sandbox', ownerId); if (r) return r; }
     try {
-      await svc.terminate(id);
+      await svc.terminate(id, actorId);
       return c.json(ok(null));
     } catch (e: any) {
       return c.json(fail('DELETE_FAILED', e.message), 404);
@@ -86,6 +93,7 @@ export function createSandboxRouter(
 
   // POST /:id/sync — sync runtime status from provider
   router.post('/:id/sync', async (c) => {
+    { const r = await requirePerm(c, permissionChecker, 'update', 'sandbox'); if (r) return r; }
     const id = createSandboxId(c.req.param('id'));
     try {
       const runtime = await svc.syncRuntime(id);
@@ -97,6 +105,7 @@ export function createSandboxRouter(
 
   // GET /:id/health — container health status
   router.get('/:id/health', async (c) => {
+    { const r = await requirePerm(c, permissionChecker, 'read', 'sandbox'); if (r) return r; }
     const id = createSandboxId(c.req.param('id'));
     try {
       const health = await svc.getHealth(id);

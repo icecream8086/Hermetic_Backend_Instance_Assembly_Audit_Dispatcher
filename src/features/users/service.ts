@@ -1,4 +1,5 @@
-import type { IAtomicStore } from '../../core/store/interfaces.ts';
+import type { IAtomicStore, IStoreTransaction } from '../../core/store/interfaces.ts';
+import { TransactConflictError } from '../../core/store/interfaces.ts';
 import type { ILogWriter } from '../../core/logger/interfaces.ts';
 import { createFacility } from '../../core/brand.ts';
 import { measure, lastPerf } from '../../core/perf.ts';
@@ -6,7 +7,7 @@ import { LogLevel, AppError } from '../../core/types.ts';
 import type { IAuditWriter } from '../../core/audit/types.ts';
 import { KernLevel } from '../../core/audit/kern-level.ts';
 import type { User, UserId, Session, SessionToken, RegisterInput, LoginInput, LoginContext, NoPasswordLoginInput, UpdateUserInput, LoginInfo } from './types.ts';
-import { generateUserId, generateSessionToken, createUserId, createSessionToken } from './types.ts';
+import { generateUserId, generateSessionToken, createUserId, createSessionToken, UserRole } from './types.ts';
 
 const FACILITY = createFacility('user-service');
 const USER_PREFIX = 'user:';
@@ -19,6 +20,7 @@ const USER_SESSIONS_PREFIX = 'user:sessions:';
  *  the read cost scales linearly with shard count — 16 is a good balance. */
 const USER_IDS_SHARDS = 16;
 const USER_IDS_SHARD_PREFIX = 'user:idx:';
+const USER_COUNT_KEY = 'user:count';
 
 /** Deterministic shard assignment from a UserId (UUID v4). */
 function shardIndex(id: UserId): number {
@@ -97,59 +99,50 @@ function base64UrlDecode(s: string): Uint8Array<ArrayBuffer> {
   return out;
 }
 
-// ─── Nonce replay cache ───
+// ─── Nonce replay cache (persisted via atomic store with TTL) ───
+// On Workers, in-memory state is lost on cold start — an attacker could
+// replay a one-time key within its validity window (±30s).  By storing
+// the nonce in the atomic store with a 90-second TTL we survive cold
+// starts and still get auto-cleanup.
 
-const _nonceCache = new Map<string, number>();
+const NONCE_TTL_S = 90; // ±30s key window + generous margin
 
-function checkNonce(email: string, nonceB64: string): boolean {
-  const key = `${email}:${nonceB64}`;
-  const now = Date.now();
-  // Map is self-limiting (TTL × login rate). Per-key check only — no O(n) scan.
-  if (_nonceCache.has(key)) return false; // replay
-  _nonceCache.set(key, now);
-  return true;
+async function checkNonce(atomic: IAtomicStore, email: string, nonceB64: string): Promise<boolean> {
+  const key = `nonce:${email}:${nonceB64}`;
+  const ver = await atomic.set(key, true, null, NONCE_TTL_S);
+  return ver !== null;
 }
 
-// ─── Login throttle (brute-force protection) ───
+// ─── Login throttle (brute-force protection) — persisted via atomic store ───
 
 const MAX_ATTEMPTS = 5;
 const LOCKOUT_MS = 60_000;
-const _attempts = new Map<string, { count: number; window: number }>();
+const ATTEMPT_TTL_S = 90;
 
-function checkThrottle(email: string, ip?: string): void {
-  const key = ip ? `${email}:${ip}` : email;
-  const now = Date.now();
-  const entry = _attempts.get(key);
-  if (entry && entry.count >= MAX_ATTEMPTS) {
-    const elapsed = now - entry.window;
-    if (elapsed >= LOCKOUT_MS) {
-      _attempts.delete(key);
-      return;
-    }
+async function checkThrottle(atomic: IAtomicStore, email: string, ip?: string): Promise<void> {
+  const key = `login:attempts:${ip ? `${email}:${ip}` : email}`;
+  const entry = await atomic.get<{ count: number; window: number }>(key);
+  if (entry && entry.value.count >= MAX_ATTEMPTS) {
+    const elapsed = Date.now() - entry.value.window;
+    if (elapsed >= LOCKOUT_MS) return;
     const remaining = Math.ceil((LOCKOUT_MS - elapsed) / 1000);
     throw new AppError(429, 'TOO_MANY_ATTEMPTS', `Too many login attempts. Try again in ${remaining}s`);
   }
 }
 
-function recordAttempt(email: string, success: boolean, ip?: string): void {
-  const key = ip ? `${email}:${ip}` : email;
+async function recordAttempt(atomic: IAtomicStore, email: string, success: boolean, ip?: string): Promise<void> {
+  const key = `login:attempts:${ip ? `${email}:${ip}` : email}`;
   if (success) {
-    _attempts.delete(key);
+    const existing = await atomic.get<{ count: number; window: number }>(key);
+    if (existing) await atomic.set(key, null, existing.version);
     return;
   }
   const now = Date.now();
-  const entry = _attempts.get(key);
-  if (entry && now - entry.window < LOCKOUT_MS) {
-    entry.count++;
+  const entry = await atomic.get<{ count: number; window: number }>(key);
+  if (entry && now - entry.value.window < LOCKOUT_MS) {
+    await atomic.set(key, { count: entry.value.count + 1, window: entry.value.window }, entry.version, ATTEMPT_TTL_S);
   } else {
-    _attempts.set(key, { count: 1, window: now });
-  }
-  // Trim stale entries once in a while
-  if (_attempts.size > 1000) {
-    const cutoff = now - LOCKOUT_MS;
-    for (const [k, v] of _attempts) {
-      if (v.window < cutoff) _attempts.delete(k);
-    }
+    await atomic.set(key, { count: 1, window: now }, null, ATTEMPT_TTL_S);
   }
 }
 
@@ -183,12 +176,13 @@ export interface IUserService {
   login(input: LoginInput, ctx?: LoginContext): Promise<{ user: User; token: SessionToken }>;
   loginNoPassword(input: NoPasswordLoginInput, ctx?: LoginContext): Promise<{ user: User; token: SessionToken }>;
   getById(id: UserId): Promise<User | null>;
-  update(id: UserId, input: UpdateUserInput): Promise<User>;
-  delete(id: UserId): Promise<void>;
+  update(id: UserId, input: UpdateUserInput, actorId?: string): Promise<User>;
+  delete(id: UserId, actorId?: string): Promise<void>;
   list(): Promise<User[]>;
+  listPaginated(page?: number, limit?: number): Promise<{ items: User[]; total: number }>;
   validateToken(token: SessionToken): Promise<User | null>;
-  clearLoginPolicy(id: UserId): Promise<User>;
-  clearPublicKey(id: UserId): Promise<User>;
+  clearLoginPolicy(id: UserId, actorId?: string): Promise<User>;
+  clearPublicKey(id: UserId, actorId?: string): Promise<User>;
   getLoginInfo(email: string): Promise<LoginInfo>;
   /** Bust the KV cache for a user and fetch fresh from authoritative store. */
   refresh(id: UserId): Promise<User | null>;
@@ -197,7 +191,7 @@ export interface IUserService {
   listSessions(userId: UserId): Promise<readonly SessionToken[]>;
 
   /** Revoke a specific session token. No-op if already revoked. */
-  revokeSession(token: SessionToken): Promise<void>;
+  revokeSession(token: SessionToken, actorId?: string): Promise<void>;
 }
 
 export class UserService implements IUserService {
@@ -206,6 +200,18 @@ export class UserService implements IUserService {
     private readonly logger: ILogWriter,
     private readonly audit?: IAuditWriter,
   ) {}
+
+  async #transactWithRetry<T>(fn: (txn: IStoreTransaction) => Promise<T>, maxRetries = 3): Promise<T> {
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        return await this.atomic.transact(fn);
+      } catch (err) {
+        if (err instanceof TransactConflictError && attempt < maxRetries - 1) continue;
+        throw err;
+      }
+    }
+    throw new AppError(409, 'CONFLICT', 'Transaction failed after retries');
+  }
 
   async register(input: RegisterInput): Promise<{ user: User; token: SessionToken }> {
     const id = generateUserId();
@@ -223,28 +229,30 @@ export class UserService implements IUserService {
       updatedAt: now,
     };
 
-    // Write user first (UUID key, no collision possible)
-    const userVersion = await this.atomic.set(USER_PREFIX + id, user, null);
-    if (!userVersion) throw new AppError(500, 'CREATE_FAILED', 'Failed to persist user');
+    // Atomically: write user + email index (uniqueness) + user ID index
+    await this.#transactWithRetry(async (txn) => {
+      const emailEntry = await txn.get<any>(EMAIL_INDEX_PREFIX + input.email);
+      if (emailEntry) throw new AppError(409, 'EMAIL_EXISTS', 'Email already registered');
+      const shardKey = USER_IDS_SHARD_PREFIX + shardIndex(id);
+      const idx = await txn.get<string[]>(shardKey);
+      txn.set(shardKey, [...(idx ?? []), id]);
+      txn.set(USER_PREFIX + id, user);
+      txn.set(EMAIL_INDEX_PREFIX + input.email, user);
+    });
 
-    // Email index with OCC create-only — this is the actual uniqueness gate.
-    // expectedVersion=null asserts the key must NOT exist, so concurrent
-    // registrations with the same email are correctly rejected.
-    const emailVersion = await this.atomic.set(EMAIL_INDEX_PREFIX + input.email, user, null);
-    if (!emailVersion) {
-      // Rollback: remove the user record we just created
-      await this.atomic.set(USER_PREFIX + id, null, userVersion);
-      throw new AppError(409, 'EMAIL_EXISTS', 'Email already registered');
-    }
+    // Best-effort counter update (outside transaction to avoid cross-shard contention)
+    await this.#incrCounter().catch(() => {});
 
-    // Create session token
+    // Create session token (separate — 'session' prefix maps to different DO shard)
     const token = await this.createSession(id);
-
-    // Append to user ID index for list()
-    await this.#addToIndex(id);
 
     // Auto-join "users" group (Linux-style default group)
     await this.#joinDefaultGroup(id);
+
+    // Root users also join the "root" group to get perm.operator policies
+    if (input.role === UserRole.Root) {
+      await this.#joinNamedGroup(id, 'root');
+    }
 
     await this.logger.logAsync({
       facility: FACILITY,
@@ -267,12 +275,12 @@ export class UserService implements IUserService {
     const ip = ctx?.ip;
 
     // ─── Throttle check ───
-    checkThrottle(email, ip);
+    await checkThrottle(this.atomic, email, ip);
 
     // ─── Credentials ───
     const entry = await this.atomic.get<User>(EMAIL_INDEX_PREFIX + email);
     if (!entry) {
-      recordAttempt(email, false, ip);
+      await recordAttempt(this.atomic, email, false, ip);
       throw new AppError(401, 'INVALID_CREDENTIALS', 'Invalid email or password');
     }
 
@@ -280,7 +288,7 @@ export class UserService implements IUserService {
     const valid = await serialisedHash(() => verifyPassword(input.password, user.passwordHash));
     this.logger.logAsync({ facility: FACILITY, level: LogLevel.INFO, message: `PBKDF2 verify: ${lastPerf().toFixed(1)}ms`, metadata: { operation: 'verify', duration: lastPerf() } });
     if (!valid) {
-      recordAttempt(email, false, ip);
+      await recordAttempt(this.atomic, email, false, ip);
       throw new AppError(401, 'INVALID_CREDENTIALS', 'Invalid email or password');
     }
 
@@ -288,11 +296,11 @@ export class UserService implements IUserService {
     const policy = user.loginPolicy;
     if (policy) {
       if (!policy.enabled) {
-        recordAttempt(email, false, ip);
+        await recordAttempt(this.atomic, email, false, ip);
         throw new AppError(403, 'LOGIN_DISABLED', 'Login disabled for this account');
       }
       if (policy.passwordLoginDisabled) {
-        recordAttempt(email, false, ip);
+        await recordAttempt(this.atomic, email, false, ip);
         throw new AppError(403, 'PASSWORD_LOGIN_DISABLED', 'Password login disabled for this account — use key-based authentication');
       }
       if (policy.timeRanges.length) {
@@ -302,7 +310,7 @@ export class UserService implements IUserService {
         const current = `${hh}:${mm}`;
         const inRange = policy.timeRanges.some(r => current >= r.start && current <= r.end);
         if (!inRange) {
-          recordAttempt(email, false, ip);
+          await recordAttempt(this.atomic, email, false, ip);
           throw new AppError(403, 'LOGIN_TIME_RESTRICTED', 'Login not allowed at this time');
         }
       }
@@ -310,14 +318,14 @@ export class UserService implements IUserService {
         const clientIp: string = ip;
         const allowed = policy.allowedCIDRs.some(cidr => ipInCIDR(clientIp, cidr));
         if (!allowed) {
-          recordAttempt(email, false, ip);
+          await recordAttempt(this.atomic, email, false, ip);
           throw new AppError(403, 'LOGIN_IP_RESTRICTED', 'Login not allowed from this IP');
         }
       }
     }
 
     const token = await this.createSession(user.id);
-    recordAttempt(email, true, ip);
+    await recordAttempt(this.atomic, email, true, ip);
 
     await this.logger.logAsync({
       facility: FACILITY,
@@ -340,57 +348,57 @@ export class UserService implements IUserService {
     const ip = ctx?.ip;
 
     // ─── Throttle ───
-    checkThrottle(email, ip);
+    await checkThrottle(this.atomic, email, ip);
 
     // Decode one-time key: signature_b64url.timestamp_b64url.nonce_b64url
     const parts = input.oneTimeKey.split('.');
-    if (parts.length !== 3) { recordAttempt(email, false, ip); throw new AppError(400, 'BAD_KEY_FORMAT', 'Invalid one-time key format'); }
+    if (parts.length !== 3) { await recordAttempt(this.atomic, email, false, ip); throw new AppError(400, 'BAD_KEY_FORMAT', 'Invalid one-time key format'); }
     const sigB64 = parts[0];
     const tsB64 = parts[1];
     const nonceB64 = parts[2];
-    if (!sigB64 || !tsB64 || !nonceB64) { recordAttempt(email, false, ip); throw new AppError(400, 'BAD_KEY_FORMAT', 'Empty component in one-time key'); }
+    if (!sigB64 || !tsB64 || !nonceB64) { await recordAttempt(this.atomic, email, false, ip); throw new AppError(400, 'BAD_KEY_FORMAT', 'Empty component in one-time key'); }
 
     // Check timestamp window (±30s)
     let ts: number;
     try {
       ts = parseInt(atob(tsB64.replace(/-/g, '+').replace(/_/g, '/')), 10);
     } catch {
-      recordAttempt(email, false, ip); throw new AppError(400, 'BAD_TIMESTAMP', 'Invalid timestamp encoding');
+      await recordAttempt(this.atomic, email, false, ip); throw new AppError(400, 'BAD_TIMESTAMP', 'Invalid timestamp encoding');
     }
-    if (isNaN(ts)) { recordAttempt(email, false, ip); throw new AppError(400, 'BAD_TIMESTAMP', 'Invalid timestamp'); }
+    if (isNaN(ts)) { await recordAttempt(this.atomic, email, false, ip); throw new AppError(400, 'BAD_TIMESTAMP', 'Invalid timestamp'); }
     const skew = Date.now() - ts * 1000;
-    if (Math.abs(skew) > 30_000) { recordAttempt(email, false, ip); throw new AppError(403, 'KEY_EXPIRED', 'One-time key expired'); }
+    if (Math.abs(skew) > 30_000) { await recordAttempt(this.atomic, email, false, ip); throw new AppError(403, 'KEY_EXPIRED', 'One-time key expired'); }
 
     // Check nonce replay
-    if (!checkNonce(email, nonceB64)) { recordAttempt(email, false, ip); throw new AppError(403, 'REPLAY_DETECTED', 'One-time key already used'); }
+    if (!await checkNonce(this.atomic, email, nonceB64)) { await recordAttempt(this.atomic, email, false, ip); throw new AppError(403, 'REPLAY_DETECTED', 'One-time key already used'); }
 
     // Fetch user by email
     const entry = await this.atomic.get<User>(EMAIL_INDEX_PREFIX + input.email);
-    if (!entry) { recordAttempt(email, false, ip); throw new AppError(401, 'INVALID_CREDENTIALS', 'Invalid email or one-time key'); }
+    if (!entry) { await recordAttempt(this.atomic, email, false, ip); throw new AppError(401, 'INVALID_CREDENTIALS', 'Invalid email or one-time key'); }
     const user = entry.value;
 
     // Login policy check
     const policy = user.loginPolicy;
     if (policy) {
-      if (!policy.enabled) { recordAttempt(email, false, ip); throw new AppError(403, 'LOGIN_DISABLED', 'Login disabled for this account'); }
+      if (!policy.enabled) { await recordAttempt(this.atomic, email, false, ip); throw new AppError(403, 'LOGIN_DISABLED', 'Login disabled for this account'); }
       if (policy.timeRanges.length) {
         const now = new Date();
         const mm = String(now.getUTCMinutes()).padStart(2, '0');
         const hh = String(now.getUTCHours()).padStart(2, '0');
         const current = `${hh}:${mm}`;
         const inRange = policy.timeRanges.some(r => current >= r.start && current <= r.end);
-        if (!inRange) { recordAttempt(email, false, ip); throw new AppError(403, 'LOGIN_TIME_RESTRICTED', 'Login not allowed at this time'); }
+        if (!inRange) { await recordAttempt(this.atomic, email, false, ip); throw new AppError(403, 'LOGIN_TIME_RESTRICTED', 'Login not allowed at this time'); }
       }
       if (policy.allowedCIDRs.length && ctx?.ip) {
         const clientIp: string = ctx.ip;
         const allowed = policy.allowedCIDRs.some(cidr => ipInCIDR(clientIp, cidr));
-        if (!allowed) { recordAttempt(email, false, ip); throw new AppError(403, 'LOGIN_IP_RESTRICTED', 'Login not allowed from this IP'); }
+        if (!allowed) { await recordAttempt(this.atomic, email, false, ip); throw new AppError(403, 'LOGIN_IP_RESTRICTED', 'Login not allowed from this IP'); }
       }
     }
 
     // Verify public key exists
     const pubKeyB64 = user.publicKeyEd25519;
-    if (!pubKeyB64) { recordAttempt(email, false, ip); throw new AppError(403, 'NO_PUBLIC_KEY', 'No public key configured for this account'); }
+    if (!pubKeyB64) { await recordAttempt(this.atomic, email, false, ip); throw new AppError(403, 'NO_PUBLIC_KEY', 'No public key configured for this account'); }
 
     // Verify Ed25519 signature
     let nonceBytes: ReturnType<typeof base64UrlDecode>;
@@ -399,7 +407,7 @@ export class UserService implements IUserService {
       nonceBytes = base64UrlDecode(nonceB64);
       signature = base64UrlDecode(sigB64);
     } catch {
-      recordAttempt(email, false, ip); throw new AppError(400, 'BAD_KEY_FORMAT', 'Invalid base64 encoding in one-time key');
+      await recordAttempt(this.atomic, email, false, ip); throw new AppError(400, 'BAD_KEY_FORMAT', 'Invalid base64 encoding in one-time key');
     }
     const message = new Uint8Array(new TextEncoder().encode(`${ts}${input.email}${ctx?.siteContext ?? ''}`));
     const pkRaw = atob(pubKeyB64);
@@ -414,14 +422,14 @@ export class UserService implements IUserService {
       signedData.set(nonceBytes, message.length);
       valid = await crypto.subtle.verify({ name: 'Ed25519' }, key, signature, signedData);
     } catch {
-      recordAttempt(email, false, ip);
+      await recordAttempt(this.atomic, email, false, ip);
       throw new AppError(500, 'VERIFY_FAILED', 'Signature verification failed');
     }
-    if (!valid) { recordAttempt(email, false, ip); throw new AppError(403, 'BAD_SIGNATURE', 'Invalid signature'); }
+    if (!valid) { await recordAttempt(this.atomic, email, false, ip); throw new AppError(403, 'BAD_SIGNATURE', 'Invalid signature'); }
 
     // Success
     const token = await this.createSession(user.id);
-    recordAttempt(input.email, true, ctx?.ip);
+    await recordAttempt(this.atomic, input.email, true, ctx?.ip);
 
     await this.logger.logAsync({
       facility: FACILITY,
@@ -450,7 +458,7 @@ export class UserService implements IUserService {
     return this.getById(id);
   }
 
-  async update(id: UserId, input: UpdateUserInput): Promise<User> {
+  async update(id: UserId, input: UpdateUserInput, actorId?: string): Promise<User> {
     const entry = await this.atomic.get<User>(USER_PREFIX + id);
     if (!entry) throw new AppError(404, 'USER_NOT_FOUND', 'User not found');
 
@@ -461,7 +469,6 @@ export class UserService implements IUserService {
       ...(input.password !== undefined ? { passwordHash: await hashPassword(input.password) } : {}),
       ...(input.loginPolicy !== undefined ? { loginPolicy: input.loginPolicy } : {}),
       ...(input.publicKeyEd25519 !== undefined ? { publicKeyEd25519: input.publicKeyEd25519 } : {}),
-      ...(input.privateKeyEd25519 !== undefined ? { privateKeyEd25519: input.privateKeyEd25519 } : {}),
       updatedAt: Date.now(),
     };
 
@@ -485,27 +492,36 @@ export class UserService implements IUserService {
       metadata: { userId: id as string },
     });
 
+    await this.audit?.write({
+      level: KernLevel.INFO,
+      facility: FACILITY,
+      message: `User profile updated — ${updated.email}`,
+      metadata: { eventType: 'user.updated', userId: id as string, actorId },
+    });
+
     return updated;
   }
 
-  async delete(id: UserId): Promise<void> {
+  async delete(id: UserId, actorId?: string): Promise<void> {
     const entry = await this.atomic.get<User>(USER_PREFIX + id);
     if (!entry) throw new AppError(404, 'USER_NOT_FOUND', 'User not found');
 
     const email = entry.value.email;
 
-    // Delete using OCC: storing null as tombstone, which get() treats as not-found
-    const deleted = await this.atomic.set(USER_PREFIX + id, null, entry.version);
-    if (!deleted) throw new AppError(409, 'CONFLICT', 'Concurrent modification detected');
+    // Atomically: tombstone user + remove email index + remove from ID index
+    await this.#transactWithRetry(async (txn) => {
+      const e = await txn.get<User>(USER_PREFIX + id);
+      if (!e) throw new AppError(404, 'USER_NOT_FOUND', 'User not found');
+      const shardKey = USER_IDS_SHARD_PREFIX + shardIndex(id);
+      const idx = await txn.get<string[]>(shardKey);
+      if (idx) txn.set(shardKey, idx.filter((i: string) => i !== id));
+      txn.set(USER_PREFIX + id, null);
+      const emEntry = await txn.get<any>(EMAIL_INDEX_PREFIX + email);
+      if (emEntry) txn.set(EMAIL_INDEX_PREFIX + email, null);
+    });
 
-    // Best-effort email index cleanup
-    const emailEntry = await this.atomic.get<User>(EMAIL_INDEX_PREFIX + email);
-    if (emailEntry) {
-      await this.atomic.set(EMAIL_INDEX_PREFIX + email, null, emailEntry.version);
-    }
-
-    // Remove from ID index
-    await this.#removeFromIndex(id);
+    // Best-effort counter update
+    await this.#decrCounter().catch(() => {});
 
     await this.logger.logAsync({
       facility: FACILITY,
@@ -513,6 +529,33 @@ export class UserService implements IUserService {
       message: 'User deleted',
       metadata: { userId: id as string, email },
     });
+
+    await this.audit?.write({
+      level: KernLevel.WARNING,
+      facility: FACILITY,
+      message: `User deleted — ${email}`,
+      metadata: { eventType: 'user.deleted', userId: id as string, email, actorId },
+    });
+  }
+
+  /** Increment user count — best-effort, OCC retry ×3. */
+  async #incrCounter(): Promise<void> {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const entry = await this.atomic.get<number>(USER_COUNT_KEY);
+      const ver = await this.atomic.set(USER_COUNT_KEY, (entry?.value ?? 0) + 1, entry?.version ?? null);
+      if (ver) return;
+    }
+  }
+
+  /** Decrement user count — best-effort, OCC retry ×3. */
+  async #decrCounter(): Promise<void> {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const entry = await this.atomic.get<number>(USER_COUNT_KEY);
+      const cur = entry?.value ?? 0;
+      if (cur <= 0) return;
+      const ver = await this.atomic.set(USER_COUNT_KEY, cur - 1, entry?.version ?? null);
+      if (ver) return;
+    }
   }
 
   async list(): Promise<User[]> {
@@ -529,7 +572,44 @@ export class UserService implements IUserService {
     return users.filter((u): u is NonNullable<typeof u> => u !== null).map(u => u.value);
   }
 
-  async clearLoginPolicy(id: UserId): Promise<User> {
+  async listPaginated(page = 1, limit = 50): Promise<{ items: User[]; total: number }> {
+    // Read total from counter (1 I/O) — avoids reading all 16 shard indices.
+    const countEntry = await this.atomic.get<number>(USER_COUNT_KEY);
+    const total = countEntry?.value ?? 0;
+    if (total === 0) return { items: [], total };
+
+    const start = (page - 1) * limit;
+    if (start >= total) return { items: [], total };
+
+    // Scan shards sequentially, collecting only enough IDs for the requested page.
+    const pageIds: string[] = [];
+    let remaining = limit;
+    let skip = start;
+
+    for (let i = 0; i < USER_IDS_SHARDS && remaining > 0; i++) {
+      const shard = await this.atomic.get<string[]>(USER_IDS_SHARD_PREFIX + i);
+      const ids = shard?.value ?? [];
+      if (ids.length === 0) continue;
+
+      if (skip >= ids.length) {
+        skip -= ids.length;
+        continue;
+      }
+
+      const take = Math.min(ids.length - skip, remaining);
+      pageIds.push(...ids.slice(skip, skip + take));
+      remaining -= take;
+      skip = 0;
+    }
+
+    if (pageIds.length === 0) return { items: [], total };
+
+    const users = await Promise.all(pageIds.map(id => this.atomic.get<User>(USER_PREFIX + id)));
+    const items = users.filter((u): u is NonNullable<typeof u> => u !== null).map(u => u.value);
+    return { items, total };
+  }
+
+  async clearLoginPolicy(id: UserId, actorId?: string): Promise<User> {
     const entry = await this.atomic.get<User>(USER_PREFIX + id);
     if (!entry) throw new AppError(404, 'USER_NOT_FOUND', 'User not found');
 
@@ -541,10 +621,17 @@ export class UserService implements IUserService {
     const emailEntry = await this.atomic.get<User>(EMAIL_INDEX_PREFIX + updated.email);
     if (emailEntry) await this.atomic.set(EMAIL_INDEX_PREFIX + updated.email, updated, emailEntry.version);
 
+    await this.audit?.write({
+      level: KernLevel.NOTICE,
+      facility: FACILITY,
+      message: `Login policy cleared for user — ${updated.email}`,
+      metadata: { eventType: 'user.loginPolicy.cleared', userId: id as string, actorId },
+    });
+
     return updated;
   }
 
-  async clearPublicKey(id: UserId): Promise<User> {
+  async clearPublicKey(id: UserId, actorId?: string): Promise<User> {
     const entry = await this.atomic.get<User>(USER_PREFIX + id);
     if (!entry) throw new AppError(404, 'USER_NOT_FOUND', 'User not found');
     const { publicKeyEd25519: _k, ...rest } = entry.value;
@@ -553,6 +640,14 @@ export class UserService implements IUserService {
     if (!newVersion) throw new AppError(409, 'CONFLICT', 'Concurrent modification detected');
     const emailEntry = await this.atomic.get<User>(EMAIL_INDEX_PREFIX + updated.email);
     if (emailEntry) await this.atomic.set(EMAIL_INDEX_PREFIX + updated.email, updated, emailEntry.version);
+
+    await this.audit?.write({
+      level: KernLevel.NOTICE,
+      facility: FACILITY,
+      message: `Public key cleared for user — ${updated.email}`,
+      metadata: { eventType: 'user.publicKey.cleared', userId: id as string, actorId },
+    });
+
     return updated;
   }
 
@@ -581,31 +676,35 @@ export class UserService implements IUserService {
   }
 
   async validateToken(token: SessionToken): Promise<User | null> {
-    const entry = await this.atomic.get<{ userId: string }>(TOKEN_PREFIX + token);
+    const entry = await this.atomic.get<Session>(TOKEN_PREFIX + token);
     if (!entry) return null;
+    const expiresAt = entry.value.expiresAt ?? entry.value.createdAt + SESSION_TTL_MS;
+    if (Date.now() >= expiresAt) return null;
     const userId = createUserId(entry.value.userId);
     return this.getById(userId);
   }
 
   private async createSession(userId: UserId): Promise<SessionToken> {
-    // 复用 2 小时内活跃 session
+    // Reuse active session within TTL
     const idxEntry = await this.atomic.get<string>(USER_SESSION_PREFIX + userId);
     if (idxEntry) {
       const existingToken = createSessionToken(idxEntry.value);
       const sessEntry = await this.atomic.get<Session>(TOKEN_PREFIX + existingToken);
       if (sessEntry) {
-        const age = Date.now() - sessEntry.value.createdAt;
-        if (age < SESSION_TTL_MS) {
+        const expiresAt = sessEntry.value.expiresAt ?? sessEntry.value.createdAt + SESSION_TTL_MS;
+        if (Date.now() < expiresAt) {
           return existingToken;
         }
       }
     }
 
+    const now = Date.now();
     const token = generateSessionToken();
     const session: Session = {
       token,
       userId,
-      createdAt: Date.now(),
+      createdAt: now,
+      expiresAt: now + SESSION_TTL_MS,
     };
     await this.atomic.set(TOKEN_PREFIX + token, session, null);
     await this.atomic.set(USER_SESSION_PREFIX + userId, token, idxEntry?.version ?? null);
@@ -623,20 +722,29 @@ export class UserService implements IUserService {
   async listSessions(userId: UserId): Promise<readonly SessionToken[]> {
     const entry = await this.atomic.get<string[]>(USER_SESSIONS_PREFIX + userId);
     if (!entry) return [];
-    // Filter out expired sessions (still in index but TTL-expired in store)
     const live: SessionToken[] = [];
+    const expired: string[] = [];
+    const now = Date.now();
     for (const raw of entry.value) {
       const t = createSessionToken(raw);
       const s = await this.atomic.get<Session>(TOKEN_PREFIX + t);
       if (s) {
-        const age = Date.now() - s.value.createdAt;
-        if (age < SESSION_TTL_MS) live.push(t);
+        const expiresAt = s.value.expiresAt ?? s.value.createdAt + SESSION_TTL_MS;
+        if (now < expiresAt) live.push(t);
+        else expired.push(t);
       }
+    }
+    // Clean up expired sessions from index
+    if (expired.length > 0) {
+      const remaining = entry.value.filter(r => !expired.includes(r));
+      await this.atomic.set(USER_SESSIONS_PREFIX + userId, remaining, entry.version);
+      // Best-effort remove from store
+      await Promise.allSettled(expired.map(t => this.atomic.set(TOKEN_PREFIX + createSessionToken(t), null, null)));
     }
     return live;
   }
 
-  async revokeSession(token: SessionToken): Promise<void> {
+  async revokeSession(token: SessionToken, actorId?: string): Promise<void> {
     // Read session before deleting to find userId for index cleanup
     const entry = await this.atomic.get<Session>(TOKEN_PREFIX + token);
     if (!entry) return;
@@ -654,16 +762,28 @@ export class UserService implements IUserService {
         sessIdx.version,
       );
     }
+
+    await this.audit?.write({
+      level: KernLevel.INFO,
+      facility: FACILITY,
+      message: `Session revoked for user ${userId}`,
+      metadata: { eventType: 'user.session.revoked', userId: userId as string, tokenHint: (token as string).slice(-4), actorId },
+    });
   }
 
   /** Auto-join "users" group on registration (Linux-style). */
   async #joinDefaultGroup(userId: UserId): Promise<void> {
+    return this.#joinNamedGroup(userId, 'users');
+  }
+
+  /** Add a user to a named user group by group name. */
+  async #joinNamedGroup(userId: UserId, groupName: string): Promise<void> {
     try {
       const ugEntry = await this.atomic.get<string[]>('usergroup:ids');
       if (!ugEntry) return;
       for (const id of ugEntry.value) {
         const g = await this.atomic.get<any>('usergroup:' + id);
-        if (g?.value?.name === 'users') {
+        if (g?.value?.name === groupName) {
           if (!g.value.memberIds.includes(userId)) {
             g.value.memberIds.push(userId);
             g.value.updatedAt = Date.now();
@@ -673,30 +793,8 @@ export class UserService implements IUserService {
         }
       }
     } catch {
-      // Silently ignore — default group is best-effort
+      // Silently ignore — group may not exist yet
     }
   }
 
-  /**
-   * Append `id` to its shard (deterministic, OCC-guarded).
-   * Contention is bounded by concurrent writes to the same shard, not
-   * the total user count — with 16 shards, 160k concurrent signups have
-   * the same collision rate as 10k on a single key.
-   */
-  async #addToIndex(id: UserId): Promise<void> {
-    const shardKey = USER_IDS_SHARD_PREFIX + shardIndex(id);
-    const entry = await this.atomic.get<string[]>(shardKey);
-    const ids = entry?.value ?? [];
-    ids.push(id);
-    const version = await this.atomic.set(shardKey, ids, entry?.version ?? null);
-    if (!version) throw new AppError(500, 'INDEX_FAILED', 'Failed to update user index');
-  }
-
-  async #removeFromIndex(id: UserId): Promise<void> {
-    const shardKey = USER_IDS_SHARD_PREFIX + shardIndex(id);
-    const entry = await this.atomic.get<string[]>(shardKey);
-    if (!entry) return;
-    const ids = entry.value.filter(i => i !== id);
-    await this.atomic.set(shardKey, ids, entry.version);
-  }
 }

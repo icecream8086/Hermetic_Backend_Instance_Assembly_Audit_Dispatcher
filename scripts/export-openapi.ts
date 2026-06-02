@@ -19,6 +19,7 @@ import { createTemplateRouter, templateRouteMeta } from '../src/features/templat
 import { createImageRouter, imageRouteMeta } from '../src/features/image/handler.ts';
 import { createSandboxRouter, sandboxRouteMeta } from '../src/features/sandbox/handler.ts';
 import { createPlatformsRouter, platformsRouteMeta } from '../src/features/platforms/handler.ts';
+import { createNetworkRouter, networkRouteMeta } from '../src/features/network/handler.ts';
 import type { RouteMeta } from '../src/core/http-docs/types.ts';
 import { createAuditRouter } from '../src/core/audit/audit-router.ts';
 import { WorkersAuditLogger } from '../src/core/audit/workers-audit-logger.ts';
@@ -116,7 +117,7 @@ const routes: RouteDoc[] = [];
 function collect(
   label: string,
   basePath: string,
-  app: ReturnType<typeof createInfoHandler | typeof createUserRouter | typeof createAuditRouter | typeof createPermissionRouter>,
+  app: { routes: Array<{ method: string; path: string }> },
   metaList?: RouteMeta[],
 ) {
   for (const r of app.routes) {
@@ -174,6 +175,13 @@ collect('Templates', '/api/templates', createTemplateRouter(stubAtomic as any), 
 collect('Images', '/api/images', createImageRouter(), imageRouteMeta);
 collect('Sandboxes', '/api/sandboxes', createSandboxRouter(stubSandboxSvc as any), sandboxRouteMeta);
 collect('Platforms', '/api/platforms', createPlatformsRouter(stubRegistry as any), platformsRouteMeta);
+collect('Networks', '/api/networks', createNetworkRouter({
+  create: async () => ({} as any),
+  list: async () => ({ items: [], total: 0, page: 1, limit: 20 }),
+  get: async () => null,
+  update: async () => ({} as any),
+  delete: async () => {},
+}), networkRouteMeta);
 
 // Manually-added routes
 function addRoute(method: string, path: string, tag: string, meta?: RouteMeta) {
@@ -184,6 +192,7 @@ addRoute('POST', '/__become-wheel', 'Dev', { method: 'POST', path: '/__become-wh
 addRoute('POST', '/__tick', 'Dev', { method: 'POST', path: '/__tick', description: 'Manually trigger event loop tick', responseDescription: '{ ok, queueSize, processedCount, running }' });
 addRoute('POST', '/__admin/migrate-user-index', 'Dev', { method: 'POST', path: '/__admin/migrate-user-index', description: 'Rebuild sharded user index', requestBody: { ids: ['uuid-1'] }, responseDescription: '{ migrated: number }' });
 addRoute('GET', '/api/openapi.json', 'Public', { method: 'GET', path: '/api/openapi.json', description: 'OpenAPI 3.0 specification (no auth required)', responseDescription: 'OpenAPI 3.0 JSON' });
+addRoute('GET', '/api/ws/notifications', 'Notifications', { method: 'GET', path: '/api/ws/notifications', description: 'WebSocket upgrade to global notification channel (requires Workers deployment with DO binding)', responseDescription: '101 WebSocket upgrade' });
 addRoute('POST', '/api/events', 'Events', { method: 'POST', path: '/', description: 'Enqueue an event', requestBody: { type: 'my-event', payload: {} }, responseDescription: '{ id }' });
 addRoute('GET', '/api/events/loop/status', 'Events', { method: 'GET', path: '/loop/status', description: 'Event loop status', responseDescription: 'EventLoopStatus' });
 addRoute('POST', '/api/events/loop/start', 'Events', { method: 'POST', path: '/loop/start', description: 'Start event loop', responseDescription: '{ ok }' });
@@ -191,6 +200,9 @@ addRoute('POST', '/api/events/loop/stop', 'Events', { method: 'POST', path: '/lo
 addRoute('POST', '/api/events/loop/pause', 'Events', { method: 'POST', path: '/loop/pause', description: 'Pause event loop', responseDescription: '{ ok }' });
 addRoute('POST', '/api/events/loop/resume', 'Events', { method: 'POST', path: '/loop/resume', description: 'Resume event loop', responseDescription: '{ ok }' });
 addRoute('POST', '/api/events/loop/configure', 'Events', { method: 'POST', path: '/loop/configure', description: 'Reconfigure event loop', requestBody: { intervalMs: 5000 }, responseDescription: 'EventLoopConfig' });
+
+// Dev / Sudo
+addRoute('POST', '/api/sudo', 'Dev', { method: 'POST', path: '/api/sudo', description: '[DEV] Temporary privilege elevation for wheel members (30 min)', requestBody: {}, responseDescription: '{ expiry, durationMs }' });
 
 // ─── Convert routes to OpenAPI paths ───
 

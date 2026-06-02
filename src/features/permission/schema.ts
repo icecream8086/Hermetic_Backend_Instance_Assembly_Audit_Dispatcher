@@ -50,6 +50,7 @@ export const PermissionRuleSchema = z.object({
   actions: z.array(z.string().min(1)).default([]),
   resource: z.string().max(200).optional(),
   priority: z.number().int().optional().default(0),
+  description: z.string().max(500).optional(),
 });
 
 // ─── Permission group ───

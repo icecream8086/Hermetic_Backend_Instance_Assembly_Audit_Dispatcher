@@ -8,7 +8,7 @@ import { PodmanContainerGroupProvider } from '../../providers/podman/podman-grou
 import { secureContainerGroupProvider } from '../../core/provider/security.ts';
 
 export function createRouter(deps: FeatureDeps): Hono<any> {
-  const svc = new SandboxService(deps.stores.atomic, new ConsoleLogger(), deps.providers.container, deps.providers);
+  const svc = new SandboxService(deps.stores.atomic, new ConsoleLogger(), deps.providers.container, deps.providers, deps.eventBus, deps.audit);
 
   // Wire PodResolver with the Podman container group provider for local dev.
   // In production, a registered IContainerGroupProvider would be resolved from

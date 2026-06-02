@@ -36,6 +36,10 @@ import { createFacility, generateVersionId } from '../../core/brand.ts';
 import type { RegionId } from '../../core/region/types.ts';
 import { createRegionId } from '../../core/region/types.ts';
 import { AppError } from '../../core/types.ts';
+import type { EventBus } from '../../core/event-bus/bus.ts';
+import { createEvent } from '../../core/event-bus/types.ts';
+import type { IAuditWriter } from '../../core/audit/types.ts';
+import { KernLevel } from '../../core/audit/kern-level.ts';
 
 const FACILITY = createFacility('sandbox-service');
 const KEY_PREFIX = 'sandbox:';
@@ -48,6 +52,8 @@ export class SandboxService implements ISandboxService {
     private readonly logger: ILogWriter,
     private readonly containerProvider: IContainerProvider,
     private readonly providerRegistry?: IProviderRegistry | undefined,
+    private readonly eventBus?: EventBus,
+    private readonly audit?: IAuditWriter,
   ) {}
 
   /** Resolve the container provider, picking the account-specific one if requested. */
@@ -116,6 +122,22 @@ export class SandboxService implements ISandboxService {
       metadata: { sandboxId: id as string, providerId, name: input.name },
     });
 
+    this.audit?.write({
+      level: KernLevel.NOTICE,
+      facility: FACILITY,
+      message: `Sandbox provisioned — ${input.name}`,
+      metadata: { eventType: 'sandbox.provisioned', sandboxId: id as string, providerId, creatorId: input.creatorId },
+    });
+
+    // Notify real-time subscribers
+    this.eventBus?.dispatch(createEvent('sandbox.provisioned', {
+      sandboxId: id as string,
+      status: SandboxStatus.Running,
+      name: input.name,
+      creatorId: input.creatorId,
+      providerId,
+    }));
+
     return running;
   }
 
@@ -157,14 +179,22 @@ export class SandboxService implements ISandboxService {
     return this.transition(id, SandboxStatus.Stopped, 'user requested stop');
   }
 
-  async terminate(id: SandboxId): Promise<void> {
+  async terminate(id: SandboxId, actorId?: string): Promise<void> {
     const sandbox = await this.getById(id);
     if (!sandbox) throw new AppError(404, 'SANDBOX_NOT_FOUND', `Sandbox ${id} not found`);
 
-    await this.containerProvider.delete({
-      region: sandbox.config.region,
-      providerId: sandbox.providerId ?? String(id),
-    });
+    // Best-effort provider cleanup — don't let provider errors block local state cleanup.
+    // Orphaned provider resources are handled by the periodic health check loop (event bus
+    // 'health:check' tick), which detects containers that exist on the provider but have
+    // no corresponding local sandbox.
+    try {
+      await this.containerProvider.delete({
+        region: sandbox.config.region,
+        providerId: sandbox.providerId ?? String(id),
+      });
+    } catch {
+      // Provider may be unreachable or container already gone — proceed with local cleanup.
+    }
 
     await this.transition(id, SandboxStatus.Deleted, 'user requested termination');
 
@@ -177,6 +207,13 @@ export class SandboxService implements ISandboxService {
       level: LogLevel.NOTICE,
       message: 'Sandbox terminated',
       metadata: { sandboxId: id as string },
+    });
+
+    this.audit?.write({
+      level: KernLevel.WARNING,
+      facility: FACILITY,
+      message: `Sandbox terminated — ${id}`,
+      metadata: { eventType: 'sandbox.terminated', sandboxId: id as string, actorId },
     });
   }
 
@@ -289,6 +326,20 @@ export class SandboxService implements ISandboxService {
       message: `Sandbox ${from.status} → ${to}`,
       metadata: { sandboxId: id as string, fromStatus: from.status, toStatus: to, reason },
     });
+
+    this.audit?.write({
+      level: KernLevel.INFO,
+      facility: FACILITY,
+      message: `Sandbox ${from.status} → ${to} — ${reason}`,
+      metadata: { eventType: 'sandbox.transition', sandboxId: id as string, fromStatus: from.status, toStatus: to, reason },
+    });
+
+    this.eventBus?.dispatch(createEvent('sandbox.status', {
+      sandboxId: id as string,
+      fromStatus: from.status,
+      toStatus: to,
+      reason,
+    }));
 
     return updated;
   }

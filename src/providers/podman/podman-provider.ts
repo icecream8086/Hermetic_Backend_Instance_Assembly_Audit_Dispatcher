@@ -154,6 +154,7 @@ export class PodmanContainerProvider implements IContainerProvider {
 
     const body: Record<string, unknown> = {
       Image: c?.image ?? '',
+      Entrypoint: c?.command ? [...c.command] : undefined,
       Cmd: c?.args ? [...c.args] : undefined,
       Env: env.length ? env : undefined,
       Labels: { 'managed-by': 'hbi-aad', sandbox: input.name },
@@ -163,11 +164,19 @@ export class PodmanContainerProvider implements IContainerProvider {
     };
 
     const nameParam = c?.name ? `?name=${encodeURIComponent(c.name)}` : '';
-    const resp = await fetch(`${this.#apiBase}/containers/create${nameParam}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
+    // [debug] Podman create target
+    console.error(`[debug] Podman create: apiBase=${this.#apiBase}, nameParam=${nameParam}, image=${c?.image}`);
+    let resp: Response;
+    try {
+      resp = await fetch(`${this.#apiBase}/containers/create${nameParam}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    } catch (fetchErr: unknown) {
+      console.error(`[debug] Podman fetch failed:`, { apiBase: this.#apiBase, error: fetchErr instanceof Error ? fetchErr.message : String(fetchErr), stack: fetchErr instanceof Error ? fetchErr.stack : undefined });
+      throw new Error(`Podman connection failed to ${this.#apiBase}: ${fetchErr instanceof Error ? fetchErr.message : String(fetchErr)}`);
+    }
     if (!resp.ok) {
       const err = await resp.text();
       throw new Error(`Podman create failed (${resp.status}): ${err}`);

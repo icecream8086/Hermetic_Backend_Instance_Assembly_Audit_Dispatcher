@@ -11,12 +11,42 @@
 import { serve } from '@hono/node-server';
 import { loadConfig } from './config/env.ts';
 import { createApp } from './core/app.ts';
+import { createRegionId } from './core/region/types.ts';
+import { readFileSync } from 'node:fs';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// Load .env file manually — tsx doesn't auto-load it
+const __dirname = dirname(fileURLToPath(import.meta.url));
+try {
+  const envPath = resolve(__dirname, '..', '.env');
+  const lines = readFileSync(envPath, 'utf-8').split('\n');
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq === -1) continue;
+    const key = trimmed.slice(0, eq).trim();
+    const val = trimmed.slice(eq + 1).trim();
+    if (key && !(key in process.env)) {
+      process.env[key] = val;
+    }
+  }
+} catch { /* .env not found — use env vars / defaults */ }
 
 const config = loadConfig({
+  provider: {
+    container: 'podman',
+    region: createRegionId('local'),
+    accounts: [],
+    defaultAccount: 'default',
+    dns: 'stub',
+    metrics: 'stub',
+  },
   storage: {
     stateBackend: 'file',
     queryBackend: 'none',
-    blobBackend: 'none',
+    blobBackend: 'file',
     connections: { filePath: '.data' },
   },
   scheduler: {
