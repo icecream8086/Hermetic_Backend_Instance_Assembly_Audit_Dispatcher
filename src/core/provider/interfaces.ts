@@ -17,6 +17,7 @@ import type {
   NodeCondition,
 } from './types.ts';
 import type { RegionId } from '../region/types.ts';
+import type { InstanceId } from '../region/instance.ts';
 import type { IS3Provider } from './s3.ts';
 
 // ─── Container operations ───
@@ -57,7 +58,17 @@ export interface ContainerLogResult {
 }
 
 export interface IContainerProvider {
-  /** Create a container group. Returns the provider-assigned ID. */
+  /**
+   * Create a container (or container group, depending on provider).
+   *
+   * Accepts CreateContainerGroupInput because all providers need the same
+   * data shape (containers, resources, network). Lifecycle semantics differ:
+   * - Podman: creates a single Docker container (only the first container in
+   *   the input array is used; extra containers are ignored).
+   * - ECI: creates a ContainerGroup — all containers in the array are included.
+   *
+   * Returns the provider-assigned ID.
+   */
   create(input: CreateContainerGroupInput): Promise<{ providerId: string }>;
 
   /** Query sandboxes by filters. */
@@ -148,8 +159,9 @@ export interface ListImagesOptions {
 }
 
 export interface IImageProvider {
-  /** Pull an image from a registry. Returns image info. */
-  pull(image: string): Promise<ImageInfo>;
+  /** Pull an image from a registry. Returns image info.
+   *  If clusterId is provided, the provider may route to a cluster-specific endpoint. */
+  pull(image: string, clusterId?: string): Promise<ImageInfo>;
 
   /** List locally available images. */
   list(options?: ListImagesOptions): Promise<readonly ImageInfo[]>;
@@ -218,24 +230,21 @@ export interface ProviderEntry {
 }
 
 export interface IProviderRegistry {
+  /** Default container provider (resolved from first available online instance). */
   readonly container: IContainerProvider;
   readonly dns: IDnsProvider;
   readonly metrics: IMetricsProvider;
+  /** Default image provider. */
   readonly image: IImageProvider;
   readonly virtualNode?: IVirtualNode | undefined;
   readonly networkPolicy?: INetworkPolicyProvider | undefined;
+  readonly groupContainer?: IContainerGroupProvider | undefined;
   readonly capabilities: ProviderCapabilities;
 
   /** Get a provider by type name ('stub' | 'podman' | 'alibaba'). */
   provider(name: string): ProviderEntry | undefined;
 
-  /** Get a credential account by logical name ('prod' | 'dev' | ...). */
-  account(name: string): ProviderEntry | undefined;
-
-  /** List all registered credential account names. */
-  listAccounts(): string[];
-
-  /** List all registered providers by type. */
+  /** List available provider types. Deprecated: use /api/topology/instances. */
   availableProviders(): readonly ProviderEntry[];
 
   /** S3: get a named S3 provider account. */
@@ -243,16 +252,37 @@ export interface IProviderRegistry {
 
   /** S3: list all S3 account names. */
   listS3Accounts(): string[];
+
+  // ─── ComputeInstance-aware resolution ───
+
+  /** Resolve a container provider for a specific instance.
+   *  Falls back to default container provider. */
+  resolveContainer(instanceId?: InstanceId): Promise<IContainerProvider>;
+
+  /** Resolve an image provider for a specific instance. */
+  resolveImage(instanceId?: InstanceId): Promise<IImageProvider>;
+
+  /** Resolve a container group provider for a specific instance. */
+  resolveGroup(instanceId?: InstanceId): Promise<IContainerGroupProvider | undefined>;
 }
 
-// ─── Container group operations (Pod-level abstraction) ───
-// Separate from IContainerProvider because creating a container group/pod
-// is fundamentally different from creating individual containers.
-// - Podman: uses libpod pods API (pod create → add containers → start pod)
-// - ECI:   uses ContainerGroup API natively (single request)
+// ─── Container group / Pod operations ───
+// Separate from IContainerProvider because the lifecycle is different:
+// - Podman: creates a libpod pod (pod create → share net/uts/ipc → start).
+//   All containers in the spec are included in the pod.
+// - ECI: creates a ContainerGroup. All containers share the same ENI.
+//
+// Accepts the same CreateContainerGroupInput type as IContainerProvider
+// because the data shape is identical. The semantic difference is in how
+// the provider groups the containers (pod vs. container group vs. individual).
 
 export interface IContainerGroupProvider {
-  /** Create a container group (pod) from a multi-container spec. */
+  /**
+   * Create a container group (pod) from a multi-container spec.
+   * All containers in the input are included in the group/pod.
+   * - Podman: creates a Podman pod with shared net/uts/ipc namespaces.
+   * - ECI: creates an Alibaba ContainerGroup (natively supports multi-container).
+   */
   createGroup(input: CreateContainerGroupInput): Promise<{ providerId: string }>;
 
   /** Delete a container group by provider ID. */

@@ -8,6 +8,7 @@ import type {
   ContainerConfig,
   CreateSandboxInput,
 } from '../types.ts';
+import type { InstanceId } from '../../../core/region/instance.ts';
 
 // ─── Template discriminator ───
 
@@ -144,6 +145,8 @@ export interface ServiceDefinition {
 /** A Pod-level specification — analogous to a docker-compose file or Podman's PodSpecGenerator. */
 export interface PodSpec {
   readonly name: string;
+  readonly region?: string | undefined;
+  readonly instanceId?: InstanceId | undefined;
   readonly hostname?: string | undefined;
   readonly labels?: Record<string, string> | undefined;
   readonly sharedNamespaces?: readonly SharedNamespace[] | undefined;

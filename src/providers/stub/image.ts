@@ -3,7 +3,7 @@ import type { IImageProvider, ImageInfo, ListImagesOptions } from '../../core/pr
 export class StubImageProvider implements IImageProvider {
   private images = new Map<string, ImageInfo>();
 
-  async pull(image: string): Promise<ImageInfo> {
+  async pull(image: string, _clusterId?: string): Promise<ImageInfo> {
     const id = `sha256:${Array(64).fill(0).map(() => Math.random().toString(16)[2]).join('')}`;
     const info: ImageInfo = { id, tags: [image], created: Date.now(), size: 1024 * 1024 * 100 };
     this.images.set(image, info);

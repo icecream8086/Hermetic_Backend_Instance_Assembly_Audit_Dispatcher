@@ -249,9 +249,10 @@ export class UserService implements IUserService {
     // Auto-join "users" group (Linux-style default group)
     await this.#joinDefaultGroup(id);
 
-    // Root users also join the "root" group to get perm.operator policies
+    // Root users also join the "root" and "wheel" groups for full admin access
     if (input.role === UserRole.Root) {
       await this.#joinNamedGroup(id, 'root');
+      await this.#joinNamedGroup(id, 'wheel');
     }
 
     await this.logger.logAsync({

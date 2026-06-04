@@ -22,7 +22,7 @@ export class PodmanImageProvider implements IImageProvider {
     this.#ep = endpoint ?? ENDPOINT;
   }
 
-  async pull(image: string): Promise<ImageInfo> {
+  async pull(image: string, _clusterId?: string): Promise<ImageInfo> {
     const [name, tag] = image.includes(':') ? image.split(':') : [image, 'latest'];
     const resp = await this.#fetch(`${this.#ep}/images/create?fromImage=${encodeURIComponent(name!)}&tag=${encodeURIComponent(tag!)}`, { method: 'POST' });
     if (!resp) throw new Error('Podman daemon unreachable');

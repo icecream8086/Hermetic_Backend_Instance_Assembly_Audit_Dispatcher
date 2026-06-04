@@ -267,6 +267,7 @@ export class PodmanContainerProvider implements IContainerProvider {
       name: info.Name.replace(/^\//, '') ?? '',
       status: mapPodmanState(info.State.Status),
       regionId: 'local',
+      instanceId: undefined,
       zoneId: undefined,
       creationTime: created,
       expiredTime: undefined,

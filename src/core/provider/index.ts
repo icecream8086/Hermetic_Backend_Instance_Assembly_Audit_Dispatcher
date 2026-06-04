@@ -51,6 +51,7 @@ export type {
 } from './types.ts';
 
 export { createProviderRegistry } from './factory.ts';
+export { InstanceProviderResolver } from './instance-resolver.ts';
 
 export type {
   IS3Provider,

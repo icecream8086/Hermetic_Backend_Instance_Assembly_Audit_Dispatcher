@@ -51,6 +51,7 @@ export class ConsoleLogger implements ILogger {
   #print(entry: LogEntry): void {
     const ts = new Date(entry.timestamp).toISOString();
     const level = entry.level.toUpperCase();
-    console.log(`[${ts}] ${level}: [${entry.facility}] ${entry.message}`);
+    const actor = entry.metadata?.actorId ? ` (actor=${entry.metadata.actorId})` : '';
+    console.log(`[${ts}] ${level}: [${entry.facility}] ${entry.message}${actor}`);
   }
 }

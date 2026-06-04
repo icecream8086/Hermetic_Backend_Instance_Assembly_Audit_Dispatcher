@@ -1,4 +1,4 @@
-import type { RegionId, AlibabaRegion } from './types.ts';
+import type { RegionId, AlibabaRegion, ZoneId, ClusterId } from './types.ts';
 import { ALIBABA_REGIONS } from './types.ts';
 
 // ─── Region-level configuration ───
@@ -10,9 +10,9 @@ export interface RegionEndpoint {
 }
 
 export interface RegionConfig {
-  readonly vswitchId?: string | undefined;
+  readonly subnetId?: string | undefined;
   readonly securityGroupId?: string | undefined;
-  readonly zoneId?: string | undefined;
+  readonly zoneId?: ZoneId | undefined;
   readonly endpoints?: RegionEndpoint | undefined;
 }
 
@@ -22,8 +22,8 @@ function defaultAlibabaEndpoint(region: string, service: string): string {
   return `${service}.${region}.aliyuncs.com`;
 }
 
-function buildAlibabaDefaults(): Map<AlibabaRegion, RegionConfig> {
-  const map = new Map<AlibabaRegion, RegionConfig>();
+function buildAlibabaDefaults(): Map<string, RegionConfig> {
+  const map = new Map<string, RegionConfig>();
   for (const r of ALIBABA_REGIONS) {
     map.set(r, {
       endpoints: {
@@ -52,6 +52,9 @@ export class RegionRegistry {
   /** Runtime overrides applied on top of static defaults. */
   readonly #overrides = new Map<string, RegionConfig>();
 
+  /** Cluster-specific overrides applied on top of regional config. */
+  readonly #clusterOverrides = new Map<string, RegionConfig>();
+
   constructor(seed?: ReadonlyArray<{ region: string; config: RegionConfig }>) {
     if (seed) {
       for (const { region, config } of seed) {
@@ -60,8 +63,15 @@ export class RegionRegistry {
     }
   }
 
-  /** Get the full region config (defaults + overrides merged). */
-  getConfig(region: RegionId, provider?: ProviderName): RegionConfig {
+  /** Get the full region config (defaults + overrides merged).
+   *  If clusterId is provided, cluster-level overrides are also applied. */
+  getConfig(region: RegionId, provider?: ProviderName, clusterId?: ClusterId): RegionConfig {
+    // Cluster-specific override takes highest priority
+    if (clusterId) {
+      const co = this.#clusterOverrides.get(clusterId);
+      if (co) return co;
+    }
+
     const ov = this.#overrides.get(region);
     if (ov) return ov;
 
@@ -82,8 +92,8 @@ export class RegionRegistry {
    * this method can route to the correct default table (Alibaba vs AWS).
    * Runtime overrides are checked first, then built-in defaults.
    */
-  getEndpoint(provider: ProviderName, region: RegionId, service: string): string {
-    const cfg = this.getConfig(region, provider);
+  getEndpoint(provider: ProviderName, region: RegionId, service: string, clusterId?: ClusterId): string {
+    const cfg = this.getConfig(region, provider, clusterId);
 
     // Check region-level override first
     if (cfg.endpoints) {
@@ -97,6 +107,16 @@ export class RegionRegistry {
     }
 
     return '';
+  }
+
+  /** Apply a runtime override for a specific cluster. */
+  setClusterOverride(clusterId: ClusterId, config: RegionConfig): void {
+    this.#clusterOverrides.set(clusterId, config);
+  }
+
+  /** Remove a cluster override. */
+  removeClusterOverride(clusterId: ClusterId): void {
+    this.#clusterOverrides.delete(clusterId);
   }
 
   /** Apply a runtime override for a specific region. */

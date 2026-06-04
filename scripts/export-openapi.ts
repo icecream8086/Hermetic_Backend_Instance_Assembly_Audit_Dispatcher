@@ -20,6 +20,8 @@ import { createImageRouter, imageRouteMeta } from '../src/features/image/handler
 import { createSandboxRouter, sandboxRouteMeta } from '../src/features/sandbox/handler.ts';
 import { createPlatformsRouter, platformsRouteMeta } from '../src/features/platforms/handler.ts';
 import { createNetworkRouter, networkRouteMeta } from '../src/features/network/handler.ts';
+import { createTopologyRouter, topologyRouteMeta } from '../src/features/topology/handler.ts';
+import { createSubnetRouter, subnetRouteMeta } from '../src/features/subnet/handler.ts';
 import type { RouteMeta } from '../src/core/http-docs/types.ts';
 import { createAuditRouter } from '../src/core/audit/audit-router.ts';
 import { WorkersAuditLogger } from '../src/core/audit/workers-audit-logger.ts';
@@ -182,6 +184,13 @@ collect('Networks', '/api/networks', createNetworkRouter({
   update: async () => ({} as any),
   delete: async () => {},
 }), networkRouteMeta);
+
+const stubSubnetSvc: any = { create: async () => ({}), list: async () => ({ items: [], total: 0, page: 1, limit: 20 }), get: async () => null, update: async () => ({}), delete: async () => {} };
+collect('Subnets', '/api/subnets', createSubnetRouter(stubSubnetSvc), subnetRouteMeta);
+
+const stubClusterSvc: any = { create: async () => ({}), get: async () => null, list: async () => [], update: async () => ({}), delete: async () => {} };
+const stubBucketSvc: any = { create: async () => ({}), get: async () => null, list: async () => [], update: async () => ({}), delete: async () => {} };
+collect('Topology', '/api/topology', createTopologyRouter(stubClusterSvc, stubBucketSvc), topologyRouteMeta);
 
 // Manually-added routes
 function addRoute(method: string, path: string, tag: string, meta?: RouteMeta) {

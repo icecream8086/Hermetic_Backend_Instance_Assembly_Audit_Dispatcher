@@ -50,6 +50,8 @@ export function loadConfig(overrides?: Partial<AppConfig>): AppConfig {
           accessKeySecret: a.sk ?? a.accessKeySecret ?? '',
           defaultRegion: a.region,
           endpoint: a.endpoint,
+          ...(a.extra ? { extra: a.extra } : {}),
+          ...(a.registryCredentials ? { extra: { registryCredentials: a.registryCredentials } } : {}),
         }));
       } catch { /* fall through to legacy */ }
     }
@@ -90,6 +92,7 @@ export function loadConfig(overrides?: Partial<AppConfig>): AppConfig {
           defaultRegion: a.region,
           endpoint: a.endpoint,
           bucket: a.bucket,
+          ...(a.extra ? { extra: a.extra } : {}),
         }));
       } catch { /* fall through */ }
     }

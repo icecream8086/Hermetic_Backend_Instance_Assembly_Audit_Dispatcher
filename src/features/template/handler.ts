@@ -12,6 +12,8 @@ import { applyTemplate } from './applicator.ts';
 import { SandboxService } from '../sandbox/sandbox.service.ts';
 import { ConsoleLogger } from '../../core/logger/console-logger.ts';
 import { SandboxStatus } from '../sandbox/types.ts';
+import { createAtomicNetworkResolver } from '../../core/network/resolver.ts';
+import { InstanceService } from '../../core/region/instance.ts';
 
 type PermissionCheckFn = { check(params: { userId: string; action: string; resource: string; ip?: string }): Promise<{ allowed: boolean; reason: string }> };
 
@@ -381,7 +383,7 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
       if (providerName && providers) {
         const entry = providers.provider(providerName);
         if (!entry) return c.json(fail('PROVIDER_NOT_FOUND', `Provider "${providerName}" not available`), 400);
-        svc = new SandboxService(atomic, new ConsoleLogger(), entry.container);
+        svc = new SandboxService(atomic, new ConsoleLogger(), entry.container, undefined, undefined, undefined, createAtomicNetworkResolver(atomic), new InstanceService(atomic));
       }
       if (!svc) return c.json(fail('SERVICE_UNAVAILABLE', 'Sandbox service not available'), 503);
 
@@ -444,8 +446,8 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
   router.delete('/:id', async (c) => {
     const entry = await atomic.get<SandboxTemplate>(PREFIX + c.req.param('id'));
     if (!entry) return c.json(fail('TEMPLATE_NOT_FOUND', 'Template not found'), 404);
-    if (entry.value.name === 'nginx' && !entry.value.creatorId) {
-      return c.json(fail('MAC_DENIED', 'Cannot delete seed template "nginx" — protected by system policy'), 403);
+    if (!entry.value.creatorId) {
+      return c.json(fail('MAC_DENIED', `Cannot delete seed template "${entry.value.name}" — protected by system policy`), 403);
     }
     { const r = await requirePerm(c, permissionChecker, 'delete', 'template', entry.value.creatorId); if (r) return r; }
     const user = (c as any).var?.currentUser as { id: string; role?: string } | undefined;

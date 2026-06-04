@@ -68,7 +68,7 @@ export function createS3Providers(config: S3Config): { entries: S3ProviderEntry[
     const creds: S3Credentials = type === 'alibaba-oss'
       ? { oss: { accessKeyId: ak, accessKeySecret: sk } }
       : type === 'cloudflare-r2'
-        ? { sigV4: { accessKeyId: ak, secretAccessKey: sk }, r2AccountId: config.region }
+        ? { sigV4: { accessKeyId: ak, secretAccessKey: sk }, r2AccountId: (acct.extra?.r2AccountId as string) ?? config.region }
         : { sigV4: { accessKeyId: ak, secretAccessKey: sk } };
     const ep = acct.endpoint ?? config.endpoint;
     entries.push({

@@ -111,13 +111,15 @@ export function authz(config: AuthzConfig): MiddlewareHandler<{ Variables: AppCo
     c.set('currentUser', { id: uid, role: userEntry.value.role ?? '', email: userEntry.value.email ?? '' });
 
     // 6. Route ACL check
+    const email = userEntry.value.email ?? '';
     if (config.checkRouteAccess) {
       const allowed = await config.checkRouteAccess(method, path, uid);
       if (!allowed) {
-        secAudit('perm.forbidden', KernLevel.NOTICE, { userId: uid, reason: 'no_matching_acl' });
+        secAudit('perm.forbidden', KernLevel.NOTICE, { userId: uid, email, reason: 'no_matching_acl' });
         return c.json({ success: false, data: null, error: { code: 'FORBIDDEN', message: 'You do not have access to this resource' } }, 403);
       }
-      secAudit('perm.routeAccess', KernLevel.INFO, { userId: uid, allowed: true });
+      // perm.routeAccess 不在审计日志记录（每个成功的 API 请求都记录一次，噪音太大）
+      // 可通过 log-policy 动态开启 DEBUG 级别观察
     }
 
     await next();

@@ -15,6 +15,7 @@ import type {
   S3ListObjectsResult,
 } from '../../core/provider/s3.ts';
 import type { S3ProviderConfig } from '../../core/provider/s3-types.ts';
+import { hmacSha1Base64 } from '../../core/auth/providers.ts';
 
 export class AlibabaOssProvider implements IS3Provider {
   readonly type = 'alibaba-oss' as const;
@@ -212,13 +213,3 @@ function parseListResult(xml: string): S3ListObjectsResult {
   };
 }
 
-/** HMAC-SHA1 → Base64 — OSS signature scheme. */
-async function hmacSha1Base64(secret: string, data: string): Promise<string> {
-  const enc = new TextEncoder();
-  const cryptoKey = await crypto.subtle.importKey(
-    'raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-1' },
-    false, ['sign'],
-  );
-  const sig = await crypto.subtle.sign('HMAC', cryptoKey, enc.encode(data));
-  return btoa(String.fromCharCode(...new Uint8Array(sig)));
-}

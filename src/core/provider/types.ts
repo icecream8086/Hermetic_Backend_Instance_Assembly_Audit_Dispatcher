@@ -23,7 +23,8 @@ export type ContainerGroupStatus =
 
 // ─── OCI Container types (core) ───
 
-import type { RegionId } from '../region/types.ts';
+import type { RegionId, ZoneId } from '../region/types.ts';
+import type { InstanceId } from '../region/instance.ts';
 
 declare const CONTAINER_ID_BRAND: unique symbol;
 export type ContainerId = string & { readonly [CONTAINER_ID_BRAND]: true };
@@ -123,7 +124,7 @@ export interface ContainerGroupRuntimeEvent {
 export interface ContainerGroupNetwork {
   readonly privateIp?: string;
   readonly vpcId?: string;
-  readonly vswitchId?: string;
+  readonly subnetId?: string;
   readonly securityGroupId?: string;
   readonly eniId?: string;
 }
@@ -204,7 +205,8 @@ export interface ContainerGroupRuntime {
   readonly name: string;
   readonly status: ContainerGroupStatus;
   readonly regionId: RegionId;
-  readonly zoneId?: string;
+  readonly zoneId?: ZoneId | undefined;
+  readonly instanceId?: InstanceId | undefined;
   readonly creationTime?: string;
   readonly expiredTime?: string;
   readonly instanceType?: string;
@@ -324,6 +326,7 @@ export interface CreateContainerGroupInput {
   readonly name: string;
   readonly description?: string | undefined;
   readonly region: RegionId;
+  readonly instanceId?: InstanceId | undefined;
   readonly cpu: number;
   readonly memory: number;
   readonly spotStrategy: string;

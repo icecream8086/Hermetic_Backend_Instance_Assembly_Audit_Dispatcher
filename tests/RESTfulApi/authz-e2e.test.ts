@@ -77,6 +77,9 @@ beforeAll(async () => {
   for (let i = 0; i < WHEEL_USER_ID.length; i++) { hash = ((hash << 5) + hash) + WHEEL_USER_ID.charCodeAt(i); hash |= 0; }
   writeFileKV(`user:idx:${Math.abs(hash) % 16}`, [WHEEL_USER_ID]);
 
+  // 5b. Mark initialized so new registrations are Viewer, not Root
+  writeFileKV('_sys:initialized', true);
+
   // 6. Start server with auth enabled
   const config = loadConfig({
     storage: { stateBackend: 'file', queryBackend: 'none', blobBackend: 'none', connections: { filePath: dataDir } },

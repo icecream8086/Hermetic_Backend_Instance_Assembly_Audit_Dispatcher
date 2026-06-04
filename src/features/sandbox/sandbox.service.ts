@@ -40,6 +40,9 @@ import type { EventBus } from '../../core/event-bus/bus.ts';
 import { createEvent } from '../../core/event-bus/types.ts';
 import type { IAuditWriter } from '../../core/audit/types.ts';
 import { KernLevel } from '../../core/audit/kern-level.ts';
+import type { NetworkResolverFn } from '../../core/network/types.ts';
+import type { InstanceService } from '../../core/region/instance.ts';
+import { mapEnvVars, mapPorts, mapVolumeMounts, mapVolumes, mapTags, mapNetwork } from '../../core/provider/mapper.ts';
 
 const FACILITY = createFacility('sandbox-service');
 const KEY_PREFIX = 'sandbox:';
@@ -54,19 +57,45 @@ export class SandboxService implements ISandboxService {
     private readonly providerRegistry?: IProviderRegistry | undefined,
     private readonly eventBus?: EventBus,
     private readonly audit?: IAuditWriter,
+    /** Optional: resolve a VirtualNetwork by ID to inherit security settings. */
+    private readonly resolveNetwork?: NetworkResolverFn | undefined,
+    /** Optional: resolve ComputeInstance by ID to get endpoint/capabilities. */
+    private readonly instanceService?: InstanceService | undefined,
   ) {}
 
-  /** Resolve the container provider, picking the account-specific one if requested. */
-  #container(account?: string): IContainerProvider {
-    if (!account || !this.providerRegistry) return this.containerProvider;
-    const entry = this.providerRegistry.account(account);
-    return entry?.container ?? this.containerProvider;
+  /** Resolve the container provider, optionally by instanceId. Falls back to default. */
+  async #resolveProvider(instanceId?: string): Promise<IContainerProvider> {
+    if (this.providerRegistry?.resolveContainer && instanceId) {
+      const p = await this.providerRegistry.resolveContainer(instanceId as any);
+      if (p) return p;
+    }
+    return this.containerProvider;
   }
 
   async provision(input: CreateSandboxInput, idempotencyKey?: string): Promise<Sandbox> {
     if (idempotencyKey) {
       const existing = await this.atomic.get<Sandbox>(`${KEY_PREFIX}idem:${idempotencyKey}`);
       if (existing) return existing.value;
+    }
+
+    // 0. Resolve VirtualNetwork reference if specified — merges securityGroupId/subnetIds
+    const resolvedNet = input.network.networkId && this.resolveNetwork
+      ? await this.resolveNetwork(input.network.networkId)
+      : null;
+    let mergedNetwork = resolvedNet
+      ? {
+          ...input.network,
+          securityGroupId: input.network.securityGroupId ?? resolvedNet.securityGroupId,
+          subnetIds: input.network.subnetIds?.length ? input.network.subnetIds : resolvedNet.subnetIds,
+        }
+      : input.network;
+
+    // 0b. Resolve ComputeInstance reference if specified
+    const resolvedInst = input.instanceId && this.instanceService
+      ? await this.instanceService.get(input.instanceId as any)
+      : null;
+    if (resolvedInst) {
+      mergedNetwork = { ...mergedNetwork, instanceId: resolvedInst.id as any };
     }
 
     // 1. Generate sandbox identity and persist as Scheduling
@@ -80,7 +109,7 @@ export class SandboxService implements ISandboxService {
       updatedAt: Date.now(),
       status: SandboxStatus.Scheduling,
       version: generateVersionId(),
-      config: input,
+      config: { ...input, network: mergedNetwork },
       ...(input.creatorId ? { creatorId: input.creatorId } : {}),
       network: {} as NetworkInfo,
       containers: [] as ContainerRuntime[],
@@ -94,9 +123,11 @@ export class SandboxService implements ISandboxService {
     const idx = await this.atomic.get<string[]>(INDEX_KEY);
     await this.atomic.set(INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
 
-    // 2. Build provider input and create cloud resource
-    const providerInput = toContainerGroupInput(input);
-    const { providerId } = await this.#container(input.account).create(providerInput);
+    // 2. Build provider input (with merged VNet + cluster settings) and create cloud resource
+    const clusterEnriched = resolvedInst ? { ...input, instanceId: resolvedInst.id as any, network: mergedNetwork } : { ...input, network: mergedNetwork };
+    const providerInput = toContainerGroupInput(clusterEnriched);
+    const containerProvider = await this.#resolveProvider(input.instanceId);
+    const { providerId } = await containerProvider.create(providerInput);
 
     // 3. Transition to Running with provider details (no redundant re-read: we just
     //    wrote `initial` with OCC create-only at line 71, so it's the current state).
@@ -119,6 +150,7 @@ export class SandboxService implements ISandboxService {
       facility: FACILITY,
       level: LogLevel.NOTICE,
       message: 'Sandbox provisioned',
+      actorId: input.creatorId,
       metadata: { sandboxId: id as string, providerId, name: input.name },
     });
 
@@ -126,7 +158,8 @@ export class SandboxService implements ISandboxService {
       level: KernLevel.NOTICE,
       facility: FACILITY,
       message: `Sandbox provisioned — ${input.name}`,
-      metadata: { eventType: 'sandbox.provisioned', sandboxId: id as string, providerId, creatorId: input.creatorId },
+      actorId: input.creatorId,
+      metadata: { eventType: 'sandbox.provisioned', sandboxId: id as string, providerId },
     });
 
     // Notify real-time subscribers
@@ -196,7 +229,7 @@ export class SandboxService implements ISandboxService {
       // Provider may be unreachable or container already gone — proceed with local cleanup.
     }
 
-    await this.transition(id, SandboxStatus.Deleted, 'user requested termination');
+    await this.transition(id, SandboxStatus.Deleted, 'user requested termination', actorId);
 
     // Remove from sandbox ID index
     const idx = await this.atomic.get<string[]>(INDEX_KEY);
@@ -206,6 +239,7 @@ export class SandboxService implements ISandboxService {
       facility: FACILITY,
       level: LogLevel.NOTICE,
       message: 'Sandbox terminated',
+      actorId,
       metadata: { sandboxId: id as string },
     });
 
@@ -213,12 +247,13 @@ export class SandboxService implements ISandboxService {
       level: KernLevel.WARNING,
       facility: FACILITY,
       message: `Sandbox terminated — ${id}`,
-      metadata: { eventType: 'sandbox.terminated', sandboxId: id as string, actorId },
+      actorId,
+      metadata: { eventType: 'sandbox.terminated', sandboxId: id as string },
     });
   }
 
-  async forceTransition(id: SandboxId, to: SandboxStatus, reason: string): Promise<Sandbox> {
-    return this.transition(id, to, reason);
+  async forceTransition(id: SandboxId, to: SandboxStatus, reason: string, actorId?: string): Promise<Sandbox> {
+    return this.transition(id, to, reason, actorId);
   }
 
   async pollForIp(sandboxId: SandboxId, timeoutMs: number, pollIntervalMs: number): Promise<string | null> {
@@ -278,12 +313,16 @@ export class SandboxService implements ISandboxService {
       ? mapped
       : sandbox.status;
 
+    // Persist clusterId from runtime if provider reported it back
+    const runtimeInstanceId = runtime.instanceId ?? sandbox.config.instanceId;
+
     const updated: Sandbox = {
       ...sandbox,
       network: runtimeToNetwork(runtime.network, runtime.associatedResources),
       containers: runtimeToContainers(runtime),
       events: runtimeToEvents(runtime),
       status: finalStatus,
+      ...(runtimeInstanceId ? { config: { ...sandbox.config, instanceId: runtimeInstanceId } } : {}),
       updatedAt: Date.now(),
       version: generateVersionId(),
     };
@@ -301,7 +340,7 @@ export class SandboxService implements ISandboxService {
     return runtime;
   }
 
-  private async transition(id: SandboxId, to: SandboxStatus, reason: string): Promise<Sandbox> {
+  private async transition(id: SandboxId, to: SandboxStatus, reason: string, actorId?: string): Promise<Sandbox> {
     const entry = await this.atomic.get<Sandbox>(`${KEY_PREFIX}${id}`);
     if (!entry) throw new AppError(404, 'SANDBOX_NOT_FOUND', `Sandbox ${id} not found`);
 
@@ -324,6 +363,7 @@ export class SandboxService implements ISandboxService {
       facility: FACILITY,
       level: LogLevel.NOTICE,
       message: `Sandbox ${from.status} → ${to}`,
+      actorId,
       metadata: { sandboxId: id as string, fromStatus: from.status, toStatus: to, reason },
     });
 
@@ -331,6 +371,7 @@ export class SandboxService implements ISandboxService {
       level: KernLevel.INFO,
       facility: FACILITY,
       message: `Sandbox ${from.status} → ${to} — ${reason}`,
+      actorId,
       metadata: { eventType: 'sandbox.transition', sandboxId: id as string, fromStatus: from.status, toStatus: to, reason },
     });
 
@@ -397,6 +438,7 @@ export function toContainerGroupInput(input: CreateSandboxInput): CreateContaine
     name: input.name,
     description: input.description,
     region: input.region,
+    ...(input.instanceId ? { instanceId: input.instanceId } : {}),
     cpu: input.resourceSpec.cpu,
     memory: input.resourceSpec.memory,
     spotStrategy: input.spotStrategy,
@@ -405,7 +447,7 @@ export function toContainerGroupInput(input: CreateSandboxInput): CreateContaine
       name: c.name,
       image: c.image,
       args: c.args,
-      env: c.env?.map(e => ({ name: e.name, value: e.value, valueFrom: e.valueFrom })),
+      env: mapEnvVars(c.env),
       tty: c.tty,
       stdin: c.stdin,
       imagePullPolicy: c.imagePullPolicy,
@@ -413,28 +455,28 @@ export function toContainerGroupInput(input: CreateSandboxInput): CreateContaine
       livenessProbe: c.livenessProbe,
       readinessProbe: c.readinessProbe,
       startupProbe: c.startupProbe,
-      ports: c.ports,
+      ports: mapPorts(c.ports),
       networkMode: c.networkMode,
-      volumeMounts: c.volumeMounts?.map(vm => ({
+      volumeMounts: mapVolumeMounts(c.volumeMounts?.map(vm => ({
         volumeId: String(vm.volumeId),
         mountPath: vm.mountPath,
         readOnly: vm.readOnly,
         mountPropagation: vm.mountPropagation,
-      })),
+      }))),
       providerOverrides: c.providerOverrides,
     })),
-    volumes: input.volumes?.map(v => ({
+    volumes: mapVolumes(input.volumes?.map(v => ({
       id: String(v.id),
       type: v.type,
-      options: v.nfs ? { server: v.nfs.server, path: v.nfs.path, readOnly: v.nfs.readOnly } : undefined,
-    })),
-    network: {
+      nfs: v.nfs,
+    }))),
+    network: mapNetwork({
       subnetIds: input.network.subnetIds,
       securityGroupId: input.network.securityGroupId,
       allocatePublicIp: input.network.allocatePublicIp,
       publicIpBandwidth: input.network.publicIpBandwidth,
-    },
-    tags: input.tags?.map(t => ({ key: t.key, value: t.value })),
+    }),
+    tags: mapTags(input.tags),
     providerOverrides: input.providerOverrides,
   };
 }
@@ -455,7 +497,7 @@ function runtimeToNetwork(
     ...(publicIp !== undefined ? { publicIp } : {}),
     ...(network.privateIp !== undefined ? { privateIp: network.privateIp } : {}),
     ...(network.vpcId !== undefined ? { vpcId: network.vpcId } : {}),
-    ...(network.vswitchId !== undefined ? { subnetId: network.vswitchId } : {}),
+    ...(network.subnetId !== undefined ? { subnetId: network.subnetId } : {}),
     ...(network.securityGroupId !== undefined ? { securityGroupId: network.securityGroupId } : {}),
     ...(network.eniId !== undefined ? { eniId: network.eniId } : {}),
   };

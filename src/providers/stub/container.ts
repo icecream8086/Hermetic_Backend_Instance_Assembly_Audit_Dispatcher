@@ -11,6 +11,7 @@ import type {
   OciContainer,
 } from '../../core/provider/index.ts';
 import type { CreateContainerGroupInput, ContainerId } from '../../core/provider/types.ts';
+import type { ZoneId } from '../../core/region/types.ts';
 import { StubOciRuntime } from '../../features/ociruntime/oci-runtime.stub.ts';
 import type { OciCreateSpec } from '../../features/ociruntime/types.ts';
 
@@ -76,7 +77,8 @@ export class StubContainerProvider implements IContainerProvider {
       name: input.name,
       status: 'Running',
       regionId: input.region,
-      zoneId: 'stub-zone-a',
+      instanceId: undefined,
+      zoneId: 'stub-zone-a' as ZoneId,
       instanceType: 'ecs.g6.large',
       spotStrategy: input.spotStrategy,
       cpu: input.cpu,
@@ -84,7 +86,7 @@ export class StubContainerProvider implements IContainerProvider {
       network: {
         privateIp: `10.0.0.${this.#nextProviderId}`,
         vpcId: 'stub-vpc',
-        ...(input.network.subnetIds?.[0] ? { vswitchId: input.network.subnetIds[0] } : {}),
+        ...(input.network.subnetIds?.[0] ? { subnetId: input.network.subnetIds[0] } : {}),
         ...(input.network.securityGroupId ? { securityGroupId: input.network.securityGroupId } : {}),
       },
       associatedResources,

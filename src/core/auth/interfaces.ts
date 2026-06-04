@@ -14,12 +14,18 @@ export interface AuthRequest {
   readonly body?: string | undefined;
 }
 
+export interface SignResult {
+  readonly headers: Record<string, string>;
+  /** Signed URL override — for providers that embed signature in query params (e.g. Alibaba RPC). */
+  readonly url?: string | undefined;
+}
+
 export interface IAuthProvider {
   /** Name of this auth method. */
   readonly type: string;
 
-  /** Apply authentication to a request. Returns the signed headers. */
-  sign(req: AuthRequest): Promise<Record<string, string>>;
+  /** Apply authentication to a request. Returns signed headers and optionally a signed URL. */
+  sign(req: AuthRequest): Promise<SignResult>;
 
   /** Get a Bearer token (for token-based auth). Returns null if not applicable. */
   getToken?(): Promise<{ token: string; expiresAt?: number | undefined } | null>;

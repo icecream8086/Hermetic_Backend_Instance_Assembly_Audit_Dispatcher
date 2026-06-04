@@ -1,4 +1,5 @@
-import type { RegionId } from '../../core/region/types.ts';
+import type { RegionId, ZoneId } from '../../core/region/types.ts';
+import type { InstanceId } from '../../core/region/instance.ts';
 import type { ProbeSpec } from '../../core/provider/types.ts';
 
 // ═══════════════════════════════════════════
@@ -44,7 +45,8 @@ export interface ContainerDef {
 /** 容器组定义 — 纯无状态，不包含 probes/storage/providerOverrides */
 export interface ContainerSpec {
   readonly region: RegionId;
-  readonly zone?: string | undefined;
+  readonly zone?: ZoneId | undefined;
+  readonly instanceId?: InstanceId | undefined;
   readonly account?: string | undefined;
   readonly restartPolicy?: string | undefined;
   readonly containers: readonly ContainerDef[];
@@ -91,6 +93,7 @@ export interface NetworkSpec {
   /** 虚拟私有网络（VPC） */
   readonly vpc?: {
     readonly id?: string;
+    readonly instanceId?: string;
     readonly subnetIds?: readonly string[];
     readonly securityGroupId?: string;
   } | undefined;

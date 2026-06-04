@@ -1,10 +1,13 @@
 /**
- * Alibaba Cloud RPC API caller — uses shared HMAC-SHA1 from auth layer.
+ * Alibaba Cloud RPC API caller — uses AkSkProvider from the auth layer.
  *
  * Reference: https://help.aliyun.com/document_detail/110992.html
+ *
+ * This is a thin wrapper that adapts AkSkProvider (which generates a signed URL)
+ * to the ECI-specific call pattern (POST with error parsing).
  */
 
-import { hmacSha1, percentEncode } from '../../core/auth/providers.ts';
+import { AkSkProvider } from '../../core/auth/providers.ts';
 
 export interface RpcParams {
   readonly [key: string]: string | undefined;
@@ -20,27 +23,22 @@ export async function rpcCall(
   action: string,
   params: RpcParams,
 ): Promise<any> {
-  const query: Record<string, string> = {
-    Format: 'JSON',
-    Version: '2018-08-08',
-    AccessKeyId: accessKeyId,
-    SignatureMethod: 'HMAC-SHA1',
-    Timestamp: new Date().toISOString().replace(/\.\d+Z$/, 'Z'),
-    SignatureVersion: '1.0',
-    SignatureNonce: `${Date.now()}${Math.random().toString(36).slice(2)}`,
+  const aksk = new AkSkProvider(accessKeyId, accessKeySecret);
+
+  // Build query params for the specific action
+  const queryEntries = Object.entries({
     Action: action,
-  };
-  for (const [k, v] of Object.entries(params)) {
-    if (v !== undefined) query[k] = v;
-  }
+    Version: '2018-08-08',
+    ...params,
+  }).filter(([_, v]) => v !== undefined) as [string, string][];
 
-  const keys = Object.keys(query).sort();
-  const canonical = keys.map(k => `${percentEncode(k)}=${percentEncode(query[k]!)}`).join('&');
-  const stringToSign = `POST&${percentEncode('/')}&${percentEncode(canonical)}`;
-  const signature = await hmacSha1(`${accessKeySecret}&`, stringToSign);
+  const queryString = queryEntries.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
+  const baseUrl = `https://${endpoint}/?${queryString}`;
 
-  const url = `https://${endpoint}/?${canonical}&Signature=${percentEncode(signature)}`;
-  const resp = await fetch(url, { method: 'POST' });
+  const { url: signedUrl } = await aksk.sign({ method: 'POST', url: baseUrl, headers: {} });
+  if (!signedUrl) throw new Error('AkSkProvider did not produce a signed URL');
+
+  const resp = await fetch(signedUrl, { method: 'POST' });
   const body = await resp.json() as any;
   if (body.Code) {
     throw new Error(`Alibaba ECI ${action} failed: ${body.Code} — ${body.Message ?? ''}`);

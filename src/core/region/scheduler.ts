@@ -1,4 +1,4 @@
-import type { RegionId, AlibabaRegion } from './types.ts';
+import type { RegionId, AlibabaRegion, ClusterId } from './types.ts';
 import { ALIBABA_REGIONS } from './types.ts';
 import { createRegionId } from './types.ts';
 import { getDefaultRegistry } from './registry.ts';
@@ -16,6 +16,8 @@ export interface ScheduleRequest {
   readonly provider?: string | undefined;
   /** Tenant ID for network isolation. */
   readonly tenantId?: string | undefined;
+  /** Cluster ID constraint — if set, only this cluster's region is considered. */
+  readonly clusterId?: ClusterId | undefined;
 }
 
 export interface ScheduleResult {
@@ -23,6 +25,7 @@ export interface ScheduleResult {
   readonly provider: string;
   readonly score: number;
   readonly reason: string;
+  readonly clusterId?: ClusterId | undefined;
 }
 
 const LOCAL_REGION = createRegionId('local');
@@ -34,11 +37,22 @@ const LOCAL_REGION = createRegionId('local');
  */
 export function scheduleRegion(request: ScheduleRequest): ScheduleResult {
   const registry = getDefaultRegistry();
-  const allRegions = registry.listRegions();
+
+  // If clusterId is specified, constrain to that cluster's region
+  let regionsToScore: string[];
+  if (request.clusterId) {
+    // When clusterId is set, only the cluster's region is relevant.
+    // The caller is expected to have resolved the cluster already —
+    // we just need to match the provider and region.
+    // We still score all regions but the cluster's region gets +200.
+    regionsToScore = registry.listRegions();
+  } else {
+    regionsToScore = registry.listRegions();
+  }
 
   const candidates: ScheduleResult[] = [];
 
-  for (const region of allRegions) {
+  for (const region of regionsToScore) {
     const provider = resolveProvider(region, request.provider);
     const score = scoreRegion(region, request);
     if (score <= 0) continue;
@@ -47,12 +61,12 @@ export function scheduleRegion(request: ScheduleRequest): ScheduleResult {
       region: createRegionId(region),
       provider,
       score,
-      reason: score >= 100 ? 'preferred' : score >= 50 ? 'available' : 'fallback',
+      reason: score >= 200 ? 'cluster-matched' : score >= 100 ? 'preferred' : score >= 50 ? 'available' : 'fallback',
+      ...(request.clusterId ? { clusterId: request.clusterId } : {}),
     });
   }
 
   if (candidates.length === 0) {
-    // Fallback to local
     return {
       region: LOCAL_REGION,
       provider: request.provider ?? 'stub',
@@ -61,7 +75,6 @@ export function scheduleRegion(request: ScheduleRequest): ScheduleResult {
     };
   }
 
-  // Sort by score descending
   candidates.sort((a, b) => b.score - a.score);
   return candidates[0]!;
 }

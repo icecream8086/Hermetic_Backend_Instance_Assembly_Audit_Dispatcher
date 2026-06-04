@@ -10,6 +10,8 @@ import { createImageRouter, imageRouteMeta } from '../src/features/image/handler
 import { createSandboxRouter, sandboxRouteMeta } from '../src/features/sandbox/handler.ts';
 import { createPlatformsRouter, platformsRouteMeta } from '../src/features/platforms/handler.ts';
 import { createNetworkRouter, networkRouteMeta } from '../src/features/network/handler.ts';
+import { createTopologyRouter, topologyRouteMeta } from '../src/features/topology/handler.ts';
+import { createSubnetRouter, subnetRouteMeta } from '../src/features/subnet/handler.ts';
 import type { RouteMeta } from '../src/core/http-docs/types.ts';
 import { createAuditRouter } from '../src/core/audit/audit-router.ts';
 import { WorkersAuditLogger } from '../src/core/audit/workers-audit-logger.ts';
@@ -118,6 +120,13 @@ collect('net', 'Net', '/api/networks', createNetworkRouter({
   delete: async () => {},
 }), () => true, networkRouteMeta);
 
+const stubSubnetSvc: any = { create: async () => ({}), list: async () => ({ items: [], total: 0, page: 1, limit: 20 }), get: async () => null, update: async () => ({}), delete: async () => {} };
+collect('sub', 'Sub', '/api/subnets', createSubnetRouter(stubSubnetSvc), () => true, subnetRouteMeta);
+
+const stubClusterSvc: any = { create: async () => ({}), get: async () => null, list: async () => [], update: async () => ({}), delete: async () => {} };
+const stubBucketSvc: any = { create: async () => ({}), get: async () => null, list: async () => [], update: async () => ({}), delete: async () => {} };
+collect('topo', 'Topo', '/api/topology', createTopologyRouter(stubClusterSvc, stubBucketSvc), () => true, topologyRouteMeta);
+
 // Manually-added routes (not in any feature router)
 // Dev-only
 routes.push({
@@ -168,7 +177,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const httpDir = resolve(__dirname, '..', 'http');
 mkdirSync(httpDir, { recursive: true });
 
-const fileTagOrder = ['info', 'auth', 'sysgrp', 'tpl', 'img', 'sbx', 'plf', 'perm', 'audit', 'users', 'events'];
+const fileTagOrder = ['info', 'auth', 'sysgrp', 'tpl', 'img', 'sbx', 'plf', 'perm', 'audit', 'users', 'events', 'topo', 'sub'];
 const fileTagTitle: Record<string, string> = {
   info: 'Info',
   auth: 'Auth',
@@ -181,6 +190,8 @@ const fileTagTitle: Record<string, string> = {
   audit: 'Audit',
   users: 'Users',
   events: 'Events',
+  topo: 'Topo',
+  sub: 'Sub',
 };
 
 for (const ft of fileTagOrder) {

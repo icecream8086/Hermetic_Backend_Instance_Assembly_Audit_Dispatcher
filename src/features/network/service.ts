@@ -1,236 +1,139 @@
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
 import type { ILogWriter } from '../../core/logger/interfaces.ts';
 import type { IAuditWriter } from '../../core/audit/types.ts';
+import type { INetworkPolicyProvider } from '../../core/provider/interfaces.ts';
 import { createFacility } from '../../core/brand.ts';
 import { LogLevel, AppError } from '../../core/types.ts';
 import { KernLevel } from '../../core/audit/kern-level.ts';
-import { parseCidr } from '../../core/network/cidr.ts';
-import type { RegionId } from '../../core/region/types.ts';
+import { InstanceService } from '../../core/region/instance.ts';
 import type {
-  VirtualNetwork, NetworkId, NetworkStatus,
-  CreateNetworkInput, UpdateNetworkInput,
+  SecurityGroup, SecurityGroupId, SecurityGroupStatus,
+  CreateSecurityGroupInput, UpdateSecurityGroupInput,
 } from './types.ts';
-import { generateNetworkId } from './types.ts';
+import { generateSecurityGroupId } from './types.ts';
 
-const FACILITY = createFacility('network');
-const NETWORK_PREFIX = 'vnet:';
-const NETWORK_INDEX_KEY = 'vnet:ids';
+const FACILITY = createFacility('secgroup');
+const PREFIX = 'secgroup:';
+const INDEX_KEY = 'secgroup:ids';
 
-export interface INetworkService {
-  create(input: CreateNetworkInput, actorId?: string): Promise<VirtualNetwork>;
-  list(page?: number, limit?: number, filter?: { visibility?: string | undefined; provider?: string | undefined; region?: string | undefined }, currentUser?: { id: string; role?: string } | undefined): Promise<{ items: VirtualNetwork[]; total: number; page: number; limit: number }>;
-  get(id: NetworkId): Promise<VirtualNetwork | null>;
-  update(id: NetworkId, input: UpdateNetworkInput, actorId?: string): Promise<VirtualNetwork>;
-  delete(id: NetworkId, actorId?: string): Promise<void>;
+export interface ISecurityGroupService {
+  create(input: CreateSecurityGroupInput, actorId?: string): Promise<SecurityGroup>;
+  list(page?: number, limit?: number): Promise<{ items: SecurityGroup[]; total: number; page: number; limit: number }>;
+  get(id: SecurityGroupId): Promise<SecurityGroup | null>;
+  update(id: SecurityGroupId, input: UpdateSecurityGroupInput, actorId?: string): Promise<SecurityGroup>;
+  delete(id: SecurityGroupId, actorId?: string): Promise<void>;
 }
 
-export class NetworkService implements INetworkService {
+export class SecurityGroupService implements ISecurityGroupService {
   constructor(
     private readonly atomic: IAtomicStore,
     private readonly logger: ILogWriter,
     private readonly audit?: IAuditWriter,
+    private readonly networkPolicy?: INetworkPolicyProvider | undefined,
+    private readonly instanceSvc?: InstanceService | undefined,
   ) {}
 
-  async create(input: CreateNetworkInput, actorId?: string): Promise<VirtualNetwork> {
-    try {
-      parseCidr(input.cidr);
-    } catch {
-      throw new AppError(400, 'INVALID_CIDR', `Invalid CIDR: ${input.cidr}`);
-    }
+  async create(input: CreateSecurityGroupInput, actorId?: string): Promise<SecurityGroup> {
+    const inst = this.instanceSvc ? await this.instanceSvc.get(input.instanceId) : null;
+    if (!inst) throw new AppError(400, 'INSTANCE_NOT_FOUND', `ComputeInstance ${input.instanceId} not found`);
 
-    const id = generateNetworkId();
+    const id = generateSecurityGroupId();
     const now = Date.now();
 
-    const network: VirtualNetwork = {
-      id,
-      name: input.name,
-      description: input.description,
-      cidr: input.cidr,
-      subnetPrefix: input.subnetPrefix,
-      securityGroupId: input.securityGroupId,
-      provider: input.provider,
-      region: input.region as RegionId,
-      visibility: input.visibility ?? 'private',
-      creatorId: actorId,
-      userIds: input.userIds ?? [],
-      userGroupIds: input.userGroupIds ?? [],
-      status: 'Active',
-      createdAt: now,
-      updatedAt: now,
+    // Provision cloud-side resource if provider is available
+    let providerNetworkId: string | undefined;
+    if (this.networkPolicy) {
+      try {
+        providerNetworkId = await this.networkPolicy.ensureNetwork(id);
+        if (input.rules?.length && this.networkPolicy.applyRules) {
+          await this.networkPolicy.applyRules(providerNetworkId, input.rules);
+        }
+      } catch (e: any) {
+        throw new AppError(502, 'PROVIDER_ERROR', `Failed to provision security group: ${e.message}`);
+      }
+    }
+
+    const sg: SecurityGroup = {
+      id, name: input.name, description: input.description,
+      ...(input.securityGroupId ? { securityGroupId: input.securityGroupId } : {}),
+      ...(input.rules?.length ? { rules: input.rules } : {}),
+      ...(providerNetworkId ? { providerNetworkId } : {}),
+      instanceId: input.instanceId, provider: inst.platform, region: inst.region,
+      visibility: input.visibility ?? 'private', creatorId: actorId,
+      userIds: input.userIds ?? [], userGroupIds: input.userGroupIds ?? [],
+      status: 'Active', createdAt: now, updatedAt: now,
     };
 
-    await this.atomic.set(NETWORK_PREFIX + id, network, null);
+    await this.atomic.set(PREFIX + id, sg, null);
     await this.#addToIndex(id);
-    await this.#incrCounter().catch(() => {});
 
-    await this.logger.logAsync({
-      facility: FACILITY, level: LogLevel.INFO,
-      message: `Virtual network created: ${input.name} (${input.cidr})`,
-      metadata: { networkId: id, actorId },
-    });
-
-    this.audit?.write({
-      level: KernLevel.NOTICE, facility: FACILITY,
-      message: `Virtual network created — ${input.name} (${input.cidr})`,
-      metadata: { eventType: 'network.created', networkId: id, actorId },
-    });
-
-    return network;
+    await this.logger.logAsync({ facility: FACILITY, level: LogLevel.INFO, message: `Security group created: ${input.name}`, actorId });
+    this.audit?.write({ level: KernLevel.NOTICE, facility: FACILITY, message: `Security group created — ${input.name}`, actorId, metadata: { eventType: 'secgroup.created' } });
+    return sg;
   }
 
-  async list(
-    page = 1, limit = 20,
-    filter?: { visibility?: string | undefined; provider?: string | undefined; region?: string | undefined },
-    currentUser?: { id: string; role?: string } | undefined,
-  ): Promise<{ items: VirtualNetwork[]; total: number; page: number; limit: number }> {
-    const all = await this.#listAll();
-    const accessResults = await Promise.all(all.map(n => this.#canAccess(n, currentUser)));
-    let filtered = all.filter((_, i) => accessResults[i]);
-
-    if (filter?.visibility) filtered = filtered.filter(n => n.visibility === filter.visibility);
-    if (filter?.provider) filtered = filtered.filter(n => n.provider === filter.provider);
-    if (filter?.region) filtered = filtered.filter(n => n.region === filter.region);
-
-    const total = filtered.length;
-    const start = (page - 1) * limit;
-    const items = filtered.slice(start, start + limit);
-
-    return { items, total, page, limit };
+  async list(page = 1, limit = 20): Promise<{ items: SecurityGroup[]; total: number; page: number; limit: number }> {
+    const all = (await this.#listAll()).reverse();
+    return { items: all.slice((page - 1) * limit, page * limit), total: all.length, page, limit };
   }
 
-  async get(id: NetworkId): Promise<VirtualNetwork | null> {
-    const entry = await this.atomic.get<VirtualNetwork>(NETWORK_PREFIX + id);
+  async get(id: SecurityGroupId): Promise<SecurityGroup | null> {
+    const entry = await this.atomic.get<SecurityGroup>(PREFIX + id);
     return entry?.value ?? null;
   }
 
-  async update(id: NetworkId, input: UpdateNetworkInput, actorId?: string): Promise<VirtualNetwork> {
-    const entry = await this.atomic.get<VirtualNetwork>(NETWORK_PREFIX + id);
-    if (!entry) throw new AppError(404, 'NETWORK_NOT_FOUND', 'Virtual network not found');
+  async update(id: SecurityGroupId, input: UpdateSecurityGroupInput, actorId?: string): Promise<SecurityGroup> {
+    const entry = await this.atomic.get<SecurityGroup>(PREFIX + id);
+    if (!entry) throw new AppError(404, 'SECGROUP_NOT_FOUND', 'Security group not found');
 
-    const updated: VirtualNetwork = {
+    const updated: SecurityGroup = {
       ...entry.value,
       ...(input.name !== undefined ? { name: input.name } : {}),
       ...(input.description !== undefined ? { description: input.description ?? undefined } : {}),
       ...(input.securityGroupId !== undefined ? { securityGroupId: input.securityGroupId ?? undefined } : {}),
+      ...(input.rules !== undefined ? { rules: input.rules ?? undefined } : {}),
       ...(input.visibility !== undefined ? { visibility: input.visibility } : {}),
       ...(input.userIds !== undefined ? { userIds: input.userIds ?? [] } : {}),
       ...(input.userGroupIds !== undefined ? { userGroupIds: input.userGroupIds ?? [] } : {}),
-      ...(input.status !== undefined ? { status: input.status as NetworkStatus } : {}),
+      ...(input.status !== undefined ? { status: input.status as SecurityGroupStatus } : {}),
       updatedAt: Date.now(),
     };
 
-    const newVersion = await this.atomic.set(NETWORK_PREFIX + id, updated, entry.version);
+    const newVersion = await this.atomic.set(PREFIX + id, updated, entry.version);
     if (!newVersion) throw new AppError(409, 'CONFLICT', 'Concurrent modification detected');
 
-    this.audit?.write({
-      level: KernLevel.NOTICE, facility: FACILITY,
-      message: `Virtual network updated — ${updated.name}`,
-      metadata: { eventType: 'network.updated', networkId: id, actorId },
-    });
-
+    if (input.rules !== undefined && updated.providerNetworkId && this.networkPolicy?.applyRules) {
+      await this.networkPolicy.applyRules(updated.providerNetworkId, updated.rules ?? []).catch(e => {
+        this.logger.logAsync({ facility: FACILITY, level: LogLevel.WARN, message: `Failed to apply rules: ${e.message}`, actorId });
+      });
+    }
     return updated;
   }
 
-  async delete(id: NetworkId, actorId?: string): Promise<void> {
-    const entry = await this.atomic.get<VirtualNetwork>(NETWORK_PREFIX + id);
-    if (!entry) throw new AppError(404, 'NETWORK_NOT_FOUND', 'Virtual network not found');
-
-    await this.atomic.set(NETWORK_PREFIX + id, null, entry.version);
+  async delete(id: SecurityGroupId, actorId?: string): Promise<void> {
+    const entry = await this.atomic.get<SecurityGroup>(PREFIX + id);
+    if (!entry) throw new AppError(404, 'SECGROUP_NOT_FOUND', 'Security group not found');
+    if (entry.value.providerNetworkId && this.networkPolicy) {
+      try { await this.networkPolicy.removeNetwork(entry.value.providerNetworkId); } catch { }
+    }
+    await this.atomic.set(PREFIX + id, null, entry.version);
     await this.#removeFromIndex(id);
-    await this.#decrCounter().catch(() => {});
-
-    this.audit?.write({
-      level: KernLevel.WARNING, facility: FACILITY,
-      message: `Virtual network deleted — ${entry.value.name} (${entry.value.cidr})`,
-      metadata: { eventType: 'network.deleted', networkId: id, actorId },
-    });
+    this.audit?.write({ level: KernLevel.WARNING, facility: FACILITY, message: `Security group deleted — ${entry.value.name}`, actorId, metadata: { eventType: 'secgroup.deleted' } });
   }
 
-  // ─── Visibility / Access control ───
-
-  /**
-   * 可见性规则：
-   *   1. >= root 组且 role='root' → 无视规则，全部可见
-   *   2. public → 所有人可见
-   *   3. private → 创建者本人 / userIds 白名单 / userGroupIds 白名单
-   */
-  async #canAccess(network: VirtualNetwork, user: { id: string; role?: string } | undefined): Promise<boolean> {
-    // 未认证用户只能看到 public
-    if (!user) return network.visibility === 'public';
-
-    // Root 组 + role='root' 绕过所有限制
-    if (await this.#isRootUser(user.id, user.role)) return true;
-
-    // Public → 所有认证用户
-    if (network.visibility === 'public') return true;
-
-    // Private → 检查白名单
-    if (network.creatorId === user.id) return true;
-    if (network.userIds?.includes(user.id)) return true;
-    if (network.userGroupIds?.length) {
-      const userGroupIds = await this.#getUserGroupIds(user.id);
-      if (network.userGroupIds.some(gid => userGroupIds.includes(gid))) return true;
-    }
-
-    return false;
-  }
-
-  /** 检查用户是否 >= root 组且 role='root' */
-  async #isRootUser(userId: string, userRole?: string): Promise<boolean> {
-    if (userRole !== 'root') return false;
-    const ugEntry = await this.atomic.get<string[]>('usergroup:ids');
-    if (!ugEntry) return false;
-    for (const gid of ugEntry.value) {
-      const g = await this.atomic.get<any>('usergroup:' + gid);
-      if (g?.value?.name === 'root' && g.value.memberIds?.includes(userId)) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /** 获取用户所在的所有用户组 ID */
-  async #getUserGroupIds(userId: string): Promise<string[]> {
-    const results: string[] = [];
-    const ugEntry = await this.atomic.get<string[]>('usergroup:ids');
-    if (!ugEntry) return results;
-    for (const gid of ugEntry.value) {
-      const g = await this.atomic.get<any>('usergroup:' + gid);
-      if (g?.value?.memberIds?.includes(userId)) {
-        results.push(gid);
-      }
-    }
-    return results;
-  }
-
-  // ─── Internal helpers ───
-
-  async #listAll(): Promise<VirtualNetwork[]> {
-    const idx = await this.atomic.get<string[]>(NETWORK_INDEX_KEY);
+  async #listAll(): Promise<SecurityGroup[]> {
+    const idx = await this.atomic.get<string[]>(INDEX_KEY);
     if (!idx) return [];
-    const entries = await Promise.all(idx.value.map(id => this.atomic.get<VirtualNetwork>(NETWORK_PREFIX + id)));
+    const entries = await Promise.all(idx.value.map(id => this.atomic.get<SecurityGroup>(PREFIX + id)));
     return entries.filter(e => e).map(e => e!.value);
   }
-
-  async #addToIndex(id: NetworkId): Promise<void> {
-    const idx = await this.atomic.get<string[]>(NETWORK_INDEX_KEY);
-    await this.atomic.set(NETWORK_INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
+  async #addToIndex(id: SecurityGroupId): Promise<void> {
+    const idx = await this.atomic.get<string[]>(INDEX_KEY);
+    await this.atomic.set(INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
   }
-
-  async #removeFromIndex(id: NetworkId): Promise<void> {
-    const idx = await this.atomic.get<string[]>(NETWORK_INDEX_KEY);
+  async #removeFromIndex(id: SecurityGroupId): Promise<void> {
+    const idx = await this.atomic.get<string[]>(INDEX_KEY);
     if (!idx) return;
-    await this.atomic.set(NETWORK_INDEX_KEY, idx.value.filter((i: string) => i !== id), idx.version);
-  }
-
-  async #incrCounter(): Promise<void> {
-    const entry = await this.atomic.get<number>('vnet:count');
-    await this.atomic.set('vnet:count', (entry?.value ?? 0) + 1, entry?.version ?? null);
-  }
-
-  async #decrCounter(): Promise<void> {
-    const entry = await this.atomic.get<number>('vnet:count');
-    if (!entry || entry.value <= 0) return;
-    await this.atomic.set('vnet:count', entry.value - 1, entry.version);
+    await this.atomic.set(INDEX_KEY, idx.value.filter((i: string) => i !== id), idx.version);
   }
 }

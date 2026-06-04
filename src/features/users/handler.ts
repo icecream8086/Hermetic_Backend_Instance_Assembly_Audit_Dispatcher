@@ -18,7 +18,9 @@ const ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gi
 function detectImageType(buf: Uint8Array): string | null {
   if (buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) return 'image/jpeg';
   if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47) return 'image/png';
-  if (buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46) return 'image/webp'; // RIFF header
+  if (buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46) {
+    if (buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50) return 'image/webp'; // RIFF + WEBP
+  }
   if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) return 'image/gif';
   return null;
 }
@@ -36,9 +38,20 @@ function userToResponse(user: { id: string; email: string; name: string; role: U
   });
 }
 
+type PermissionCheckFn = { check(params: { userId: string; action: string; resource: string; ip?: string; resourceOwnerId?: string }): Promise<{ allowed: boolean; reason: string }> };
+
+async function requirePerm(c: any, checker: PermissionCheckFn | undefined, action: string, resource: string, resourceOwnerId?: string): Promise<Response | null> {
+  if (!checker) return null;
+  const user = (c as any).var?.currentUser;
+  if (!user) return null;
+  const result = await checker.check({ userId: user.id, action, resource, ...(resourceOwnerId ? { resourceOwnerId } : {}) });
+  if (!result.allowed) return c.json(fail('FORBIDDEN', result.reason), 403);
+  return null;
+}
+
 // ─── Router factory ───
 
-export function createUserRouter(userService: IUserService): Hono<{ Variables: AppContext }> {
+export function createUserRouter(userService: IUserService, permissionChecker?: PermissionCheckFn): Hono<{ Variables: AppContext }> {
   const router = new Hono<{ Variables: AppContext }>();
 
   // POST /api/users/register
@@ -116,6 +129,7 @@ export function createUserRouter(userService: IUserService): Hono<{ Variables: A
     if (!parsed.success) {
       return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
     }
+    { const r = await requirePerm(c, permissionChecker, 'update', 'user', id as string); if (r) return r; }
 
     // Construct input with all properties present (EOPT-safe)
     const data = parsed.data;
@@ -133,6 +147,7 @@ export function createUserRouter(userService: IUserService): Hono<{ Variables: A
   // DELETE /api/users/:id
   router.delete('/:id', async (c) => {
     const id = createUserId(c.req.param('id'));
+    { const r = await requirePerm(c, permissionChecker, 'delete', 'user', id as string); if (r) return r; }
     const actorId = (c as any).var?.currentUser?.id;
     await userService.delete(id, actorId);
     return c.json(ok(null));
@@ -154,12 +169,29 @@ export function createUserRouter(userService: IUserService): Hono<{ Variables: A
     return c.json(ok(userToResponse(user)));
   });
 
-  // GET /api/users
+  // GET /api/users — list all (paginated)
   router.get('/', async (c) => {
     const page = parseInt(c.req.query('page') ?? '') || 1;
     const limit = parseInt(c.req.query('limit') ?? '') || 50;
     const { items, total } = await userService.listPaginated(page, limit);
     return c.json(ok({ items: items.map(userToResponse), total, page, limit }));
+  });
+
+  // GET /api/users/search?q=email-or-id — eventual-consistency lookup
+  router.get('/search', async (c) => {
+    const q = c.req.query('q');
+    if (!q) return c.json(fail('VALIDATION_ERROR', 'query parameter q is required'), 400);
+    const atomic = c.var.stores.atomic;
+    let user;
+    if (q.includes('@')) {
+      const entry = await atomic.get<any>('user:email:' + q);
+      if (entry) user = entry.value;
+    } else {
+      const entry = await atomic.get<any>('user:' + q);
+      if (entry) user = entry.value;
+    }
+    if (!user) return c.json(ok(null));
+    return c.json(ok(userToResponse(user)));
   });
 
   // ─── Login policy CRUD ───
@@ -172,6 +204,7 @@ export function createUserRouter(userService: IUserService): Hono<{ Variables: A
 
   router.put('/:id/login-policy', async (c) => {
     const id = createUserId(c.req.param('id'));
+    { const r = await requirePerm(c, permissionChecker, 'update', 'user', id as string); if (r) return r; }
     const body: unknown = await c.req.json();
     const parsed = LoginPolicySchema.safeParse(body);
     if (!parsed.success) {
@@ -187,6 +220,7 @@ export function createUserRouter(userService: IUserService): Hono<{ Variables: A
 
   router.delete('/:id/login-policy', async (c) => {
     const id = createUserId(c.req.param('id'));
+    { const r = await requirePerm(c, permissionChecker, 'update', 'user', id as string); if (r) return r; }
     const actorId = (c as any).var?.currentUser?.id;
     await userService.clearLoginPolicy(id, actorId);
     return c.json(ok(null));
@@ -207,6 +241,7 @@ export function createUserRouter(userService: IUserService): Hono<{ Variables: A
     if (!parsed.success) {
       return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
     }
+    { const r = await requirePerm(c, permissionChecker, 'update', 'user', id as string); if (r) return r; }
     const user = await userService.update(id, {
       name: undefined, password: undefined, role: undefined,
       loginPolicy: undefined, publicKeyEd25519: parsed.data.publicKey,
@@ -216,6 +251,7 @@ export function createUserRouter(userService: IUserService): Hono<{ Variables: A
 
   router.delete('/:id/public-key', async (c) => {
     const id = createUserId(c.req.param('id'));
+    { const r = await requirePerm(c, permissionChecker, 'update', 'user', id as string); if (r) return r; }
     const actorId = (c as any).var?.currentUser?.id;
     await userService.clearPublicKey(id, actorId);
     return c.json(ok(null));
@@ -243,6 +279,7 @@ export function createUserRouter(userService: IUserService): Hono<{ Variables: A
     const user = (c as any).var?.currentUser as { id: string; role?: string } | undefined;
     if (!user) return c.json(fail('UNAUTHORIZED', 'Authentication required'), 401);
     const targetId = createUserId(c.req.param('id'));
+    { const r = await requirePerm(c, permissionChecker, 'update', 'user', targetId as string); if (r) return r; }
     const isAdmin = user.role === 'root' || user.role === 'Operator' || user.role === 'wheel';
     if (user.id !== targetId && !isAdmin) {
       return c.json(fail('FORBIDDEN', 'Can only upload your own avatar'), 403);
@@ -289,6 +326,7 @@ export function createUserRouter(userService: IUserService): Hono<{ Variables: A
     const user = (c as any).var?.currentUser as { id: string; role?: string } | undefined;
     if (!user) return c.json(fail('UNAUTHORIZED', 'Authentication required'), 401);
     const targetId = createUserId(c.req.param('id'));
+    { const r = await requirePerm(c, permissionChecker, 'update', 'user', targetId as string); if (r) return r; }
     const isAdmin = user.role === 'root' || user.role === 'Operator' || user.role === 'wheel';
     if (user.id !== targetId && !isAdmin) {
       return c.json(fail('FORBIDDEN', 'Can only delete your own avatar'), 403);
@@ -326,6 +364,7 @@ export function createUserRouter(userService: IUserService): Hono<{ Variables: A
   router.delete('/sessions/:token', async (c) => {
     const user = (c as any).var?.currentUser as { id: string; role?: string } | undefined;
     if (!user) return c.json(fail('UNAUTHORIZED', 'Authentication required'), 401);
+    { const r = await requirePerm(c, permissionChecker, 'update', 'user', user.id); if (r) return r; }
 
     const token = createSessionToken(c.req.param('token'));
     await userService.revokeSession(token, user.id);
@@ -479,5 +518,11 @@ export const userRouteMeta: RouteMeta[] = [
     path: '/sessions/:token',
     description: '吊销指定 session（从 store 删除 + 从用户索引移除）',
     responseDescription: '{ ok: true }',
+  },
+  {
+    method: 'GET',
+    path: '/search',
+    description: '按邮箱或 UID 查询用户（最终一致性，?q=email 或 ?q=userId）',
+    responseDescription: 'User | null',
   },
 ];

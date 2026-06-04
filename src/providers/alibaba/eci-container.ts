@@ -17,7 +17,7 @@ import type {
 import type { ContainerGroupRuntime } from '../../core/provider/index.ts';
 import type { ContainerGroupStatus } from '../../core/provider/types.ts';
 import { rpcCall } from './eci-signer.ts';
-import { createRegionId } from '../../core/region/types.ts';
+import { createRegionId, createZoneId } from '../../core/region/types.ts';
 
 export class AlibabaEciContainerProvider implements IContainerProvider {
   constructor(
@@ -233,7 +233,8 @@ function parseContainerGroup(item: any): ContainerGroupRuntime {
     name: item.ContainerGroupName ?? '',
     status: item.Status ?? 'Pending',
     regionId: item.RegionId ?? '',
-    zoneId: item.ZoneId,
+    instanceId: undefined,
+    zoneId: createZoneId(item.ZoneId ?? 'cn-hangzhou-a', 'alibaba'),
     creationTime: item.CreationTime,
     expiredTime: item.ExpiredTime,
     instanceType: item.InstanceType,
@@ -244,7 +245,7 @@ function parseContainerGroup(item: any): ContainerGroupRuntime {
     network: {
       privateIp: item.PrivateIp,
       vpcId: item.VpcId,
-      vswitchId: item.VSwitchId,
+      subnetId: item.VSwitchId,
       securityGroupId: item.SecurityGroupId,
       eniId: item.EniInstanceId,
     },

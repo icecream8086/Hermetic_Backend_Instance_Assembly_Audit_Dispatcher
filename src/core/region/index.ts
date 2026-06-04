@@ -1,4 +1,8 @@
-export type { RegionId, AlibabaRegion, AwsRegion } from './types.ts';
-export { ALIBABA_REGIONS, AWS_REGIONS, LOCAL_REGION, createRegionId, createAlibabaRegion, createAwsRegion } from './types.ts';
+export type { RegionId, AlibabaRegion, AwsRegion, PodmanRegion, ZoneId, ClusterId, Platform } from './types.ts';
+export { ALIBABA_REGIONS, AWS_REGIONS, LOCAL_REGION, createRegionId, createAlibabaRegion, createAwsRegion, createZoneId, generateClusterId } from './types.ts';
 export type { ProviderName, RegionConfig, RegionEndpoint } from './registry.ts';
 export { RegionRegistry, getDefaultRegistry, setDefaultRegistry } from './registry.ts';
+export type { RegionBucket, RegionBucketType, CreateBucketInput, UpdateBucketInput } from './bucket.ts';
+export { BucketService } from './bucket.ts';
+export type { ComputeInstance, InstanceCapabilities, InstanceCapacity, InstanceStatus, InstanceId, CreateInstanceInput, UpdateInstanceInput } from './instance.ts';
+export { InstanceService, generateInstanceId } from './instance.ts';

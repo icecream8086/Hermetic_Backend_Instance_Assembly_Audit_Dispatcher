@@ -30,7 +30,9 @@
       "image": "/api/images",
       "sandbox": "/api/sandboxes",
       "platforms": "/api/platforms",
-      "network": "/api/networks"
+      "network": "/api/networks",
+      "topology": "/api/topology",
+      "subnet": "/api/subnets"
     }
   },
   "dependencies": {

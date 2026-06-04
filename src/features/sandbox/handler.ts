@@ -27,21 +27,22 @@ export function createSandboxRouter(
 
   // ─── Container group (Pod) API (static route before parameterized :id) ───
 
-  if (podResolver) {
-    router.post('/pod', async (c) => {
-      { const r = await requirePerm(c, permissionChecker, 'create', 'sandbox'); if (r) return r; }
-      try {
-        const spec = await c.req.json<PodSpec>();
-        if (!spec.name || !spec.services) {
-          return c.json(fail('VALIDATION_ERROR', 'PodSpec requires name and services'), 400);
-        }
-        const result = await podResolver.apply(spec);
-        return c.json(ok({ providerId: result.providerId, podName: spec.name }), 201);
-      } catch (e: any) {
-        return c.json(fail('POD_CREATE_FAILED', e.message), 500);
+  router.post('/pod', async (c) => {
+    { const r = await requirePerm(c, permissionChecker, 'create', 'sandbox'); if (r) return r; }
+    if (!podResolver) {
+      return c.json(fail('NOT_CONFIGURED', 'Container group provider not available — no IContainerGroupProvider registered'), 501);
+    }
+    try {
+      const spec = await c.req.json<PodSpec>();
+      if (!spec.name || !spec.services) {
+        return c.json(fail('VALIDATION_ERROR', 'PodSpec requires name and services'), 400);
       }
-    });
-  }
+      const result = await podResolver.apply(spec);
+      return c.json(ok({ providerId: result.providerId, podName: spec.name }), 201);
+    } catch (e: any) {
+      return c.json(fail('POD_CREATE_FAILED', e.message), 500);
+    }
+  });
 
   // GET / — list all sandboxes (paginated)
   router.get('/', async (c) => {

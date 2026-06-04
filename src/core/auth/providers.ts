@@ -1,11 +1,11 @@
-import type { IAuthProvider, AuthRequest } from './interfaces.ts';
+import type { IAuthProvider, AuthRequest, SignResult } from './interfaces.ts';
 
 // ─── No-auth (local Podman, stub) ───
 
 export class NoAuthProvider implements IAuthProvider {
   readonly type = 'none';
-  sign(req: AuthRequest): Promise<Record<string, string>> {
-    return Promise.resolve(req.headers);
+  async sign(_req: AuthRequest): Promise<SignResult> {
+    return { headers: {} };
   }
   isExpired(): boolean { return false; }
   async refresh(): Promise<void> {}
@@ -28,8 +28,8 @@ export class BearerTokenProvider implements IAuthProvider {
     this._clientSecret = opts?.clientSecret;
   }
 
-  async sign(req: AuthRequest): Promise<Record<string, string>> {
-    return { ...req.headers, Authorization: `Bearer ${this.token}` };
+  async sign(req: AuthRequest): Promise<SignResult> {
+    return { headers: { ...req.headers, Authorization: `Bearer ${this.token}` } };
   }
 
   async getToken(): Promise<{ token: string; expiresAt?: number | undefined } | null> {
@@ -58,7 +58,7 @@ export class BearerTokenProvider implements IAuthProvider {
   }
 }
 
-// ─── AK/SK HMAC-SHA1 signing (Alibaba Cloud) ───
+// ─── Shared HMAC helpers (Alibaba Cloud RPC + OSS) ───
 
 function b64(buf: ArrayBuffer): string {
   return btoa(String.fromCharCode(...new Uint8Array(buf)));
@@ -77,16 +77,68 @@ export async function hmacSha1(key: string, data: string): Promise<string> {
   return b64(await crypto.subtle.sign(alg, k, enc.encode(data)));
 }
 
+/** HMAC-SHA1 → base64 (for OSS Authorization header). Key is the raw accessKeySecret. */
+export async function hmacSha1Base64(key: string, data: string): Promise<string> {
+  return hmacSha1(key, data);
+}
+
+// ─── AK/SK for Alibaba Cloud RPC (HMAC-SHA1, signature in query params) ───
+
+async function signAlibabaRpc(
+  params: Record<string, string>,
+  _accessKeyId: string,
+  accessKeySecret: string,
+): Promise<Record<string, string>> {
+  const sortedKeys = Object.keys(params).sort();
+  const canonicalized = sortedKeys
+    .map(k => `${percentEncode(k)}=${percentEncode(params[k]!)}`)
+    .join('&');
+  const stringToSign = `POST&${percentEncode('/')}&${percentEncode(canonicalized)}`;
+  const signature = await hmacSha1(accessKeySecret + '&', stringToSign);
+  return { ...params, Signature: signature };
+}
+
 export class AkSkProvider implements IAuthProvider {
   readonly type = 'aksk';
 
-  constructor(readonly _accessKeyId: string, readonly _accessKeySecret: string) {}
+  constructor(
+    readonly _accessKeyId: string,
+    readonly _accessKeySecret: string,
+    /** Region for endpoint resolution (e.g. 'cn-hangzhou'). */
+    readonly _region?: string | undefined,
+    /** Custom endpoint override. */
+    readonly _endpoint?: string | undefined,
+  ) {}
 
   isExpired(): boolean { return false; }
   async refresh(): Promise<void> {}
 
-  async sign(req: AuthRequest): Promise<Record<string, string>> {
-    return req.headers;
+  /**
+   * Sign an Alibaba Cloud RPC request.
+   * Embeds the signature into the query string (URL override).
+   * For non-Alibaba requests, returns headers as-is.
+   */
+  async sign(req: AuthRequest): Promise<SignResult> {
+    // Parse existing query params from URL
+    const urlObj = new URL(req.url);
+    const existingParams: Record<string, string> = {};
+    urlObj.searchParams.forEach((v, k) => { existingParams[k] = v; });
+
+    // Build common RPC params
+    const rpcParams: Record<string, string> = {
+      ...existingParams,
+      Format: 'JSON',
+      AccessKeyId: this._accessKeyId,
+      SignatureMethod: 'HMAC-SHA1',
+      SignatureVersion: '1.0',
+      SignatureNonce: `${Date.now()}${Math.random().toString(36).slice(2)}`,
+      Timestamp: new Date().toISOString().replace(/\.\d+Z$/, 'Z'),
+    };
+
+    const signed = await signAlibabaRpc(rpcParams, this._accessKeyId, this._accessKeySecret);
+    const signedUrl = `${urlObj.origin}${urlObj.pathname}?${Object.entries(signed).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&')}`;
+
+    return { headers: req.headers, url: signedUrl };
   }
 }
 
@@ -95,6 +147,6 @@ export class AkSkProvider implements IAuthProvider {
 export function createAuthProvider(creds: any): IAuthProvider {
   if (!creds || creds.type === 'none') return new NoAuthProvider();
   if (creds.type === 'bearer') return new BearerTokenProvider(creds.token, creds);
-  if (creds.type === 'aksk') return new AkSkProvider(creds.accessKeyId, creds.accessKeySecret);
+  if (creds.type === 'aksk') return new AkSkProvider(creds.accessKeyId, creds.accessKeySecret, creds.region, creds.endpoint);
   return new NoAuthProvider();
 }

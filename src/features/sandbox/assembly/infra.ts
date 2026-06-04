@@ -1,5 +1,7 @@
 import type { IContainerProvider } from '../../../core/provider/interfaces.ts';
 import type { CreateContainerGroupInput } from '../../../core/provider/types.ts';
+import type { RegionId } from '../../../core/region/types.ts';
+import type { InstanceId } from '../../../core/region/instance.ts';
 import { createRegionId } from '../../../core/region/types.ts';
 import type { IInfraManager } from './interfaces.ts';
 
@@ -20,15 +22,27 @@ const LOCAL_REGION = createRegionId('local');
  */
 export class InfraManager implements IInfraManager {
   readonly #containerProvider: IContainerProvider;
+  readonly #region: RegionId;
+  readonly #noop: boolean;
 
-  constructor(containerProvider: IContainerProvider) {
+  /**
+   * @param noop - When true (ECI), infra is implicit and createInfra() is a no-op.
+   *               When false (Podman), actually creates a pause container.
+   */
+  constructor(containerProvider: IContainerProvider, region?: RegionId, _instanceId?: InstanceId, noop = false) {
     this.#containerProvider = containerProvider;
+    this.#region = region ?? LOCAL_REGION;
+    this.#noop = noop;
   }
 
   async createInfra(podName: string, infraImage?: string): Promise<string> {
+    if (this.#noop) {
+      return `${podName}-infra-noop`;
+    }
     const input: CreateContainerGroupInput = {
       name: `${podName}-infra`,
-      region: LOCAL_REGION,
+      region: this.#region,
+      // clusterId omitted — infra container doesn't need instance binding
       cpu: 0.1,
       memory: 16,
       spotStrategy: 'None',
@@ -55,6 +69,7 @@ export class InfraManager implements IInfraManager {
   }
 
   async removeInfra(infraId: string): Promise<void> {
+    if (this.#noop) return;
     await this.#containerProvider.delete({
       region: LOCAL_REGION,
       providerId: infraId,
@@ -62,6 +77,7 @@ export class InfraManager implements IInfraManager {
   }
 
   async isInfraAlive(infraId: string): Promise<boolean> {
+    if (this.#noop) return true; // infra is implicit, always alive
     try {
       const status = await this.#containerProvider.getStatus?.(infraId);
       return status?.containers.some(c => c.alive) ?? false;

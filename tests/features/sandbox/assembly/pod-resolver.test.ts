@@ -112,7 +112,7 @@ describe('PodResolver', () => {
       expect(input.tags).toContainEqual({ key: 'team', value: 'infra' });
     });
 
-    it('passes shared namespaces as providerOverrides', () => {
+    it('ignores sharedNamespaces (handled by group provider)', () => {
       const spec: PodSpec = {
         name: 'pod',
         sharedNamespaces: [SharedNamespace.NET, SharedNamespace.IPC],
@@ -122,8 +122,9 @@ describe('PodResolver', () => {
       };
 
       const input = resolver.toGroupInput(spec);
-      const overrides = input.providerOverrides as Record<string, unknown> | undefined;
-      expect(overrides?.['sharedNamespaces']).toEqual(['net', 'ipc']);
+      // PodmanContainerGroupProvider always hardcodes share: [net, uts, ipc].
+      // sharedNamespaces from PodSpec is intentionally not mapped here.
+      expect(input.providerOverrides).toBeUndefined();
     });
 
     it('parses memory strings correctly', () => {

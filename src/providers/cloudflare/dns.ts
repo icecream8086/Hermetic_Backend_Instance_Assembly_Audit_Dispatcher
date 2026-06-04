@@ -86,7 +86,8 @@ export class CloudflareDnsProvider implements IDnsProvider {
 
   async #headers(): Promise<Record<string, string>> {
     const base = { 'Content-Type': 'application/json' };
-    return this.#auth.sign({ method: 'GET', url: '', headers: base });
+    const { headers } = await this.#auth.sign({ method: 'GET', url: '', headers: base });
+    return headers;
   }
 }
 

@@ -93,8 +93,8 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
   // 2. Create logger infrastructure
   const logRouter = new LogRouter();
 
-  // 3. Create container provider implementations
-  const providers = createProviderRegistry(config.provider, config.s3);
+  // 3. Create provider registry (backed by ComputeInstance entities)
+  const providers = createProviderRegistry(config.provider, config.s3, stores.atomic);
 
   // 4. Create timer backend (driven by SCHEDULER_BACKEND env var)
   const schedulerBackend = createTimerBackend(config.scheduler.backend, {
@@ -107,7 +107,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
   const eventLoop = new EventLoop(
     eventBus,
     {
-      intervalMs: 5000,
+      intervalMs: 30000,
       batchSize: config.scheduler.batchSize,
       autoStart: true,
     } as Partial<EventLoopConfig>,
@@ -124,7 +124,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
         const entry = await stores.atomic.get<Sandbox>(`sandbox:${sid}`);
         // 检查所有非 Deleted 的沙箱（Running / Stopped / Terminated 都需要确认容器已清理）
         if (!entry || entry.value.status === SandboxStatus.Deleted) continue;
-        const maxRetries = entry.value.config.healthMaxRetries ?? 10;
+        const maxRetries = entry.value.config.healthMaxRetries ?? 11;
         if (maxRetries === -1) continue;
         // 从 provider 获取实时状态
         // provider 返回 null 表示容器已不存在，标记已清理
@@ -283,6 +283,8 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
           { method: '*', pathPrefix: '/api/networks', priority: 100 },
           { method: '*', pathPrefix: '/api/sandboxes', priority: 100 },
           { method: '*', pathPrefix: '/api/templates', priority: 100 },
+          { method: '*', pathPrefix: '/api/topology', priority: 100 },
+          { method: '*', pathPrefix: '/api/images', priority: 100 },
           { method: 'GET', pathPrefix: '/api/audit', priority: 100 },
           { method: 'GET', pathPrefix: '/api/platforms', priority: 100 },
           { method: 'GET', pathPrefix: '/api/users', priority: 10 },
@@ -296,6 +298,13 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
           { method: 'PUT', pathPrefix: '/api/sandboxes', priority: 50 },
           { method: 'GET', pathPrefix: '/api/platforms', priority: 50 },
           { method: 'GET', pathPrefix: '/api/users', priority: 10 },
+          { method: 'GET', pathPrefix: '/api/images', priority: 50 },
+          { method: 'POST', pathPrefix: '/api/images', priority: 50 },
+          { method: 'DELETE', pathPrefix: '/api/images', priority: 50 },
+          { method: 'GET', pathPrefix: '/api/topology', priority: 50 },
+          { method: 'POST', pathPrefix: '/api/topology', priority: 50 },
+          { method: 'PUT', pathPrefix: '/api/topology', priority: 50 },
+          { method: 'DELETE', pathPrefix: '/api/topology', priority: 50 },
         ],
         daemon: [
           { method: 'GET', pathPrefix: '/api/users', priority: 10 },
@@ -360,6 +369,35 @@ console.log(`[${new Date().toISOString()}] INFO: [init] Policy library seeded: $
     }
   }
 
+  // 6ab. Seed default ComputeInstance (merged cluster + instance)
+  let defaultInstanceId: string | undefined;
+  {
+    const KEY = '_init:default-instance';
+    const entry = await stores.atomic.get<any>(KEY);
+    if (entry === null) {
+      try {
+        const instanceSvc = new (await import('../core/region/instance.ts')).InstanceService(stores.atomic);
+        const podmanEp = process.env['PODMAN_ENDPOINT'] ?? 'http://127.0.0.1:8080';
+        const instance = await instanceSvc.create({
+          name: 'default-podman',
+          platform: 'podman',
+          region: 'local',
+          zone: 'local-a',
+          endpoint: podmanEp,
+          labels: { networkDomain: 'podman-default' },
+          capabilities: { container: true, image: true, group: true, network: true, s3: true, metrics: false, dns: false },
+        });
+        defaultInstanceId = instance.id as string;
+        await stores.atomic.set(KEY, { instanceId: defaultInstanceId, seededAt: Date.now() }, null);
+        console.log(`[${new Date().toISOString()}] INFO: [init] Default instance seeded: ${defaultInstanceId}`);
+      } catch (e: unknown) {
+        console.error(`[${new Date().toISOString()}] ERROR: [init] Failed to seed default instance: ${e instanceof Error ? e.message : e}`);
+      }
+    } else {
+      defaultInstanceId = entry.value.instanceId;
+    }
+  }
+
   // 6b. Seed built-in sandbox templates with DAG inheritance demo
   {
     const KEY = '_init:sandbox-tpls';
@@ -367,10 +405,13 @@ console.log(`[${new Date().toISOString()}] INFO: [init] Policy library seeded: $
     if (entry === null) {
       const now = Date.now();
       const ids: Record<string, string> = {};
+      const cid = defaultInstanceId;
 
       // ── Layer 0: base templates ──
       const baseAlpineId = `tpl_${crypto.randomUUID()}`; ids.base_alpine = baseAlpineId;
       const nginxId = `tpl_${crypto.randomUUID()}`; ids.nginx = nginxId;
+      const fedoraId = `tpl_${crypto.randomUUID()}`; ids.fedora = fedoraId;
+      const minioId = `tpl_${crypto.randomUUID()}`; ids.minio = minioId;
 
       // ── Layer 1: inherits from base-alpine ──
       const customAlpineId = `tpl_${crypto.randomUUID()}`; ids.custom_alpine = customAlpineId;
@@ -378,7 +419,7 @@ console.log(`[${new Date().toISOString()}] INFO: [init] Policy library seeded: $
       // ── Layer 2: inherits from custom-alpine + nginx ──
       const fullStackId = `tpl_${crypto.randomUUID()}`; ids.full_stack = fullStackId;
 
-      const tpls = [
+      const tpls: any[] = [
         {
           id: baseAlpineId, name: 'base-alpine',
           description: 'Base Alpine Linux — minimal OS layer, 256MB RAM, sleep 3600',
@@ -386,6 +427,7 @@ console.log(`[${new Date().toISOString()}] INFO: [init] Policy library seeded: $
           dependsOn: [],
           container: {
             region: 'local',
+            clusterId: cid,
             containers: [{
               name: 'alpine', image: 'docker.io/library/alpine:latest',
               command: ['sleep', '3600'],
@@ -398,12 +440,13 @@ console.log(`[${new Date().toISOString()}] INFO: [init] Policy library seeded: $
         },
         {
           id: nginxId, name: 'nginx',
-          description: 'Nginx web server demo — lightweight, ports 80',
+          description: 'Nginx web server — ports 80, readiness check',
           apiVersion: 'hbi-aad/v1', kind: 'Container',
           dependsOn: [],
           singleton: true,
           container: {
             region: 'local',
+            clusterId: cid,
             containers: [{
               name: 'nginx', image: 'docker.io/library/nginx:latest',
               ports: [{ containerPort: 80, protocol: 'TCP' }],
@@ -422,6 +465,59 @@ console.log(`[${new Date().toISOString()}] INFO: [init] Policy library seeded: $
           network: { publicIp: { allocate: false } },
           createdAt: now, updatedAt: now,
         },
+        {
+          id: fedoraId, name: 'fedora',
+          description: 'Fedora Linux — minimal OS layer, 256MB RAM, sleep 3600',
+          apiVersion: 'hbi-aad/v1', kind: 'Container',
+          dependsOn: [],
+          container: {
+            region: 'local',
+            clusterId: cid,
+            containers: [{
+              name: 'fedora', image: 'registry.fedoraproject.org/fedora:latest',
+              command: ['sleep', '3600'],
+              resources: { limits: { cpu: 0.25, memory: 256 } },
+            }],
+            restartPolicy: 'Never',
+          },
+          network: { publicIp: { allocate: false } },
+          createdAt: now, updatedAt: now,
+        },
+        {
+          id: minioId, name: 'minio-server',
+          description: 'MinIO S3-compatible object storage — ports 9000 (API) / 9001 (console)',
+          apiVersion: 'hbi-aad/v1', kind: 'Container',
+          dependsOn: [],
+          singleton: true,
+          container: {
+            region: 'local',
+            clusterId: cid,
+            containers: [{
+              name: 'minio', image: 'quay.io/minio/minio:latest',
+              command: ['server', '/data', '--console-address', ':9001'],
+              ports: [
+                { containerPort: 9000, protocol: 'TCP' },
+                { containerPort: 9001, protocol: 'TCP' },
+              ],
+              env: [
+                { name: 'MINIO_ROOT_USER', value: 'minioadmin' },
+                { name: 'MINIO_ROOT_PASSWORD', value: 'minioadmin' },
+              ],
+              resources: { limits: { cpu: 0.5, memory: 512 } },
+            }],
+            restartPolicy: 'Always',
+          },
+          healthChecks: [{
+            name: 'minio-ready',
+            target: 'container:minio',
+            type: 'readiness',
+            probe: { tcpSocket: { port: 9000 } },
+            periodSeconds: 5,
+            initialDelaySeconds: 5,
+          }],
+          network: { publicIp: { allocate: true } },
+          createdAt: now, updatedAt: now,
+        },
         // DAG chain: base-alpine → custom-alpine
         {
           id: customAlpineId, name: 'custom-alpine',
@@ -430,6 +526,7 @@ console.log(`[${new Date().toISOString()}] INFO: [init] Policy library seeded: $
           dependsOn: [baseAlpineId],
           container: {
             region: 'local',
+            clusterId: cid,
             containers: [{
               name: 'alpine',
               command: ['sh', '-c', 'while true; do echo "Hello from DAG"; curl -s http://localhost/health 2>/dev/null || echo "nginx not ready"; sleep 10; done'],
@@ -450,6 +547,7 @@ console.log(`[${new Date().toISOString()}] INFO: [init] Policy library seeded: $
           dependsOn: [customAlpineId, nginxId],
           container: {
             region: 'local',
+            clusterId: cid,
             containers: [{
               name: 'alpine',
               env: [
@@ -464,7 +562,7 @@ console.log(`[${new Date().toISOString()}] INFO: [init] Policy library seeded: $
       ];
 
       // Write all templates + index
-      const allIds = [baseAlpineId, nginxId, customAlpineId, fullStackId];
+      const allIds = [baseAlpineId, nginxId, customAlpineId, fullStackId, fedoraId, minioId];
       for (const t of tpls) {
         await stores.atomic.set('sandbox-tpl:' + t.id, t, null);
       }
@@ -478,6 +576,7 @@ console.log(`[${new Date().toISOString()}] INFO: [init] Policy library seeded: $
   const app = new Hono<{ Variables: AppContext }>();
 
   // 7. Apply global middleware (timing first = outermost, wrapping everything)
+
   app.use('*', async (c, next) => {
     const t0 = performance.now();
     await next();
@@ -678,6 +777,7 @@ console.log(`[${new Date().toISOString()}] INFO: [init] Policy library seeded: $
   // Mount at both /path and /path/ since Hono's route() doesn't normalize
   // trailing slashes — /api/users matches but /api/users/ does not.
   const featureDeps: FeatureDeps = { stores, logRouter, providers, eventBus, eventLoop, audit, permissionChecker: permService as any };
+  // Mount each feature with and without trailing slash (Hono app.route() doesn't normalize)
   for (const feat of getFeatures()) {
     const router = feat.mount(featureDeps);
     app.route(feat.path, router);

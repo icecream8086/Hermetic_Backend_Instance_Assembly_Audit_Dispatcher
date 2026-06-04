@@ -78,11 +78,12 @@ export function applyTemplate(tpl: SandboxTemplate, name?: string, region?: stri
     } : {}),
     ...(volumes.length > 0 ? { volumes } : {}),
     ...(container.account ? { account: container.account } : {}),
+    ...(container.instanceId ? { instanceId: container.instanceId } : {}),
     ...(ext?.healthMaxRetries !== undefined ? { healthMaxRetries: ext.healthMaxRetries as number } : {}),
     network: mapNetwork(tpl.network),
     description: tpl.description,
     ...(ext?.providerOverrides ? { providerOverrides: ext.providerOverrides } : {}),
-  } as CreateSandboxInput;
+  } as unknown as CreateSandboxInput;
 }
 
 // ─── Health check → probe map ───
@@ -116,7 +117,7 @@ function buildProbeMap(healthChecks: readonly HealthCheckDef[] | undefined): Map
 
 // ─── Network mapping ───
 
-function mapNetwork(network: NetworkSpec | undefined): { allocatePublicIp: boolean; publicIpBandwidth?: number; securityGroupId?: string; subnetIds?: string[] } {
+function mapNetwork(network: NetworkSpec | undefined): { allocatePublicIp: boolean; publicIpBandwidth?: number; securityGroupId?: string; subnetIds?: string[]; instanceId?: string } {
   if (!network) return { allocatePublicIp: false };
 
   return {
@@ -124,6 +125,7 @@ function mapNetwork(network: NetworkSpec | undefined): { allocatePublicIp: boole
     ...(network.publicIp?.bandwidth !== undefined ? { publicIpBandwidth: network.publicIp.bandwidth } : {}),
     ...(network.vpc?.securityGroupId ? { securityGroupId: network.vpc.securityGroupId } : {}),
     ...(network.vpc?.subnetIds ? { subnetIds: [...network.vpc.subnetIds] } : {}),
+    ...(network.vpc?.instanceId ? { instanceId: network.vpc.instanceId } : {}),
   };
 }
 

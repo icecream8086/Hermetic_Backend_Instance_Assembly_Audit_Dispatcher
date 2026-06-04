@@ -6,6 +6,8 @@ import type {
 } from './base.ts';
 import type { EnvVar, ProbeSpec, ResourceRequirements } from '../../core/provider/types.ts';
 import type { RegionId } from '../../core/region/types.ts';
+import type { NetworkId } from '../../core/network/types.ts';
+import type { InstanceId } from '../../core/region/instance.ts';
 
 // ─── Brand types ───
 declare const SANDBOX_ID_BRAND: unique symbol;
@@ -191,6 +193,10 @@ export interface PodCondition {
 // ─── Network config (input) ───
 
 export interface SandboxNetworkConfig {
+  /** 引用 VirtualNetwork，继承其安全组和规则 */
+  readonly networkId?: NetworkId | undefined;
+  /** 引用 ComputeCluster，继承其 zone/networkDomain */
+  readonly instanceId?: InstanceId | undefined;
   readonly subnetIds?: readonly string[] | undefined;
   readonly securityGroupId?: string | undefined;
   readonly allocatePublicIp: boolean;
@@ -203,6 +209,7 @@ export interface CreateSandboxInput {
   readonly name: string;
   readonly description?: string;
   readonly region: RegionId;
+  readonly instanceId?: InstanceId | undefined;
   readonly resourceSpec: ResourceSpec;
   readonly spotStrategy: SpotStrategy;
   readonly restartPolicy: 'Always' | 'OnFailure' | 'Never';

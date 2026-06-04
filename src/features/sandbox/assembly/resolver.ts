@@ -15,6 +15,7 @@ type MutableSandboxInput = {
   name: string;
   description?: string;
   region: string;
+  instanceId?: string;
   resourceSpec: { cpu: number; memory: number };
   spotStrategy: CreateSandboxInput['spotStrategy'];
   restartPolicy: CreateSandboxInput['restartPolicy'];
@@ -25,6 +26,7 @@ type MutableSandboxInput = {
     securityGroupId?: string;
     allocatePublicIp: boolean;
     publicIpBandwidth?: number;
+    instanceId?: string;
   };
   tags?: CreateSandboxInput['tags'];
   providerOverrides?: Record<string, unknown>;

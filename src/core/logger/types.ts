@@ -6,6 +6,8 @@ export interface LogInput {
   facility: Facility;
   level: LogLevel;
   message: string;
+  /** Who performed the action. Automatically included in output. */
+  actorId?: string | undefined;
   metadata?: Record<string, unknown>;
 }
 

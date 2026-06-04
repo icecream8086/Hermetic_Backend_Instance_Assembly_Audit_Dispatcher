@@ -11,7 +11,7 @@ export { RegisterUserSchema, LoginUserSchema, UpdateUserSchema, UserResponseSche
 
 export function createRouter(deps: FeatureDeps): Hono<any> {
   const service = new UserService(deps.stores.atomic, new ConsoleLogger(), deps.audit);
-  return createUserRouter(service);
+  return createUserRouter(service, deps.permissionChecker);
 }
 
 export { UserService };

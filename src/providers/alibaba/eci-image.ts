@@ -21,7 +21,7 @@ export class AlibabaEciImageProvider implements IImageProvider {
     private readonly registryCredentials?: Array<{ server: string; userName: string; password: string }>,
   ) {}
 
-  async pull(image: string, registryCredential?: { server: string; userName: string; password: string }): Promise<ImageInfo> {
+  async pull(image: string, registryCredentialOrClusterId?: { server: string; userName: string; password: string } | string): Promise<ImageInfo> {
     const { name } = parseImageRef(image);
     const params: Record<string, string | undefined> = {
       RegionId: this.region,
@@ -30,7 +30,8 @@ export class AlibabaEciImageProvider implements IImageProvider {
     };
 
     // Build registry credentials list
-    const creds = registryCredential ? [registryCredential] : (this.registryCredentials ?? []);
+    const regCred = registryCredentialOrClusterId && typeof registryCredentialOrClusterId === 'object' ? registryCredentialOrClusterId : undefined;
+    const creds = regCred ? [regCred] : (this.registryCredentials ?? []);
     if (creds.length > 0) {
       creds.forEach((c, i) => {
         params[`ImageRegistryCredential.${i + 1}.Server`] = c.server;

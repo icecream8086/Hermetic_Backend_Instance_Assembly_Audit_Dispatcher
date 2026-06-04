@@ -304,6 +304,7 @@ export class PodmanContainerGroupProvider implements IContainerGroupProvider {
       name: detail.Name,
       status: mapPodmanPodState(detail.State),
       regionId: 'local',
+      instanceId: undefined,
       zoneId: undefined,
       creationTime: detail.Created,
       expiredTime: undefined,

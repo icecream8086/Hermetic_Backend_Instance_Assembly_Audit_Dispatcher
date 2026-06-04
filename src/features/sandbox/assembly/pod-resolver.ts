@@ -1,9 +1,37 @@
 import type { IContainerGroupProvider } from '../../../core/provider/interfaces.ts';
 import type { CreateContainerGroupInput, ContainerCreateConfig } from '../../../core/provider/types.ts';
 import { createRegionId } from '../../../core/region/types.ts';
-import type { PodSpec } from './types.ts';
+import type { PodSpec, ServiceDefinition } from './types.ts';
+import { mapEnvVars, mapPorts, mapTags } from '../../../core/provider/mapper.ts';
 
 const LOCAL_REGION = createRegionId('local');
+
+/** Simple topological sort for services with dependsOn. Returns service names in order. */
+function topologicalSort(services: Record<string, ServiceDefinition>): string[] {
+  const names = Object.keys(services);
+  const visited = new Set<string>();
+  const result: string[] = [];
+
+  function visit(name: string, path: Set<string>) {
+    if (path.has(name)) throw new Error(`Circular dependency detected: ${name}`);
+    if (visited.has(name)) return;
+    path.add(name);
+    const deps = services[name]?.dependsOn ?? [];
+    for (const dep of deps) {
+      if (!services[dep]) throw new Error(`Service "${name}" depends on unknown service "${dep}"`);
+      visit(dep, path);
+    }
+    path.delete(name);
+    visited.add(name);
+    result.push(name);
+  }
+
+  for (const name of names) {
+    if (!visited.has(name)) visit(name, new Set());
+  }
+
+  return result;
+}
 
 // ─── Helpers ───
 
@@ -58,20 +86,19 @@ export class PodResolver {
    * All services become containers in a single container group.
    */
   toGroupInput(spec: PodSpec): CreateContainerGroupInput {
-    const containers: ContainerCreateConfig[] = Object.entries(spec.services).map(([name, svc]) => {
+    // Sort services by dependsOn so containers start in dependency order
+    const sortedNames = topologicalSort(spec.services);
+    const containers: ContainerCreateConfig[] = sortedNames.map(name => {
+      const svc = spec.services[name]!;
       const args = typeof svc.command === 'string'
         ? [svc.command]
         : svc.command as readonly string[] | undefined;
 
       const env = svc.environment
-        ? Object.entries(svc.environment).map(([k, v]) => ({ name: k, value: v } as const))
+        ? mapEnvVars(Object.entries(svc.environment).map(([k, v]) => ({ name: k, value: v })))
         : undefined;
 
-      const ports = svc.ports?.map(p => ({
-        containerPort: p.containerPort,
-        ...(p.hostPort !== undefined ? { hostPort: p.hostPort } : {}),
-        protocol: p.protocol ?? ('tcp' as const),
-      }));
+      const ports = mapPorts(svc.ports);
 
       const cpu = parseCpu(svc.resources?.cpu);
       const memory = parseMemory(svc.resources?.memory);
@@ -105,15 +132,19 @@ export class PodResolver {
 
     return {
       name: spec.name,
-      region: LOCAL_REGION,
+      region: spec.region ? createRegionId(spec.region) : LOCAL_REGION,
+      ...(spec.instanceId ? { clusterId: spec.instanceId } : {}),
       cpu: totalCpu,
       memory: totalMem,
       spotStrategy: 'None',
       restartPolicy: 'Never',
       containers,
       network: { allocatePublicIp: false },
-      ...(spec.labels ? { tags: Object.entries(spec.labels).map(([k, v]) => ({ key: k, value: v })) } : {}),
-      ...(spec.sharedNamespaces ? { providerOverrides: { sharedNamespaces: spec.sharedNamespaces.map(s => s.toString()) } } : {}),
+      ...(spec.labels ? { tags: mapTags(Object.entries(spec.labels).map(([k, v]) => ({ key: k, value: v }))) } : {}),
+      // NOTE: sharedNamespaces from PodSpec are a Podman-specific concept.
+      // The PodmanContainerGroupProvider always hardcodes share: [net, uts, ipc]
+      // for pods, so sharedNamespaces is intentionally not mapped here.
+      // If per-service namespace isolation is needed, extend the group provider.
     };
   }
 

@@ -137,10 +137,10 @@ describe('RegionRegistry', () => {
 
   it('seed constructor pre-populates overrides', () => {
     const reg = new RegionRegistry([
-      { region: 'cn-beijing', config: { vswitchId: 'vsw-xxx' } },
+      { region: 'cn-beijing', config: { subnetId: 'vsw-xxx' } },
     ]);
     const cfg = reg.getConfig(createRegionId('cn-beijing'));
-    expect(cfg.vswitchId).toBe('vsw-xxx');
+    expect(cfg.subnetId).toBe('vsw-xxx');
   });
 });
 

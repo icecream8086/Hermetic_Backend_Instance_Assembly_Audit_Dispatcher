@@ -10,6 +10,8 @@ import { createRouter as imageRouter } from './image/index.ts';
 import { createRouter as sandboxRouter } from './sandbox/index.ts';
 import { createRouter as platformsRouter } from './platforms/index.ts';
 import { createRouter as networkRouter } from './network/index.ts';
+import { createRouter as topologyRouter } from './topology/index.ts';
+import { createRouter as subnetRouter } from './subnet/index.ts';
 
 import type { FeatureDeps } from '../core/app.ts';
 import type { Hono } from 'hono';
@@ -29,5 +31,7 @@ export function getFeatures(): RegisteredFeature[] {
   { path: '/api/images', mount: (deps) => imageRouter(deps) },
   { path: '/api/sandboxes', mount: (deps) => sandboxRouter(deps) },
   { path: '/api/platforms', mount: (deps) => platformsRouter(deps) },
-  { path: '/api/networks', mount: (deps) => networkRouter(deps) },  ];
+  { path: '/api/networks', mount: (deps) => networkRouter(deps) },
+  { path: '/api/topology', mount: (deps) => topologyRouter(deps) },
+  { path: '/api/subnets', mount: (deps) => subnetRouter(deps) },  ];
 }

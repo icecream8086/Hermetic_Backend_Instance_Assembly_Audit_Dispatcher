@@ -6,6 +6,8 @@ export interface AuditEntry {
   level: KernLevel;
   facility: string;
   message: string;
+  /** Who performed the action. */
+  actorId?: string | undefined;
   metadata?: Record<string, unknown>;
 }
 
@@ -60,5 +62,6 @@ export interface IAuditReader {
 /** Format an audit entry as a log line. */
 export function formatAuditLine(timestamp: number, entry: AuditEntry): string {
   const ts = new Date(timestamp).toISOString();
-  return `[${ts}] ${kernLevelName(entry.level)}: ${entry.message}`;
+  const actor = entry.actorId ? ` (actor=${entry.actorId})` : '';
+  return `[${ts}] ${kernLevelName(entry.level)}: ${entry.message}${actor}`;
 }

@@ -39,12 +39,14 @@ export function createImageRouter(permissionChecker?: PermissionCheckFn): Hono<{
 
   router.post('/pull', async (c) => {
     { const r = await requirePerm(c, permissionChecker, 'create', 'image'); if (r) return r; }
-    const { image } = await c.req.json() as { image: string };
+    const { image, instanceId } = await c.req.json() as { image: string; instanceId?: string };
     if (!image) return c.json(fail('VALIDATION_ERROR', 'image required'), 400);
-    // Full image reference including registry: "docker.io/library/nginx:latest"
-    // or private registry: "registry.mycompany.com/myimage:v1"
     try {
-      const info = await c.var.providers.image.pull(image);
+      // Resolve image provider, optionally per-cluster (multi-server Podman)
+      const imgProvider = instanceId && c.var.providers.resolveImage
+        ? await c.var.providers.resolveImage(instanceId as any)
+        : c.var.providers.image;
+      const info = await imgProvider.pull(image, instanceId);
       const user = (c as any).var?.currentUser as { id: string } | undefined;
       c.var.audit?.write({
         level: KernLevel.NOTICE,
