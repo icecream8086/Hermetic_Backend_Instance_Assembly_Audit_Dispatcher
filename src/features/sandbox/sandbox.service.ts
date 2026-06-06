@@ -125,9 +125,30 @@ export class SandboxService implements ISandboxService {
 
     // 2. Build provider input (with merged VNet + cluster settings) and create cloud resource
     const clusterEnriched = resolvedInst ? { ...input, instanceId: resolvedInst.id as any, network: mergedNetwork } : { ...input, network: mergedNetwork };
+
+    // 3. Resolve SecurityGroup system UID (sg_*) → cloud ID + bandwidth
+    if (mergedNetwork?.securityGroupId?.startsWith('sg_')) {
+      const sgEntry = await this.atomic.get<any>('secgroup:' + mergedNetwork.securityGroupId);
+      if (sgEntry?.value) {
+        const sg = sgEntry.value;
+        (clusterEnriched as any).network = {
+          ...clusterEnriched.network,
+          securityGroupId: sg.securityGroupId ?? mergedNetwork.securityGroupId,
+          ...(sg.bandwidth ? { bandwidth: sg.bandwidth } : {}),
+        };
+      }
+    }
+
     const providerInput = toContainerGroupInput(clusterEnriched);
     const containerProvider = await this.#resolveProvider(input.instanceId);
-    const { providerId } = await containerProvider.create(providerInput);
+    let providerId: string;
+    try {
+      ({ providerId } = await containerProvider.create(providerInput));
+    } catch (e) {
+      // Provider creation failed — mark sandbox as Failed so it's not orphaned
+      await this.atomic.set(`${KEY_PREFIX}${id}`, { ...initial, status: SandboxStatus.Failed, updatedAt: Date.now() }, created).catch(() => {});
+      throw e;
+    }
 
     // 3. Transition to Running with provider details (no redundant re-read: we just
     //    wrote `initial` with OCC create-only at line 71, so it's the current state).
@@ -209,6 +230,16 @@ export class SandboxService implements ISandboxService {
   }
 
   async stop(id: SandboxId): Promise<Sandbox> {
+    const sandbox = await this.getById(id);
+    if (!sandbox) throw new AppError(404, 'SANDBOX_NOT_FOUND', `Sandbox ${id} not found`);
+
+    // Tell the provider to stop the container (best-effort)
+    try {
+      await this.containerProvider.stop?.(sandbox.providerId ?? String(id));
+    } catch {
+      // Provider may be unreachable or container already stopped — proceed.
+    }
+
     return this.transition(id, SandboxStatus.Stopped, 'user requested stop');
   }
 
@@ -271,20 +302,35 @@ export class SandboxService implements ISandboxService {
   }
 
   async getHealth(id: SandboxId): Promise<readonly ContainerHealth[]> {
-    let sandbox = await this.getById(id);
+    const sandbox = await this.getById(id);
     if (!sandbox) throw new AppError(404, 'SANDBOX_NOT_FOUND', `Sandbox ${id} not found`);
 
-    // Auto-sync if containers haven't been populated yet
-    if (sandbox.containers.length === 0 && sandbox.status === SandboxStatus.Running) {
+    // Sync from provider only when Running to get real-time health
+    if (sandbox.status === SandboxStatus.Running) {
       try {
         await this.syncRuntime(id);
-        sandbox = (await this.getById(id))!;
       } catch { /* stale data is acceptable */ }
     }
 
-    return sandbox!.containers.map(c => ({
+    const updated = await this.getById(id);
+    const target = updated ?? sandbox;
+
+    // Non-Running sandboxes: containers are not healthy regardless of cached state
+    const sandboxDone = target.status !== SandboxStatus.Running && target.status !== SandboxStatus.Pending && target.status !== SandboxStatus.Scheduling;
+
+    if (sandboxDone) {
+      return target.containers.map(c => ({
+        containerName: c.name,
+        status: 'stopped',
+        ready: false,
+        startedAt: c.state.startTime,
+        message: `Sandbox is ${target.status.toLowerCase()}`,
+      }));
+    }
+
+    return target.containers.map(c => ({
       containerName: c.name,
-      status: c.health?.status ?? (c.state.state === 'Running' ? 'healthy' : c.state.state === 'Waiting' ? 'starting' : 'none'),
+      status: c.health?.status ?? (c.state.state === 'Running' ? 'running' : c.state.state === 'Waiting' ? 'starting' : 'none'),
       ready: c.state.ready,
       startedAt: c.state.startTime,
       message: c.health?.message ?? c.state.message,
@@ -298,9 +344,12 @@ export class SandboxService implements ISandboxService {
     if (!entry) throw new AppError(404, 'SANDBOX_NOT_FOUND', `Sandbox ${id} not found`);
     const sandbox = entry.value;
 
+    if (!sandbox.providerId) {
+      throw new AppError(404, 'PROVIDER_ID_MISSING', `Sandbox ${id} has no providerId — provider resource was never created or was cleaned up`);
+    }
     const result = await this.containerProvider.describe({
       region: sandbox.config.region,
-      sandboxId: sandbox.providerId ?? String(id),
+      sandboxId: sandbox.providerId,
     });
 
     const runtime = result.sandboxes[0];
@@ -441,11 +490,14 @@ export function toContainerGroupInput(input: CreateSandboxInput): CreateContaine
     ...(input.instanceId ? { instanceId: input.instanceId } : {}),
     cpu: input.resourceSpec.cpu,
     memory: input.resourceSpec.memory,
+    gpu: input.resourceSpec.gpu,
+    gpuType: input.resourceSpec.gpuType,
     spotStrategy: input.spotStrategy,
     restartPolicy: input.restartPolicy,
     containers: input.containers.map(c => ({
       name: c.name,
       image: c.image,
+      command: c.command,
       args: c.args,
       env: mapEnvVars(c.env),
       tty: c.tty,
@@ -475,6 +527,7 @@ export function toContainerGroupInput(input: CreateSandboxInput): CreateContaine
       securityGroupId: input.network.securityGroupId,
       allocatePublicIp: input.network.allocatePublicIp,
       publicIpBandwidth: input.network.publicIpBandwidth,
+      bandwidth: input.network.bandwidth,
     }),
     tags: mapTags(input.tags),
     providerOverrides: input.providerOverrides,
@@ -511,7 +564,7 @@ function runtimeToContainers(r: ContainerGroupRuntime): ContainerRuntime[] {
     memory: c.resources?.memory ?? 0,
     state: {
       state: ociStatusToContainerState(c.status),
-      ready: c.status === 'running',
+      ready: c.health.status === 'healthy' || (c.health.status === 'none' && c.status === 'running'),
       restartCount: 0,
       ...(c.startedAt ? { startTime: c.startedAt } : {}),
     },

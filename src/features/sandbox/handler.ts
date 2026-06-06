@@ -3,6 +3,7 @@ import type { ISandboxService } from './interfaces.ts';
 import type { PodResolver } from './assembly/pod-resolver.ts';
 import { createSandboxId } from './types.ts';
 import type { PodSpec } from './assembly/types.ts';
+import type { IContainerGroupProvider } from '../../core/provider/interfaces.ts';
 import type { RouteMeta } from '../../core/http-docs/types.ts';
 import type { AppContext } from '../../core/app.ts';
 import { ok, fail } from '../../core/response.ts';
@@ -22,15 +23,17 @@ export function createSandboxRouter(
   svc: ISandboxService,
   podResolver?: PodResolver,
   permissionChecker?: PermissionCheckFn,
+  podGroupProvider?: IContainerGroupProvider,
 ): Hono<{ Variables: AppContext }> {
   const router = new Hono<{ Variables: AppContext }>();
 
-  // ─── Container group (Pod) API (static route before parameterized :id) ───
+  // ─── Container group (Pod) API (static routes before parameterized :id) ───
 
+  // POST /pod — create a pod from PodSpec
   router.post('/pod', async (c) => {
     { const r = await requirePerm(c, permissionChecker, 'create', 'sandbox'); if (r) return r; }
     if (!podResolver) {
-      return c.json(fail('NOT_CONFIGURED', 'Container group provider not available — no IContainerGroupProvider registered'), 501);
+      return c.json(fail('NOT_CONFIGURED', 'Container group provider not available'), 501);
     }
     try {
       const spec = await c.req.json<PodSpec>();
@@ -41,6 +44,66 @@ export function createSandboxRouter(
       return c.json(ok({ providerId: result.providerId, podName: spec.name }), 201);
     } catch (e: any) {
       return c.json(fail('POD_CREATE_FAILED', e.message), 500);
+    }
+  });
+
+  // GET /pod — list all pods
+  router.get('/pod', async (c) => {
+    { const r = await requirePerm(c, permissionChecker, 'read', 'sandbox'); if (r) return r; }
+    if (!podGroupProvider) {
+      return c.json(fail('NOT_CONFIGURED', 'Container group provider not available'), 501);
+    }
+    try {
+      const result = await podGroupProvider.describeGroups({ region: 'local' as any });
+      return c.json(ok(result));
+    } catch (e: any) {
+      return c.json(fail('POD_LIST_FAILED', e.message), 500);
+    }
+  });
+
+  // GET /pod/:providerId — get a single pod's status
+  router.get('/pod/:providerId', async (c) => {
+    { const r = await requirePerm(c, permissionChecker, 'read', 'sandbox'); if (r) return r; }
+    if (!podGroupProvider) {
+      return c.json(fail('NOT_CONFIGURED', 'Container group provider not available'), 501);
+    }
+    try {
+      const providerId = c.req.param('providerId');
+      const status = await podGroupProvider.getGroupStatus(providerId);
+      if (!status) return c.json(fail('POD_NOT_FOUND', 'Pod not found'), 404);
+      return c.json(ok(status));
+    } catch (e: any) {
+      return c.json(fail('POD_GET_FAILED', e.message), 500);
+    }
+  });
+
+  // POST /pod/:providerId/stop — stop a pod (ECI: terminal, Podman: reversible)
+  router.post('/pod/:providerId/stop', async (c) => {
+    { const r = await requirePerm(c, permissionChecker, 'update', 'sandbox'); if (r) return r; }
+    if (!podGroupProvider) {
+      return c.json(fail('NOT_CONFIGURED', 'Container group provider not available'), 501);
+    }
+    try {
+      const providerId = c.req.param('providerId');
+      await podGroupProvider.stopGroup(providerId);
+      return c.json(ok(null));
+    } catch (e: any) {
+      return c.json(fail('POD_STOP_FAILED', e.message), 500);
+    }
+  });
+
+  // DELETE /pod/:providerId — delete a pod (terminal)
+  router.delete('/pod/:providerId', async (c) => {
+    { const r = await requirePerm(c, permissionChecker, 'delete', 'sandbox'); if (r) return r; }
+    if (!podGroupProvider) {
+      return c.json(fail('NOT_CONFIGURED', 'Container group provider not available'), 501);
+    }
+    try {
+      const providerId = c.req.param('providerId');
+      await podGroupProvider.deleteGroup(providerId);
+      return c.json(ok(null));
+    } catch (e: any) {
+      return c.json(fail('POD_DELETE_FAILED', e.message), 500);
     }
   });
 
@@ -121,6 +184,10 @@ export function createSandboxRouter(
 
 export const sandboxRouteMeta: RouteMeta[] = [
   { method: 'POST', path: '/pod', description: '从 PodSpec 创建容器组（Pod），返回 providerId', requestBody: { name: 'my-pod', services: { nginx: { image: 'nginx:latest' } } }, responseDescription: '{ providerId, podName }' },
+  { method: 'GET', path: '/pod', description: '列出所有容器组（Pod）— 通过 IContainerGroupProvider.describeGroups', responseDescription: 'DescribeContainerGroupsResult' },
+  { method: 'GET', path: '/pod/:providerId', description: '获取容器组（Pod）详情', responseDescription: 'ContainerGroupRuntime' },
+  { method: 'POST', path: '/pod/:providerId/stop', description: '停止容器组（Pod）— ECI 停止即释放(terminal), Podman 可逆', responseDescription: '{ ok: true }' },
+  { method: 'DELETE', path: '/pod/:providerId', description: '删除容器组（Pod）— 终态操作', responseDescription: '{ ok: true }' },
   { method: 'GET', path: '/', description: '列出所有沙箱（支持 ?status=&limit=&cursor= 过滤）', responseDescription: '{ items: Sandbox[], nextCursor }' },
   { method: 'GET', path: '/:id', description: '获取沙箱详情（含网络/容器/事件）', responseDescription: 'Sandbox' },
   { method: 'POST', path: '/:id/stop', description: '停止沙箱', responseDescription: 'Sandbox' },

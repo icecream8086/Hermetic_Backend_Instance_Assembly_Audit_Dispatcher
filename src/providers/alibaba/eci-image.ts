@@ -1,8 +1,15 @@
 import type { IImageProvider, ImageInfo, ListImagesOptions } from '../../core/provider/interfaces.ts';
 import { rpcCall } from './eci-signer.ts';
+import { AppError } from '../../core/types.ts';
 
-/** Parse an image reference like "registry:5000/repo:tag" into name and tag. */
+/** Parse an image reference like "nginx:latest" or "registry:5000/repo:tag"
+ *  or "sha256:abc123..." into name and tag.
+ *  sha256 digest format is treated as a complete image ID, not name:tag. */
 function parseImageRef(image: string): { name: string; tag: string } {
+  // sha256 digest — use whole string as image ID
+  if (image.startsWith('sha256:')) {
+    return { name: image, tag: '' };
+  }
   const lastColon = image.lastIndexOf(':');
   const lastSlash = image.lastIndexOf('/');
   // If there's a colon after the last slash, it's a tag separator
@@ -100,5 +107,31 @@ export class AlibabaEciImageProvider implements IImageProvider {
       RegionId: this.region,
       ImageCacheId: id,
     });
+  }
+
+  // ─── ECI-unsupported operations ───
+
+  async push(_imageOrId: string): Promise<ImageInfo> {
+    throw new AppError(501, 'NOT_IMPLEMENTED', 'push is not supported by Alibaba ECI');
+  }
+
+  async search(_term: string): Promise<readonly { name: string; description?: string; isOfficial?: boolean }[]> {
+    throw new AppError(501, 'NOT_IMPLEMENTED', 'search is not supported by Alibaba ECI');
+  }
+
+  async tag(_id: string, _tag: string): Promise<void> {
+    throw new AppError(501, 'NOT_IMPLEMENTED', 'tag is not supported by Alibaba ECI');
+  }
+
+  async history(_id: string): Promise<readonly { id: string; created?: number; createdBy?: string; size?: number }[]> {
+    throw new AppError(501, 'NOT_IMPLEMENTED', 'history is not supported by Alibaba ECI');
+  }
+
+  async prune(): Promise<{ reclaimed: number }> {
+    throw new AppError(501, 'NOT_IMPLEMENTED', 'prune is not supported by Alibaba ECI');
+  }
+
+  async build(_context: unknown): Promise<ImageInfo> {
+    throw new AppError(501, 'NOT_IMPLEMENTED', 'build is not supported by Alibaba ECI');
   }
 }

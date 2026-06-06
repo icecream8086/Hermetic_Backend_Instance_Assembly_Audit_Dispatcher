@@ -120,6 +120,12 @@ export interface MappableNetwork {
   readonly securityGroupId?: string | undefined;
   readonly allocatePublicIp: boolean;
   readonly publicIpBandwidth?: number | undefined;
+  readonly bandwidth?: {
+    readonly egress?: number | undefined;
+    readonly ingress?: number | undefined;
+    readonly burst?: number | undefined;
+    readonly priority?: number | undefined;
+  } | undefined;
 }
 
 export function mapNetwork(n: MappableNetwork): ContainerGroupNetworkInput {
@@ -128,5 +134,6 @@ export function mapNetwork(n: MappableNetwork): ContainerGroupNetworkInput {
     ...(n.securityGroupId ? { securityGroupId: n.securityGroupId } : {}),
     allocatePublicIp: n.allocatePublicIp,
     ...(n.publicIpBandwidth !== undefined ? { publicIpBandwidth: n.publicIpBandwidth } : {}),
+    ...(n.bandwidth ? { bandwidth: { ...(n.bandwidth.egress !== undefined ? { egress: n.bandwidth.egress } : {}), ...(n.bandwidth.ingress !== undefined ? { ingress: n.bandwidth.ingress } : {}), ...(n.bandwidth.burst !== undefined ? { burst: n.bandwidth.burst } : {}), ...(n.bandwidth.priority !== undefined ? { priority: n.bandwidth.priority } : {}) } } : {}),
   };
 }

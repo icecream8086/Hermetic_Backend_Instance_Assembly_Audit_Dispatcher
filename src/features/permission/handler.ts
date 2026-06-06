@@ -23,7 +23,8 @@ const LogLevelEnum = z.enum(['debug', 'info', 'warn', 'warning', 'error', 'none'
 
 const KNOWN_FACILITIES = [
   'user-service', 'perm', 'perm-audit', 'authz', 'sysgrp',
-  'sandbox', 'sandbox-service', 'template', 'image', 'dns', 'dns-service', 'quota', 'http',
+  'sandbox-service', 'template', 'dns-service', 'quota', 'http',
+  'subnet', 'secgroup', 'system',
 ] as const;
 
 const UpdateLogPolicySchema = z.object({

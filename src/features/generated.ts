@@ -6,7 +6,6 @@ import { createRouter as usersRouter } from './users/index.ts';
 import { createRouter as permissionRouter } from './permission/index.ts';
 import { createRouter as system_groupRouter } from './system-group/index.ts';
 import { createRouter as templateRouter } from './template/index.ts';
-import { createRouter as imageRouter } from './image/index.ts';
 import { createRouter as sandboxRouter } from './sandbox/index.ts';
 import { createRouter as platformsRouter } from './platforms/index.ts';
 import { createRouter as networkRouter } from './network/index.ts';
@@ -28,7 +27,6 @@ export function getFeatures(): RegisteredFeature[] {
   { path: '/api/permissions', mount: (deps) => permissionRouter(deps) },
   { path: '/api/system-groups', mount: (deps) => system_groupRouter(deps) },
   { path: '/api/templates', mount: (deps) => templateRouter(deps) },
-  { path: '/api/images', mount: (deps) => imageRouter(deps) },
   { path: '/api/sandboxes', mount: (deps) => sandboxRouter(deps) },
   { path: '/api/platforms', mount: (deps) => platformsRouter(deps) },
   { path: '/api/networks', mount: (deps) => networkRouter(deps) },

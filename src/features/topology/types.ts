@@ -1,6 +1,7 @@
 import type { Platform } from '../../core/region/types.ts';
 import type { RegionBucketType } from '../../core/region/bucket.ts';
 import type { InstanceCapabilities, InstanceCapacity, InstanceStatus } from '../../core/region/instance.ts';
+import type { CredentialType } from '../../core/auth/credential.ts';
 
 // ─── Bucket types ───
 
@@ -50,17 +51,25 @@ export interface HeartbeatBody {
 
 export interface CreateCredentialBody {
   name: string;
+  type: CredentialType;
   platform: Platform;
-  accessKeyId: string;
-  accessKeySecret: string;
+  accessKeyId?: string | undefined;
+  accessKeySecret?: string | undefined;
+  token?: string | undefined;
+  username?: string | undefined;
+  password?: string | undefined;
   registryCredentials?: { server: string; userName: string; password: string }[] | undefined;
   instanceId?: string | undefined;
 }
 
 export interface UpdateCredentialBody {
   name?: string | undefined;
+  type?: CredentialType | undefined;
   accessKeyId?: string | undefined;
   accessKeySecret?: string | undefined;
+  token?: string | undefined;
+  username?: string | undefined;
+  password?: string | undefined;
   registryCredentials?: { server: string; userName: string; password: string }[] | null | undefined;
   instanceId?: string | null | undefined;
   status?: 'active' | 'inactive' | undefined;

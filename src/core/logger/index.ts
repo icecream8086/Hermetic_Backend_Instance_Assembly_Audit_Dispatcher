@@ -4,11 +4,9 @@ export type {
   ILogReader,
   ILogAdmin,
   ILogger,
-  ILogRouter,
 } from './interfaces.ts';
 export type { ILogFormatter } from './formatter.ts';
 export { JsonLogFormatter } from './formatter.ts';
-export { LogRouter } from './router.ts';
 export type { LogInput, LogEntry, LogQuery, StorageEntry } from './types.ts';
 export type {
   ILogTailCoordinator,

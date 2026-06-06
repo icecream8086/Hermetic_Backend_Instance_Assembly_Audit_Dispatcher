@@ -6,7 +6,6 @@ import { createUserRouter, userRouteMeta } from '../src/features/users/handler.t
 import { createPermissionRouter, permissionRouteMeta } from '../src/features/permission/handler.ts';
 import { createSysGroupRouter, sysGroupRouteMeta } from '../src/features/system-group/handler.ts';
 import { createTemplateRouter, templateRouteMeta } from '../src/features/template/handler.ts';
-import { createImageRouter, imageRouteMeta } from '../src/features/image/handler.ts';
 import { createSandboxRouter, sandboxRouteMeta } from '../src/features/sandbox/handler.ts';
 import { createPlatformsRouter, platformsRouteMeta } from '../src/features/platforms/handler.ts';
 import { createNetworkRouter, networkRouteMeta } from '../src/features/network/handler.ts';
@@ -105,7 +104,6 @@ collect('sysgrp', 'SysGrp', '/api/system-groups', createSysGroupRouter(stubSysGr
 // Use a plain store object that accepts any key/value (stub for route scanning)
 const stubAtomic: any = { get: async () => null, set: async () => null };
 collect('tpl', 'Tpl', '/api/templates', createTemplateRouter(stubAtomic as any), () => true, templateRouteMeta);
-collect('img', 'Img', '/api/images', createImageRouter(), () => true, imageRouteMeta);
 
 const stubSandboxSvc: any = { getById: async () => null, stop: async () => {}, terminate: async () => {}, syncRuntime: async () => {}, list: async () => ({ items: [] }) };
 collect('sbx', 'Sbx', '/api/sandboxes', createSandboxRouter(stubSandboxSvc as any), () => true, sandboxRouteMeta);
@@ -125,14 +123,10 @@ collect('sub', 'Sub', '/api/subnets', createSubnetRouter(stubSubnetSvc), () => t
 
 const stubClusterSvc: any = { create: async () => ({}), get: async () => null, list: async () => [], update: async () => ({}), delete: async () => {} };
 const stubBucketSvc: any = { create: async () => ({}), get: async () => null, list: async () => [], update: async () => ({}), delete: async () => {} };
-collect('topo', 'Topo', '/api/topology', createTopologyRouter(stubClusterSvc, stubBucketSvc), () => true, topologyRouteMeta);
+const stubImageSvc: any = { create: async () => ({}), get: async () => null, list: async () => [], update: async () => ({}), delete: async () => {} };
+collect('topo', 'Topo', '/api/topology', createTopologyRouter(stubClusterSvc, stubBucketSvc, stubImageSvc), () => true, topologyRouteMeta);
 
 // Manually-added routes (not in any feature router)
-// Dev-only
-routes.push({
-  method: 'POST', path: '/__become-wheel', fileTag: 'auth', tag: 'Dev',
-  meta: { method: 'POST', path: '/__become-wheel', description: '[DEV] 将用户加入 wheel 组获取完整权限（仅 localhost）', requestBody: { userId: 'uuid-here' }, responseDescription: '{ success, data }' },
-});
 routes.push({
   method: 'POST', path: '/__tick', fileTag: 'events', tag: 'Dev',
   meta: { method: 'POST', path: '/__tick', description: '[DEV] 手动触发事件循环 tick', responseDescription: '{ ok, queueSize, processedCount, running }' },
@@ -177,13 +171,12 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const httpDir = resolve(__dirname, '..', 'http');
 mkdirSync(httpDir, { recursive: true });
 
-const fileTagOrder = ['info', 'auth', 'sysgrp', 'tpl', 'img', 'sbx', 'plf', 'perm', 'audit', 'users', 'events', 'topo', 'sub'];
+const fileTagOrder = ['info', 'auth', 'sysgrp', 'tpl', 'sbx', 'plf', 'perm', 'audit', 'users', 'events', 'topo', 'sub'];
 const fileTagTitle: Record<string, string> = {
   info: 'Info',
   auth: 'Auth',
   sysgrp: 'SysGrp',
   tpl: 'Tpl',
-  img: 'Img',
   sbx: 'Sbx',
   plf: 'Plf',
   perm: 'Perm',

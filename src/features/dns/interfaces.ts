@@ -5,10 +5,10 @@ import type { DnsRecordId, DnsRecord, DnsSyncInput } from './types.ts';
 
 export interface IDnsService {
   /** Create or update a DNS record and sync it with the provider. */
-  syncRecord(input: DnsSyncInput): Promise<DnsRecord>;
+  syncRecord(input: DnsSyncInput, actorId?: string): Promise<DnsRecord>;
 
   /** Delete a DNS record and remove it from the provider. */
-  deleteRecord(id: DnsRecordId): Promise<void>;
+  deleteRecord(id: DnsRecordId, actorId?: string): Promise<void>;
 
   /** Get a single DNS record by ID. */
   getRecord(id: DnsRecordId): Promise<DnsRecord | null>;

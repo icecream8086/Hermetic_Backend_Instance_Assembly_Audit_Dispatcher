@@ -6,7 +6,7 @@
 | | [Users](api/users.md) | Register, login, CRUD, sessions, avatar, public keys |
 | | [Sandbox](api/sandbox.md) | Sandbox CRUD, state machine, health |
 | | [Permission](api/permission.md) | Policies, groups, route ACLs, check |
-| | [Image](api/image.md) | Image list, pull, inspect, delete |
+| | [Topology](api/topology.md) | Compute instances, buckets, credentials, image repositories |
 | | [Platforms](api/platforms.md) | Available provider platforms |
 | | [Info](api/info.md) | Server info and runtime status |
 | | [DNS](api/dns.md) | DNS record management |

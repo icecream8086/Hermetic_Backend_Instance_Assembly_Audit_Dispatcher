@@ -12,7 +12,7 @@ function createSandboxService(deps: FeatureDeps, providers: IProviderRegistry, p
   const container = entry?.container ?? providers.container;
   const resolveNetwork = createAtomicNetworkResolver(deps.stores.atomic);
   const instanceService = new InstanceService(deps.stores.atomic);
-  return new SandboxService(deps.stores.atomic, new ConsoleLogger(), container, undefined, undefined, deps.audit, resolveNetwork, instanceService);
+  return new SandboxService(deps.stores.atomic, new ConsoleLogger(), container, providers, undefined, deps.audit, resolveNetwork, instanceService);
 }
 
 export function createRouter(deps: FeatureDeps): Hono<any> {

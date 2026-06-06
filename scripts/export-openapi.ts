@@ -16,7 +16,6 @@ import { createUserRouter, userRouteMeta } from '../src/features/users/handler.t
 import { createPermissionRouter, permissionRouteMeta } from '../src/features/permission/handler.ts';
 import { createSysGroupRouter, sysGroupRouteMeta } from '../src/features/system-group/handler.ts';
 import { createTemplateRouter, templateRouteMeta } from '../src/features/template/handler.ts';
-import { createImageRouter, imageRouteMeta } from '../src/features/image/handler.ts';
 import { createSandboxRouter, sandboxRouteMeta } from '../src/features/sandbox/handler.ts';
 import { createPlatformsRouter, platformsRouteMeta } from '../src/features/platforms/handler.ts';
 import { createNetworkRouter, networkRouteMeta } from '../src/features/network/handler.ts';
@@ -174,7 +173,6 @@ collect('Audit', '/api/audit', createAuditRouter(new WorkersAuditLogger()), audi
 collect('Permissions', '/api/permissions', createPermissionRouter(stubPermService as any), permissionRouteMeta);
 collect('System Groups', '/api/system-groups', createSysGroupRouter(stubSysGroupService as any), sysGroupRouteMeta);
 collect('Templates', '/api/templates', createTemplateRouter(stubAtomic as any), templateRouteMeta);
-collect('Images', '/api/images', createImageRouter(), imageRouteMeta);
 collect('Sandboxes', '/api/sandboxes', createSandboxRouter(stubSandboxSvc as any), sandboxRouteMeta);
 collect('Platforms', '/api/platforms', createPlatformsRouter(stubRegistry as any), platformsRouteMeta);
 collect('Networks', '/api/networks', createNetworkRouter({
@@ -190,14 +188,14 @@ collect('Subnets', '/api/subnets', createSubnetRouter(stubSubnetSvc), subnetRout
 
 const stubClusterSvc: any = { create: async () => ({}), get: async () => null, list: async () => [], update: async () => ({}), delete: async () => {} };
 const stubBucketSvc: any = { create: async () => ({}), get: async () => null, list: async () => [], update: async () => ({}), delete: async () => {} };
-collect('Topology', '/api/topology', createTopologyRouter(stubClusterSvc, stubBucketSvc), topologyRouteMeta);
+const stubImageSvc: any = { create: async () => ({}), get: async () => null, list: async () => [], update: async () => ({}), delete: async () => {} };
+collect('Topology', '/api/topology', createTopologyRouter(stubClusterSvc, stubBucketSvc, stubImageSvc), topologyRouteMeta);
 
 // Manually-added routes
 function addRoute(method: string, path: string, tag: string, meta?: RouteMeta) {
   routes.push({ method, path, tag, meta });
   tagSet.add(tag);
 }
-addRoute('POST', '/__become-wheel', 'Dev', { method: 'POST', path: '/__become-wheel', description: 'Add user to wheel group for full privileges (localhost only)', requestBody: { userId: 'uuid-here' }, responseDescription: '{ success, data }' });
 addRoute('POST', '/__tick', 'Dev', { method: 'POST', path: '/__tick', description: 'Manually trigger event loop tick', responseDescription: '{ ok, queueSize, processedCount, running }' });
 addRoute('POST', '/__admin/migrate-user-index', 'Dev', { method: 'POST', path: '/__admin/migrate-user-index', description: 'Rebuild sharded user index', requestBody: { ids: ['uuid-1'] }, responseDescription: '{ migrated: number }' });
 addRoute('GET', '/api/openapi.json', 'Public', { method: 'GET', path: '/api/openapi.json', description: 'OpenAPI 3.0 specification (no auth required)', responseDescription: 'OpenAPI 3.0 JSON' });

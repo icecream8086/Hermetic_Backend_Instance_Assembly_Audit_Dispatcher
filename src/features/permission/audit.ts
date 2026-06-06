@@ -26,6 +26,7 @@ export function permEvent(
     level,
     facility: FACILITY,
     message: message ?? `${eventType} by ${actor?.userId ?? 'unknown'}`,
+    actorId: actor?.userId,
     metadata: {
       eventType,
       ...(actor?.userId ? { actorId: actor.userId } : {}),

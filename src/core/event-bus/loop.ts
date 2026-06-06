@@ -59,6 +59,9 @@ export interface IEventLoopControl {
    */
   enqueueTrigger<T>(input: TriggerEventInput<T>): Event;
 
+  /** List pending events in the queue (type + id, no payload). */
+  pendingEvents(): Array<{ type: string; id: string }>;
+
   /** Current number of pending events. */
   readonly size: number;
 
@@ -228,6 +231,10 @@ export class EventLoop implements IEventLoopControl {
     return event;
   }
 
+  pendingEvents(): Array<{ type: string; id: string }> {
+    return this.#queue.toArray().map(e => ({ type: e.type, id: e.id }));
+  }
+
   get size(): number {
     return this.#queue.size;
   }
@@ -286,12 +293,20 @@ export class EventLoop implements IEventLoopControl {
     const entry = await this.#store!.get<Event[]>(KEY_PENDING);
     if (!entry) return;
     for (const event of entry.value) {
+      // Skip stale health:check — re-created on startup tick
+      if (event.type === 'health:check') continue;
       this.#queue.enqueue(event);
     }
+    // Clear persisted store so stale events don't compound across restarts
+    await this.#store!.set(KEY_PENDING, [], entry.version).catch(() => {});
   }
 
-  /** Append one event to the persisted queue. */
+  /** Event types that should survive Worker restarts (image.pull, user events). */
+  static #PERSISTED_TYPES = new Set(['image.pull']);
+
+  /** Append one event to the persisted queue (transient events skipped). */
   async #persistEnqueue(event: Event): Promise<void> {
+    if (!EventLoop.#PERSISTED_TYPES.has(event.type)) return;
     await this.#store!.transact(async (txn) => {
       const pending = (await txn.get<Event[]>(KEY_PENDING)) ?? [];
       pending.push(event);

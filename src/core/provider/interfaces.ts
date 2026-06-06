@@ -85,6 +85,39 @@ export interface IContainerProvider {
 
   /** Fetch container stdout/stderr logs. */
   getLogs(input: GetContainerLogInput): Promise<ContainerLogResult>;
+
+  /** Gracefully stop a container with optional timeout. */
+  stop?(providerId: string, timeoutSeconds?: number): Promise<void>;
+
+  /** Start a stopped container. */
+  start?(providerId: string): Promise<void>;
+
+  /** Restart a container with optional timeout. */
+  restart?(providerId: string, timeoutSeconds?: number): Promise<void>;
+
+  /** Force-kill a container with optional signal. */
+  kill?(providerId: string, signal?: string): Promise<void>;
+
+  /** Pause a running container (freeze cgroups). */
+  pause?(providerId: string): Promise<void>;
+
+  /** Unpause a paused container. */
+  unpause?(providerId: string): Promise<void>;
+
+  /** Wait for a container to reach a specific state. */
+  wait?(providerId: string, condition?: 'not-running' | 'next-exit'): Promise<{ statusCode: number }>;
+
+  /** Execute a command inside a running container. */
+  exec?(providerId: string, cmd: readonly string[], containerName?: string): Promise<{ execId: string; webSocketUri?: string | undefined }>;
+
+  /** Rename a container. */
+  rename?(providerId: string, newName: string): Promise<void>;
+
+  /** Get live resource usage stats. */
+  stats?(providerId: string): Promise<{ cpuUsage: number; memoryUsage: number; networkIO?: { rx: number; tx: number } | undefined }>;
+
+  /** List running processes inside a container. */
+  top?(providerId: string, psArgs?: string): Promise<{ processes: readonly (readonly string[])[] }>;
 }
 
 // ─── Virtual Node operations ───
@@ -171,6 +204,24 @@ export interface IImageProvider {
 
   /** Remove an image. */
   remove(id: string): Promise<void>;
+
+  /** Push an image to a registry. Optional — provider may not support it. */
+  push?(imageOrId: string, credential?: { server: string; userName: string; password: string }): Promise<ImageInfo>;
+
+  /** Search for images on a registry. */
+  search?(term: string, options?: { limit?: number | undefined }): Promise<readonly { name: string; description?: string | undefined; isOfficial?: boolean | undefined }[]>;
+
+  /** Tag an image with a new name. */
+  tag?(id: string, tag: string): Promise<void>;
+
+  /** Get image layer history. */
+  history?(id: string): Promise<readonly { id: string; created?: number | undefined; createdBy?: string | undefined; size?: number | undefined }[]>;
+
+  /** Prune unused images. */
+  prune?(options?: { dangling?: boolean | undefined }): Promise<{ reclaimed: number }>;
+
+  /** Build an image from a Dockerfile-like context. */
+  build?(context: unknown, options?: { dockerfile?: string | undefined; tag?: string | undefined }): Promise<ImageInfo>;
 }
 
 // ─── Metrics operations ───
@@ -200,6 +251,8 @@ export interface NetworkRule {
   readonly port?: number | undefined;
   readonly cidr?: string | undefined;
   readonly action: 'allow' | 'deny';
+  /** Per-rule bandwidth limit (Mbps). 0 = block, undefined = no limit. */
+  readonly rateLimit?: number | undefined;
 }
 
 export interface INetworkPolicyProvider {
@@ -285,7 +338,17 @@ export interface IContainerGroupProvider {
    */
   createGroup(input: CreateContainerGroupInput): Promise<{ providerId: string }>;
 
-  /** Delete a container group by provider ID. */
+  /**
+   * Stop a container group.
+   * - ECI: 停止即释放（terminal），等同于删除，资源不可恢复
+   * - Podman: 停止进程但保留 pod 元数据，可重新 start
+   */
+  stopGroup(providerId: string): Promise<void>;
+
+  /** Start a stopped container group. */
+  startGroup?(providerId: string): Promise<void>;
+
+  /** Delete a container group by provider ID (terminal). */
   deleteGroup(providerId: string): Promise<void>;
 
   /** Get detailed status of a container group. */

@@ -1,23 +1,17 @@
 import type { IAuditWriter, IAuditReader, AuditEntry, AuditFilter, AuditQueryResult, StoredAuditEntry } from './types.ts';
-import { KernLevel } from './kern-level.ts';
 import { generateLogId } from '../brand.ts';
 import { shouldLogAudit } from '../logger/log-policy.ts';
+import { formatDmesgLine } from '../utils/dmesg.ts';
 
 const MAX_ENTRIES = 2000;
-const LEVEL_NAMES: Record<number, string> = {
-  0: 'emerg', 1: 'alert', 2: 'crit', 3: 'error',
-  4: 'warning', 5: 'notice', 6: 'info', 7: 'debug',
-};
-
-function levelName(level: KernLevel): string {
-  return LEVEL_NAMES[level] ?? 'unknown';
-}
 
 /** Format a stored entry as JSON string (matching Workers Logs output). */
 function formatEntry(e: StoredAuditEntry): string {
+  const actorId = e.actorId ?? (e.metadata?.actorId as string | undefined);
   return JSON.stringify({
-    id: e.id, timestamp: e.timestamp, level: levelName(e.level),
-    facility: e.facility, message: e.message,
+    id: e.id, timestamp: e.timestamp, message: e.message,
+    facility: e.facility, level: e.level,
+    ...(actorId ? { actorId } : {}),
     ...(e.metadata ? { metadata: e.metadata } : {}),
   });
 }
@@ -41,15 +35,14 @@ export class LocalAuditLogger implements IAuditWriter, IAuditReader {
     const stored: StoredAuditEntry = {
       id: generateLogId(), timestamp: now,
       level: entry.level, facility: entry.facility,
-      message: entry.message,
+      message: entry.message, actorId: entry.actorId,
       ...(entry.metadata ? { metadata: entry.metadata } : {}),
     };
     this.#entries.push(stored);
     if (this.#entries.length > this.#capacity) this.#entries.shift();
 
     if (shouldLogAudit(entry.facility, entry.level)) {
-      const ts = new Date(now).toISOString();
-      console.log(`[${ts}] ${levelName(entry.level).toUpperCase()}: [${entry.facility}] ${entry.message}`);
+      console.log(formatDmesgLine(entry.message, entry.actorId));
     }
   }
 

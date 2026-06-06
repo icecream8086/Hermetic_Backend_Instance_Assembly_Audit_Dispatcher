@@ -77,16 +77,17 @@ function createMockStub(
   if (dataRef) dataRef.current = data;
 
   const handler = async (req: Request): Promise<Response> => {
-    const { op, key, value, expectedVersion, txnOps } = await req.json() as {
+    const { op, key, keys, value, expectedVersion, txnOps } = await req.json() as {
       op: string;
       key?: string;
+      keys?: string[];
       value?: unknown;
       expectedVersion?: string | null;
       txnOps?: Array<{ op: string; key: string; value?: unknown; expectedVersion?: string | null }>;
     };
 
     // Simulate DO returning a server error for specific operations
-    if (options?.failOps?.has(op as 'get' | 'set' | 'transact')) {
+    if (options?.failOps?.has(op as 'get' | 'set' | 'transact' | 'batchGet')) {
       return Response.json({ error: `Internal error processing ${op}` }, { status: 500 });
     }
 
@@ -104,6 +105,17 @@ function createMockStub(
         const newVersion = crypto.randomUUID();
         data.set(key!, { v: value, _ver: newVersion });
         return Response.json({ version: newVersion });
+      }
+      case 'batchGet': {
+        if (!keys || keys.length === 0) {
+          return Response.json({ results: [] });
+        }
+        const results: Array<{ key: string; value: unknown; version: string | null }> = [];
+        for (const k of keys) {
+          const entry = data.get(k);
+          results.push({ key: k, value: entry?.v ?? null, version: entry?._ver ?? null });
+        }
+        return Response.json({ results });
       }
       case 'transact': {
         if (!txnOps) return Response.json({ error: 'Missing txnOps' }, { status: 400 });

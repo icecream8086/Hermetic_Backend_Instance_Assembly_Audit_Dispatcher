@@ -18,6 +18,7 @@ export interface LogEntry {
   level: LogLevel;
   timestamp: number;
   message: string;
+  actorId?: string | undefined;
   metadata?: Record<string, unknown>;
 }
 

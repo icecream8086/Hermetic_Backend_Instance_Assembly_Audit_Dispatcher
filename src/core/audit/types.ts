@@ -1,5 +1,5 @@
 import type { KernLevel } from './kern-level.ts';
-import { kernLevelName } from './kern-level.ts';
+import { formatDmesgLine } from '../utils/dmesg.ts';
 
 /** Input for writing an audit entry. */
 export interface AuditEntry {
@@ -18,6 +18,7 @@ export interface StoredAuditEntry {
   level: KernLevel;
   facility: string;
   message: string;
+  actorId?: string | undefined;
   metadata?: Record<string, unknown>;
 }
 
@@ -59,9 +60,8 @@ export interface IAuditReader {
   query(filter?: AuditFilter): AuditQueryResult;
 }
 
-/** Format an audit entry as a log line. */
-export function formatAuditLine(timestamp: number, entry: AuditEntry): string {
-  const ts = new Date(timestamp).toISOString();
-  const actor = entry.actorId ? ` (actor=${entry.actorId})` : '';
-  return `[${ts}] ${kernLevelName(entry.level)}: ${entry.message}${actor}`;
+/** Format an audit entry as a dmesg-style log line. */
+export function formatAuditLine(_timestamp: number, entry: AuditEntry): string {
+  const actorId = entry.actorId ?? (entry.metadata?.actorId as string | undefined);
+  return formatDmesgLine(entry.message, actorId);
 }

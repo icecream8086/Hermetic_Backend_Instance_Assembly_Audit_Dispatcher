@@ -43,13 +43,4 @@ export interface ILogger extends ILogWriter, ILogReader {
   dispose(): Promise<void>;
 }
 
-/**
- * Router resolves a facility to its writable/readable logger pair.
- */
-export interface ILogRouter {
-  resolve(facility: Facility): ILogWriter & ILogReader;
-  register(facility: Facility, logger: ILogger): void;
-  dispose(): void;
-}
-
 export type { LogInput, LogEntry, LogQuery } from './types.ts';

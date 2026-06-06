@@ -320,6 +320,13 @@ export interface ContainerGroupNetworkInput {
   readonly securityGroupId?: string | undefined;
   readonly allocatePublicIp: boolean;
   readonly publicIpBandwidth?: number | undefined;
+  /** 带宽控制（Mbps），从 SecurityGroup 自动继承 */
+  readonly bandwidth?: {
+    readonly egress?: number | undefined;
+    readonly ingress?: number | undefined;
+    readonly burst?: number | undefined;
+    readonly priority?: number | undefined;
+  } | undefined;
 }
 
 export interface CreateContainerGroupInput {
@@ -329,6 +336,8 @@ export interface CreateContainerGroupInput {
   readonly instanceId?: InstanceId | undefined;
   readonly cpu: number;
   readonly memory: number;
+  readonly gpu?: number | undefined;
+  readonly gpuType?: string | undefined;
   readonly spotStrategy: string;
   readonly restartPolicy: string;
   readonly containers: readonly ContainerCreateConfig[];

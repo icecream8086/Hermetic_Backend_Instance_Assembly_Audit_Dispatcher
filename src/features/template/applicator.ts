@@ -16,6 +16,7 @@ export function applyTemplate(tpl: SandboxTemplate, name?: string, region?: stri
   const containers = container.containers ?? [];
   const cpu = containers.reduce((s, c) => s + (c.resources?.limits?.cpu ?? c.resources?.requests?.cpu ?? 1), 0);
   const memory = containers.reduce((s, c) => s + (c.resources?.limits?.memory ?? c.resources?.requests?.memory ?? 512), 0);
+  const gpu = Math.max(...containers.map(c => c.resources?.limits?.gpu ?? 0));
 
   const ext = tpl.extensions;
   const { volumes, volumeMounts } = mapStorage(ext?.storage);
@@ -29,7 +30,7 @@ export function applyTemplate(tpl: SandboxTemplate, name?: string, region?: stri
   return {
     name: name ?? tpl.name,
     region: (region ?? container.region) as any,
-    resourceSpec: { cpu, memory },
+    resourceSpec: { cpu, memory, ...(gpu > 0 ? { gpu } : {}) },
     spotStrategy: (ext?.spotStrategy ?? 'None') as SpotStrategy,
     restartPolicy: (container.restartPolicy ?? 'Always') as any,
     containers: containers.map((c: ContainerDef, i: number) => ({
@@ -117,12 +118,12 @@ function buildProbeMap(healthChecks: readonly HealthCheckDef[] | undefined): Map
 
 // ─── Network mapping ───
 
-function mapNetwork(network: NetworkSpec | undefined): { allocatePublicIp: boolean; publicIpBandwidth?: number; securityGroupId?: string; subnetIds?: string[]; instanceId?: string } {
+function mapNetwork(network: NetworkSpec | undefined) {
   if (!network) return { allocatePublicIp: false };
-
   return {
     allocatePublicIp: network.publicIp?.allocate ?? false,
     ...(network.publicIp?.bandwidth !== undefined ? { publicIpBandwidth: network.publicIp.bandwidth } : {}),
+    ...(network.ipAddress ? { ipAddress: network.ipAddress } : {}),
     ...(network.vpc?.securityGroupId ? { securityGroupId: network.vpc.securityGroupId } : {}),
     ...(network.vpc?.subnetIds ? { subnetIds: [...network.vpc.subnetIds] } : {}),
     ...(network.vpc?.instanceId ? { instanceId: network.vpc.instanceId } : {}),

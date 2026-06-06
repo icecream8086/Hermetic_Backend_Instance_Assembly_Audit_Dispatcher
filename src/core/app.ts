@@ -5,8 +5,6 @@ import { bodyLimit } from 'hono/body-limit';
 import type { AppConfig } from '../config/types.ts';
 import type { Stores } from './store/interfaces.ts';
 import { createStores } from './store/factory.ts';
-import type { ILogRouter } from './logger/interfaces.ts';
-import { LogRouter } from './logger/router.ts';
 import { globalErrorHandler } from './middleware/error-handler.ts';
 import { rateLimit } from './middleware/rate-limit.ts';
 import { createFacility } from './brand.ts';
@@ -16,6 +14,7 @@ import { createProviderRegistry } from './provider/factory.ts';
 import { createTimerBackend } from './scheduler/factory.ts';
 import { EventBus } from './event-bus/bus.ts';
 import { EventLoop } from './event-bus/loop.ts';
+import { CredentialService } from './auth/credential.ts';
 import type { EventLoopConfig, TriggerEventInput } from './event-bus/types.ts';
 import type { IAuditWriter, IAuditReader } from './audit/types.ts';
 import type { Sandbox } from '../features/sandbox/types.ts';
@@ -33,7 +32,6 @@ import { createWsRouter } from './ws/router.ts';
 
 export interface AppContext {
   stores: Stores;
-  logRouter: ILogRouter;
   providers: IProviderRegistry;
   eventBus: EventBus;
   eventLoop: EventLoop;
@@ -43,7 +41,6 @@ export interface AppContext {
 /** Shared dependencies injected into every feature's createRouter(). */
 export interface FeatureDeps {
   stores: Stores;
-  logRouter: ILogRouter;
   providers: IProviderRegistry;
   eventBus: EventBus;
   eventLoop: EventLoop;
@@ -55,7 +52,6 @@ export interface FeatureDeps {
 export interface AppInstance {
   app: Hono<{ Variables: AppContext }>;
   stores: Stores;
-  logRouter: ILogRouter;
   providers: IProviderRegistry;
   eventBus: EventBus;
   eventLoop: EventLoop;
@@ -90,10 +86,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
   const audit: IAuditWriter = auditLogger;
   const auditReader: IAuditReader = auditLogger;
 
-  // 2. Create logger infrastructure
-  const logRouter = new LogRouter();
-
-  // 3. Create provider registry (backed by ComputeInstance entities)
+  // 2. Create provider registry (backed by ComputeInstance entities)
   const providers = createProviderRegistry(config.provider, config.s3, stores.atomic);
 
   // 4. Create timer backend (driven by SCHEDULER_BACKEND env var)
@@ -117,55 +110,97 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
 
   // 5b. 健康检查事件：每 tick 查询 provider 实时状态，可配重试次数，-1 为白名单
   eventBus.on('health:check', async () => {
-    const idx = await stores.atomic.get<string[]>('sandbox:ids');
-    if (!idx || !providers.container.getStatus) return;
-    for (const sid of idx.value) {
-      try {
-        const entry = await stores.atomic.get<Sandbox>(`sandbox:${sid}`);
-        // 检查所有非 Deleted 的沙箱（Running / Stopped / Terminated 都需要确认容器已清理）
-        if (!entry || entry.value.status === SandboxStatus.Deleted) continue;
-        const maxRetries = entry.value.config.healthMaxRetries ?? 11;
-        if (maxRetries === -1) continue;
-        // 从 provider 获取实时状态
-        // provider 返回 null 表示容器已不存在，标记已清理
-        const runtime = await providers.container.getStatus(entry.value.providerId ?? sid);
-        if (!runtime) {
-          console.error(`[health] runtime null for ${sid}, deleting`);
-          for (let attempt = 0; attempt < 3; attempt++) {
-            const latest = await stores.atomic.get<Sandbox>(`sandbox:${sid}`);
-            if (!latest) break;
-            const ver = await stores.atomic.set(`sandbox:${sid}`, { ...latest.value, status: SandboxStatus.Deleted, updatedAt: Date.now() }, latest.version);
-            if (ver) { console.error(`[health] deleted ${sid}`); break; }
-          }
-          continue;
-        }
-        const allHealthy = runtime.containers.every(cc => cc.alive);
-        const failKey = `health:fails:${sid}`;
-        if (allHealthy) {
-          const failEntry = await stores.atomic.get<number>(failKey);
-          if (failEntry) await stores.atomic.set(failKey, 0, failEntry.version);
-        } else {
-          const failEntry = await stores.atomic.get<number>(failKey);
-          const fails = (failEntry?.value ?? 0) + 1;
-          await stores.atomic.set(failKey, fails, failEntry?.version ?? null);
-          console.log(`[${new Date().toISOString()}] NOTICE: [health] sandbox ${sid} unhealthy (${fails}/${maxRetries})`);
-          if (fails >= maxRetries) {
-            console.log(`[${new Date().toISOString()}] NOTICE: [health] terminating sandbox ${sid} (${fails} consecutive)`);
-            await providers.container.delete({ region: entry.value.config.region, providerId: entry.value.providerId ?? sid });
-            // OCC 重试最多 3 次
+    try {
+      const idx = await stores.atomic.get<string[]>('sandbox:ids');
+      if (!idx || !providers.container.getStatus) return;
+      for (const sid of idx.value) {
+        try {
+          const entry = await stores.atomic.get<Sandbox>(`sandbox:${sid}`);
+          if (!entry || entry.value.status === SandboxStatus.Deleted) continue;
+          const maxRetries = entry.value.config.healthMaxRetries ?? 11;
+          if (maxRetries === -1) continue;
+          const runtime = await providers.container.getStatus(entry.value.providerId ?? sid);
+          if (!runtime) {
+            // Provider 已无此容器 → 标记已清理
             for (let attempt = 0; attempt < 3; attempt++) {
               const latest = await stores.atomic.get<Sandbox>(`sandbox:${sid}`);
               if (!latest) break;
               const ver = await stores.atomic.set(`sandbox:${sid}`, { ...latest.value, status: SandboxStatus.Deleted, updatedAt: Date.now() }, latest.version);
               if (ver) break;
             }
+            continue;
           }
-        }
-      } catch (e) { console.error(`[health] check error ${sid}:`, e instanceof Error ? e.message : e); }
+          const allHealthy = runtime.containers.every(cc => cc.alive);
+          const failKey = `health:fails:${sid}`;
+          if (allHealthy) {
+            const failEntry = await stores.atomic.get<number>(failKey);
+            if (failEntry) await stores.atomic.set(failKey, 0, failEntry.version);
+          } else {
+            const failEntry = await stores.atomic.get<number>(failKey);
+            const fails = (failEntry?.value ?? 0) + 1;
+            await stores.atomic.set(failKey, fails, failEntry?.version ?? null);
+            if (fails >= maxRetries) {
+              await providers.container.delete({ region: entry.value.config.region, providerId: entry.value.providerId ?? sid });
+              for (let attempt = 0; attempt < 3; attempt++) {
+                const latest = await stores.atomic.get<Sandbox>(`sandbox:${sid}`);
+                if (!latest) break;
+                const ver = await stores.atomic.set(`sandbox:${sid}`, { ...latest.value, status: SandboxStatus.Deleted, updatedAt: Date.now() }, latest.version);
+                if (ver) break;
+              }
+            }
+          }
+        } catch (e) { console.error(`[health] check error ${sid}:`, e instanceof Error ? e.message : e); }
+      }
+    } finally {
+      // 重新入队，保证每 tick 执行一次
+      eventLoop.enqueueTrigger({ type: 'health:check', payload: {} });
     }
   });
-  // 注册连续健康检查事件（每 tick 触发一次）
+  // 触发首次健康检查
   eventLoop.enqueueTrigger({ type: 'health:check', payload: {} });
+
+  // 5b2. 镜像拉取事件：从事件循环队列中异步处理
+  eventBus.on('image.pull', async (event) => {
+    const payload = event.payload as Record<string, unknown> | undefined;
+    if (!payload) return;
+    const { taskId, image, instanceId, clusterId, credentialRef, registryCredential } = payload as {
+      taskId?: string; image?: string; instanceId?: string; clusterId?: string;
+      credentialRef?: string; registryCredential?: { server: string; userName: string; password: string };
+    };
+    if (!taskId || !image) return;
+
+    const entry = await stores.atomic.get<any>('pull-task:' + taskId);
+    if (!entry) return;
+    const taskBase = { id: taskId, repositoryId: entry.value.repositoryId, image, createdAt: entry.value.createdAt };
+
+    try {
+      const imgProvider = instanceId ? await providers.resolveImage(instanceId as any) : providers.image;
+
+      // Resolve registry credentials from credential module if credentialRef is set
+      let credArg: string | { server: string; userName: string; password: string } | undefined = clusterId;
+      if (credentialRef) {
+        const credSvc = new CredentialService(stores.atomic);
+        const managed = await credSvc.findByName(credentialRef);
+        if (managed?.registryCredentials?.length) {
+          // Pass first registry credential to pull (ECI supports one per pull via pull param,
+          // additional ones were baked into the provider at construction time)
+          credArg = { server: managed.registryCredentials[0]!.server, userName: managed.registryCredentials[0]!.userName, password: managed.registryCredentials[0]!.password };
+        }
+      } else if (registryCredential) {
+        credArg = registryCredential;
+      }
+
+      const info = await imgProvider.pull(image, credArg as any);
+      await stores.atomic.set('pull-task:' + taskId, {
+        ...taskBase, status: 'completed', result: { id: info.id, tags: [...info.tags] }, completedAt: Date.now(),
+      }, entry.version);
+    } catch (e: any) {
+      console.error(`[pull-task] ${taskId} failed:`, e.message);
+      await stores.atomic.set('pull-task:' + taskId, {
+        ...taskBase, status: 'failed', error: e.message, failedAt: Date.now(),
+      }, entry.version);
+    }
+  });
 
   // 5c. Load log policy into runtime (non-blocking)
   stores.atomic.get<any>('_sys:log-policy').then(entry => {
@@ -284,10 +319,11 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
           { method: '*', pathPrefix: '/api/sandboxes', priority: 100 },
           { method: '*', pathPrefix: '/api/templates', priority: 100 },
           { method: '*', pathPrefix: '/api/topology', priority: 100 },
-          { method: '*', pathPrefix: '/api/images', priority: 100 },
           { method: 'GET', pathPrefix: '/api/audit', priority: 100 },
           { method: 'GET', pathPrefix: '/api/platforms', priority: 100 },
           { method: 'GET', pathPrefix: '/api/users', priority: 10 },
+          { method: 'PUT', pathPrefix: '/api/users', priority: 10 },
+          { method: 'DELETE', pathPrefix: '/api/users', priority: 10 },
         ],
         users: [
           { method: 'GET', pathPrefix: '/api/networks', priority: 50 },
@@ -298,9 +334,8 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
           { method: 'PUT', pathPrefix: '/api/sandboxes', priority: 50 },
           { method: 'GET', pathPrefix: '/api/platforms', priority: 50 },
           { method: 'GET', pathPrefix: '/api/users', priority: 10 },
-          { method: 'GET', pathPrefix: '/api/images', priority: 50 },
-          { method: 'POST', pathPrefix: '/api/images', priority: 50 },
-          { method: 'DELETE', pathPrefix: '/api/images', priority: 50 },
+          { method: 'PUT', pathPrefix: '/api/users', priority: 10 },
+          { method: 'DELETE', pathPrefix: '/api/users', priority: 10 },
           { method: 'GET', pathPrefix: '/api/topology', priority: 50 },
           { method: 'POST', pathPrefix: '/api/topology', priority: 50 },
           { method: 'PUT', pathPrefix: '/api/topology', priority: 50 },
@@ -419,6 +454,17 @@ console.log(`[${new Date().toISOString()}] INFO: [init] Policy library seeded: $
       // ── Layer 2: inherits from custom-alpine + nginx ──
       const fullStackId = `tpl_${crypto.randomUUID()}`; ids.full_stack = fullStackId;
 
+      // ── 验证模板: nginx-arg — 展示 command/args 从种子模板穿透到容器的完整链路 ──
+      // Apply 后 `podman inspect <container>` 应看到:
+      //   Path="nginx", Args=["-g", "daemon off;"]
+      const nginxArgId = `tpl_${crypto.randomUUID()}`; ids.nginx_arg = nginxArgId;
+
+      // ── v2 容器组模板: demo-pod — docker-compose 风格, 使用 PodResolver + IContainerGroupProvider ──
+      // apiVersion: hbi-aad/v2, kind: ContainerGroup
+      // Apply 后创建包含 nginx + alpine 的 Podman pod，共享网络命名空间
+      const demoPodId = `tpl_${crypto.randomUUID()}`; ids.demo_pod = demoPodId;
+      const gpuInferenceId = `tpl_${crypto.randomUUID()}`; ids.gpu_inference = gpuInferenceId;
+
       const tpls: any[] = [
         {
           id: baseAlpineId, name: 'base-alpine',
@@ -427,7 +473,7 @@ console.log(`[${new Date().toISOString()}] INFO: [init] Policy library seeded: $
           dependsOn: [],
           container: {
             region: 'local',
-            clusterId: cid,
+            instanceId: cid,
             containers: [{
               name: 'alpine', image: 'docker.io/library/alpine:latest',
               command: ['sleep', '3600'],
@@ -446,15 +492,24 @@ console.log(`[${new Date().toISOString()}] INFO: [init] Policy library seeded: $
           singleton: true,
           container: {
             region: 'local',
-            clusterId: cid,
+            instanceId: cid,
             containers: [{
               name: 'nginx', image: 'docker.io/library/nginx:latest',
+              command: ['nginx'],
+              args: ['-g', 'daemon off;'],
               ports: [{ containerPort: 80, protocol: 'TCP' }],
               resources: { limits: { cpu: 0.5, memory: 128 } },
             }],
             restartPolicy: 'Always',
           },
           healthChecks: [{
+            name: 'nginx-alive',
+            target: 'container:nginx',
+            type: 'liveness',
+            probe: { httpGet: { path: '/', port: 80 } },
+            periodSeconds: 10,
+            initialDelaySeconds: 5,
+          }, {
             name: 'nginx-ready',
             target: 'container:nginx',
             type: 'readiness',
@@ -472,7 +527,7 @@ console.log(`[${new Date().toISOString()}] INFO: [init] Policy library seeded: $
           dependsOn: [],
           container: {
             region: 'local',
-            clusterId: cid,
+            instanceId: cid,
             containers: [{
               name: 'fedora', image: 'registry.fedoraproject.org/fedora:latest',
               command: ['sleep', '3600'],
@@ -480,7 +535,38 @@ console.log(`[${new Date().toISOString()}] INFO: [init] Policy library seeded: $
             }],
             restartPolicy: 'Never',
           },
+          healthChecks: [{
+            name: 'fedora-alive',
+            target: 'container:fedora',
+            type: 'liveness',
+            probe: { exec: { command: ['sh', '-c', 'kill -0 1'] } },
+            periodSeconds: 15,
+            initialDelaySeconds: 5,
+            failureThreshold: 3,
+          }],
           network: { publicIp: { allocate: false } },
+          createdAt: now, updatedAt: now,
+        },
+        // gpu-inference — GPU 推理工作负载示例
+        // 需要宿主机有 NVIDIA GPU + nvidia-container-toolkit
+        // WSL 下不可用，但可正常创建模板和沙箱（GPU 字段存在但 Stub 不绑定）
+        {
+          id: gpuInferenceId, name: 'gpu-inference',
+          description: 'GPU inference server — requires NVIDIA GPU (nvidia.com/gpu)',
+          apiVersion: 'hbi-aad/v1', kind: 'Container',
+          dependsOn: [],
+          container: {
+            region: 'local',
+            instanceId: cid,
+            containers: [{
+              name: 'inference', image: 'nvidia/cuda:12.2-runtime',
+              command: ['python', '-m', 'my_inference_server'],
+              resources: { limits: { cpu: 4, memory: 8192, gpu: 1 } },
+              ports: [{ containerPort: 8080, protocol: 'TCP' }],
+            }],
+            restartPolicy: 'Always',
+          },
+          network: { publicIp: { allocate: true } },
           createdAt: now, updatedAt: now,
         },
         {
@@ -491,7 +577,7 @@ console.log(`[${new Date().toISOString()}] INFO: [init] Policy library seeded: $
           singleton: true,
           container: {
             region: 'local',
-            clusterId: cid,
+            instanceId: cid,
             containers: [{
               name: 'minio', image: 'quay.io/minio/minio:latest',
               command: ['server', '/data', '--console-address', ':9001'],
@@ -526,7 +612,7 @@ console.log(`[${new Date().toISOString()}] INFO: [init] Policy library seeded: $
           dependsOn: [baseAlpineId],
           container: {
             region: 'local',
-            clusterId: cid,
+            instanceId: cid,
             containers: [{
               name: 'alpine',
               command: ['sh', '-c', 'while true; do echo "Hello from DAG"; curl -s http://localhost/health 2>/dev/null || echo "nginx not ready"; sleep 10; done'],
@@ -547,7 +633,7 @@ console.log(`[${new Date().toISOString()}] INFO: [init] Policy library seeded: $
           dependsOn: [customAlpineId, nginxId],
           container: {
             region: 'local',
-            clusterId: cid,
+            instanceId: cid,
             containers: [{
               name: 'alpine',
               env: [
@@ -559,10 +645,69 @@ console.log(`[${new Date().toISOString()}] INFO: [init] Policy library seeded: $
           network: { publicIp: { allocate: true } },
           createdAt: now, updatedAt: now,
         },
+        // nginx-arg — 验证 command/args 穿透链路；和 nginx 模板功能一致，仅作为参数传递的参考
+        {
+          id: nginxArgId, name: 'nginx-arg',
+          description: 'Nginx with explicit command+args — 验证模板参数穿透到容器',
+          apiVersion: 'hbi-aad/v1', kind: 'Container',
+          dependsOn: [],
+          singleton: true,
+          container: {
+            region: 'local',
+            instanceId: cid,
+            containers: [{
+              name: 'nginx-arg', image: 'docker.io/library/nginx:latest',
+              command: ['nginx'],
+              args: ['-g', 'daemon off;'],
+              ports: [{ containerPort: 80, protocol: 'TCP' }],
+              resources: { limits: { cpu: 0.5, memory: 128 } },
+            }],
+            restartPolicy: 'Always',
+          },
+          healthChecks: [{
+            name: 'nginx-arg-alive',
+            target: 'container:nginx-arg',
+            type: 'liveness',
+            probe: { httpGet: { path: '/', port: 80 } },
+            periodSeconds: 10,
+            initialDelaySeconds: 5,
+          }],
+          network: { publicIp: { allocate: false } },
+          createdAt: now, updatedAt: now,
+        },
+        // demo-pod — v2 容器组模板 (hbi-aad/v2, kind=ContainerGroup)
+        // 使用 PodResolver 解析，创建 Podman pod，共享 net/uts/ipc
+        // 验证: podman pod inspect <name> 看 Containers 字段
+        {
+          id: demoPodId, name: 'demo-pod',
+          description: 'v2 容器组 — nginx + alpine 共享网络 (docker-compose 风格)',
+          apiVersion: 'hbi-aad/v2', kind: 'ContainerGroup',
+          dependsOn: [],
+          podSpec: {
+            name: 'demo-pod',
+            region: 'local',
+            resources: { cpu: '1.0', memory: '512Mi' },
+            services: {
+              web: {
+                image: 'docker.io/library/nginx:latest',
+                command: ['nginx', '-g', 'daemon off;'],
+                ports: [{ containerPort: 80, protocol: 'TCP' }],
+                resources: { cpu: '0.5', memory: '128Mi' },
+              },
+              sidecar: {
+                image: 'docker.io/library/alpine:latest',
+                command: ['sh', '-c', 'while true; do echo "sidecar alive"; sleep 30; done'],
+                dependsOn: ['web'],
+                resources: { cpu: '0.25', memory: '64Mi' },
+              },
+            },
+          },
+          createdAt: now, updatedAt: now,
+        },
       ];
 
       // Write all templates + index
-      const allIds = [baseAlpineId, nginxId, customAlpineId, fullStackId, fedoraId, minioId];
+      const allIds = [baseAlpineId, nginxId, nginxArgId, customAlpineId, fullStackId, fedoraId, minioId, demoPodId, gpuInferenceId];
       for (const t of tpls) {
         await stores.atomic.set('sandbox-tpl:' + t.id, t, null);
       }
@@ -592,7 +737,6 @@ console.log(`[${new Date().toISOString()}] INFO: [init] Policy library seeded: $
   // 8. Inject context variables
   app.use('*', async (c, next) => {
     c.set('stores', stores);
-    c.set('logRouter', logRouter);
     c.set('providers', providers);
     c.set('eventBus', eventBus);
     c.set('eventLoop', eventLoop);
@@ -602,65 +746,6 @@ console.log(`[${new Date().toISOString()}] INFO: [init] Policy library seeded: $
 
   // 9. Dev-only: localhost → add user to the seed 'wheel' group (bypasses auth)
   // NOTE: This adds to wheel group ONLY. Does NOT elevate role to 'root'.
-  // The permission engine's checkRouteAccess requires DUAL verification:
-  //   wheel group membership AND role === 'root' (Linux sudo model).
-  // Role must come from first-user auto-promotion or be set by an existing root.
-  app.post('/__become-wheel', async (c) => {
-    const ip = c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ?? c.req.header('cf-connecting-ip');
-    // Both headers can be missing (e.g. direct connection without Cloudflare proxy).
-    // Treat missing IP as non-localhost — refuse the request.
-    if (!ip || (ip !== '127.0.0.1' && ip !== '::1' && !ip.startsWith('::ffff:127.'))) {
-      return c.json({ success: false, error: 'Only available from localhost' }, 403);
-    }
-    const atomic = c.var.stores.atomic;
-    const { userId } = await c.req.json<{ userId: string }>();
-    if (!userId) return c.json({ success: false, error: 'userId required' }, 400);
-
-    // Find the seed 'wheel' group
-    const ugEntry = await atomic.get<string[]>('usergroup:ids');
-    let wheelGroupId: string | null = null;
-    if (ugEntry) {
-      for (const id of ugEntry.value) {
-        const g = await atomic.get<any>('usergroup:' + id);
-        if (g?.value?.name === 'wheel') { wheelGroupId = id; break; }
-      }
-    }
-
-    if (!wheelGroupId) {
-      return c.json({ success: false, error: 'wheel group not found — seed data may not have been initialized' }, 500);
-    }
-
-    const now = Date.now();
-    const gEntry = await atomic.get<any>('usergroup:' + wheelGroupId);
-    if (!gEntry) {
-      return c.json({ success: false, error: 'wheel group not found in store' }, 500);
-    }
-
-    // Add user to wheel group if not already a member
-    if (!gEntry.value.memberIds.includes(userId)) {
-      gEntry.value.memberIds.push(userId);
-      gEntry.value.updatedAt = now;
-      await atomic.set('usergroup:' + wheelGroupId, gEntry.value, gEntry.version);
-    }
-
-    // Ensure user-level route ACL exists
-    const raEntry = await atomic.get<string[]>('routeacl:ids');
-    if (raEntry) {
-      let hasUserAcl = false;
-      for (const id of raEntry.value) {
-        const a = await atomic.get<any>('routeacl:' + id);
-        if (a?.value?.userId === userId) { hasUserAcl = true; break; }
-      }
-      if (!hasUserAcl) {
-        const aclId = `routeacl_${crypto.randomUUID()}`;
-        await atomic.set('routeacl:' + aclId, { id: aclId, method: '*', pathPrefix: '/api', matchType: 'prefix', effect: 'allow', userId, priority: 999, createdAt: now, updatedAt: now }, null);
-        await atomic.set('routeacl:ids', [...raEntry.value, aclId], raEntry.version);
-      }
-    }
-
-    console.log(`[${new Date().toISOString()}] INFO: [become-wheel] userId=${userId} added to wheel group`);
-    return c.json({ success: true, data: { message: 'Added to wheel group — user now has elevated privileges' } });
-  });
 
   // 10. Auth + route ACL middleware
   let permService: PermissionService | undefined;
@@ -677,6 +762,7 @@ console.log(`[${new Date().toISOString()}] INFO: [init] Policy library seeded: $
         '/api/users/login',
         '/api/users/login-info',
         '/api/users/no-password-login',
+        '/api/users/*/avatar',
         '/api/openapi.json',
       ],
     }));
@@ -740,6 +826,7 @@ console.log(`[${new Date().toISOString()}] INFO: [init] Policy library seeded: $
       return c.json({ id: event.id }, 202);
     })
     .get('/loop/status', (c) => c.json(eventLoop.status()))
+    .get('/loop/pending', (c) => c.json(eventLoop.pendingEvents()))
     .post('/loop/start', (c) => { eventLoop.start(); return c.json({ ok: true }); })
     .post('/loop/stop', (c) => { eventLoop.stop(); return c.json({ ok: true }); })
     .post('/loop/pause', (c) => { eventLoop.pause(); return c.json({ ok: true }); })
@@ -776,7 +863,7 @@ console.log(`[${new Date().toISOString()}] INFO: [init] Policy library seeded: $
   // 13. Auto-register features from generated registry
   // Mount at both /path and /path/ since Hono's route() doesn't normalize
   // trailing slashes — /api/users matches but /api/users/ does not.
-  const featureDeps: FeatureDeps = { stores, logRouter, providers, eventBus, eventLoop, audit, permissionChecker: permService as any };
+  const featureDeps: FeatureDeps = { stores, providers, eventBus, eventLoop, audit, permissionChecker: permService as any };
   // Mount each feature with and without trailing slash (Hono app.route() doesn't normalize)
   for (const feat of getFeatures()) {
     const router = feat.mount(featureDeps);
@@ -790,13 +877,11 @@ console.log(`[${new Date().toISOString()}] INFO: [init] Policy library seeded: $
   return {
     app,
     stores,
-    logRouter,
     providers,
     eventBus,
     eventLoop,
     dispose: async () => {
       eventLoop.stop();
-      logRouter.dispose();
     },
   };
 }

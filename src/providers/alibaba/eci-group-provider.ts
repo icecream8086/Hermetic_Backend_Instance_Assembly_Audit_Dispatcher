@@ -32,6 +32,11 @@ export class AlibabaEciContainerGroupProvider implements IContainerGroupProvider
     return this.#inner.create(input);
   }
 
+  async stopGroup(providerId: string): Promise<void> {
+    // ECI: stop = terminal（释放资源），等同于 delete
+    return this.deleteGroup(providerId);
+  }
+
   async deleteGroup(providerId: string): Promise<void> {
     // Best-effort: try all known regions to find and delete the group
     const regions = ['cn-hangzhou', 'cn-shanghai', 'cn-beijing', 'cn-shenzhen'];

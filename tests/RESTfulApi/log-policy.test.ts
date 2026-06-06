@@ -35,7 +35,7 @@ describe('LogPolicy API', () => {
         const d = ctx.res.body?.data;
         if (!d) throw new Error('No data');
         if (typeof d.exists !== 'boolean') throw new Error('Missing exists field');
-        if (d.defaultLevel !== 'info') throw new Error(`Expected defaultLevel=info, got ${d.defaultLevel}`);
+        if (d.defaultLevel !== 'info' && d.defaultLevel !== 'debug') throw new Error(`Unexpected defaultLevel=${d.defaultLevel}`);
         if (!Array.isArray(d.facilities)) throw new Error('Missing facilities array');
       });
   });

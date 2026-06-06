@@ -11,16 +11,16 @@ import { KernLevel } from '../audit/kern-level.ts';
 
 // ─── Built-in defaults (single source of truth) ───
 
+/** Default log level — override via LOG_LEVEL env var or NODE_ENV. */
+function defaultLevel(): string {
+  return process.env['LOG_LEVEL']?.toLowerCase()
+    ?? (process.env['NODE_ENV'] === 'production' ? 'info' : 'debug');
+}
+
 export const DEFAULT_POLICY: LogPolicy = {
-  defaultLevel: 'info',
-  auditLevel: 'notice',
-  facilities: [
-    { facility: 'user-service', level: 'info' },
-    { facility: 'perm', level: 'info' },
-    { facility: 'perm-audit', level: 'notice' },
-    { facility: 'authz', level: 'warning' },
-    { facility: 'sysgrp', level: 'info' },
-  ],
+  defaultLevel: defaultLevel(),
+  auditLevel: defaultLevel(),
+  facilities: [],
   updatedAt: Date.now(),
 };
 
@@ -77,6 +77,17 @@ function kernToName(level: KernLevel): string {
     case KernLevel.INFO: return 'info';
     case KernLevel.DEBUG: return 'debug';
     default: return 'info';
+  }
+}
+
+/**
+ * Gate debug console output behind the active log policy.
+ * Use this for noisy debug-print statements in providers and core modules.
+ * Only prints when the facility allows 'debug' level.
+ */
+export function debugLog(facility: string, message: string, ...args: unknown[]): void {
+  if (shouldLog(facility, 'debug')) {
+    console.error(`[debug][${facility}] ${message}`, ...args);
   }
 }
 

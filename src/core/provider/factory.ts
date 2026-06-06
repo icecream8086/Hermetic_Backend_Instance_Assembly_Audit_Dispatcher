@@ -40,6 +40,7 @@ import { CredentialService } from '../auth/credential.ts';
 import type { IAtomicStore } from '../store/interfaces.ts';
 import { InstanceProviderResolver } from './instance-resolver.ts';
 import type { InstanceId } from '../region/instance.ts';
+import { debugLog } from '../logger/log-policy.ts';
 
 interface AccountEntry {
   readonly name: string;
@@ -87,7 +88,7 @@ export function createProviderRegistry(
     }] as const] : []),
   ]);
 
-  console.error(`[debug] provider selection: config.container="${config.container}", PODMAN_ENDPOINT="${process.env['PODMAN_ENDPOINT']}"`);
+  debugLog('system', 'provider selection: config.container="%s", PODMAN_ENDPOINT="%s"', config.container, process.env['PODMAN_ENDPOINT']);
   const isAlibaba = config.container === 'alibaba' && accounts.length > 0;
   const def = isAlibaba
     ? typeEntries.get('alibaba')!

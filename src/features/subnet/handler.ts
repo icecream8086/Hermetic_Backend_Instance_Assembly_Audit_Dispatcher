@@ -21,7 +21,8 @@ export function createSubnetRouter(svc: ISubnetService): Hono<{ Variables: AppCo
       if (!body.name || !body.cidr || body.subnetPrefix === undefined || !body.instanceId) {
         return c.json(fail('VALIDATION_ERROR', 'name, cidr, subnetPrefix, and instanceId are required'), 400);
       }
-      const subnet = await svc.create(body);
+      const actorId = c.var?.currentUser?.id;
+      const subnet = await svc.create(body, actorId);
       return c.json(ok(subnet), 201);
     } catch (e: any) {
       return c.json(fail('CREATE_FAILED', e.message), 400);
@@ -39,7 +40,8 @@ export function createSubnetRouter(svc: ISubnetService): Hono<{ Variables: AppCo
     try {
       const id = c.req.param('id') as any;
       const body = await c.req.json<UpdateSubnetInput>();
-      const subnet = await svc.update(id, body);
+      const actorId = c.var?.currentUser?.id;
+      const subnet = await svc.update(id, body, actorId);
       return c.json(ok(subnet));
     } catch (e: any) {
       return c.json(fail('UPDATE_FAILED', e.message), e.status ?? 400);
@@ -49,7 +51,8 @@ export function createSubnetRouter(svc: ISubnetService): Hono<{ Variables: AppCo
   router.delete('/:id', async (c) => {
     try {
       const id = c.req.param('id') as any;
-      await svc.delete(id);
+      const actorId = c.var?.currentUser?.id;
+      await svc.delete(id, actorId);
       return c.json(ok(null));
     } catch (e: any) {
       return c.json(fail('DELETE_FAILED', e.message), e.status ?? 400);

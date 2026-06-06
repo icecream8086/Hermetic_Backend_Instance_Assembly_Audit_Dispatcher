@@ -1,6 +1,7 @@
 import type { RegionId, ZoneId } from '../../core/region/types.ts';
 import type { InstanceId } from '../../core/region/instance.ts';
-import type { ProbeSpec } from '../../core/provider/types.ts';
+import type { ProbeSpec, OciImageRef } from '../../core/provider/types.ts';
+import type { PodSpec } from '../sandbox/assembly/types.ts';
 
 // ═══════════════════════════════════════════
 // 模板信息 — 模板自身的元数据
@@ -31,7 +32,8 @@ export interface TemplateResourceBinding {
 /** 无状态容器定义 — 不包含 probes/storage/providerOverrides */
 export interface ContainerDef {
   readonly name: string;
-  readonly image: string;
+  /** 镜像引用 — 支持 name:tag（如 "nginx:latest"）、sha256 digest、完整 registry URL */
+  readonly image: OciImageRef;
   readonly command?: readonly string[] | undefined;
   readonly args?: readonly string[] | undefined;
   readonly env?: readonly { name: string; value?: string; valueFrom?: string }[] | undefined;
@@ -97,7 +99,10 @@ export interface NetworkSpec {
     readonly subnetIds?: readonly string[];
     readonly securityGroupId?: string;
   } | undefined;
+  /** 指定 IP 地址。设了则使用此 IP，不设则由系统从 subnetIds 自动分配。 */
+  readonly ipAddress?: string | undefined;
   // 未来: dns?, loadBalancer?, privateLink?
+  // bandwidth 已合并到 SecurityGroup，创建 sandbox 时通过 securityGroupId 自动继承
 }
 
 // ═══════════════════════════════════════════
@@ -181,6 +186,9 @@ export interface SandboxTemplate {
 
   // ── 扩展功能 ──
   readonly extensions?: TemplateExtensions | undefined;
+
+  // ── 容器组规格（kind=ContainerGroup 时使用，docker-compose 风格） ──
+  readonly podSpec?: PodSpec | undefined;
 }
 
 // ═══════════════════════════════════════════
@@ -205,6 +213,7 @@ export interface CreateTemplateInput {
   network?: NetworkSpec | undefined;
   extensions?: TemplateExtensions | undefined;
   dependsOn?: string[] | undefined;
+  podSpec?: PodSpec | undefined;
 }
 
 export interface UpdateTemplateInput {
@@ -223,4 +232,5 @@ export interface UpdateTemplateInput {
   network?: NetworkSpec | undefined;
   extensions?: TemplateExtensions | undefined;
   dependsOn?: string[] | null | undefined;
+  podSpec?: PodSpec | null | undefined;
 }

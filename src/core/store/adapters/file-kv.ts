@@ -114,6 +114,26 @@ export class FileKVAtomicStore implements IAtomicStore {
             return null;
           }
         },
+        getMany: async <V>(keys: string[]) => {
+          const results: (V | null)[] = [];
+          for (const key of keys) {
+            const dw = deferredWrites.get(key);
+            if (dw !== undefined) {
+              results.push(dw.value as V);
+              continue;
+            }
+            try {
+              const raw = await readFile(this.#filePath(key), 'utf-8');
+              const entry = JSON.parse(raw) as FileEntry<V>;
+              readSet.set(key, entry.metadata.v);
+              results.push(entry.value);
+            } catch {
+              readSet.set(key, null);
+              results.push(null);
+            }
+          }
+          return results;
+        },
         set: async <V>(key: string, value: V, ttlSeconds?: number) => {
           const newVersion = generateVersionId();
           deferredWrites.set(key, { value, version: newVersion, ...(ttlSeconds !== undefined && { ttlSeconds }) });

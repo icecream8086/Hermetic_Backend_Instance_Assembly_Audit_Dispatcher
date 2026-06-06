@@ -143,6 +143,7 @@ export interface ContainerRuntime {
 export interface NetworkInfo {
   readonly publicIp?: string;
   readonly privateIp?: string;
+  readonly ipAddress?: string;   // 用户指定的固定 IP（来自 subnet）
   readonly vpcId?: string;
   readonly subnetId?: string;
   readonly securityGroupId?: string;
@@ -198,9 +199,17 @@ export interface SandboxNetworkConfig {
   /** 引用 ComputeCluster，继承其 zone/networkDomain */
   readonly instanceId?: InstanceId | undefined;
   readonly subnetIds?: readonly string[] | undefined;
+  readonly ipAddress?: string | undefined;   // 手动指定固定 IP（不设则由系统自动分配）
   readonly securityGroupId?: string | undefined;
   readonly allocatePublicIp: boolean;
   readonly publicIpBandwidth?: number | undefined;
+  /** 带宽控制（Mbps），由系统自动从 SecurityGroup 继承 */
+  readonly bandwidth?: {
+    readonly egress?: number | undefined;
+    readonly ingress?: number | undefined;
+    readonly burst?: number | undefined;
+    readonly priority?: number | undefined;
+  } | undefined;
 }
 
 // ─── Sandbox ───

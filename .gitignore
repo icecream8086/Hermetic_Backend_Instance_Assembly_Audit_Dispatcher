@@ -15,3 +15,6 @@ coverage
 .data-test
 openapi.json
 openapi-summary.json
+deps/
+.cpuprof/
+note.txt

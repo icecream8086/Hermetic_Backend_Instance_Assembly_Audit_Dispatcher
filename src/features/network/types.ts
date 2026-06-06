@@ -11,6 +11,18 @@ export function generateSecurityGroupId(): SecurityGroupId {
 /** 安全组状态 */
 export type SecurityGroupStatus = 'Active' | 'Inactive' | 'Error';
 
+/** 带宽控制策略 — 参考阿里云 EIP 带宽与 QoS */
+export interface BandwidthControl {
+  /** 出方向带宽上限 (Mbps) */
+  readonly egress?: number | undefined;
+  /** 入方向带宽上限 (Mbps) */
+  readonly ingress?: number | undefined;
+  /** QoS 突发带宽 (Mbps)，超过后降速到 bandwidth */
+  readonly burst?: number | undefined;
+  /** QoS 优先级，数值越小优先级越高 */
+  readonly priority?: number | undefined;
+}
+
 /** 安全组实体 — 平台无关的防火墙规则边界。
  *  通过绑定 ComputeInstance 自动继承 provider/region。 */
 export interface SecurityGroup {
@@ -23,6 +35,9 @@ export interface SecurityGroup {
   readonly securityGroupId?: string | undefined;
   /** 网络策略规则 — 平台无关的入站/出站规则 */
   readonly rules?: readonly NetworkRule[] | undefined;
+
+  // ── 带宽控制 ──
+  readonly bandwidth?: BandwidthControl | undefined;
 
   // ── 绑定 ──
   readonly instanceId: InstanceId;
@@ -49,6 +64,7 @@ export interface CreateSecurityGroupInput {
   description?: string | undefined;
   securityGroupId?: string | undefined;
   rules?: readonly NetworkRule[] | undefined;
+  bandwidth?: BandwidthControl | undefined;
   instanceId: InstanceId;
   visibility?: 'public' | 'private' | undefined;
   userIds?: string[] | undefined;
@@ -60,6 +76,7 @@ export interface UpdateSecurityGroupInput {
   description?: string | null | undefined;
   securityGroupId?: string | null | undefined;
   rules?: readonly NetworkRule[] | null | undefined;
+  bandwidth?: BandwidthControl | null | undefined;
   visibility?: 'public' | 'private' | undefined;
   userIds?: string[] | null | undefined;
   userGroupIds?: string[] | null | undefined;

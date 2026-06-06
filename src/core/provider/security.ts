@@ -68,32 +68,28 @@ export function sanitizeContainerInput(input: CreateContainerGroupInput): Create
  * Wrap an IContainerProvider with input sanitization.
  * All containers' probes are cleaned before reaching the implementation.
  */
+/** Keys that need input sanitization wrapping (not plain passthrough). */
+const SANITIZE_KEYS = new Set(['create', 'update']);
+
 export function secureContainerProvider(inner: IContainerProvider): IContainerProvider {
-  const proxy: IContainerProvider = {
-    async create(input) {
+  // Build a proxy that sanitizes create/update and passthrough everything else.
+  const overrides: Record<string, Function> = {
+    create(input: CreateContainerGroupInput) {
       return inner.create(sanitizeContainerInput(input));
     },
-    describe(input) {
-      return inner.describe(input);
-    },
-    delete(input) {
-      return inner.delete(input);
-    },
-    getLogs(input) {
-      return inner.getLogs(input);
-    },
-    ...(inner.getStatus !== undefined ? {
-      getStatus(providerId: string) {
-        return inner.getStatus!(providerId);
-      },
-    } : {}),
-    ...(inner.update !== undefined ? {
-      update(providerId: string, input: Partial<CreateContainerGroupInput>) {
-        return inner.update!(providerId, sanitizeContainerInput(input as CreateContainerGroupInput));
-      },
-    } : {}),
   };
-  return proxy;
+  if (inner.update) {
+    overrides.update = (providerId: string, input: Partial<CreateContainerGroupInput>) =>
+      inner.update!(providerId, sanitizeContainerInput(input as CreateContainerGroupInput));
+  }
+
+  const proxy = Object.fromEntries(
+    (Object.keys(inner) as (keyof IContainerProvider)[])
+      .filter(k => !SANITIZE_KEYS.has(k as string))
+      .map(k => [k, (...args: unknown[]) => (inner[k] as Function)(...args)]),
+  ) as Record<string, Function>;
+
+  return { ...proxy, ...overrides } as unknown as IContainerProvider;
 }
 
 /**
@@ -103,6 +99,9 @@ export function secureContainerGroupProvider(inner: IContainerGroupProvider): IC
   return {
     async createGroup(input) {
       return inner.createGroup(sanitizeContainerInput(input));
+    },
+    stopGroup(providerId: string) {
+      return inner.stopGroup(providerId);
     },
     deleteGroup(providerId: string) {
       return inner.deleteGroup(providerId);

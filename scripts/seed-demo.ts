@@ -27,8 +27,8 @@ const reg = await api('POST', '/api/users/register', { email: 'admin@demo.test',
 const uid = reg.user.id;
 console.log('Root user:', uid);
 
-await api('POST', '/__become-wheel', { userId: uid });
-console.log('→ wheel');
+// __become-wheel removed — use direct DB or admin API for elevated access.
+console.log('→ wheel (deprecated)');
 
 // Layer 0: base-network
 const l0 = await api('POST', '/api/templates/', {

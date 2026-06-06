@@ -55,6 +55,21 @@ export class CloudflareKVAtomicStore implements IAtomicStore {
         readSet.set(key, version);
         return result.value ?? null;
       },
+      getMany: async <V>(keys: string[]) => {
+        const results: (V | null)[] = [];
+        for (const key of keys) {
+          const dw = deferredWrites.get(key);
+          if (dw !== undefined) {
+            results.push(dw.value as V);
+            continue;
+          }
+          const result = await this.kv.getWithMetadata<V>(key, 'json');
+          const version = (result.metadata as { v?: string } | null)?.v ?? null;
+          readSet.set(key, version);
+          results.push(result.value ?? null);
+        }
+        return results;
+      },
       set: async <V>(key: string, value: V, ttlSeconds?: number) => {
         const newVersion = generateVersionId();
         deferredWrites.set(key, { value, version: newVersion, ...(ttlSeconds !== undefined && { ttlSeconds }) });

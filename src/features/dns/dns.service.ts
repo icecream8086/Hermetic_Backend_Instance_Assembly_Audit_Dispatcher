@@ -25,7 +25,7 @@ export class DnsService implements IDnsService {
     private readonly audit?: IAuditWriter,
   ) {}
 
-  async syncRecord(input: DnsSyncInput): Promise<DnsRecord> {
+  async syncRecord(input: DnsSyncInput, actorId?: string): Promise<DnsRecord> {
     const { domain, type, value, ttl, proxied, zoneId, id } = input;
 
     if (type !== 'A' && type !== 'CNAME') {
@@ -65,6 +65,7 @@ export class DnsService implements IDnsService {
       facility: FACILITY,
       level: LogLevel.INFO,
       message: `DNS record ${type} ${domain} → ${value}`,
+      actorId,
       metadata: { dnsRecordId: id as string, domain, type, value },
     });
 
@@ -72,13 +73,14 @@ export class DnsService implements IDnsService {
       level: KernLevel.INFO,
       facility: FACILITY,
       message: `DNS record synced — ${type} ${domain} → ${value}`,
+      actorId,
       metadata: { eventType: 'dns.synced', dnsRecordId: id as string, domain, type, value },
     });
 
     return record;
   }
 
-  async deleteRecord(id: DnsRecordId): Promise<void> {
+  async deleteRecord(id: DnsRecordId, actorId?: string): Promise<void> {
     const entry = await this.atomic.get<DnsRecord>(`${KEY_PREFIX}${id}`);
     if (!entry) return;
 
@@ -93,6 +95,7 @@ export class DnsService implements IDnsService {
       facility: FACILITY,
       level: LogLevel.INFO,
       message: `DNS record deleted ${entry.value.domain}`,
+      actorId,
       metadata: { dnsRecordId: id as string, domain: entry.value.domain },
     });
 
@@ -100,6 +103,7 @@ export class DnsService implements IDnsService {
       level: KernLevel.INFO,
       facility: FACILITY,
       message: `DNS record deleted — ${entry.value.domain}`,
+      actorId,
       metadata: { eventType: 'dns.deleted', dnsRecordId: id as string, domain: entry.value.domain },
     });
   }

@@ -14,7 +14,7 @@ import type { IContainerProvider, IContainerGroupProvider, IImageProvider, INetw
 import type { IS3Provider } from './s3.ts';
 import type { ComputeInstance } from '../region/instance.ts';
 import type { InstanceService, InstanceId } from '../region/instance.ts';
-import type { CredentialService } from '../auth/credential.ts';
+import type { CredentialService, RegistryCredential } from '../auth/credential.ts';
 import { secureContainerProvider, secureContainerGroupProvider } from './security.ts';
 import { PodmanContainerProvider } from '../../providers/podman/podman-provider.ts';
 import { PodmanImageProvider } from '../../providers/podman/podman-image.ts';
@@ -90,11 +90,27 @@ export class InstanceProviderResolver {
 
   // ─── Provider factory methods ───
 
-  async #resolveCredential(credentialRef?: string): Promise<{ accessKeyId: string | undefined; accessKeySecret: string | undefined }> {
+  async #resolveCredential(credentialRef?: string): Promise<{
+    type?: string | undefined;
+    accessKeyId: string | undefined;
+    accessKeySecret: string | undefined;
+    token?: string | undefined;
+    username?: string | undefined;
+    password?: string | undefined;
+    registryCredentials?: readonly RegistryCredential[] | undefined;
+  }> {
     if (!credentialRef) return { accessKeyId: undefined, accessKeySecret: undefined };
     const cred = await this.credentialService.findByName(credentialRef);
     if (!cred) return { accessKeyId: undefined, accessKeySecret: undefined };
-    return { accessKeyId: cred.accessKeyId, accessKeySecret: cred.accessKeySecret };
+    return {
+      type: cred.type,
+      accessKeyId: cred.accessKeyId,
+      accessKeySecret: cred.accessKeySecret,
+      token: cred.token,
+      username: cred.username,
+      password: cred.password,
+      registryCredentials: cred.registryCredentials,
+    };
   }
 
   async #createContainerProvider(instance: ComputeInstance): Promise<IContainerProvider> {
@@ -122,6 +138,8 @@ export class InstanceProviderResolver {
         const cred = await this.#resolveCredential(instance.credentialRef);
         return new AlibabaEciImageProvider(
           cred.accessKeyId ?? '', cred.accessKeySecret ?? '', instance.endpoint,
+          'cn-hangzhou',
+          cred.registryCredentials as Array<{ server: string; userName: string; password: string }> | undefined,
         );
       }
       case 'stub':

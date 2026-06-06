@@ -6,3 +6,5 @@ export type { RegionBucket, RegionBucketType, CreateBucketInput, UpdateBucketInp
 export { BucketService } from './bucket.ts';
 export type { ComputeInstance, InstanceCapabilities, InstanceCapacity, InstanceStatus, InstanceId, CreateInstanceInput, UpdateInstanceInput } from './instance.ts';
 export { InstanceService, generateInstanceId } from './instance.ts';
+export type { ImageRepository, RegistryCredential as ImageRegistryCredential, CreateImageInput, UpdateImageInput } from './image.ts';
+export { ImageRepositoryService } from './image.ts';

@@ -12,6 +12,9 @@ import { applyTemplate } from './applicator.ts';
 import { SandboxService } from '../sandbox/sandbox.service.ts';
 import { ConsoleLogger } from '../../core/logger/console-logger.ts';
 import { SandboxStatus } from '../sandbox/types.ts';
+import { PodResolver } from '../sandbox/assembly/pod-resolver.ts';
+import type { PodSpec } from '../sandbox/assembly/types.ts';
+import { UserRole } from '../users/types.ts';
 import { createAtomicNetworkResolver } from '../../core/network/resolver.ts';
 import { InstanceService } from '../../core/region/instance.ts';
 
@@ -33,23 +36,38 @@ function genId(): string { return `tpl_${crypto.randomUUID()}`; }
 
 /** Check if the current user has root-level privileges. */
 function isUserRoot(user: { role?: string } | undefined): boolean {
-  return user?.role === 'root' || user?.role === 'Operator' || user?.role === 'wheel';
+  return user?.role === UserRole.Root || user?.role === UserRole.Operator;
 }
 
 // ─── DAG resolver ───
 
 function resolveDag(tpls: SandboxTemplate[], seedIds: string[]): SandboxTemplate[] {
   const visited = new Set<string>();
+  const inStack = new Set<string>();
   const result: SandboxTemplate[] = [];
-  const stack = [...seedIds];
+  const stack: Array<{ id: string; phase: 'enter' | 'exit' }> = seedIds.map(id => ({ id, phase: 'enter' as const }));
+
   while (stack.length) {
-    const id = stack.pop()!;
-    if (visited.has(id)) continue;
-    visited.add(id);
-    const tpl = tpls.find(t => t.id === id);
+    const frame = stack.pop()!;
+    if (frame.phase === 'exit') {
+      visited.add(frame.id);
+      inStack.delete(frame.id);
+      continue;
+    }
+    if (inStack.has(frame.id)) {
+      throw Object.assign(new Error(`Cycle detected: template "${frame.id}" depends on itself (directly or transitively)`), { status: 400 });
+    }
+    if (visited.has(frame.id)) continue;
+    inStack.add(frame.id);
+    const tpl = tpls.find(t => t.id === frame.id);
     if (tpl) {
       result.push(tpl);
-      if (tpl.dependsOn) stack.push(...tpl.dependsOn);
+      if (tpl.dependsOn) {
+        stack.push({ id: frame.id, phase: 'exit' });
+        for (const dep of tpl.dependsOn) {
+          stack.push({ id: dep, phase: 'enter' });
+        }
+      }
     }
   }
   return result;
@@ -117,6 +135,7 @@ async function resolveTemplate(atomic: IAtomicStore, id: string): Promise<Sandbo
       ...(t.healthChecks ? { healthChecks: t.healthChecks } : {}),
       ...(t.network ? { network: t.network } : {}),
       ...(t.extensions ? { extensions: t.extensions } : {}),
+      ...(t.podSpec ? { podSpec: t.podSpec } : {}),
     });
   }
   // Keep original metadata, merge runtime fields
@@ -254,6 +273,31 @@ async function claimResourceBinding(
   await atomic.set(key, tpl.id, null);
 }
 
+async function releaseResourceBinding(atomic: IAtomicStore, tpl: SandboxTemplate): Promise<void> {
+  const binding = tpl.resourceBinding;
+  if (!binding?.domain || !binding.port) return;
+  const key = bindingKey(binding.domain, binding.port);
+  const entry = await atomic.get<string>(key);
+  if (entry) await atomic.set(key, null, entry.version).catch(() => {});
+}
+
+async function releaseInstanceSlot(atomic: IAtomicStore, tpl: SandboxTemplate, _userId: string): Promise<void> {
+  if (!tpl.singleton && !tpl.instanceLimit) return;
+  const baseKey = lockKey(tpl.name);
+  const entry = await atomic.get<number>(baseKey);
+  if (entry && entry.value > 0) {
+    await atomic.set(baseKey, entry.value - 1, entry.version).catch(() => {});
+  }
+  // Also release per-user counter if applicable
+  if (tpl.instanceLimit?.type === 'perUser') {
+    const userKey = lockKey(tpl.name, ':' + _userId);
+    const uEntry = await atomic.get<number>(userKey);
+    if (uEntry && uEntry.value > 0) {
+      await atomic.set(userKey, uEntry.value - 1, uEntry.version).catch(() => {});
+    }
+  }
+}
+
 function canAccessTemplate(tpl: SandboxTemplate, user: { id: string; role?: string } | undefined): boolean {
   if (isUserRoot(user)) return true;
   if (!tpl.visibility || tpl.visibility === TemplateVisibility.PUBLIC) return true;
@@ -305,6 +349,7 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
       healthChecks: body.healthChecks,
       network: body.network,
       extensions: body.extensions,
+      podSpec: body.podSpec,
     };
     await atomic.set(PREFIX + tpl.id, tpl, null);
     const idx = await atomic.get<string[]>(INDEX_KEY);
@@ -364,8 +409,9 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
   // POST /:id/apply — apply a template to create a sandbox
   router.post('/:id/apply', async (c) => {
     { const r = await requirePerm(c, permissionChecker, 'create', 'sandbox'); if (r) return r; }
+    let resolved;  // hoisted for catch-block release
     try {
-      const resolved = await resolveTemplate(atomic, c.req.param('id'));
+      resolved = await resolveTemplate(atomic, c.req.param('id'));
       const body: any = await c.req.json().catch(() => ({}));
 
       const user = (c as any).var?.currentUser as { id: string; role?: string } | undefined;
@@ -377,7 +423,22 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
       await claimInstanceSlot(atomic, resolved, user?.id ?? 'anonymous');
       await claimResourceBinding(atomic, resolved);
 
-      // Provider selection: body.provider overrides template providerOverrides
+      // v2: ContainerGroup → PodResolver
+      if (resolved.kind === 'ContainerGroup' && resolved.podSpec) {
+        const groupProvider = providers?.groupContainer;
+        if (!groupProvider) return c.json(fail('NOT_CONFIGURED', 'Container group provider not available'), 501);
+        const resolver = new PodResolver(groupProvider);
+        const result = await resolver.apply(resolved.podSpec as PodSpec);
+        c.var.audit?.write({
+          level: KernLevel.NOTICE,
+          facility: 'template',
+          message: `Template applied (v2 pod) — ${resolved.name}`,
+          metadata: { eventType: 'template.applied.v2', templateId: resolved.id, actorId: user?.id },
+        });
+        return c.json(ok(result), 201);
+      }
+
+      // v1: existing single-container path
       const providerName = body.provider;
       let svc = sandboxService;
       if (providerName && providers) {
@@ -400,6 +461,11 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
       return c.json(ok(sandbox), 201);
     } catch (e: any) {
       console.error(`[debug] template apply failed:`, { message: e.message, stack: e.stack, status: e.status, templateId: c.req.param('id') });
+      // Release claimed resources if template resolution succeeded before the failure
+      if (resolved) {
+        await releaseInstanceSlot(atomic, resolved, (c as any).var?.currentUser?.id ?? 'anonymous').catch(() => {});
+        await releaseResourceBinding(atomic, resolved).catch(() => {});
+      }
       return c.json(fail(e.status === 404 ? 'TEMPLATE_NOT_FOUND' : 'APPLY_FAILED', e.message), e.status ?? 500);
     }
   });
@@ -429,6 +495,7 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
       ...(body.network !== undefined ? { network: body.network } : {}),
       ...(body.extensions !== undefined ? { extensions: body.extensions } : {}),
       ...(body.dependsOn !== undefined ? { dependsOn: body.dependsOn ?? [] } : {}),
+      ...(body.podSpec !== undefined ? { podSpec: body.podSpec ?? undefined } : {}),
       updatedAt: Date.now(),
     };
     await atomic.set(PREFIX + updated.id, updated, entry.version);
@@ -467,11 +534,11 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
 }
 
 export const templateRouteMeta: RouteMeta[] = [
-  { method: 'POST', path: '/', description: '创建沙箱模板 — container 定义无状态容器，healthChecks 独立配置健康检查，providerOverrides 传递厂商特有参数，instanceLimit 设置实例数量限制', requestBody: { name: 'mc-server', container: { region: 'cn-hangzhou', containers: [{ name: 'app', image: 'nginx' }] }, instanceLimit: { type: 'fixed', max: 1 } }, responseDescription: 'SandboxTemplate' },
+  { method: 'POST', path: '/', description: '创建模板 — v1 单容器 (kind=Container + container) / v2 容器组 (kind=ContainerGroup + podSpec, docker-compose 风格)', requestBody: { name: 'my-pod', apiVersion: 'hbi-aad/v2', kind: 'ContainerGroup', podSpec: { name: 'my-pod', region: 'local', services: { web: { image: 'nginx:latest' } } } }, responseDescription: 'SandboxTemplate' },
   { method: 'GET', path: '/', description: '列出所有模板（按 visibility 过滤 — private 模板仅创建者可见）', responseDescription: 'SandboxTemplate[]' },
   { method: 'GET', path: '/:id', description: '按 ID 获取模板', responseDescription: 'SandboxTemplate' },
   { method: 'GET', path: '/:id/resolved', description: '获取模板解析结果 — 合并 DAG 继承链后完整的 spec', responseDescription: 'SandboxTemplate' },
-  { method: 'POST', path: '/:id/apply', description: '应用模板创建沙箱 — 检查 visibility、instanceLimit（基于模板名的实时运行计数锁）、resourceBinding（domain:port 排他）', requestBody: { name: 'my-sandbox' }, responseDescription: 'Sandbox' },
+  { method: 'POST', path: '/:id/apply', description: '应用模板 — v1 创建沙箱 / v2 创建容器组 (PodResolver → IContainerGroupProvider)', requestBody: { name: 'my-sandbox' }, responseDescription: 'Sandbox | { providerId }' },
   { method: 'PUT', path: '/:id', description: '更新模板', requestBody: { name: 'updated-name' }, responseDescription: 'SandboxTemplate' },
   { method: 'DELETE', path: '/:id', description: '删除模板', responseDescription: '{ ok: true }' },
 ];

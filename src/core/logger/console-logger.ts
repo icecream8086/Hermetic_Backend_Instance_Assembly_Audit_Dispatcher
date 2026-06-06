@@ -4,6 +4,7 @@ import type { LogInput, LogEntry, LogQuery } from './types.ts';
 import type { LogId } from '../brand.ts';
 import { generateLogId } from '../brand.ts';
 import { shouldLog } from './log-policy.ts';
+import { formatDmesgLine } from '../utils/dmesg.ts';
 
 /** Minimal console logger for local development. */
 export class ConsoleLogger implements ILogger {
@@ -49,9 +50,7 @@ export class ConsoleLogger implements ILogger {
   async dispose(): Promise<void> { this.#entries = []; }
 
   #print(entry: LogEntry): void {
-    const ts = new Date(entry.timestamp).toISOString();
-    const level = entry.level.toUpperCase();
-    const actor = entry.metadata?.actorId ? ` (actor=${entry.metadata.actorId})` : '';
-    console.log(`[${ts}] ${level}: [${entry.facility}] ${entry.message}${actor}`);
+    const actorId = entry.actorId ?? (entry.metadata?.actorId as string | undefined);
+    console.log(formatDmesgLine(entry.message, actorId));
   }
 }

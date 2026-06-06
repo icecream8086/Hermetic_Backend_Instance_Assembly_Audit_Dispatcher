@@ -133,7 +133,7 @@ export class PodResolver {
     return {
       name: spec.name,
       region: spec.region ? createRegionId(spec.region) : LOCAL_REGION,
-      ...(spec.instanceId ? { clusterId: spec.instanceId } : {}),
+      ...(spec.instanceId ? { instanceId: spec.instanceId } : {}),
       cpu: totalCpu,
       memory: totalMem,
       spotStrategy: 'None',

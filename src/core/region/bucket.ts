@@ -25,14 +25,17 @@ export interface RegionBucket {
 export interface CreateBucketInput {
   name: string;
   bucketType: RegionBucketType;
-  /** 绑定的计算实例 ID，platform/region/endpoint/credentialRef 从实例自动继承 */
+  /** 绑定的计算实例 ID，platform/region/endpoint 从实例自动继承 */
   instanceId: string;
+  /** 凭证引用，有则用此值，无则从计算实例继承 */
+  credentialRef?: string | undefined;
 }
 
 export interface UpdateBucketInput {
   name?: string | undefined;
   bucketType?: RegionBucketType | undefined;
   instanceId?: string | undefined;
+  credentialRef?: string | null | undefined;
   status?: 'Active' | 'Inactive' | undefined;
 }
 
@@ -67,7 +70,7 @@ export class BucketService {
       region: inst.region,
       endpoint: inst.endpoint,
       bucketType: input.bucketType,
-      credentialRef: inst.credentialRef ?? '',
+      credentialRef: input.credentialRef ?? inst.credentialRef ?? '',
       instanceId: input.instanceId as InstanceId,
       status: 'Active',
       createdAt: now,
@@ -103,6 +106,7 @@ export class BucketService {
       ...(input.name !== undefined ? { name: input.name } : {}),
       ...(input.bucketType !== undefined ? { bucketType: input.bucketType } : {}),
       ...(input.instanceId !== undefined ? { instanceId: input.instanceId as InstanceId } : {}),
+      ...(input.credentialRef !== undefined ? { credentialRef: input.credentialRef ?? '' } : {}),
       ...(input.status !== undefined ? { status: input.status } : {}),
       updatedAt: Date.now(),
     };

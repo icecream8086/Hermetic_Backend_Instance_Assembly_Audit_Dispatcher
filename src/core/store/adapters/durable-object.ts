@@ -55,9 +55,10 @@ export class AtomicStoreDO implements DurableObject {
       this.ctx.storage.setAlarm(Date.now() + IDLE_ALARM_MS).catch(() => {});
     }
 
-    const { op, key, value, expectedVersion, ttlSeconds, txnOps } = await request.json() as {
-      op: 'get' | 'set' | 'transact';
+    const { op, key, keys, value, expectedVersion, ttlSeconds, txnOps } = await request.json() as {
+      op: 'get' | 'set' | 'transact' | 'batchGet';
       key?: string;
+      keys?: string[];
       value?: unknown;
       expectedVersion?: string | null;
       ttlSeconds?: number;
@@ -116,6 +117,36 @@ export class AtomicStoreDO implements DurableObject {
           }
 
           return Response.json({ version: newVersion });
+        }
+
+        case 'batchGet': {
+          if (!keys || keys.length === 0) {
+            return Response.json({ error: 'Missing keys for batchGet operation' }, { status: 400 });
+          }
+          const stored = await this.ctx.storage.get<StoredValue>(keys);
+          const now = Date.now();
+          const expiredKeys: string[] = [];
+          const results: Array<{ key: string; value: unknown; version: string | null }> = [];
+
+          for (const k of keys) {
+            const entry = stored.get(k);
+            if (!entry) {
+              results.push({ key: k, value: null, version: null });
+              continue;
+            }
+            if (entry._expiresAt !== null && entry._expiresAt <= now) {
+              expiredKeys.push(k, markerKey(entry._expiresAt, k));
+              results.push({ key: k, value: null, version: null });
+              continue;
+            }
+            results.push({ key: k, value: entry.v, version: entry._ver });
+          }
+
+          if (expiredKeys.length > 0) {
+            await this.ctx.storage.delete(expiredKeys);
+          }
+
+          return Response.json({ results });
         }
 
         case 'transact': {
@@ -275,19 +306,85 @@ export class DurableObjectAtomicStore implements IAtomicStore {
     const readSet = new Map<string, string | null>();
     const deferredWrites: Array<{ key: string; value: unknown }> = [];
 
+    // ── 生产者-消费者：延迟批量读 ──
+    interface ReadRequest {
+      key: string;
+      resolve: (v: unknown) => void;
+    }
+    let pendingReads: ReadRequest[] = [];
+    let flushScheduled = false;
+
+    const flushPendingReads = async (): Promise<void> => {
+      if (pendingReads.length === 0) return;
+      const batch = pendingReads;
+      pendingReads = [];
+      flushScheduled = false;
+
+      const keys = [...new Set(batch.map(r => r.key))];
+      const firstKey = keys[0]!;
+      const resp = await this.#stubForKey(firstKey).fetch('https://do/op', {
+        method: 'POST',
+        body: JSON.stringify({ op: 'batchGet', keys }),
+      });
+      const body = await resp.json() as { results: Array<{ key: string; value: unknown; version: string | null }> };
+
+      // Build lookup and record versions for OCC (null = phantom read tracking)
+      const lookup = new Map<string, unknown>();
+      for (const r of body.results) {
+        lookup.set(r.key, r.value);
+        readSet.set(r.key, r.version);
+      }
+
+      // Resolve all pending promises
+      for (const req of batch) {
+        req.resolve(lookup.get(req.key) ?? null);
+      }
+    };
+
     const txn: IStoreTransaction = {
       get: async <V>(key: string) => {
+        // 1) Read-your-writes: check locally deferred writes first
         const local = deferredWrites.find(w => w.key === key);
         if (local !== undefined) return local.value as V;
 
-        const resp = await this.#stubForKey(key).fetch('https://do/op', {
-          method: 'POST',
-          body: JSON.stringify({ op: 'get', key }),
+        // 2) Register deferred read, schedule batch flush.
+        //    Duplicate keys are fine: the flush dedupes the DO fetch
+        //    but resolves each pending entry individually.
+        return new Promise<V>(resolve => {
+          pendingReads.push({ key, resolve: resolve as (v: unknown) => void });
+
+          if (!flushScheduled) {
+            flushScheduled = true;
+            queueMicrotask(() => { void flushPendingReads(); });
+          }
         });
-        const body = await resp.json() as { value: V | null; version: string | null };
-        if (body.version === undefined) return null;
-        readSet.set(key, body.version);
-        return body.value ?? null;
+      },
+      getMany: async <V>(keys: string[]) => {
+        // Check local writes first
+        const localResults: (V | null)[] = [];
+        const remoteKeys: string[] = [];
+        for (const key of keys) {
+          const local = deferredWrites.find(w => w.key === key);
+          if (local !== undefined) {
+            localResults.push(local.value as V);
+          } else {
+            localResults.push(null as V | null);
+            remoteKeys.push(key);
+          }
+        }
+        if (remoteKeys.length === 0) return localResults;
+
+        const resp = await this.#stubForKey(remoteKeys[0]!).fetch('https://do/op', {
+          method: 'POST',
+          body: JSON.stringify({ op: 'batchGet', keys: remoteKeys }),
+        });
+        const body = await resp.json() as { results: Array<{ key: string; value: unknown; version: string | null }> };
+        for (const r of body.results) {
+          readSet.set(r.key, r.version);
+          const idx = keys.indexOf(r.key);
+          if (idx !== -1) localResults[idx] = (r.value ?? null) as V | null;
+        }
+        return localResults;
       },
       set: async <V>(key: string, value: V, _ttlSeconds?: number) => {
         deferredWrites.push({ key, value });
@@ -295,6 +392,11 @@ export class DurableObjectAtomicStore implements IAtomicStore {
     };
 
     const userResult = await action(txn);
+
+    // Flush any reads that never got flushed (e.g. action didn't await the last get)
+    if (pendingReads.length > 0) {
+      await flushPendingReads();
+    }
 
     if (deferredWrites.length > 0) {
       const txnOps: Array<{
@@ -311,9 +413,17 @@ export class DurableObjectAtomicStore implements IAtomicStore {
         txnOps.push({ op: 'set', key: w.key, value: w.value });
       }
 
-      // Route to the correct DO shard: all keys in a transaction share a
-      // common prefix (the event bus only transacts on events:pending).
-      // Use the first read or write key to determine the shard.
+      // Validate all keys share the same shard prefix.
+      // Keys without ':' are treated as global (_global prefix).
+      const allKeys = [...readSet.keys(), ...deferredWrites.map(w => w.key)];
+      const prefixes = new Set(allKeys.map(k => { const i = k.indexOf(':'); return i === -1 ? '_global' : k.slice(0, i); }));
+      if (prefixes.size > 1) {
+        throw new Error(
+          `Cross-shard transaction: keys span multiple prefixes ${[...prefixes].join(', ')}. ` +
+          'All keys in a transaction must share the same key prefix (e.g. all "user:*" or all "sandbox:*").',
+        );
+      }
+
       const firstKey = readSet.keys().next().value ?? deferredWrites[0]!.key;
       const resp = await this.#stubForKey(firstKey).fetch('https://do/op', {
         method: 'POST',

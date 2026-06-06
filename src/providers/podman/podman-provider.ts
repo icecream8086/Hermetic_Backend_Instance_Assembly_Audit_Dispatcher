@@ -17,6 +17,7 @@ import type {
   CreateContainerGroupInput,
 } from '../../core/provider/index.ts';
 import type { ContainerGroupRuntime } from '../../core/provider/index.ts';
+import { debugLog } from '../../core/logger/log-policy.ts';
 
 interface PodmanContainer {
   Id: string;
@@ -51,6 +52,7 @@ interface PodmanInspectResult {
     FinishedAt?: string;
     ExitCode?: number;
     Error?: string;
+    Health?: { Status?: string; FailingStreak?: number };
   };
   Config: {
     Image: string;
@@ -136,6 +138,9 @@ export class PodmanContainerProvider implements IContainerProvider {
     if (c?.resources?.limits) {
       hostConfig.Memory = (c.resources.limits.memory ?? 0) * 1024 * 1024;
       hostConfig.NanoCpus = (c.resources.limits.cpu ?? 0) * 1e9;
+      if (c.resources.limits.gpu && c.resources.limits.gpu > 0) {
+        hostConfig.DeviceRequests = [{ Driver: 'nvidia', Count: c.resources.limits.gpu, Capabilities: [['gpu']] }];
+      }
     }
     // Volume mounts via Binds (local host paths)
     if (input.volumes?.length && c?.volumeMounts) {
@@ -163,9 +168,10 @@ export class PodmanContainerProvider implements IContainerProvider {
       ...(Object.keys(hostConfig).length > 0 ? { HostConfig: hostConfig } : {}),
     };
 
-    const nameParam = c?.name ? `?name=${encodeURIComponent(c.name)}` : '';
-    // [debug] Podman create target
-    console.error(`[debug] Podman create: apiBase=${this.#apiBase}, nameParam=${nameParam}, image=${c?.image}`);
+    // No container name — Podman auto-assigns a unique one.
+    // We always refer to containers by their ID (providerId), so the name is irrelevant.
+    const nameParam = '';
+    debugLog('sandbox-service', 'Podman create: apiBase=%s, image=%s', this.#apiBase, c?.image);
     let resp: Response;
     try {
       resp = await fetch(`${this.#apiBase}/containers/create${nameParam}`, {
@@ -174,7 +180,7 @@ export class PodmanContainerProvider implements IContainerProvider {
         body: JSON.stringify(body),
       });
     } catch (fetchErr: unknown) {
-      console.error(`[debug] Podman fetch failed:`, { apiBase: this.#apiBase, error: fetchErr instanceof Error ? fetchErr.message : String(fetchErr), stack: fetchErr instanceof Error ? fetchErr.stack : undefined });
+      debugLog('sandbox-service', 'Podman fetch failed: %O', { apiBase: this.#apiBase, error: fetchErr instanceof Error ? fetchErr.message : String(fetchErr), stack: fetchErr instanceof Error ? fetchErr.stack : undefined });
       throw new Error(`Podman connection failed to ${this.#apiBase}: ${fetchErr instanceof Error ? fetchErr.message : String(fetchErr)}`);
     }
     if (!resp.ok) {
@@ -254,6 +260,126 @@ export class PodmanContainerProvider implements IContainerProvider {
     return this.#toRuntime(providerId);
   }
 
+  // ─── Container lifecycle operations ───
+
+  async stop(providerId: string, timeoutSeconds?: number): Promise<void> {
+    let url = `${this.#apiBase}/containers/${encodeURIComponent(providerId)}/stop`;
+    if (timeoutSeconds !== undefined) url += `?t=${timeoutSeconds}`;
+    const resp = await this.#fetch(url, { method: 'POST' });
+    if (!resp) throw new Error('Podman daemon unreachable');
+    if (resp.status === 304) return; // already stopped
+    if (!resp.ok) throw new Error(`Podman stop failed (${resp.status})`);
+  }
+
+  async start(providerId: string): Promise<void> {
+    const url = `${this.#apiBase}/containers/${encodeURIComponent(providerId)}/start`;
+    const resp = await this.#fetch(url, { method: 'POST' });
+    if (!resp) throw new Error('Podman daemon unreachable');
+    if (!resp.ok) throw new Error(`Podman start failed (${resp.status})`);
+  }
+
+  async restart(providerId: string, timeoutSeconds?: number): Promise<void> {
+    let url = `${this.#apiBase}/containers/${encodeURIComponent(providerId)}/restart`;
+    if (timeoutSeconds !== undefined) url += `?t=${timeoutSeconds}`;
+    const resp = await this.#fetch(url, { method: 'POST' });
+    if (!resp) throw new Error('Podman daemon unreachable');
+    if (!resp.ok) throw new Error(`Podman restart failed (${resp.status})`);
+  }
+
+  async kill(providerId: string, signal?: string): Promise<void> {
+    let url = `${this.#apiBase}/containers/${encodeURIComponent(providerId)}/kill`;
+    if (signal) url += `?signal=${encodeURIComponent(signal)}`;
+    const resp = await this.#fetch(url, { method: 'POST' });
+    if (!resp) throw new Error('Podman daemon unreachable');
+    if (resp.status === 304) return; // already stopped/killed
+    if (!resp.ok) throw new Error(`Podman kill failed (${resp.status})`);
+  }
+
+  async pause(providerId: string): Promise<void> {
+    const resp = await this.#fetch(`${this.#apiBase}/containers/${encodeURIComponent(providerId)}/pause`, { method: 'POST' });
+    if (!resp) throw new Error('Podman daemon unreachable');
+    if (!resp.ok) throw new Error(`Podman pause failed (${resp.status})`);
+  }
+
+  async unpause(providerId: string): Promise<void> {
+    const resp = await this.#fetch(`${this.#apiBase}/containers/${encodeURIComponent(providerId)}/unpause`, { method: 'POST' });
+    if (!resp) throw new Error('Podman daemon unreachable');
+    if (!resp.ok) throw new Error(`Podman unpause failed (${resp.status})`);
+  }
+
+  async wait(providerId: string, _condition?: 'not-running' | 'next-exit'): Promise<{ statusCode: number }> {
+    const resp = await this.#fetch(`${this.#apiBase}/containers/${encodeURIComponent(providerId)}/wait`, { method: 'POST' });
+    if (!resp) throw new Error('Podman daemon unreachable');
+    if (!resp.ok) throw new Error(`Podman wait failed (${resp.status})`);
+    const data = await resp.json() as { StatusCode?: number };
+    return { statusCode: data.StatusCode ?? -1 };
+  }
+
+  async exec(providerId: string, cmd: readonly string[], _containerName?: string): Promise<{ execId: string; webSocketUri?: string }> {
+    // Step 1: Create exec instance
+    const createResp = await this.#fetch(`${this.#apiBase}/containers/${encodeURIComponent(providerId)}/exec`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ Cmd: [...cmd], AttachStdout: true, AttachStderr: true }),
+    });
+    if (!createResp) throw new Error('Podman daemon unreachable');
+    if (!createResp.ok) throw new Error(`Podman exec create failed (${createResp.status})`);
+    const { Id: execId } = await createResp.json() as { Id: string };
+
+    // Step 2: Start exec
+    const startResp = await this.#fetch(`${this.#apiBase}/exec/${execId}/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ Detach: false, Tty: false }),
+    });
+    if (!startResp) throw new Error('Podman daemon unreachable');
+    if (!startResp.ok) throw new Error(`Podman exec start failed (${startResp.status})`);
+
+    return { execId };
+  }
+
+  async rename(providerId: string, newName: string): Promise<void> {
+    const resp = await this.#fetch(`${this.#apiBase}/containers/${encodeURIComponent(providerId)}/rename?name=${encodeURIComponent(newName)}`, { method: 'POST' });
+    if (!resp) throw new Error('Podman daemon unreachable');
+    if (!resp.ok) throw new Error(`Podman rename failed (${resp.status})`);
+  }
+
+  async stats(providerId: string): Promise<{ cpuUsage: number; memoryUsage: number; networkIO?: { rx: number; tx: number } }> {
+    const resp = await this.#fetch(`${this.#apiBase}/containers/${encodeURIComponent(providerId)}/stats?stream=false`);
+    if (!resp) throw new Error('Podman daemon unreachable');
+    if (!resp.ok) throw new Error(`Podman stats failed (${resp.status})`);
+    const data = await resp.json() as {
+      cpu_stats?: { cpu_usage?: { total_usage?: number } };
+      memory_stats?: { usage?: number };
+      networks?: Record<string, { rx_bytes?: number; tx_bytes?: number }>;
+    };
+    const netKeys = data.networks ? Object.keys(data.networks) : [];
+    return {
+      cpuUsage: data.cpu_stats?.cpu_usage?.total_usage ?? 0,
+      memoryUsage: data.memory_stats?.usage ?? 0,
+      ...(netKeys.length > 0 ? { networkIO: { rx: data.networks![netKeys[0]!]?.rx_bytes ?? 0, tx: data.networks![netKeys[0]!]?.tx_bytes ?? 0 } } : {}),
+    };
+  }
+
+  async top(providerId: string, psArgs?: string): Promise<{ processes: readonly (readonly string[])[] }> {
+    let url = `${this.#apiBase}/containers/${encodeURIComponent(providerId)}/top`;
+    if (psArgs) url += `?ps_args=${encodeURIComponent(psArgs)}`;
+    const resp = await this.#fetch(url);
+    if (!resp) throw new Error('Podman daemon unreachable');
+    if (!resp.ok) throw new Error(`Podman top failed (${resp.status})`);
+    const data = await resp.json() as { Processes?: string[][] };
+    return { processes: data.Processes ?? [] };
+  }
+
+  /** Fetch with connection error protection. Returns null when Podman is down. */
+  async #fetch(url: string, init?: RequestInit): Promise<Response | null> {
+    try {
+      return await fetch(url, init);
+    } catch {
+      return null;
+    }
+  }
+
   async #toRuntime(containerId: string): Promise<ContainerGroupRuntime | null> {
     const resp = await fetch(`${this.#apiBase}/containers/${containerId}/json`);
     if (resp.status === 404) return null;
@@ -302,7 +428,12 @@ export class PodmanContainerProvider implements IContainerProvider {
         type: m.Type,
         options: m.Mode ? [m.Mode] : undefined,
       })),
-        health: { status: info.State.Running ? 'healthy' : 'starting' },
+        health: {
+          status: info.State.Running
+            ? (info.State.Health?.Status ?? 'none')   // 有探针用探针结果，无探针报 none
+            : 'starting',
+          ...(info.State.Health?.FailingStreak && info.State.Health.FailingStreak > 0 ? { message: `Failing health check (${info.State.Health.FailingStreak})` } : {}),
+        },
       }],
       volumes: [],
       events: [],

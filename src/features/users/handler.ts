@@ -260,7 +260,9 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
   // ─── Avatar ───
 
   router.get('/:id/avatar', async (c) => {
-    const targetId = createUserId(c.req.param('id'));
+    const rawId = c.req.param('id');
+    let targetId: ReturnType<typeof createUserId>;
+    try { targetId = createUserId(rawId); } catch { return c.json(fail('VALIDATION_ERROR', 'Invalid user ID'), 400); }
     const blobStore = c.var.stores.blob;
     const atomic = c.var.stores.atomic;
     const metaEntry = await atomic.get<{ contentType: string }>(AVATAR_META_PREFIX + targetId);
@@ -278,9 +280,10 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
   router.put('/:id/avatar', async (c) => {
     const user = (c as any).var?.currentUser as { id: string; role?: string } | undefined;
     if (!user) return c.json(fail('UNAUTHORIZED', 'Authentication required'), 401);
-    const targetId = createUserId(c.req.param('id'));
-    { const r = await requirePerm(c, permissionChecker, 'update', 'user', targetId as string); if (r) return r; }
-    const isAdmin = user.role === 'root' || user.role === 'Operator' || user.role === 'wheel';
+    const rawId = c.req.param('id');
+    let targetId: ReturnType<typeof createUserId>;
+    try { targetId = createUserId(rawId); } catch { return c.json(fail('VALIDATION_ERROR', 'Invalid user ID'), 400); }
+    const isAdmin = user.role === UserRole.Root || user.role === UserRole.Operator;
     if (user.id !== targetId && !isAdmin) {
       return c.json(fail('FORBIDDEN', 'Can only upload your own avatar'), 403);
     }
@@ -325,9 +328,10 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
   router.delete('/:id/avatar', async (c) => {
     const user = (c as any).var?.currentUser as { id: string; role?: string } | undefined;
     if (!user) return c.json(fail('UNAUTHORIZED', 'Authentication required'), 401);
-    const targetId = createUserId(c.req.param('id'));
-    { const r = await requirePerm(c, permissionChecker, 'update', 'user', targetId as string); if (r) return r; }
-    const isAdmin = user.role === 'root' || user.role === 'Operator' || user.role === 'wheel';
+    const rawId = c.req.param('id');
+    let targetId: ReturnType<typeof createUserId>;
+    try { targetId = createUserId(rawId); } catch { return c.json(fail('VALIDATION_ERROR', 'Invalid user ID'), 400); }
+    const isAdmin = user.role === UserRole.Root || user.role === UserRole.Operator;
     if (user.id !== targetId && !isAdmin) {
       return c.json(fail('FORBIDDEN', 'Can only delete your own avatar'), 403);
     }

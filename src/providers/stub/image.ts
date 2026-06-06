@@ -25,4 +25,37 @@ export class StubImageProvider implements IImageProvider {
       if (v.id === id || v.tags.includes(id)) this.images.delete(k);
     }
   }
+
+  async push(imageOrId: string): Promise<ImageInfo> {
+    const info = await this.inspect(imageOrId);
+    if (!info) throw new Error(`Image ${imageOrId} not found`);
+    return info;
+  }
+
+  async search(term: string): Promise<readonly { name: string; description?: string; isOfficial?: boolean }[]> {
+    return [{ name: `library/${term}`, description: `Stub ${term} image`, isOfficial: true }];
+  }
+
+  async tag(id: string, tag: string): Promise<void> {
+    const info = await this.inspect(id);
+    if (!info) throw new Error(`Image ${id} not found`);
+    const tagged = { ...info, tags: [...info.tags, tag] };
+    this.images.set(tag, tagged);
+    this.images.set(info.id, tagged);
+  }
+
+  async history(id: string): Promise<readonly { id: string; created?: number | undefined; createdBy?: string | undefined; size?: number | undefined }[]> {
+    const info = await this.inspect(id);
+    if (!info) throw new Error(`Image ${id} not found`);
+    return [{ id: info.id, ...(info.created ? { created: info.created } : {}), createdBy: '/bin/sh -c #(nop) CMD', ...(info.size ? { size: info.size } : {}) }];
+  }
+
+  async prune(): Promise<{ reclaimed: number }> {
+    return { reclaimed: 0 };
+  }
+
+  async build(_context: unknown, options?: { dockerfile?: string; tag?: string }): Promise<ImageInfo> {
+    const tag = options?.tag ?? 'dockerfile:latest';
+    return this.pull(tag);
+  }
 }

@@ -3,10 +3,53 @@ import type { VersionId } from '../brand.ts';
 /**
  * Transaction-scoped read/write operations.
  * All operations within a transaction are serialized and atomic.
+ *
+ * getMany 明确批量读，不受 queueMicrotask 时机影响。
+ * 后端实现应尽量合并为一次 I/O。
  */
 export interface IStoreTransaction {
   get<T>(key: string): Promise<T | null>;
+
+  /** 批量读多个 key。后端保证在 DO 上合并为一次 batchGet。 */
+  getMany<T>(keys: string[]): Promise<(T | null)[]>;
+
   set<T>(key: string, value: T, ttlSeconds?: number): void;
+}
+
+/**
+ * transact 重试包装器，指数退避。
+ *
+ * 用法:
+ *   const result = await withRetry(() => atomic.transact(fn));
+ */
+export class TransactRetryExhausted extends Error {
+  constructor(retries: number, cause?: unknown) {
+    super(`Transaction failed after ${retries} retries`);
+    this.name = 'TransactRetryExhausted';
+    this.cause = cause;
+  }
+}
+
+export async function withRetry<T>(
+  fn: () => Promise<T>,
+  options?: { maxRetries?: number; baseDelayMs?: number },
+): Promise<T> {
+  const maxRetries = options?.maxRetries ?? 3;
+  const baseDelayMs = options?.baseDelayMs ?? 50;
+  let lastError: unknown;
+
+  for (let i = 0; i <= maxRetries; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (!(e instanceof TransactConflictError)) throw e;
+      if (i === maxRetries) throw new TransactRetryExhausted(maxRetries + 1, e);
+      lastError = e;
+      await new Promise(r => setTimeout(r, baseDelayMs * Math.pow(2, i)));
+    }
+  }
+
+  throw new TransactRetryExhausted(maxRetries + 1, lastError);
 }
 
 /**

@@ -2,6 +2,10 @@ import type { IAtomicStore } from '../store/interfaces.ts';
 import type { Platform } from '../region/types.ts';
 import { AppError } from '../types.ts';
 
+// ─── Credential type ───
+
+export type CredentialType = 'aksk' | 'token' | 'password';
+
 // ─── Brand type ───
 
 declare const CREDENTIAL_ID_BRAND: unique symbol;
@@ -22,10 +26,19 @@ export interface RegistryCredential {
 export interface ManagedCredential {
   readonly id: CredentialId;
   readonly name: string;
+  readonly type: CredentialType;
   readonly platform: Platform;
-  readonly accessKeyId: string;
-  /** 完整 secret — 写入时传入，读取时 masked */
-  readonly accessKeySecret: string;
+  /** aksk: access key */
+  readonly accessKeyId?: string | undefined;
+  /** aksk: access secret */
+  readonly accessKeySecret?: string | undefined;
+  /** token: single bearer/API token */
+  readonly token?: string | undefined;
+  /** password: login username */
+  readonly username?: string | undefined;
+  /** password: login password */
+  readonly password?: string | undefined;
+  /** registry mirror credentials */
   readonly registryCredentials?: readonly RegistryCredential[] | undefined;
   readonly instanceId?: string | undefined;
   readonly status: 'active' | 'inactive';
@@ -34,8 +47,21 @@ export interface ManagedCredential {
 }
 
 /** 对外展示的凭证（secret masked）。读接口统一用此类型。 */
-export interface MaskedCredential extends Omit<ManagedCredential, 'accessKeySecret'> {
-  readonly accessKeySecret: string; // masked: "LTAI5t***"
+export interface MaskedCredential {
+  readonly id: CredentialId;
+  readonly name: string;
+  readonly type: CredentialType;
+  readonly platform: Platform;
+  readonly accessKeyId?: string | undefined;
+  readonly accessKeySecret?: string | undefined; // masked
+  readonly token?: string | undefined;           // masked
+  readonly username?: string | undefined;
+  readonly password?: string | undefined;         // masked
+  readonly registryCredentials?: readonly RegistryCredential[] | undefined;
+  readonly instanceId?: string | undefined;
+  readonly status: 'active' | 'inactive';
+  readonly createdAt: number;
+  readonly updatedAt: number;
 }
 
 export function maskSecret(secret: string): string {
@@ -44,22 +70,46 @@ export function maskSecret(secret: string): string {
 }
 
 export function toMasked(cred: ManagedCredential): MaskedCredential {
-  return { ...cred, accessKeySecret: maskSecret(cred.accessKeySecret) };
+  const masked: MaskedCredential = {
+    id: cred.id,
+    name: cred.name,
+    type: cred.type,
+    platform: cred.platform,
+    ...(cred.accessKeyId ? { accessKeyId: cred.accessKeyId } : {}),
+    ...(cred.accessKeySecret ? { accessKeySecret: maskSecret(cred.accessKeySecret) } : {}),
+    ...(cred.token ? { token: maskSecret(cred.token) } : {}),
+    ...(cred.username ? { username: cred.username } : {}),
+    ...(cred.password ? { password: maskSecret(cred.password) } : {}),
+    ...(cred.registryCredentials?.length ? { registryCredentials: [...cred.registryCredentials] } : {}),
+    ...(cred.instanceId ? { instanceId: cred.instanceId } : {}),
+    status: cred.status,
+    createdAt: cred.createdAt,
+    updatedAt: cred.updatedAt,
+  };
+  return masked;
 }
 
 export interface CreateCredentialInput {
   name: string;
+  type: CredentialType;
   platform: Platform;
-  accessKeyId: string;
-  accessKeySecret: string;
+  accessKeyId?: string | undefined;
+  accessKeySecret?: string | undefined;
+  token?: string | undefined;
+  username?: string | undefined;
+  password?: string | undefined;
   registryCredentials?: RegistryCredential[] | undefined;
   instanceId?: string | undefined;
 }
 
 export interface UpdateCredentialInput {
   name?: string | undefined;
+  type?: CredentialType | undefined;
   accessKeyId?: string | undefined;
   accessKeySecret?: string | undefined;
+  token?: string | undefined;
+  username?: string | undefined;
+  password?: string | undefined;
   registryCredentials?: RegistryCredential[] | null | undefined;
   instanceId?: string | null | undefined;
   status?: 'active' | 'inactive' | undefined;
@@ -82,9 +132,13 @@ export class CredentialService {
     const cred: ManagedCredential = {
       id,
       name: input.name,
+      type: input.type,
       platform: input.platform,
-      accessKeyId: input.accessKeyId,
-      accessKeySecret: input.accessKeySecret,
+      ...(input.accessKeyId ? { accessKeyId: input.accessKeyId } : {}),
+      ...(input.accessKeySecret ? { accessKeySecret: input.accessKeySecret } : {}),
+      ...(input.token ? { token: input.token } : {}),
+      ...(input.username ? { username: input.username } : {}),
+      ...(input.password ? { password: input.password } : {}),
       ...(input.registryCredentials?.length ? { registryCredentials: [...input.registryCredentials] } : {}),
       ...(input.instanceId ? { instanceId: input.instanceId } : {}),
       status: 'active',
@@ -121,8 +175,12 @@ export class CredentialService {
     const updated: ManagedCredential = {
       ...entry.value,
       ...(input.name !== undefined ? { name: input.name } : {}),
+      ...(input.type !== undefined ? { type: input.type } : {}),
       ...(input.accessKeyId !== undefined ? { accessKeyId: input.accessKeyId } : {}),
       ...(input.accessKeySecret !== undefined ? { accessKeySecret: input.accessKeySecret } : {}),
+      ...(input.token !== undefined ? { token: input.token } : {}),
+      ...(input.username !== undefined ? { username: input.username } : {}),
+      ...(input.password !== undefined ? { password: input.password } : {}),
       ...(input.registryCredentials !== undefined ? { registryCredentials: input.registryCredentials ?? undefined } : {}),
       ...(input.instanceId !== undefined ? { instanceId: input.instanceId ?? undefined } : {}),
       ...(input.status !== undefined ? { status: input.status } : {}),

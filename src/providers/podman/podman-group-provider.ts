@@ -39,6 +39,11 @@ interface PodmanInspectResult {
     WorkingDir?: string;
     Labels?: Record<string, string>;
   };
+  HostConfig?: {
+    NanoCpus?: number;
+    Memory?: number;
+    CpuShares?: number;
+  };
   Mounts?: Array<{
     Source: string;
     Destination: string;
@@ -173,6 +178,17 @@ export class PodmanContainerGroupProvider implements IContainerGroupProvider {
     return { providerId: pod.Id };
   }
 
+  async stopGroup(providerId: string): Promise<void> {
+    // Podman: stop pod but keep metadata — 与 ECI 不同，Podman pod stop 可逆
+    const resp = await fetch(`${this.#libpodApi}/pods/${encodeURIComponent(providerId)}/stop`, {
+      method: 'POST',
+    });
+    if (!resp.ok && resp.status !== 304) {
+      const err = await resp.text();
+      throw new Error(`Podman pod stop failed (${resp.status}): ${err}`);
+    }
+  }
+
   async deleteGroup(providerId: string): Promise<void> {
     await this.#forceDeletePod(providerId);
   }
@@ -299,6 +315,15 @@ export class PodmanContainerGroupProvider implements IContainerGroupProvider {
         health: { status: c.State.Running ? 'healthy' : 'starting' },
       }));
 
+    const totalCpu = containerDetails.reduce((s, c) => {
+      const nano = c?.HostConfig?.NanoCpus;
+      return s + (nano != null ? nano / 1e9 : c?.HostConfig?.CpuShares ? c.HostConfig.CpuShares / 1024 : 0);
+    }, 0);
+    const totalMem = containerDetails.reduce((s, c) => {
+      const mem = c?.HostConfig?.Memory;
+      return s + (mem != null ? Math.round(mem / 1024 / 1024) : 0);
+    }, 0);
+
     return {
       providerId: detail.Id,
       name: detail.Name,
@@ -310,8 +335,8 @@ export class PodmanContainerGroupProvider implements IContainerGroupProvider {
       expiredTime: undefined,
       instanceType: 'podman-pod',
       spotStrategy: undefined,
-      cpu: 0,
-      memory: 0,
+      cpu: totalCpu || 0,
+      memory: totalMem || 0,
       network: {},
       associatedResources: [],
       restartPolicy: 'OnFailure',

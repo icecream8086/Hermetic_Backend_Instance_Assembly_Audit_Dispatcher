@@ -18,6 +18,7 @@ import type { ContainerGroupRuntime } from '../../core/provider/index.ts';
 import type { ContainerGroupStatus } from '../../core/provider/types.ts';
 import { rpcCall } from './eci-signer.ts';
 import { createRegionId, createZoneId } from '../../core/region/types.ts';
+import { AppError } from '../../core/types.ts';
 
 export class AlibabaEciContainerProvider implements IContainerProvider {
   constructor(
@@ -39,6 +40,9 @@ export class AlibabaEciContainerProvider implements IContainerProvider {
       RestartPolicy: input.restartPolicy,
       Cpu: String(input.cpu),
       Memory: String(input.memory),
+      ...(input.gpu && input.gpu > 0 ? {
+        GpuSpecs: JSON.stringify([{ Count: input.gpu, Type: input.gpuType ?? 'nvidia.com/gpu' }]),
+      } : {}),
     };
 
     // Spot strategy
@@ -207,6 +211,84 @@ export class AlibabaEciContainerProvider implements IContainerProvider {
       sandboxId: providerId,
     });
     return result.sandboxes[0] ?? null;
+  }
+
+  // ─── Container lifecycle operations ───
+
+  async stop(providerId: string): Promise<void> {
+    // ECI does not support stop — delete is the closest equivalent.
+    await this.delete({ region: createRegionId('unknown'), providerId });
+  }
+
+  async start(_providerId: string): Promise<void> {
+    throw new AppError(501, 'NOT_IMPLEMENTED', 'start is not supported by Alibaba ECI (restart instead)');
+  }
+
+  async restart(providerId: string): Promise<void> {
+    await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret, 'RestartContainerGroup', {
+      RegionId: 'cn-hangzhou',
+      ContainerGroupId: providerId,
+    });
+  }
+
+  async kill(providerId: string): Promise<void> {
+    // ECI doesn't have a "kill" API — delete is the closest equivalent.
+    await this.delete({ region: createRegionId('unknown'), providerId });
+  }
+
+  async pause(_providerId: string): Promise<void> {
+    throw new AppError(501, 'NOT_IMPLEMENTED', 'pause is not supported by Alibaba ECI');
+  }
+
+  async unpause(_providerId: string): Promise<void> {
+    throw new AppError(501, 'NOT_IMPLEMENTED', 'unpause is not supported by Alibaba ECI');
+  }
+
+  async wait(_providerId: string): Promise<{ statusCode: number }> {
+    throw new AppError(501, 'NOT_IMPLEMENTED', 'wait is not supported by Alibaba ECI');
+  }
+
+  async exec(providerId: string, cmd: readonly string[], containerName?: string): Promise<{ execId: string; webSocketUri?: string }> {
+    const params: Record<string, string | undefined> = {
+      RegionId: 'cn-hangzhou',
+      ContainerGroupId: providerId,
+      Command: cmd.join(' '),
+    };
+    if (containerName) params.ContainerName = containerName;
+    const resp = await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret, 'ExecContainerCommand', params);
+    return {
+      execId: resp.HttpUrl ?? '',
+      webSocketUri: resp.WebSocketUri,
+    };
+  }
+
+  async rename(_providerId: string): Promise<void> {
+    throw new AppError(501, 'NOT_IMPLEMENTED', 'rename is not supported by Alibaba ECI');
+  }
+
+  async stats(providerId: string): Promise<{ cpuUsage: number; memoryUsage: number; networkIO?: { rx: number; tx: number } }> {
+    try {
+      const resp = await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret, 'DescribeContainerGroupMetric', {
+        RegionId: 'cn-hangzhou',
+        ContainerGroupId: providerId,
+        Period: '60',
+      });
+      const records: any[] = resp.Records ?? [];
+      if (records.length === 0) return { cpuUsage: 0, memoryUsage: 0 };
+      const latest = records[records.length - 1]!;
+      const cpuUsage = latest.CPU?.UsageInNanocores ?? 0;
+      const memoryUsage = latest.Memory?.Rss ?? 0;
+      const net = latest.Network;
+      return net
+        ? { cpuUsage, memoryUsage, networkIO: { rx: net.RxBytes ?? 0, tx: net.TxBytes ?? 0 } }
+        : { cpuUsage, memoryUsage };
+    } catch {
+      return { cpuUsage: 0, memoryUsage: 0 };
+    }
+  }
+
+  async top(_providerId: string): Promise<{ processes: readonly (readonly string[])[] }> {
+    throw new AppError(501, 'NOT_IMPLEMENTED', 'top is not supported by Alibaba ECI');
   }
 }
 

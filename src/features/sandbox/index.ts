@@ -17,7 +17,7 @@ export function createRouter(deps: FeatureDeps): Hono<any> {
   const groupProvider = deps.providers.groupContainer;
   const podResolver = groupProvider ? new PodResolver(groupProvider) : undefined;
 
-  return createSandboxRouter(svc, podResolver, deps.permissionChecker);
+  return createSandboxRouter(svc, podResolver, deps.permissionChecker, groupProvider);
 }
 
 // Base type hierarchy

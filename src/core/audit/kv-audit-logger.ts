@@ -1,6 +1,7 @@
 import type { IAtomicStore } from '../store/interfaces.ts';
 import type { IAuditWriter, IAuditReader, AuditEntry, AuditFilter, AuditQueryResult, StoredAuditEntry } from './types.ts';
 import { formatAuditLine } from './types.ts';
+import { kernLevelName } from './kern-level.ts';
 import { generateLogId } from '../brand.ts';
 
 /** 7 days in seconds (KV expirationTtl). */
@@ -51,7 +52,7 @@ export class KvAuditLogger implements IAuditWriter, IAuditReader {
     const stored: StoredAuditEntry = {
       id, timestamp: now,
       level: entry.level, facility: entry.facility,
-      message: entry.message,
+      message: entry.message, actorId: entry.actorId,
       ...(entry.metadata ? { metadata: entry.metadata } : {}),
     };
     this.#entries.push(stored);
@@ -81,6 +82,7 @@ export class KvAuditLogger implements IAuditWriter, IAuditReader {
         id: e.id, timestamp: e.timestamp,
         level: kernLevelName(e.level),
         facility: e.facility, message: e.message,
+        ...(e.actorId ? { actorId: e.actorId } : {}),
         ...(e.metadata ? { metadata: e.metadata } : {}),
       })),
       total, page, limit, totalPages,
@@ -88,10 +90,3 @@ export class KvAuditLogger implements IAuditWriter, IAuditReader {
   }
 }
 
-function kernLevelName(level: number): string {
-  const names: Record<number, string> = {
-    0: 'emerg', 1: 'alert', 2: 'crit', 3: 'error',
-    4: 'warning', 5: 'notice', 6: 'info', 7: 'debug',
-  };
-  return names[level] ?? 'unknown';
-}
