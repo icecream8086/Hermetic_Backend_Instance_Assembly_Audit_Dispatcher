@@ -12,6 +12,10 @@ export function generateInstanceId(): InstanceId {
   return `inst_${crypto.randomUUID()}` as InstanceId;
 }
 
+export function createInstanceId(raw: string): InstanceId {
+  return raw as InstanceId;
+}
+
 // ─── Entity ───
 
 export interface InstanceCapabilities {
@@ -79,6 +83,7 @@ const INDEX_KEY = 'instance:ids';
 
 export class InstanceService {
   constructor(private readonly atomic: IAtomicStore) {}
+  #rrCounter = 0;
 
   async create(input: CreateInstanceInput): Promise<ComputeInstance> {
     const id = generateInstanceId();
@@ -123,6 +128,16 @@ export class InstanceService {
     });
   }
 
+  /** Paginated list — avoids loading all instances at once. */
+  async listPaginated(page = 1, limit = 50): Promise<{ items: ComputeInstance[]; total: number; page: number; limit: number }> {
+    const idx = await this.atomic.get<string[]>(INDEX_KEY);
+    if (!idx) return { items: [], total: 0, page, limit };
+    const start = (page - 1) * limit;
+    const ids = idx.value.slice(start, start + limit);
+    const entries = await Promise.all(ids.map(id => this.atomic.get<ComputeInstance>(PREFIX + id)));
+    return { items: entries.filter(e => e?.value).map(e => e!.value), total: idx.value.length, page, limit };
+  }
+
   async update(id: InstanceId, input: UpdateInstanceInput): Promise<ComputeInstance> {
     const entry = await this.atomic.get<ComputeInstance>(PREFIX + id);
     if (!entry) throw new AppError(404, 'INSTANCE_NOT_FOUND', 'Compute instance not found');
@@ -144,10 +159,10 @@ export class InstanceService {
     return updated;
   }
 
-  /** Update instance capacity + status (heartbeat). No OCC check — last-writer-wins. */
+  /** Update instance capacity + status (heartbeat). Throws if instance not found. */
   async heartbeat(id: InstanceId, capacity: InstanceCapacity, status: InstanceStatus = 'online'): Promise<void> {
     const entry = await this.atomic.get<ComputeInstance>(PREFIX + id);
-    if (!entry) return;
+    if (!entry) throw new AppError(404, 'INSTANCE_NOT_FOUND', `Instance ${id} not found`);
     await this.atomic.set(PREFIX + id, {
       ...entry.value,
       capacity,
@@ -159,14 +174,38 @@ export class InstanceService {
   async delete(id: InstanceId): Promise<void> {
     const entry = await this.atomic.get<ComputeInstance>(PREFIX + id);
     if (!entry) throw new AppError(404, 'INSTANCE_NOT_FOUND', 'Compute instance not found');
+
+    // Check for running sandboxes on this instance before allowing deletion
+    const sandboxIdx = await this.atomic.get<string[]>('sandbox:ids');
+    if (sandboxIdx) {
+      const sandboxes = await Promise.all(
+        sandboxIdx.value.map(sid => this.atomic.get<any>('sandbox:' + sid))
+      );
+      const running = sandboxes.filter(s => s && s.value?.config?.instanceId === id && s.value?.status !== 'Deleted');
+      if (running.length > 0) {
+        throw new AppError(409, 'INSTANCE_HAS_SANDBOXES', `Instance ${id} has ${running.length} running sandbox(es)`);
+      }
+    }
+
     await this.atomic.set(PREFIX + id, null, entry.version);
     await this.#removeFromIndex(id);
   }
 
-  /** Find online instances with a specific capability. */
+  /** Find online instances with a specific capability. Round-robin across results. */
   async resolveByCapability(capability: keyof InstanceCapabilities): Promise<ComputeInstance[]> {
     const all = await this.#listAll();
     return all.filter(inst => inst.capabilities[capability] && inst.status === 'online');
+  }
+
+  /**
+   * Pick one online instance with the given capability, round-robin.
+   * Returns undefined if none available.
+   */
+  async pickOne(capability: keyof InstanceCapabilities): Promise<ComputeInstance | undefined> {
+    const candidates = await this.resolveByCapability(capability);
+    if (candidates.length === 0) return undefined;
+    this.#rrCounter = (this.#rrCounter + 1) % candidates.length;
+    return candidates[this.#rrCounter];
   }
 
   // ─── Internal helpers ───

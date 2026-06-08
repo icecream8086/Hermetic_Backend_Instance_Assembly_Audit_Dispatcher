@@ -93,12 +93,16 @@ export class EventBus {
         const r = handler(event);
         if (r instanceof Promise) results.push(r);
       } catch (err) {
-        this.#onError(err, event);
+        try { this.#onError(err, event); } catch { /* onError must not abort the loop */ }
       }
     }
-    const settled = await Promise.allSettled(results);
-    for (const s of settled) {
-      if (s.status === 'rejected') this.#onError(s.reason, event);
+    if (results.length > 0) {
+      const settled = await Promise.allSettled(results);
+      for (const s of settled) {
+        if (s.status === 'rejected') {
+          try { this.#onError(s.reason, event); } catch { /* onError must not abort */ }
+        }
+      }
     }
   }
 

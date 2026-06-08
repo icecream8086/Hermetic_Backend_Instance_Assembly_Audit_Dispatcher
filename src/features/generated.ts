@@ -11,6 +11,8 @@ import { createRouter as platformsRouter } from './platforms/index.ts';
 import { createRouter as networkRouter } from './network/index.ts';
 import { createRouter as topologyRouter } from './topology/index.ts';
 import { createRouter as subnetRouter } from './subnet/index.ts';
+import { createRouter as volumeRouter } from './volume/index.ts';
+import { createRouter as container_secretRouter } from './container-secret/index.ts';
 
 import type { FeatureDeps } from '../core/app.ts';
 import type { Hono } from 'hono';
@@ -31,5 +33,7 @@ export function getFeatures(): RegisteredFeature[] {
   { path: '/api/platforms', mount: (deps) => platformsRouter(deps) },
   { path: '/api/networks', mount: (deps) => networkRouter(deps) },
   { path: '/api/topology', mount: (deps) => topologyRouter(deps) },
-  { path: '/api/subnets', mount: (deps) => subnetRouter(deps) },  ];
+  { path: '/api/subnets', mount: (deps) => subnetRouter(deps) },
+  { path: '/api/volumes', mount: (deps) => volumeRouter(deps) },
+  { path: '/api/container-secrets', mount: (deps) => container_secretRouter(deps) },  ];
 }

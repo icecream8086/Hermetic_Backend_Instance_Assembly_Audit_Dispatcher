@@ -24,13 +24,14 @@ export class FileBlobStore implements IBlobStore {
     return join(this.#dataDir, safe);
   }
 
-  async put(key: string, body: ReadableStream | Buffer, _metadata?: BlobMetadata): Promise<void> {
+  async put(key: string, body: ReadableStream | ArrayBuffer, _metadata?: BlobMetadata): Promise<void> {
     await this.#ensureDir();
     const fp = this.#filePath(key);
 
-    if (Buffer.isBuffer(body)) {
+    // Handle ArrayBuffer, Buffer (Uint8Array), and other binary types
+    if (body instanceof ArrayBuffer || ArrayBuffer.isView(body)) {
       const { writeFile } = await import('node:fs/promises');
-      await writeFile(fp, body);
+      await writeFile(fp, body instanceof ArrayBuffer ? Buffer.from(body) : Buffer.from(body.buffer, body.byteOffset, body.byteLength));
     } else {
       // ReadableStream → write to file
       const chunks: Uint8Array[] = [];

@@ -45,7 +45,7 @@ const LEVEL_WEIGHTS: Record<string, number> = {
   fatal: 5,
 };
 
-function weight(lvl: string): number {
+export function weight(lvl: string): number {
   return LEVEL_WEIGHTS[lvl.toLowerCase()] ?? 1;
 }
 

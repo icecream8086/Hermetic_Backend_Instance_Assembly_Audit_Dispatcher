@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { secureHeaders } from 'hono/secure-headers';
 import { bodyLimit } from 'hono/body-limit';
+import { fail } from './response.ts';
 import type { AppConfig } from '../config/types.ts';
 import type { Stores } from './store/interfaces.ts';
 import { createStores } from './store/factory.ts';
@@ -15,10 +16,12 @@ import { createTimerBackend } from './scheduler/factory.ts';
 import { EventBus } from './event-bus/bus.ts';
 import { EventLoop } from './event-bus/loop.ts';
 import { CredentialService } from './auth/credential.ts';
+import { SecretEncryption } from './auth/secret-encryption.ts';
 import type { EventLoopConfig, TriggerEventInput } from './event-bus/types.ts';
 import type { IAuditWriter, IAuditReader } from './audit/types.ts';
 import type { Sandbox } from '../features/sandbox/types.ts';
-import { SandboxStatus } from '../features/sandbox/types.ts';
+import { SandboxStatus, createSandboxId } from '../features/sandbox/types.ts';
+import type { ComputeInstance } from '../core/region/instance.ts';
 import { WorkersAuditLogger, KvAuditLogger, createAuditRouter } from './audit/index.ts';
 import { LocalAuditLogger } from './audit/local-audit-logger.ts';
 import { NoopAuditLogger } from './audit/noop-audit-logger.ts';
@@ -26,9 +29,12 @@ import { authz } from './middleware/auth.ts';
 import { jsonDepthLimit } from './middleware/security.ts';
 import { setActivePolicy } from './logger/log-policy.ts';
 import { PermissionService } from '../features/permission/service.ts';
-import { ConsoleLogger } from './logger/console-logger.ts';
+import { ConsoleLogger, setPanicHandler } from './logger/console-logger.ts';
 import { DoBridge } from './event-bus/do-bridge.ts';
 import { createWsRouter } from './ws/router.ts';
+import { seedIfNeeded, ensureMacRules } from './seed.ts';
+import { RequestCachedAtomicStore } from './store/request-cache.ts';
+import { formatDmesgLine } from './utils/dmesg.ts';
 
 export interface AppContext {
   stores: Stores;
@@ -36,6 +42,8 @@ export interface AppContext {
   eventBus: EventBus;
   eventLoop: EventLoop;
   audit: IAuditWriter;
+  requestId?: string;
+  permissionChecker?: FeatureDeps['permissionChecker'];
 }
 
 /** Shared dependencies injected into every feature's createRouter(). */
@@ -47,6 +55,8 @@ export interface FeatureDeps {
   audit: IAuditWriter;
   /** Optional action+resource level permission checker (PermissionService.check compatible). */
   permissionChecker?: { check(params: { userId: string; action: string; resource: string; ip?: string; resourceOwnerId?: string }): Promise<{ allowed: boolean; reason: string }> };
+  /** AES-256-GCM envelope encryption for credential secrets at rest. */
+  secretEncryption?: import('./auth/secret-encryption.ts').SecretEncryption;
 }
 
 export interface AppInstance {
@@ -56,14 +66,19 @@ export interface AppInstance {
   eventBus: EventBus;
   eventLoop: EventLoop;
   dispose: () => Promise<void>;
+  /** Run background seeding (policy lib, default instance, templates). Use with ctx.waitUntil() in Worker mode. */
+  seed: () => Promise<void>;
 }
 
 /**
  * Assemble the application: wire stores, logger, providers, event system, middleware, and routes.
  */
 export async function createApp(config: AppConfig, platformBindings?: Record<string, unknown>): Promise<AppInstance> {
+  // 0. Configure global panic handler — FATAL logs trigger isolate restart
+  setPanicHandler((msg) => { throw new Error('KERNEL PANIC: ' + msg); });
+
   // 1. Create storage adapters (KV, file, etc.)
-  const stores = createStores(config.storage, platformBindings);
+  const stores = await createStores(config.storage, platformBindings);
 
   // 1b. 审计日志: 根据配置选择后端
   const auditBackend = config.audit?.backend ?? (config.storage.stateBackend === 'file' ? 'local' : 'workers');
@@ -86,8 +101,14 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
   const audit: IAuditWriter = auditLogger;
   const auditReader: IAuditReader = auditLogger;
 
-  // 2. Create provider registry (backed by ComputeInstance entities)
-  const providers = createProviderRegistry(config.provider, config.s3, stores.atomic);
+  // 2. Create secret encryption for credential at-rest protection
+  const secretEncryption = SecretEncryption.fromEnv();
+  if (secretEncryption) {
+    console.log(formatDmesgLine('[app] Credential encryption enabled (AES-256-GCM)'));
+  }
+
+  // 2b. Create provider registry (backed by ComputeInstance entities)
+  const providers = createProviderRegistry(config.provider, config.s3, stores.atomic, secretEncryption);
 
   // 4. Create timer backend (driven by SCHEDULER_BACKEND env var)
   const schedulerBackend = createTimerBackend(config.scheduler.backend, {
@@ -103,6 +124,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
       intervalMs: 30000,
       batchSize: config.scheduler.batchSize,
       autoStart: true,
+      onError: (err, ctx) => console.error(formatDmesgLine(`[event-loop] ${ctx}: ${err instanceof Error ? err.message : err}`)),
     } as Partial<EventLoopConfig>,
     schedulerBackend,
     stores.atomic,
@@ -117,16 +139,31 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
         try {
           const entry = await stores.atomic.get<Sandbox>(`sandbox:${sid}`);
           if (!entry || entry.value.status === SandboxStatus.Deleted) continue;
-          const maxRetries = entry.value.config.healthMaxRetries ?? 11;
+          // Stopped 超过 2 tick 的沙箱 → 回收
+          if (entry.value.status === SandboxStatus.Stopped) {
+            const stoppedDuration = Date.now() - entry.value.updatedAt;
+            if (stoppedDuration > 60_000) { // 停止超过 60 秒才回收
+              await stores.atomic.set(`sandbox:${sid}`, { ...entry.value, status: SandboxStatus.Deleted, updatedAt: Date.now() }, entry.version);
+              const idxEntry = await stores.atomic.get<string[]>('sandbox:ids');
+              if (idxEntry) await stores.atomic.set('sandbox:ids', idxEntry.value.filter((i: string) => i !== sid), idxEntry.version);
+              console.log(formatDmesgLine(`sandbox DELETED (stopped-gc) id=${sid} name=${entry.value.name} provider=${entry.value.providerId ?? ''} containers=${entry.value.containers.length} uptime=${Date.now() - entry.value.createdAt}ms`));
+            }
+            continue;
+          }
+          const maxRetries = entry.value.config.healthMaxRetries ?? 3;
           if (maxRetries === -1) continue;
           const runtime = await providers.container.getStatus(entry.value.providerId ?? sid);
           if (!runtime) {
-            // Provider 已无此容器 → 标记已清理
+            // Provider 已无此容器 → 标记已清理并从索引移除
             for (let attempt = 0; attempt < 3; attempt++) {
               const latest = await stores.atomic.get<Sandbox>(`sandbox:${sid}`);
               if (!latest) break;
               const ver = await stores.atomic.set(`sandbox:${sid}`, { ...latest.value, status: SandboxStatus.Deleted, updatedAt: Date.now() }, latest.version);
-              if (ver) break;
+              if (!ver) continue;
+              const idxEntry = await stores.atomic.get<string[]>('sandbox:ids');
+              if (idxEntry) await stores.atomic.set('sandbox:ids', idxEntry.value.filter((i: string) => i !== sid), idxEntry.version);
+              console.log(formatDmesgLine(`sandbox DELETED (provider-gone) id=${sid} name=${entry.value.name} provider=${entry.value.providerId ?? ''} containers=${entry.value.containers.length} uptime=${Date.now() - entry.value.createdAt}ms`));
+              break;
             }
             continue;
           }
@@ -145,19 +182,60 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
                 const latest = await stores.atomic.get<Sandbox>(`sandbox:${sid}`);
                 if (!latest) break;
                 const ver = await stores.atomic.set(`sandbox:${sid}`, { ...latest.value, status: SandboxStatus.Deleted, updatedAt: Date.now() }, latest.version);
-                if (ver) break;
+                if (!ver) continue;
+                const idxEntry = await stores.atomic.get<string[]>('sandbox:ids');
+                if (idxEntry) await stores.atomic.set('sandbox:ids', idxEntry.value.filter((i: string) => i !== sid), idxEntry.version);
+                console.log(formatDmesgLine(`sandbox DELETED (unhealthy-gc) id=${sid} name=${entry.value.name} provider=${entry.value.providerId ?? ''} containers=${entry.value.containers.length} uptime=${Date.now() - entry.value.createdAt}ms`));
+                break;
               }
             }
           }
         } catch (e) { console.error(`[health] check error ${sid}:`, e instanceof Error ? e.message : e); }
       }
+
+      // Instance heartbeat timeout — 120s no heartbeat → offline
+      const instIdx = await stores.atomic.get<string[]>('instance:ids');
+      if (instIdx) {
+        const now = Date.now();
+        for (const iid of instIdx.value) {
+          try {
+            const instEntry = await stores.atomic.get<any>('instance:' + iid);
+            if (!instEntry?.value || instEntry.value.status !== 'online') continue;
+            if (instEntry.value.updatedAt && (now - instEntry.value.updatedAt > 120_000)) {
+              await stores.atomic.set('instance:' + iid, { ...instEntry.value, status: 'offline', updatedAt: now }, instEntry.version);
+            }
+          } catch { /* skip problematic instances */ }
+        }
+      }
+
+      // Bucket key rotation — rotate expired auto-generated S3 access keys
+      const BINDING_INDEX_KEY = 'bucket-key:ids';
+      const BINDING_PREFIX = 'bucket-key:';
+      const bIdx = await stores.atomic.get<string[]>(BINDING_INDEX_KEY);
+      if (bIdx) {
+        for (const sid of bIdx.value) {
+          try {
+            const entry = await stores.atomic.get<any>(BINDING_PREFIX + sid);
+            if (!entry?.value || entry.value.expiresAt > Date.now()) continue;
+            const binding = entry.value;
+            const ak = binding.accessKeyId;
+            const sk = Array.from(crypto.getRandomValues(new Uint8Array(32)))
+              .map((b: number) => b.toString(16).padStart(2, '0'))
+              .join('');
+            binding.secretValue = `${ak}:${sk}`;
+            binding.version++;
+            binding.expiresAt = Date.now() + (binding.rotationIntervalMs ?? 24 * 60 * 60 * 1000);
+            await stores.atomic.set(BINDING_PREFIX + sid, binding, entry.version);
+          } catch { /* skip problematic bindings */ }
+        }
+      }
     } finally {
       // 重新入队，保证每 tick 执行一次
-      eventLoop.enqueueTrigger({ type: 'health:check', payload: {} });
+      eventLoop.enqueuePriority({ type: 'health:check', payload: {} });
     }
   });
   // 触发首次健康检查
-  eventLoop.enqueueTrigger({ type: 'health:check', payload: {} });
+  eventLoop.enqueuePriority({ type: 'health:check', payload: {} });
 
   // 5b2. 镜像拉取事件：从事件循环队列中异步处理
   eventBus.on('image.pull', async (event) => {
@@ -179,7 +257,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
       // Resolve registry credentials from credential module if credentialRef is set
       let credArg: string | { server: string; userName: string; password: string } | undefined = clusterId;
       if (credentialRef) {
-        const credSvc = new CredentialService(stores.atomic);
+        const credSvc = new CredentialService(stores.atomic, secretEncryption);
         const managed = await credSvc.findByName(credentialRef);
         if (managed?.registryCredentials?.length) {
           // Pass first registry credential to pull (ECI supports one per pull via pull param,
@@ -213,509 +291,12 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
     new DoBridge(eventBus, notifDONamespace);
   }
 
-  // 6. Initialize policy library (first-run seeding — Linux/RBAC-style)
-  {
-    const KEY = '_init:policy-lib';
-    const entry = await stores.atomic.get<any>(KEY);
-    if (entry === null) {
-      const now = Date.now();
-      let count = 0;
+  // 6. Deferred background seeding — policy lib, default instance, templates.
+  // Shipping seeds to ctx.waitUntil() so first request isn't blocked.
+  // MAC rules are the only seed data that must exist before auth runs.
+  await ensureMacRules(stores.atomic);
 
-      // System groups (global, no user binding, evaluated first)
-      const sysGroups = [
-        { name: 'perm.sysadmin', desc: 'Full system access', rules: [{ effect: 'allow', actions: ['*'], resource: '*', priority: 100 }] },
-        { name: 'perm.operator', desc: 'Operational CRUD', rules: [{ effect: 'allow', actions: ['create', 'read', 'update', 'delete'], priority: 80 }, { effect: 'deny', actions: ['admin'], priority: 90 }] },
-        { name: 'perm.viewer', desc: 'Read-only', rules: [{ effect: 'allow', actions: ['read'], priority: 70 }] },
-        { name: 'perm.auth', desc: 'Authentication only', rules: [{ effect: 'allow', actions: ['login'], resource: 'session', priority: 60 }, { effect: 'deny', actions: ['*'], resource: '*', priority: 50 }] },
-      ];
-      const sysGroupIds: Record<string, string> = {};
-      for (const g of sysGroups) {
-        const id = `sysgrp_${crypto.randomUUID()}`;
-        sysGroupIds[g.name] = id;
-        await stores.atomic.set('sysgroup:' + id, { id, name: g.name, description: g.desc, rules: g.rules, priority: g.rules[0]!.priority, dependsOn: [], createdAt: now, updatedAt: now }, null);
-        const shardIdx = Math.abs(Array.from(id).reduce((h, c) => ((h << 5) + h) + c.charCodeAt(0), 5381)) % 4;
-        const sk = 'sysgroup:idx:' + shardIdx;
-        const idx = await stores.atomic.get<string[]>(sk);
-        await stores.atomic.set(sk, [...(idx?.value ?? []), id], idx?.version ?? null);
-        const cEntry = await stores.atomic.get<number>('sysgroup:count');
-        await stores.atomic.set('sysgroup:count', (cEntry?.value ?? 0) + 1, cEntry?.version ?? null);
-        count++;
-      }
-
-      // User groups (Linux convention: wheel for sudo, root/daemon/users for roles)
-      const userGroupDefs = [
-        { name: 'wheel', desc: 'Full sudo-level access' },
-        { name: 'root', desc: 'System administrators' },
-        { name: 'daemon', desc: 'Service accounts (key-only auth)' },
-        { name: 'users', desc: 'Regular users (password auth)' },
-      ];
-      const userGroupIds: Record<string, string> = {};
-      for (const g of userGroupDefs) {
-        const id = `usergrp_${crypto.randomUUID()}`;
-        userGroupIds[g.name] = id;
-        await stores.atomic.set('usergroup:' + id, { id, name: g.name, description: g.desc, memberIds: [], dependsOn: [], createdAt: now, updatedAt: now }, null);
-        const ugIdx = await stores.atomic.get<string[]>('usergroup:ids');
-        await stores.atomic.set('usergroup:ids', [...(ugIdx?.value ?? []), id], ugIdx?.version ?? null);
-        count++;
-      }
-
-      // Link user groups → system group rules via permission groups.
-      // This makes checkPermission() evaluate sysadmin/operator/viewer rules
-      // for members of wheel/root/users respectively.
-      const permGroupBindings: Array<{ userGroupName: string; sysGroupName: string }> = [
-        { userGroupName: 'wheel', sysGroupName: 'perm.sysadmin' },
-        { userGroupName: 'root', sysGroupName: 'perm.operator' },
-        { userGroupName: 'users', sysGroupName: 'perm.viewer' },
-        { userGroupName: 'daemon', sysGroupName: 'perm.operator' },
-      ];
-      for (const b of permGroupBindings) {
-        const sgEntry = await stores.atomic.get<any>('sysgroup:' + sysGroupIds[b.sysGroupName]);
-        if (!sgEntry) continue;
-        const ugId = userGroupIds[b.userGroupName];
-        if (!ugId) continue;
-        const pgId = `permgrp_${crypto.randomUUID()}`;
-        await stores.atomic.set('permgroup:' + pgId, {
-          id: pgId, name: b.sysGroupName,
-          rules: sgEntry.value.rules, userGroupIds: [ugId],
-          userIds: [], dependsOn: [],
-          createdAt: now, updatedAt: now,
-        }, null);
-        const pgIdx = await stores.atomic.get<string[]>('permgroup:ids');
-        await stores.atomic.set('permgroup:ids', [...(pgIdx?.value ?? []), pgId], pgIdx?.version ?? null);
-        count++;
-      }
-
-      // Owner permission group: resource owners can manage their own resources.
-      // Rules with `:$self` match when the acting user === resourceOwnerId.
-      {
-        const usersUgId = userGroupIds['users'];
-        if (usersUgId) {
-          const pgId = `permgrp_${crypto.randomUUID()}`;
-          await stores.atomic.set('permgroup:' + pgId, {
-            id: pgId, name: 'perm.owner',
-            rules: [
-              { effect: 'allow', actions: ['create', 'read', 'update', 'delete'], resource: 'sandbox:$self', priority: 90 },
-              { effect: 'allow', actions: ['create', 'read', 'update', 'delete'], resource: 'template:$self', priority: 90 },
-            ],
-            userGroupIds: [usersUgId], userIds: [], dependsOn: [],
-            createdAt: now, updatedAt: now,
-          }, null);
-          const pgIdx = await stores.atomic.get<string[]>('permgroup:ids');
-          await stores.atomic.set('permgroup:ids', [...(pgIdx?.value ?? []), pgId], pgIdx?.version ?? null);
-          count++;
-        }
-      }
-
-      // Route ACLs: per-group access model
-      //   wheel — full access (`* /`)
-      //   root  — containers, templates, audit logs, users list
-      //   users — create/update own containers, users list
-      //   daemon — users list (service accounts)
-      type RouteAclDef = { method: string; pathPrefix: string; priority: number };
-      const groupAcls: Record<string, RouteAclDef[]> = {
-        wheel: [{ method: '*', pathPrefix: '/', priority: 1000 }],
-        root: [
-          { method: '*', pathPrefix: '/api/networks', priority: 100 },
-          { method: '*', pathPrefix: '/api/sandboxes', priority: 100 },
-          { method: '*', pathPrefix: '/api/templates', priority: 100 },
-          { method: '*', pathPrefix: '/api/topology', priority: 100 },
-          { method: 'GET', pathPrefix: '/api/audit', priority: 100 },
-          { method: 'GET', pathPrefix: '/api/platforms', priority: 100 },
-          { method: 'GET', pathPrefix: '/api/users', priority: 10 },
-          { method: 'PUT', pathPrefix: '/api/users', priority: 10 },
-          { method: 'DELETE', pathPrefix: '/api/users', priority: 10 },
-        ],
-        users: [
-          { method: 'GET', pathPrefix: '/api/networks', priority: 50 },
-          { method: 'GET', pathPrefix: '/api/templates', priority: 50 },
-          { method: 'POST', pathPrefix: '/api/templates', priority: 50 },
-          { method: 'GET', pathPrefix: '/api/sandboxes', priority: 50 },
-          { method: 'POST', pathPrefix: '/api/sandboxes', priority: 50 },
-          { method: 'PUT', pathPrefix: '/api/sandboxes', priority: 50 },
-          { method: 'GET', pathPrefix: '/api/platforms', priority: 50 },
-          { method: 'GET', pathPrefix: '/api/users', priority: 10 },
-          { method: 'PUT', pathPrefix: '/api/users', priority: 10 },
-          { method: 'DELETE', pathPrefix: '/api/users', priority: 10 },
-          { method: 'GET', pathPrefix: '/api/topology', priority: 50 },
-          { method: 'POST', pathPrefix: '/api/topology', priority: 50 },
-          { method: 'PUT', pathPrefix: '/api/topology', priority: 50 },
-          { method: 'DELETE', pathPrefix: '/api/topology', priority: 50 },
-        ],
-        daemon: [
-          { method: 'GET', pathPrefix: '/api/users', priority: 10 },
-        ],
-      };
-      for (const [grpName, acls] of Object.entries(groupAcls)) {
-        const grpId = userGroupIds[grpName];
-        if (!grpId) continue;
-        for (const def of acls) {
-          const aclId = `routeacl_${crypto.randomUUID()}`;
-          await stores.atomic.set('routeacl:' + aclId, {
-            id: aclId, method: def.method, pathPrefix: def.pathPrefix,
-            matchType: 'prefix', effect: 'allow', userGroupId: grpId,
-            priority: def.priority, createdAt: now, updatedAt: now,
-          }, null);
-          const raIdx = await stores.atomic.get<string[]>('routeacl:ids');
-          await stores.atomic.set('routeacl:ids', [...(raIdx?.value ?? []), aclId], raIdx?.version ?? null);
-          count++;
-        }
-      }
-
-      await stores.atomic.set(KEY, { seededAt: now }, null);
-      // MAC rules — immutable system policies, never modifiable via API.
-// These protect critical resources against accidental or malicious deletion.
-// MAC rules are loaded at startup and enforced in checkPermission() before all other rules.
-{ const mk = '_init:mac-policy'; const me = await stores.atomic.get<any>(mk);
-  if (me === null) {
-    await stores.atomic.set(mk, { rules: [
-      // ── Critical identity protection ──
-      { effect: 'deny', actions: ['delete'], resource: 'user:root', priority: 9999, description: 'Cannot delete the root user — would break system ownership' },
-      { effect: 'deny', actions: ['admin'], resource: 'user:root', priority: 9999, description: 'Cannot change the root user role — root must remain root' },
-
-      // ── Core group protection ──
-      { effect: 'deny', actions: ['delete', 'admin'], resource: 'usergroup:wheel', priority: 9999, description: 'Cannot delete or modify wheel group — would break privilege model' },
-      { effect: 'deny', actions: ['delete', 'admin'], resource: 'usergroup:daemon', priority: 9999, description: 'Cannot delete or modify daemon group — service accounts would be orphaned' },
-      { effect: 'deny', actions: ['delete'], resource: 'usergroup:root', priority: 9999, description: 'Cannot delete the root user group' },
-      { effect: 'deny', actions: ['delete'], resource: 'usergroup:users', priority: 9999, description: 'Cannot delete the default users group' },
-
-      // ── System group protection ──
-      { effect: 'deny', actions: ['admin', 'delete', 'create', 'update'], resource: 'sysgroup', priority: 9999, description: 'Cannot create, modify or delete system groups — immutable policy templates' },
-      { effect: 'deny', actions: ['delete'], resource: 'permgroup', priority: 9999, description: 'Cannot delete seed permission groups (perm.sysadmin/operator/viewer/auth)' },
-
-      // ── Seed data integrity ──
-      { effect: 'deny', actions: ['admin', 'delete', 'update'], resource: '_init:', priority: 9999, description: 'Cannot modify or delete any _init:* keys — seed data is immutable' },
-      { effect: 'deny', actions: ['delete'], resource: '_sys:initialized', priority: 9999, description: 'Cannot delete the initialization flag — would allow re-setup' },
-      { effect: 'deny', actions: ['admin', 'update'], resource: '_sys:initialized', priority: 9999, description: 'Cannot set _sys:initialized back to false' },
-
-      // ── MAC policy self-protection ──
-      { effect: 'deny', actions: ['delete', 'admin', 'update'], resource: '_init:mac-policy', priority: 9999, description: 'Cannot modify or delete MAC policy itself — systemic integrity' },
-
-      // ── Route ACL integrity ──
-      { effect: 'deny', actions: ['delete'], resource: 'routeacl:ids', priority: 9999, description: 'Cannot delete the route ACL index — would bypass all access control' },
-
-      // ── Template integrity — specific seed templates only ──
-      // (Generic template delete is governed by requirePerm + requireRoot)
-
-      // ── Permission group binding integrity ──
-      { effect: 'deny', actions: ['admin'], resource: 'permgroup', priority: 9998, description: 'Admin actions cannot bypass permission group evaluation' },
-    ]}, null); count++; }
-}
-console.log(`[${new Date().toISOString()}] INFO: [init] Policy library seeded: ${count} items (${sysGroups.length} system groups, ${userGroupDefs.length} user groups + route ACLs)`);
-    }
-  }
-
-  // 6ab. Seed default ComputeInstance (merged cluster + instance)
-  let defaultInstanceId: string | undefined;
-  {
-    const KEY = '_init:default-instance';
-    const entry = await stores.atomic.get<any>(KEY);
-    if (entry === null) {
-      try {
-        const instanceSvc = new (await import('../core/region/instance.ts')).InstanceService(stores.atomic);
-        const podmanEp = process.env['PODMAN_ENDPOINT'] ?? 'http://127.0.0.1:8080';
-        const instance = await instanceSvc.create({
-          name: 'default-podman',
-          platform: 'podman',
-          region: 'local',
-          zone: 'local-a',
-          endpoint: podmanEp,
-          labels: { networkDomain: 'podman-default' },
-          capabilities: { container: true, image: true, group: true, network: true, s3: true, metrics: false, dns: false },
-        });
-        defaultInstanceId = instance.id as string;
-        await stores.atomic.set(KEY, { instanceId: defaultInstanceId, seededAt: Date.now() }, null);
-        console.log(`[${new Date().toISOString()}] INFO: [init] Default instance seeded: ${defaultInstanceId}`);
-      } catch (e: unknown) {
-        console.error(`[${new Date().toISOString()}] ERROR: [init] Failed to seed default instance: ${e instanceof Error ? e.message : e}`);
-      }
-    } else {
-      defaultInstanceId = entry.value.instanceId;
-    }
-  }
-
-  // 6b. Seed built-in sandbox templates with DAG inheritance demo
-  {
-    const KEY = '_init:sandbox-tpls';
-    const entry = await stores.atomic.get<any>(KEY);
-    if (entry === null) {
-      const now = Date.now();
-      const ids: Record<string, string> = {};
-      const cid = defaultInstanceId;
-
-      // ── Layer 0: base templates ──
-      const baseAlpineId = `tpl_${crypto.randomUUID()}`; ids.base_alpine = baseAlpineId;
-      const nginxId = `tpl_${crypto.randomUUID()}`; ids.nginx = nginxId;
-      const fedoraId = `tpl_${crypto.randomUUID()}`; ids.fedora = fedoraId;
-      const minioId = `tpl_${crypto.randomUUID()}`; ids.minio = minioId;
-
-      // ── Layer 1: inherits from base-alpine ──
-      const customAlpineId = `tpl_${crypto.randomUUID()}`; ids.custom_alpine = customAlpineId;
-
-      // ── Layer 2: inherits from custom-alpine + nginx ──
-      const fullStackId = `tpl_${crypto.randomUUID()}`; ids.full_stack = fullStackId;
-
-      // ── 验证模板: nginx-arg — 展示 command/args 从种子模板穿透到容器的完整链路 ──
-      // Apply 后 `podman inspect <container>` 应看到:
-      //   Path="nginx", Args=["-g", "daemon off;"]
-      const nginxArgId = `tpl_${crypto.randomUUID()}`; ids.nginx_arg = nginxArgId;
-
-      // ── v2 容器组模板: demo-pod — docker-compose 风格, 使用 PodResolver + IContainerGroupProvider ──
-      // apiVersion: hbi-aad/v2, kind: ContainerGroup
-      // Apply 后创建包含 nginx + alpine 的 Podman pod，共享网络命名空间
-      const demoPodId = `tpl_${crypto.randomUUID()}`; ids.demo_pod = demoPodId;
-      const gpuInferenceId = `tpl_${crypto.randomUUID()}`; ids.gpu_inference = gpuInferenceId;
-
-      const tpls: any[] = [
-        {
-          id: baseAlpineId, name: 'base-alpine',
-          description: 'Base Alpine Linux — minimal OS layer, 256MB RAM, sleep 3600',
-          apiVersion: 'hbi-aad/v1', kind: 'Container',
-          dependsOn: [],
-          container: {
-            region: 'local',
-            instanceId: cid,
-            containers: [{
-              name: 'alpine', image: 'docker.io/library/alpine:latest',
-              command: ['sleep', '3600'],
-              resources: { limits: { cpu: 0.25, memory: 256 } },
-            }],
-            restartPolicy: 'Never',
-          },
-          network: { publicIp: { allocate: false } },
-          createdAt: now, updatedAt: now,
-        },
-        {
-          id: nginxId, name: 'nginx',
-          description: 'Nginx web server — ports 80, readiness check',
-          apiVersion: 'hbi-aad/v1', kind: 'Container',
-          dependsOn: [],
-          singleton: true,
-          container: {
-            region: 'local',
-            instanceId: cid,
-            containers: [{
-              name: 'nginx', image: 'docker.io/library/nginx:latest',
-              command: ['nginx'],
-              args: ['-g', 'daemon off;'],
-              ports: [{ containerPort: 80, protocol: 'TCP' }],
-              resources: { limits: { cpu: 0.5, memory: 128 } },
-            }],
-            restartPolicy: 'Always',
-          },
-          healthChecks: [{
-            name: 'nginx-alive',
-            target: 'container:nginx',
-            type: 'liveness',
-            probe: { httpGet: { path: '/', port: 80 } },
-            periodSeconds: 10,
-            initialDelaySeconds: 5,
-          }, {
-            name: 'nginx-ready',
-            target: 'container:nginx',
-            type: 'readiness',
-            probe: { tcpSocket: { port: 80 } },
-            periodSeconds: 5,
-            initialDelaySeconds: 2,
-          }],
-          network: { publicIp: { allocate: false } },
-          createdAt: now, updatedAt: now,
-        },
-        {
-          id: fedoraId, name: 'fedora',
-          description: 'Fedora Linux — minimal OS layer, 256MB RAM, sleep 3600',
-          apiVersion: 'hbi-aad/v1', kind: 'Container',
-          dependsOn: [],
-          container: {
-            region: 'local',
-            instanceId: cid,
-            containers: [{
-              name: 'fedora', image: 'registry.fedoraproject.org/fedora:latest',
-              command: ['sleep', '3600'],
-              resources: { limits: { cpu: 0.25, memory: 256 } },
-            }],
-            restartPolicy: 'Never',
-          },
-          healthChecks: [{
-            name: 'fedora-alive',
-            target: 'container:fedora',
-            type: 'liveness',
-            probe: { exec: { command: ['sh', '-c', 'kill -0 1'] } },
-            periodSeconds: 15,
-            initialDelaySeconds: 5,
-            failureThreshold: 3,
-          }],
-          network: { publicIp: { allocate: false } },
-          createdAt: now, updatedAt: now,
-        },
-        // gpu-inference — GPU 推理工作负载示例
-        // 需要宿主机有 NVIDIA GPU + nvidia-container-toolkit
-        // WSL 下不可用，但可正常创建模板和沙箱（GPU 字段存在但 Stub 不绑定）
-        {
-          id: gpuInferenceId, name: 'gpu-inference',
-          description: 'GPU inference server — requires NVIDIA GPU (nvidia.com/gpu)',
-          apiVersion: 'hbi-aad/v1', kind: 'Container',
-          dependsOn: [],
-          container: {
-            region: 'local',
-            instanceId: cid,
-            containers: [{
-              name: 'inference', image: 'nvidia/cuda:12.2-runtime',
-              command: ['python', '-m', 'my_inference_server'],
-              resources: { limits: { cpu: 4, memory: 8192, gpu: 1 } },
-              ports: [{ containerPort: 8080, protocol: 'TCP' }],
-            }],
-            restartPolicy: 'Always',
-          },
-          network: { publicIp: { allocate: true } },
-          createdAt: now, updatedAt: now,
-        },
-        {
-          id: minioId, name: 'minio-server',
-          description: 'MinIO S3-compatible object storage — ports 9000 (API) / 9001 (console)',
-          apiVersion: 'hbi-aad/v1', kind: 'Container',
-          dependsOn: [],
-          singleton: true,
-          container: {
-            region: 'local',
-            instanceId: cid,
-            containers: [{
-              name: 'minio', image: 'quay.io/minio/minio:latest',
-              command: ['server', '/data', '--console-address', ':9001'],
-              ports: [
-                { containerPort: 9000, protocol: 'TCP' },
-                { containerPort: 9001, protocol: 'TCP' },
-              ],
-              env: [
-                { name: 'MINIO_ROOT_USER', value: 'minioadmin' },
-                { name: 'MINIO_ROOT_PASSWORD', value: 'minioadmin' },
-              ],
-              resources: { limits: { cpu: 0.5, memory: 512 } },
-            }],
-            restartPolicy: 'Always',
-          },
-          healthChecks: [{
-            name: 'minio-ready',
-            target: 'container:minio',
-            type: 'readiness',
-            probe: { tcpSocket: { port: 9000 } },
-            periodSeconds: 5,
-            initialDelaySeconds: 5,
-          }],
-          network: { publicIp: { allocate: true } },
-          createdAt: now, updatedAt: now,
-        },
-        // DAG chain: base-alpine → custom-alpine
-        {
-          id: customAlpineId, name: 'custom-alpine',
-          description: 'Custom Alpine — inherits base-alpine, adds curl + env vars',
-          apiVersion: 'hbi-aad/v1', kind: 'Container',
-          dependsOn: [baseAlpineId],
-          container: {
-            region: 'local',
-            instanceId: cid,
-            containers: [{
-              name: 'alpine',
-              command: ['sh', '-c', 'while true; do echo "Hello from DAG"; curl -s http://localhost/health 2>/dev/null || echo "nginx not ready"; sleep 10; done'],
-              env: [
-                { name: 'APP_ENV', value: 'development' },
-                { name: 'LOG_LEVEL', value: 'debug' },
-              ],
-            }],
-            restartPolicy: 'Never',
-          },
-          createdAt: now, updatedAt: now,
-        },
-        // DAG merge: (base-alpine→custom-alpine) + nginx = full-stack
-        {
-          id: fullStackId, name: 'full-stack',
-          description: 'Full stack — merges custom-alpine + nginx with app container',
-          apiVersion: 'hbi-aad/v1', kind: 'Container',
-          dependsOn: [customAlpineId, nginxId],
-          container: {
-            region: 'local',
-            instanceId: cid,
-            containers: [{
-              name: 'alpine',
-              env: [
-                { name: 'NGINX_HOST', value: 'localhost' },
-                { name: 'DB_URL', value: 'sqlite:///data/app.db' },
-              ],
-            }],
-          },
-          network: { publicIp: { allocate: true } },
-          createdAt: now, updatedAt: now,
-        },
-        // nginx-arg — 验证 command/args 穿透链路；和 nginx 模板功能一致，仅作为参数传递的参考
-        {
-          id: nginxArgId, name: 'nginx-arg',
-          description: 'Nginx with explicit command+args — 验证模板参数穿透到容器',
-          apiVersion: 'hbi-aad/v1', kind: 'Container',
-          dependsOn: [],
-          singleton: true,
-          container: {
-            region: 'local',
-            instanceId: cid,
-            containers: [{
-              name: 'nginx-arg', image: 'docker.io/library/nginx:latest',
-              command: ['nginx'],
-              args: ['-g', 'daemon off;'],
-              ports: [{ containerPort: 80, protocol: 'TCP' }],
-              resources: { limits: { cpu: 0.5, memory: 128 } },
-            }],
-            restartPolicy: 'Always',
-          },
-          healthChecks: [{
-            name: 'nginx-arg-alive',
-            target: 'container:nginx-arg',
-            type: 'liveness',
-            probe: { httpGet: { path: '/', port: 80 } },
-            periodSeconds: 10,
-            initialDelaySeconds: 5,
-          }],
-          network: { publicIp: { allocate: false } },
-          createdAt: now, updatedAt: now,
-        },
-        // demo-pod — v2 容器组模板 (hbi-aad/v2, kind=ContainerGroup)
-        // 使用 PodResolver 解析，创建 Podman pod，共享 net/uts/ipc
-        // 验证: podman pod inspect <name> 看 Containers 字段
-        {
-          id: demoPodId, name: 'demo-pod',
-          description: 'v2 容器组 — nginx + alpine 共享网络 (docker-compose 风格)',
-          apiVersion: 'hbi-aad/v2', kind: 'ContainerGroup',
-          dependsOn: [],
-          podSpec: {
-            name: 'demo-pod',
-            region: 'local',
-            resources: { cpu: '1.0', memory: '512Mi' },
-            services: {
-              web: {
-                image: 'docker.io/library/nginx:latest',
-                command: ['nginx', '-g', 'daemon off;'],
-                ports: [{ containerPort: 80, protocol: 'TCP' }],
-                resources: { cpu: '0.5', memory: '128Mi' },
-              },
-              sidecar: {
-                image: 'docker.io/library/alpine:latest',
-                command: ['sh', '-c', 'while true; do echo "sidecar alive"; sleep 30; done'],
-                dependsOn: ['web'],
-                resources: { cpu: '0.25', memory: '64Mi' },
-              },
-            },
-          },
-          createdAt: now, updatedAt: now,
-        },
-      ];
-
-      // Write all templates + index
-      const allIds = [baseAlpineId, nginxId, nginxArgId, customAlpineId, fullStackId, fedoraId, minioId, demoPodId, gpuInferenceId];
-      for (const t of tpls) {
-        await stores.atomic.set('sandbox-tpl:' + t.id, t, null);
-      }
-      await stores.atomic.set('sandbox-tpl:ids', allIds, null);
-      await stores.atomic.set(KEY, { seededAt: now }, null);
-      console.log(`[${new Date().toISOString()}] INFO: [init] Sandbox templates seeded: ${tpls.length} (${tpls.map(t => t.name).join(', ')})`);
-    }
-  }
+  // 7. Build Hono app
 
   // 7. Build Hono app
   const app = new Hono<{ Variables: AppContext }>();
@@ -727,6 +308,12 @@ console.log(`[${new Date().toISOString()}] INFO: [init] Policy library seeded: $
     await next();
     c.header('Server-Timing', `total;dur=${(performance.now() - t0).toFixed(2)}`);
   });
+  app.use('*', async (c, next) => {
+    const reqId = crypto.randomUUID().slice(0, 8);
+    c.set('requestId', reqId);
+    c.header('x-request-id', reqId);
+    await next();
+  });
   app.use('*', secureHeaders());
   app.use('*', cors());
   app.use('*', bodyLimit({ maxSize: 5 * 1024 * 1024 }));  // 5 MB
@@ -734,9 +321,12 @@ console.log(`[${new Date().toISOString()}] INFO: [init] Policy library seeded: $
   app.use('*', rateLimit({ windowMs: 60_000, maxRequests: 100 }));
   app.onError(globalErrorHandler);
 
-  // 8. Inject context variables
+  // 8. Inject context variables (with per-request atomic store cache)
   app.use('*', async (c, next) => {
-    c.set('stores', stores);
+    // Wrap atomic store with per-request cache to eliminate duplicate reads
+    // across auth middleware, PermissionChecker, and RouteAclManager.
+    const cachedAtomic = new RequestCachedAtomicStore(stores.atomic);
+    c.set('stores', { ...stores, atomic: cachedAtomic });
     c.set('providers', providers);
     c.set('eventBus', eventBus);
     c.set('eventLoop', eventLoop);
@@ -752,7 +342,7 @@ console.log(`[${new Date().toISOString()}] INFO: [init] Policy library seeded: $
   if (config.authz?.enabled !== false) {
     permService = new PermissionService(stores.atomic, new ConsoleLogger(), audit);
     app.use('/api/*', authz({
-      store: stores.atomic,
+      store: 'auto',
       audit,
       checkRouteAccess: async (method, path, userId) => {
         return permService!.checkRouteAccess(method, path, userId);
@@ -786,8 +376,8 @@ console.log(`[${new Date().toISOString()}] INFO: [init] Policy library seeded: $
     }
   });
 
-  // 11. DO alarm callback route
-  app.post('/__tick', async (c) => {
+  // 11. DO alarm callback route — DO Alarm fires POST /__scheduled → triggerTick()
+  app.post('/__scheduled', async (c) => {
     await eventLoop.triggerTick();
     const st = eventLoop.status();
     return c.json({ ok: true, queueSize: st.queueSize, processedCount: st.processedCount, running: st.running });
@@ -863,7 +453,7 @@ console.log(`[${new Date().toISOString()}] INFO: [init] Policy library seeded: $
   // 13. Auto-register features from generated registry
   // Mount at both /path and /path/ since Hono's route() doesn't normalize
   // trailing slashes — /api/users matches but /api/users/ does not.
-  const featureDeps: FeatureDeps = { stores, providers, eventBus, eventLoop, audit, permissionChecker: permService as any };
+  const featureDeps: FeatureDeps = { stores, providers, eventBus, eventLoop, audit, permissionChecker: permService as any, ...(secretEncryption ? { secretEncryption } : {}) };
   // Mount each feature with and without trailing slash (Hono app.route() doesn't normalize)
   for (const feat of getFeatures()) {
     const router = feat.mount(featureDeps);
@@ -873,7 +463,49 @@ console.log(`[${new Date().toISOString()}] INFO: [init] Policy library seeded: $
     }
   }
 
-  // 12. Export
+  // 12. Log stream WebSocket — real-time container logs via DO
+  const logStreamNs = platformBindings?.['LOG_STREAM_DO'] as DurableObjectNamespace | undefined;
+  if (logStreamNs) {
+    app.get('/api/sandboxes/:id/logs', async (c) => {
+      const id = createSandboxId(c.req.param('id'));
+
+      // Permission check: user needs 'read' on this sandbox
+      const user = (c as any).var?.currentUser as { id: string } | undefined;
+      if (permService && user) {
+        const result = await permService.check({ userId: user.id, action: 'read', resource: 'sandbox' });
+        if (!result.allowed) return c.json(fail('FORBIDDEN', result.reason), 403);
+      }
+
+      const entry = await stores.atomic.get<Sandbox>('sandbox:' + id);
+      if (!entry) return c.json(fail('SANDBOX_NOT_FOUND', 'Sandbox not found'), 404);
+      const sandbox = entry.value;
+      if (!sandbox.providerId) return c.json(fail('NO_PROVIDER', 'Sandbox has no provider resource'), 400);
+
+      // Resolve provider endpoint and platform from the ComputeInstance config
+      const instanceId = sandbox.config.instanceId;
+      let endpoint = 'http://127.0.0.1:8080/v1.24';
+      let provider = 'podman';
+      if (instanceId) {
+        const instEntry = await stores.atomic.get<ComputeInstance>('instance:' + instanceId);
+        if (instEntry) {
+          endpoint = instEntry.value.endpoint;
+          provider = instEntry.value.platform;
+        }
+      }
+
+      // Forward WebSocket to the DO with standard log API params
+      const tail = c.req.query('tail') ?? '';
+      const since = c.req.query('since') ?? '';
+      const stub = logStreamNs.get(logStreamNs.idFromName('logstream:' + id));
+      const qs = new URLSearchParams({ providerId: sandbox.providerId, endpoint, provider });
+      if (tail) qs.set('tail', tail);
+      if (since) qs.set('since', since);
+      const doUrl = `/logs?${qs.toString()}`;
+      return stub.fetch(new URL(doUrl, 'https://do/'), c.req.raw);
+    });
+  }
+
+  // 13. Export
   return {
     app,
     stores,
@@ -883,6 +515,7 @@ console.log(`[${new Date().toISOString()}] INFO: [init] Policy library seeded: $
     dispose: async () => {
       eventLoop.stop();
     },
+    seed: () => seedIfNeeded(stores.atomic),
   };
 }
 

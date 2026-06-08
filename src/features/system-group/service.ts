@@ -26,7 +26,7 @@ function sysgroupShard(id: string): number {
 export interface ISysGroupService {
   create(input: CreateSysGroupInput, actorId?: string): Promise<SysGroup>;
   list(): Promise<SysGroup[]>;
-  listPaginated(page?: number, limit?: number): Promise<{ items: SysGroup[]; total: number }>;
+  listPaginated(page?: number, limit?: number, name?: string): Promise<{ items: SysGroup[]; total: number }>;
   get(id: string): Promise<SysGroup | null>;
   update(id: string, input: UpdateSysGroupInput, actorId?: string): Promise<SysGroup>;
   delete(id: string, actorId?: string): Promise<void>;
@@ -60,7 +60,16 @@ export class SysGroupService implements ISysGroupService {
     return this.#listAll();
   }
 
-  async listPaginated(page = 1, limit = 50): Promise<{ items: SysGroup[]; total: number }> {
+  async listPaginated(page = 1, limit = 50, name?: string): Promise<{ items: SysGroup[]; total: number }> {
+    // When filtering by name, fall back to loading all items in memory
+    if (name) {
+      const all = await this.#listAll();
+      const filtered = all.filter(g => g.name.toLowerCase().includes(name.toLowerCase()));
+      const total = filtered.length;
+      const start = (page - 1) * limit;
+      return { items: filtered.slice(start, start + limit), total };
+    }
+
     // Read total from counter (1 I/O) — avoids reading the full index.
     const countEntry = await this.atomic.get<number>(COUNT_KEY);
     const total = countEntry?.value ?? 0;

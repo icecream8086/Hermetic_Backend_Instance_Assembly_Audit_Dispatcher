@@ -15,7 +15,7 @@ const INDEX_KEY = 'subnet:ids';
 
 export interface ISubnetService {
   create(input: CreateSubnetInput, actorId?: string): Promise<Subnet>;
-  list(page?: number, limit?: number): Promise<{ items: Subnet[]; total: number; page: number; limit: number }>;
+  list(page?: number, limit?: number, name?: string): Promise<{ items: Subnet[]; total: number; page: number; limit: number }>;
   get(id: SubnetId): Promise<Subnet | null>;
   update(id: SubnetId, input: UpdateSubnetInput, actorId?: string): Promise<Subnet>;
   delete(id: SubnetId, actorId?: string): Promise<void>;
@@ -56,8 +56,9 @@ export class SubnetService implements ISubnetService {
     return subnet;
   }
 
-  async list(page = 1, limit = 20): Promise<{ items: Subnet[]; total: number; page: number; limit: number }> {
-    const all = (await this.#listAll()).reverse();
+  async list(page = 1, limit = 20, name?: string): Promise<{ items: Subnet[]; total: number; page: number; limit: number }> {
+    let all = (await this.#listAll()).reverse();
+    if (name) all = all.filter(s => s.name.toLowerCase().includes(name.toLowerCase()));
     const total = all.length;
     const start = (page - 1) * limit;
     return { items: all.slice(start, start + limit), total, page, limit };

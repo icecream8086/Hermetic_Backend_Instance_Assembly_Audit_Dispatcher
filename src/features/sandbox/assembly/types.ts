@@ -5,6 +5,8 @@ import type {
 import type {
   VolumeType,
   NFSVolumeConfig,
+  DiskVolumeConfig,
+  SecretVolumeConfig,
   ContainerConfig,
   CreateSandboxInput,
 } from '../types.ts';
@@ -23,7 +25,10 @@ export enum TemplateKind {
 
 export interface VolumeTemplateSpec {
   readonly type: VolumeType;
+  readonly instanceId: string;
   readonly nfs?: NFSVolumeConfig;
+  readonly disk?: DiskVolumeConfig;
+  readonly secret?: SecretVolumeConfig;
 }
 
 export interface VolumeTemplate extends BaseTemplate<TemplateKind.Volume> {

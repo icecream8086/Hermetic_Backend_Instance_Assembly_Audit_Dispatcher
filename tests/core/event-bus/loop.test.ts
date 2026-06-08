@@ -253,4 +253,66 @@ describe('EventLoop', () => {
       loop.stop();
     });
   });
+
+  // ─── triggerTick concurrency ───
+
+  describe('triggerTick concurrency', () => {
+    it('does not process duplicate batch when triggerTick overlaps', async () => {
+      const bus = new EventBus();
+      const order: string[] = [];
+      bus.on('a', async () => { order.push('a'); await new Promise(r => setTimeout(r, 1)); });
+      bus.on('b', async () => { order.push('b'); await new Promise(r => setTimeout(r, 1)); });
+
+      const backend = new FakeTimerBackend();
+      const loop = new EventLoop(bus, { batchSize: 2 }, backend);
+      loop.enqueue(createEvent('a'));
+      loop.enqueue(createEvent('b'));
+      loop.enqueue(createEvent('a'));
+
+      // triggerTick with guard — concurrent calls skip
+      await Promise.all([
+        loop.triggerTick(),
+        loop.triggerTick(), // this one should be skipped by #ticking guard
+        loop.triggerTick(), // this one too
+      ]);
+
+      // Only 2 events processed (batchSize=2), not 6
+      expect(order.length).toBe(2);
+      expect(loop.size).toBe(1); // one 'a' remains
+    });
+  });
+
+  // ─── Recovery ───
+
+  describe('recovery', () => {
+    it('recovers persisted events from store after construction', async () => {
+      const { FileKVAtomicStore } = await import('../../../src/core/store/adapters/file-kv.ts');
+      const { mkdtempSync } = await import('node:fs');
+      const { tmpdir } = await import('node:os');
+      const { join } = await import('node:path');
+
+      const dir = mkdtempSync(join(tmpdir(), 'hbi-loop-test-'));
+      const atomic = new FileKVAtomicStore(dir);
+
+      // Manually persist an event
+      const event = createEvent('recovered', { x: 1 });
+      await atomic.transact(async (txn) => {
+        txn.set('events:pending', [event]);
+      });
+
+      const bus = new EventBus();
+      const handler = vi.fn();
+      bus.on('recovered', handler);
+
+      // Construct EventLoop — should recover the persisted event
+      const loop = new EventLoop(bus, { autoStart: false }, undefined, atomic);
+      // Wait for async recover to complete (microtask)
+      await new Promise(r => setTimeout(r, 10));
+      expect(loop.size).toBe(1);
+      loop.enqueue(createEvent('recovered'));
+
+      await loop.triggerTick();
+      expect(handler).toHaveBeenCalledTimes(2); // recovered + enqueued
+    });
+  });
 });

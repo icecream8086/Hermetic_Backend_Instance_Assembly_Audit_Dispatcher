@@ -2,10 +2,10 @@
  * Provider factory — creates IProviderRegistry backed by ComputeInstance entities.
  *
  * Instead of creating singleton providers at startup, this factory:
- * 1. Creates an InstanceProviderResolver that dynamically creates providers
- *    from ComputeInstance entities (stored in IAtomicStore).
- * 2. Seeds initial default instances from config/env.
- * 3. Returns a registry that resolves providers lazily per cluster.
+ * 1. Returns a LazyProviderRegistry that instantiates providers on first access.
+ * 2. Default provider (matching config.container) is eagerly resolved on first get.
+ * 3. All other providers (dns, metrics, networkPolicy, group, S3, instance resolver)
+ *    are instantiated lazily, reducing cold-start cost and memory in serverless.
  */
 
 import type { ProviderConfig, S3Config, Credential } from '../../config/types.ts';
@@ -20,172 +20,292 @@ import type {
   ProviderEntry,
 } from './interfaces.ts';
 import type { IS3Provider } from './s3.ts';
-import { createS3Providers } from './s3-factory.ts';
-import { StubContainerProvider } from '../../providers/stub/container.ts';
-import { AlibabaEciContainerProvider } from '../../providers/alibaba/eci-container.ts';
-import { PodmanContainerProvider } from '../../providers/podman/podman-provider.ts';
+import { createS3Providers, type S3ProviderEntry } from './s3-factory.ts';
 import { secureContainerProvider, secureContainerGroupProvider } from './security.ts';
-import { PodmanNetworkPolicyProvider } from '../../providers/podman/podman-network.ts';
-import { StubDnsProvider } from '../../providers/stub/dns.ts';
-import { CloudflareDnsProvider } from '../../providers/cloudflare/dns.ts';
-import { StubMetricsProvider } from '../../providers/stub/metrics.ts';
-import { AlibabaEciMetricsProvider } from '../../providers/alibaba/eci-metrics.ts';
-import { StubImageProvider } from '../../providers/stub/image.ts';
-import { PodmanImageProvider } from '../../providers/podman/podman-image.ts';
-import { AlibabaEciImageProvider } from '../../providers/alibaba/eci-image.ts';
-import { PodmanContainerGroupProvider } from '../../providers/podman/podman-group-provider.ts';
-import { AlibabaEciContainerGroupProvider } from '../../providers/alibaba/eci-group-provider.ts';
-import { InstanceService } from '../region/instance.ts';
-import { CredentialService } from '../auth/credential.ts';
 import type { IAtomicStore } from '../store/interfaces.ts';
-import { InstanceProviderResolver } from './instance-resolver.ts';
 import type { InstanceId } from '../region/instance.ts';
+import type { InstanceProviderResolver } from './instance-resolver.ts';
+import type { SecretEncryption } from '../auth/secret-encryption.ts';
 import { debugLog } from '../logger/log-policy.ts';
+import { StubContainerProvider } from '../../providers/stub/container.ts';
+import { StubImageProvider } from '../../providers/stub/image.ts';
+import { StubDnsProvider } from '../../providers/stub/dns.ts';
+import { StubMetricsProvider } from '../../providers/stub/metrics.ts';
+import { PodmanContainerProvider } from '../../providers/podman/podman-provider.ts';
+import { PodmanImageProvider } from '../../providers/podman/podman-image.ts';
+import { PodmanNetworkPolicyProvider } from '../../providers/podman/podman-network.ts';
+import { PodmanContainerGroupProvider } from '../../providers/podman/podman-group-provider.ts';
+import { AlibabaEciContainerProvider } from '../../providers/alibaba/eci-container.ts';
+import { AlibabaEciImageProvider } from '../../providers/alibaba/eci-image.ts';
+import { AlibabaEciMetricsProvider } from '../../providers/alibaba/eci-metrics.ts';
+import { AlibabaEciContainerGroupProvider } from '../../providers/alibaba/eci-group-provider.ts';
+import { CloudflareDnsProvider } from '../../providers/cloudflare/dns.ts';
 
-interface AccountEntry {
-  readonly name: string;
-  readonly container: IContainerProvider;
-  readonly image: AlibabaEciImageProvider;
+// ─── Lazy provider registry ───
+// Providers are instantiated on first access rather than at startup,
+// reducing cold-start cost and memory in serverless environments.
+// Imports are static (worker bundler includes them anyway), but the
+// `new XxxProvider()` calls are deferred until first use.
+
+class LazyProviderRegistry implements IProviderRegistry {
+  private _defaultContainer?: IContainerProvider;
+  private _defaultImage?: IImageProvider;
+  private _networkPolicy: INetworkPolicyProvider | undefined;
+  private _dns?: IDnsProvider;
+  private _metrics?: IMetricsProvider;
+  private _groupContainer: IContainerGroupProvider | undefined;
+  private _typeEntries?: Map<string, ProviderEntry>;
+  private _s3Entries?: S3ProviderEntry[];
+  private _instanceResolver?: InstanceProviderResolver;
+  private _resolverPromise: Promise<void> | null = null;
+
+  constructor(
+    private readonly config: ProviderConfig,
+    private readonly s3Config: S3Config | undefined,
+    private readonly atomicStore: IAtomicStore | undefined,
+    private readonly secretEncryption?: SecretEncryption,
+  ) {
+    debugLog('system', 'provider config: container="%s"', config.container);
+  }
+
+  /** Number of Alibaba accounts with valid credentials. */
+  private get _hasAlibabaAccounts(): boolean {
+    return this.config.accounts.some(a => !!(a.accessKeyId && a.accessKeySecret));
+  }
+
+  get container(): IContainerProvider {
+    if (!this._defaultContainer) {
+      this._defaultContainer = this._resolveDefaultEntry().container;
+    }
+    return this._defaultContainer;
+  }
+
+  get image(): IImageProvider {
+    if (!this._defaultImage) {
+      this._defaultImage = this._resolveDefaultEntry().image;
+    }
+    return this._defaultImage;
+  }
+
+  get networkPolicy(): INetworkPolicyProvider | undefined {
+    if (this._networkPolicy === undefined) {
+      const ep = process.env['PODMAN_ENDPOINT'] ?? 'http://127.0.0.1:8080';
+      this._networkPolicy = this._isAlibaba ? undefined : new PodmanNetworkPolicyProvider(ep);
+    }
+    return this._networkPolicy;
+  }
+
+  get dns(): IDnsProvider {
+    if (!this._dns) {
+      this._dns = this.config.dns === 'cloudflare' && this.config.cfApiToken
+        ? new CloudflareDnsProvider(this.config.cfApiToken)
+        : new StubDnsProvider();
+    }
+    return this._dns;
+  }
+
+  get metrics(): IMetricsProvider {
+    if (!this._metrics) {
+      const defaultCreds = this.config.accounts.find(
+        (a): a is Credential & { accessKeyId: string; accessKeySecret: string } => !!(a.accessKeyId && a.accessKeySecret),
+      );
+      this._metrics = this.config.metrics === 'alibaba' && defaultCreds
+        ? new AlibabaEciMetricsProvider(defaultCreds.accessKeyId, defaultCreds.accessKeySecret)
+        : new StubMetricsProvider();
+    }
+    return this._metrics;
+  }
+
+  get groupContainer(): IContainerGroupProvider | undefined {
+    if (!this._groupContainer) {
+      this._groupContainer = this._createGroupProvider();
+    }
+    return this._groupContainer;
+  }
+
+  get capabilities(): ProviderCapabilities {
+    const isProd = this.config.container === 'alibaba' && this._hasAlibabaAccounts;
+    return {
+      spotInstances: isProd, nfsVolumes: true, publicIpAutoAssign: true,
+      preemptible: isProd, maxRuntimeSeconds: isProd ? 86_400 * 7 : 0,
+    };
+  }
+
+  // ─── Type-based provider lookup (lazy) ───
+
+  private _getTypeEntries(): Map<string, ProviderEntry> {
+    if (!this._typeEntries) {
+      this._typeEntries = this._buildTypeEntries();
+    }
+    return this._typeEntries;
+  }
+
+  provider(name: string): ProviderEntry | undefined {
+    return this._getTypeEntries().get(name);
+  }
+
+  availableProviders(): readonly ProviderEntry[] {
+    return [...this._getTypeEntries().values()];
+  }
+
+  // ─── S3 (lazy) ───
+
+  private _getS3Entries(): S3ProviderEntry[] {
+    if (!this._s3Entries && this.s3Config) {
+      this._s3Entries = createS3Providers(this.s3Config).entries;
+    }
+    return this._s3Entries ?? [];
+  }
+
+  s3Account(name?: string): IS3Provider | undefined {
+    const entries = this._getS3Entries();
+    const n = name ?? this.s3Config?.defaultAccount ?? '';
+    return entries.find(e => e.name === n)?.provider;
+  }
+
+  listS3Accounts(): string[] {
+    return this._getS3Entries().map(e => e.name);
+  }
+
+  // ─── Instance-based resolution (lazy) ───
+
+  private async _ensureResolver(): Promise<void> {
+    if (this._instanceResolver || !this.atomicStore) return;
+    if (!this._resolverPromise) {
+      this._resolverPromise = this._initResolver();
+    }
+    await this._resolverPromise;
+  }
+
+  private async _initResolver(): Promise<void> {
+    if (!this.atomicStore) return;
+    const { InstanceService } = await import('../region/instance.ts');
+    const { CredentialService } = await import('../auth/credential.ts');
+    const { InstanceProviderResolver } = await import('./instance-resolver.ts');
+    const instanceService = new InstanceService(this.atomicStore);
+    const credService = new CredentialService(this.atomicStore, this.secretEncryption);
+    this._instanceResolver = new InstanceProviderResolver(instanceService, credService);
+  }
+
+  async resolveContainer(instanceId?: InstanceId): Promise<IContainerProvider> {
+    await this._ensureResolver();
+    if (this._instanceResolver) {
+      const p = await this._instanceResolver.resolveContainer(instanceId);
+      if (p) return p;
+    }
+    return this.container;
+  }
+
+  async resolveImage(instanceId?: InstanceId): Promise<IImageProvider> {
+    await this._ensureResolver();
+    if (this._instanceResolver) {
+      const p = await this._instanceResolver.resolveImage(instanceId);
+      if (p) return p;
+    }
+    return this.image;
+  }
+
+  async resolveGroup(instanceId?: InstanceId): Promise<IContainerGroupProvider | undefined> {
+    await this._ensureResolver();
+    if (this._instanceResolver) {
+      return this._instanceResolver.resolveGroup(instanceId);
+    }
+    return this.groupContainer;
+  }
+
+  // ─── Internal helpers ───
+
+  private get _isAlibaba(): boolean {
+    return this.config.container === 'alibaba' && this._hasAlibabaAccounts;
+  }
+
+  private _resolveDefaultEntry(): ProviderEntry {
+    if (this._isAlibaba) {
+      return this._buildAlibabaDefaultEntry();
+    }
+    if (this.config.container === 'podman') {
+      return this._buildPodmanEntry();
+    }
+    return this._buildStubEntry();
+  }
+
+  private _buildStubEntry(): ProviderEntry {
+    return {
+      name: 'stub',
+      container: secureContainerProvider(new StubContainerProvider()),
+      image: new StubImageProvider(),
+    };
+  }
+
+  private _buildPodmanEntry(): ProviderEntry {
+    const ep = process.env['PODMAN_ENDPOINT'] ?? 'http://127.0.0.1:8080';
+    return {
+      name: 'podman',
+      container: secureContainerProvider(new PodmanContainerProvider(ep)),
+      image: new PodmanImageProvider(ep),
+    };
+  }
+
+  private _buildAlibabaDefaultEntry(): ProviderEntry {
+    const accounts = this._buildAlibabaAccounts();
+    return {
+      name: 'alibaba',
+      container: accounts[0]!.container,
+      image: accounts[0]!.image,
+    };
+  }
+
+  private _buildAlibabaAccounts(): Array<{ name: string; container: IContainerProvider; image: IImageProvider }> {
+    return this.config.accounts
+      .filter((a): a is Credential & { accessKeyId: string; accessKeySecret: string } => !!(a.accessKeyId && a.accessKeySecret))
+      .map(a => ({
+        name: a.name,
+        container: secureContainerProvider(new AlibabaEciContainerProvider(a.accessKeyId, a.accessKeySecret, a.endpoint)),
+        image: new AlibabaEciImageProvider(a.accessKeyId, a.accessKeySecret, a.endpoint,
+          a.defaultRegion ?? this.config.region as string,
+          a.extra?.registryCredentials as Array<{ server: string; userName: string; password: string }> | undefined),
+      }));
+  }
+
+  private _buildTypeEntries(): Map<string, ProviderEntry> {
+    const entries = new Map<string, ProviderEntry>();
+    entries.set('stub', this._buildStubEntry());
+    entries.set('podman', this._buildPodmanEntry());
+    const aliAccounts = this._buildAlibabaAccounts();
+    if (aliAccounts.length > 0) {
+      entries.set('alibaba', {
+        name: 'alibaba' as const,
+        container: aliAccounts[0]!.container,
+        image: aliAccounts[0]!.image,
+      });
+    }
+    return entries;
+  }
+
+  private _createGroupProvider(): IContainerGroupProvider | undefined {
+    if (this._isAlibaba) {
+      const defaultAccount = this.config.accounts.find(
+        (a): a is Credential & { accessKeyId: string; accessKeySecret: string } => !!(a.accessKeyId && a.accessKeySecret),
+      );
+      if (defaultAccount) {
+        return secureContainerGroupProvider(
+          new AlibabaEciContainerGroupProvider(defaultAccount.accessKeyId, defaultAccount.accessKeySecret, defaultAccount.endpoint),
+        );
+      }
+    }
+    if (this.config.container === 'podman') {
+      const ep = process.env['PODMAN_ENDPOINT'] ?? 'http://127.0.0.1:8080';
+      return secureContainerGroupProvider(new PodmanContainerGroupProvider(ep));
+    }
+    return undefined;
+  }
 }
 
 export function createProviderRegistry(
   config: ProviderConfig,
   s3Config?: S3Config,
   atomicStore?: IAtomicStore,
+  secretEncryption?: SecretEncryption,
 ): IProviderRegistry {
-  const podmanEp = process.env['PODMAN_ENDPOINT'] ?? 'http://127.0.0.1:8080';
-
-  // ─── Build per-credential Alibaba accounts ───
-  const accounts: AccountEntry[] = config.accounts
-    .filter(a => a.accessKeyId && a.accessKeySecret)
-    .map(a => ({
-      name: a.name,
-      container: secureContainerProvider(new AlibabaEciContainerProvider(a.accessKeyId!, a.accessKeySecret!, a.endpoint)),
-      image: new AlibabaEciImageProvider(a.accessKeyId!, a.accessKeySecret!, a.endpoint,
-        a.defaultRegion ?? config.region as string,
-        a.extra?.registryCredentials as Array<{ server: string; userName: string; password: string }> | undefined),
-    }));
-
-  // ─── Stub and podman entries (for backward compat lookups) ───
-  const stubEntry: ProviderEntry = {
-    name: 'stub',
-    container: secureContainerProvider(new StubContainerProvider()),
-    image: new StubImageProvider(),
-  };
-  const podmanEntry: ProviderEntry = {
-    name: 'podman',
-    container: secureContainerProvider(new PodmanContainerProvider(podmanEp)),
-    image: new PodmanImageProvider(podmanEp),
-  };
-
-  const typeEntries = new Map<string, ProviderEntry>([
-    ['stub', stubEntry],
-    ['podman', podmanEntry],
-    ...(accounts.length > 0 ? [['alibaba', {
-      name: 'alibaba' as const,
-      container: accounts[0]!.container,
-      image: accounts[0]!.image,
-    }] as const] : []),
-  ]);
-
-  debugLog('system', 'provider selection: config.container="%s", PODMAN_ENDPOINT="%s"', config.container, process.env['PODMAN_ENDPOINT']);
-  const isAlibaba = config.container === 'alibaba' && accounts.length > 0;
-  const def = isAlibaba
-    ? typeEntries.get('alibaba')!
-    : config.container === 'podman' ? podmanEntry
-    : stubEntry;
-
-  // ─── Legacy providers (sync, for backward compat) ───
-  const networkPolicy: INetworkPolicyProvider | undefined = isAlibaba
-    ? undefined
-    : new PodmanNetworkPolicyProvider(podmanEp);
-
-  const dns: IDnsProvider = config.dns === 'cloudflare' && config.cfApiToken
-    ? new CloudflareDnsProvider(config.cfApiToken)
-    : new StubDnsProvider();
-
-  const defaultCreds = config.accounts.find((a): a is Credential & { accessKeyId: string; accessKeySecret: string } => !!(a.accessKeyId && a.accessKeySecret));
-  const metrics: IMetricsProvider = config.metrics === 'alibaba' && defaultCreds
-    ? new AlibabaEciMetricsProvider(defaultCreds.accessKeyId, defaultCreds.accessKeySecret)
-    : new StubMetricsProvider();
-
-  const defaultAccount = config.accounts.find((a): a is Credential & { accessKeyId: string; accessKeySecret: string } => !!(a.accessKeyId && a.accessKeySecret));
-  const groupContainer: IContainerGroupProvider | undefined = isAlibaba && defaultAccount
-    ? secureContainerGroupProvider(new AlibabaEciContainerGroupProvider(defaultAccount.accessKeyId, defaultAccount.accessKeySecret, defaultAccount.endpoint))
-    : config.container === 'podman'
-      ? secureContainerGroupProvider(new PodmanContainerGroupProvider(podmanEp))
-      : undefined;
-
-  // ─── S3 providers ───
-  const { entries: s3Entries, defaultName: s3DefaultName } = s3Config
-    ? createS3Providers(s3Config)
-    : { entries: [], defaultName: '' };
-
-  // ─── Instance-based resolver (dynamic, per-cluster) ───
-  let instanceService: InstanceService | undefined;
-  let instanceResolver: InstanceProviderResolver | undefined;
-  if (atomicStore) {
-    instanceService = new InstanceService(atomicStore);
-    const credService = new CredentialService(atomicStore);
-    instanceResolver = new InstanceProviderResolver(instanceService, credService);
-  }
-
-  return {
-    container: def.container,
-    dns,
-    metrics,
-    image: def.image,
-    networkPolicy,
-    groupContainer,
-    capabilities: resolveCapabilities(config, accounts.length > 0),
-
-    provider(name: string): ProviderEntry | undefined {
-      return typeEntries.get(name);
-    },
-
-    availableProviders(): readonly ProviderEntry[] {
-      return [...typeEntries.values()];
-    },
-
-    s3Account(name?: string): IS3Provider | undefined {
-      const n = name ?? s3DefaultName;
-      return s3Entries.find(e => e.name === n)?.provider;
-    },
-
-    listS3Accounts(): string[] {
-      return s3Entries.map(e => e.name);
-    },
-
-    // ─── Dynamic instance resolution ───
-    async resolveContainer(instanceId?: InstanceId): Promise<IContainerProvider> {
-      if (instanceResolver) {
-        const p = await instanceResolver.resolveContainer(instanceId);
-        if (p) return p;
-      }
-      return def.container;
-    },
-
-    async resolveImage(instanceId?: InstanceId): Promise<IImageProvider> {
-      if (instanceResolver) {
-        const p = await instanceResolver.resolveImage(instanceId);
-        if (p) return p;
-      }
-      return def.image;
-    },
-
-    async resolveGroup(instanceId?: InstanceId): Promise<IContainerGroupProvider | undefined> {
-      if (instanceResolver) {
-        return instanceResolver.resolveGroup(instanceId);
-      }
-      return groupContainer;
-    },
-  };
-}
-
-function resolveCapabilities(config: ProviderConfig, hasAccounts: boolean): ProviderCapabilities {
-  const isProd = config.container === 'alibaba' && hasAccounts;
-  return {
-    spotInstances: isProd, nfsVolumes: true, publicIpAutoAssign: true,
-    preemptible: isProd, maxRuntimeSeconds: isProd ? 86_400 * 7 : 0,
-  };
+  return new LazyProviderRegistry(config, s3Config, atomicStore, secretEncryption);
 }

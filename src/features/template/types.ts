@@ -111,11 +111,19 @@ export interface NetworkSpec {
 
 export interface TemplateStorage {
   readonly name: string;
-  readonly type: 'oss' | 'nfs' | 'hostPath' | 'emptyDir';
+  readonly type: 'oss' | 'nfs' | 'hostPath' | 'emptyDir' | 'disk' | 'configMap' | 'secret';
   readonly mountPath: string;
+  readonly instanceId: string;
+  /** Reference a pre-existing Volume entity. When set, the volume's config (nfs/disk/configMap/secret) overrides inline fields. */
+  readonly volumeId?: string | undefined;
+  /** Reference a pre-existing Bucket entity. When set, overrides inline oss.bucket. */
+  readonly bucketId?: string | undefined;
   readonly oss?: { bucket: string; path: string; readOnly?: boolean } | undefined;
   readonly nfs?: { server: string; path: string; readOnly?: boolean } | undefined;
   readonly hostPath?: { path: string } | undefined;
+  readonly disk?: { diskId: string; fsType?: string; sizeGiB?: number; readOnly?: boolean; deleteWithInstance?: boolean } | undefined;
+  readonly configMap?: { name: string; env: readonly { key: string; value: string }[] } | undefined;
+  readonly secret?: { name: string; items?: readonly { key: string; path: string; mode?: number }[] } | undefined;
   readonly size?: number | undefined;
   readonly providerOverrides?: Record<string, unknown> | undefined;
 }

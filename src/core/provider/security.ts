@@ -68,49 +68,35 @@ export function sanitizeContainerInput(input: CreateContainerGroupInput): Create
  * Wrap an IContainerProvider with input sanitization.
  * All containers' probes are cleaned before reaching the implementation.
  */
-/** Keys that need input sanitization wrapping (not plain passthrough). */
-const SANITIZE_KEYS = new Set(['create', 'update']);
-
 export function secureContainerProvider(inner: IContainerProvider): IContainerProvider {
-  // Build a proxy that sanitizes create/update and passthrough everything else.
-  const overrides: Record<string, Function> = {
-    create(input: CreateContainerGroupInput) {
-      return inner.create(sanitizeContainerInput(input));
+  // Proxy intercepts create/update for sanitization, passes everything else through.
+  // Class methods live on the prototype — Object.keys() can't see them, so we use Proxy.
+  return new Proxy(inner, {
+    get(target, prop: string | symbol, receiver) {
+      if (prop === 'create') {
+        return (input: CreateContainerGroupInput) => target.create(sanitizeContainerInput(input));
+      }
+      if (prop === 'update' && target.update) {
+        return (providerId: string, input: Partial<CreateContainerGroupInput>) =>
+          target.update!(providerId, sanitizeContainerInput(input as CreateContainerGroupInput));
+      }
+      const val = Reflect.get(target, prop, receiver);
+      return typeof val === 'function' ? val.bind(target) : val;
     },
-  };
-  if (inner.update) {
-    overrides.update = (providerId: string, input: Partial<CreateContainerGroupInput>) =>
-      inner.update!(providerId, sanitizeContainerInput(input as CreateContainerGroupInput));
-  }
-
-  const proxy = Object.fromEntries(
-    (Object.keys(inner) as (keyof IContainerProvider)[])
-      .filter(k => !SANITIZE_KEYS.has(k as string))
-      .map(k => [k, (...args: unknown[]) => (inner[k] as Function)(...args)]),
-  ) as Record<string, Function>;
-
-  return { ...proxy, ...overrides } as unknown as IContainerProvider;
+  });
 }
 
 /**
  * Wrap an IContainerGroupProvider with input sanitization.
  */
 export function secureContainerGroupProvider(inner: IContainerGroupProvider): IContainerGroupProvider {
-  return {
-    async createGroup(input) {
-      return inner.createGroup(sanitizeContainerInput(input));
+  return new Proxy(inner, {
+    get(target, prop: string | symbol, receiver) {
+      if (prop === 'createGroup') {
+        return (input: CreateContainerGroupInput) => target.createGroup(sanitizeContainerInput(input));
+      }
+      const val = Reflect.get(target, prop, receiver);
+      return typeof val === 'function' ? val.bind(target) : val;
     },
-    stopGroup(providerId: string) {
-      return inner.stopGroup(providerId);
-    },
-    deleteGroup(providerId: string) {
-      return inner.deleteGroup(providerId);
-    },
-    getGroupStatus(providerId: string) {
-      return inner.getGroupStatus(providerId);
-    },
-    describeGroups(input) {
-      return inner.describeGroups(input);
-    },
-  };
+  });
 }

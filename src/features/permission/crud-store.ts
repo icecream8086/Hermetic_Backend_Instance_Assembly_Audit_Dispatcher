@@ -26,19 +26,14 @@ export class CrudStore<T extends { id: string }> {
   }
 
   /** Return a page of entities. Defaults to page 1, limit 50. */
-  async listPaginated(page = 1, limit = 50): Promise<PaginatedResult<T>> {
-    const idsEntry = await this.atomic.get<string[]>(this.indexKey);
-    const allIds = idsEntry?.value ?? [];
-    const total = allIds.length;
+  async listPaginated(page = 1, limit = 50, filter?: (item: T) => boolean): Promise<PaginatedResult<T>> {
+    // Apply filter before pagination: load all items, filter, then slice
+    const allItems = await this.#loadAll();
+    let items = filter ? allItems.filter(filter) : allItems;
+    const total = items.length;
 
     const start = (page - 1) * limit;
-    const pageIds = allIds.slice(start, start + limit);
-    const entries = await Promise.all(
-      pageIds.map(id => this.atomic.get<T>(this.prefix + id)),
-    );
-    const items = entries
-      .filter((e): e is NonNullable<typeof e> => e !== null)
-      .map(e => e.value);
+    items = items.slice(start, start + limit);
 
     return { items, total, page, limit };
   }
@@ -89,14 +84,13 @@ export class CrudStore<T extends { id: string }> {
     }
   }
 
-  async commitUpdate(id: string, updated: T, expectedVersion: string): Promise<void> {
+  async commitUpdate(id: string, updated: T): Promise<void> {
     for (let attempt = 0; attempt < 3; attempt++) {
-      const ver = await this.atomic.set(this.prefix + id, updated, expectedVersion as any);
-      if (ver) return;
       const entry = await this.atomic.get<T>(this.prefix + id);
       if (!entry) throw new AppError(404, this.notFoundCode, `${this.notFoundCode}: ${id}`);
-      expectedVersion = entry.version;
-      updated = { ...entry.value, ...updated, updatedAt: Date.now() };
+      updated = { ...entry.value, ...updated, updatedAt: Date.now() } as T;
+      const ver = await this.atomic.set(this.prefix + id, updated, entry.version);
+      if (ver) return;
     }
     throw new AppError(409, 'CONFLICT', 'Concurrent modification detected after 3 retries');
   }

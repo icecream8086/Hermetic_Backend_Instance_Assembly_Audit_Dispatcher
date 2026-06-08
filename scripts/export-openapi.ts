@@ -21,6 +21,7 @@ import { createPlatformsRouter, platformsRouteMeta } from '../src/features/platf
 import { createNetworkRouter, networkRouteMeta } from '../src/features/network/handler.ts';
 import { createTopologyRouter, topologyRouteMeta } from '../src/features/topology/handler.ts';
 import { createSubnetRouter, subnetRouteMeta } from '../src/features/subnet/handler.ts';
+import { createVolumeRouter, volumeRouteMeta } from '../src/features/volume/handler.ts';
 import type { RouteMeta } from '../src/core/http-docs/types.ts';
 import { createAuditRouter } from '../src/core/audit/audit-router.ts';
 import { WorkersAuditLogger } from '../src/core/audit/workers-audit-logger.ts';
@@ -164,6 +165,7 @@ const stubPermService = {
 const stubSysGroupService = { create: async () => ({ id: '', name: '', rules: [], priority: 0, createdAt: 0, updatedAt: 0 }), list: async () => [], get: async () => null, update: async () => { throw new Error('stub'); }, delete: async () => {} };
 const stubAtomic: any = { get: async () => null, set: async () => null };
 const stubSandboxSvc: any = { getById: async () => null, stop: async () => {}, terminate: async () => {}, syncRuntime: async () => {}, list: async () => ({ items: [] }) };
+const stubVolumeSvc: any = { create: async () => ({}), get: async () => null, listPaginated: async () => ({ items: [], total: 0, page: 1, limit: 50 }), update: async () => ({}), delete: async () => {} };
 const stubRegistry: any = { availableProviders: () => [{ name: 'stub' }, { name: 'podman' }] };
 
 collect('Info', '/', createInfoHandler(stubStores as any), infoRouteMeta);
@@ -175,6 +177,7 @@ collect('System Groups', '/api/system-groups', createSysGroupRouter(stubSysGroup
 collect('Templates', '/api/templates', createTemplateRouter(stubAtomic as any), templateRouteMeta);
 collect('Sandboxes', '/api/sandboxes', createSandboxRouter(stubSandboxSvc as any), sandboxRouteMeta);
 collect('Platforms', '/api/platforms', createPlatformsRouter(stubRegistry as any), platformsRouteMeta);
+collect('Volumes', '/api/volumes', createVolumeRouter(stubVolumeSvc as any), volumeRouteMeta);
 collect('Networks', '/api/networks', createNetworkRouter({
   create: async () => ({} as any),
   list: async () => ({ items: [], total: 0, page: 1, limit: 20 }),
@@ -189,7 +192,8 @@ collect('Subnets', '/api/subnets', createSubnetRouter(stubSubnetSvc), subnetRout
 const stubClusterSvc: any = { create: async () => ({}), get: async () => null, list: async () => [], update: async () => ({}), delete: async () => {} };
 const stubBucketSvc: any = { create: async () => ({}), get: async () => null, list: async () => [], update: async () => ({}), delete: async () => {} };
 const stubImageSvc: any = { create: async () => ({}), get: async () => null, list: async () => [], update: async () => ({}), delete: async () => {} };
-collect('Topology', '/api/topology', createTopologyRouter(stubClusterSvc, stubBucketSvc, stubImageSvc), topologyRouteMeta);
+const stubPolicyMgr: any = { list: async () => [], create: async () => ({}), get: async () => null, update: async () => ({}), delete: async () => {} };
+collect('Topology', '/api/topology', createTopologyRouter(stubClusterSvc, stubBucketSvc, stubImageSvc, undefined, stubPolicyMgr), topologyRouteMeta);
 
 // Manually-added routes
 function addRoute(method: string, path: string, tag: string, meta?: RouteMeta) {

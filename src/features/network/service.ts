@@ -18,7 +18,7 @@ const INDEX_KEY = 'secgroup:ids';
 
 export interface ISecurityGroupService {
   create(input: CreateSecurityGroupInput, actorId?: string): Promise<SecurityGroup>;
-  list(page?: number, limit?: number): Promise<{ items: SecurityGroup[]; total: number; page: number; limit: number }>;
+  list(page?: number, limit?: number, name?: string): Promise<{ items: SecurityGroup[]; total: number; page: number; limit: number }>;
   get(id: SecurityGroupId): Promise<SecurityGroup | null>;
   update(id: SecurityGroupId, input: UpdateSecurityGroupInput, actorId?: string): Promise<SecurityGroup>;
   delete(id: SecurityGroupId, actorId?: string): Promise<void>;
@@ -73,8 +73,9 @@ export class SecurityGroupService implements ISecurityGroupService {
     return sg;
   }
 
-  async list(page = 1, limit = 20): Promise<{ items: SecurityGroup[]; total: number; page: number; limit: number }> {
-    const all = (await this.#listAll()).reverse();
+  async list(page = 1, limit = 20, name?: string): Promise<{ items: SecurityGroup[]; total: number; page: number; limit: number }> {
+    let all = (await this.#listAll()).reverse();
+    if (name) all = all.filter(sg => sg.name.toLowerCase().includes(name.toLowerCase()));
     return { items: all.slice((page - 1) * limit, page * limit), total: all.length, page, limit };
   }
 

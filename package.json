@@ -31,7 +31,9 @@
       "platforms": "/api/platforms",
       "network": "/api/networks",
       "topology": "/api/topology",
-      "subnet": "/api/subnets"
+      "subnet": "/api/subnets",
+    "volume": "/api/volumes",
+    "container-secret": "/api/container-secrets"
     }
   },
   "dependencies": {

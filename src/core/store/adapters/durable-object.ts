@@ -269,7 +269,9 @@ export class AtomicStoreDO implements DurableObject {
 // ═══════════════════════════════════════════════════════════
 
 export class DurableObjectAtomicStore implements IAtomicStore {
-  #ns: DurableObjectNamespace;
+  readonly #ns: DurableObjectNamespace;
+  /** Cache idFromName() results per prefix — called on every get/set/transact */
+  readonly #idCache = new Map<string, DurableObjectId>();
 
   constructor(ns: DurableObjectNamespace) {
     this.#ns = ns;
@@ -279,7 +281,13 @@ export class DurableObjectAtomicStore implements IAtomicStore {
   #stubForKey(key: string): DurableObjectStub {
     const colonIdx = key.indexOf(':');
     const prefix = colonIdx === -1 ? '_global' : key.substring(0, colonIdx);
-    return this.#ns.get(this.#ns.idFromName('tx_' + prefix));
+    const name = 'tx_' + prefix;
+    let id = this.#idCache.get(name);
+    if (!id) {
+      id = this.#ns.idFromName(name);
+      this.#idCache.set(name, id);
+    }
+    return this.#ns.get(id);
   }
 
   async get<T>(key: string): Promise<{ value: T; version: VersionId } | null> {

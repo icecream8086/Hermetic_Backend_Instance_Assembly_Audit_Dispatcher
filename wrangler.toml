@@ -22,6 +22,11 @@ class_name = "AlarmTimerDO"
 name = "NOTIFICATION_DO"
 class_name = "NotificationDO"
 
+# ─── Durable Object for real-time container log streaming ───
+[[durable_objects.bindings]]
+name = "LOG_STREAM_DO"
+class_name = "LogStreamDO"
+
 [[migrations]]
 tag = "v1"
 new_classes = ["AtomicStoreDO"]
@@ -29,6 +34,10 @@ new_classes = ["AtomicStoreDO"]
 [[migrations]]
 tag = "v5-realtime"
 new_classes = ["NotificationDO"]
+
+[[migrations]]
+tag = "v6-logstream"
+new_classes = ["LogStreamDO"]
 
 # ─── KV for state storage (eventual consistency fallback) ───
 [[kv_namespaces]]

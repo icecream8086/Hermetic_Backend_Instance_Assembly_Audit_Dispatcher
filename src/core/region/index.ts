@@ -5,6 +5,6 @@ export { RegionRegistry, getDefaultRegistry, setDefaultRegistry } from './regist
 export type { RegionBucket, RegionBucketType, CreateBucketInput, UpdateBucketInput } from './bucket.ts';
 export { BucketService } from './bucket.ts';
 export type { ComputeInstance, InstanceCapabilities, InstanceCapacity, InstanceStatus, InstanceId, CreateInstanceInput, UpdateInstanceInput } from './instance.ts';
-export { InstanceService, generateInstanceId } from './instance.ts';
+export { InstanceService, generateInstanceId, createInstanceId } from './instance.ts';
 export type { ImageRepository, RegistryCredential as ImageRegistryCredential, CreateImageInput, UpdateImageInput } from './image.ts';
 export { ImageRepositoryService } from './image.ts';

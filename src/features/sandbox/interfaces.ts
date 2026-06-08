@@ -29,6 +29,9 @@ export interface ISandboxService {
   /** Stop a running sandbox. */
   stop(id: SandboxId): Promise<Sandbox>;
 
+  /** Start a stopped sandbox. */
+  start?(id: SandboxId): Promise<Sandbox>;
+
   /** Destroy a sandbox and release all provider resources. */
   terminate(id: SandboxId, actorId?: string): Promise<void>;
 

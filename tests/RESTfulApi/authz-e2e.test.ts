@@ -47,7 +47,7 @@ beforeAll(async () => {
 
   // 1. Wheel user (Admin role)
   writeFileKV(`user:${WHEEL_USER_ID}`, {
-    id: WHEEL_USER_ID, email: WHEEL_EMAIL, name: 'Wheel', role: 'root',
+    id: WHEEL_USER_ID, email: WHEEL_EMAIL, name: 'Wheel', role: 'wheel',
     passwordHash: WHEEL_PASSWORD_HASH,
     loginPolicy: { enabled: true, timeRanges: [], allowedCIDRs: [] },
     createdAt: NOW, updatedAt: NOW,
@@ -88,6 +88,7 @@ beforeAll(async () => {
   });
 
   const instance = await createApp(config);
+  await instance.seed();
 
   await new Promise<void>((resolve, reject) => {
     server = serve({ fetch: instance.app.fetch, port: 0 }, (info) => {

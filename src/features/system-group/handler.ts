@@ -31,7 +31,8 @@ export function createSysGroupRouter(svc: ISysGroupService): Hono<any> {
     const r = requireRoot(c); if (r) return r;
     const page = parseInt(c.req.query('page') ?? '') || 1;
     const limit = parseInt(c.req.query('limit') ?? '') || 50;
-    const { items, total } = await svc.listPaginated(page, limit);
+    const name = c.req.query('name');
+    const { items, total } = await svc.listPaginated(page, limit, name);
     return c.json(ok({ items, total, page, limit }));
   });
 

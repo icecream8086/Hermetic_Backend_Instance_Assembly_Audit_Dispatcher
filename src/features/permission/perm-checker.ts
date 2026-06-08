@@ -1,16 +1,27 @@
 /**
- * Permission evaluation logic — the heavy check() path extracted from PermissionService
+ * Permission evaluation logic — DAG-based rewrite.
+ *
+ * Converts stored PermissionRules into PolicyNode DAG nodes at check time
+ * and evaluates via PermissionDag (deny-overrides, topological sort).
+ *
+ * Fixes:
+ *  - $self resource matching (previously unimplemented)
+ *  - allow-policies now evaluated (previously only deny-policies loaded)
+ *  - userId/role/policy resource scoping (previously dropped by PolicyManager)
+ *  - Module-level _macRules → instance-scoped
  */
+
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
 import type { ILogWriter } from '../../core/logger/interfaces.ts';
 import type { IAuditWriter } from '../../core/audit/types.ts';
-import { createFacility } from '../../core/brand.ts';
+import { PermissionDag } from '../../core/permission/permission-dag.ts';
+import { PermissionEffect } from '../../core/permission/types.ts';
+import type { PolicyNode, PermissionCheck } from '../../core/permission/types.ts';
+import { createPolicyId } from '../../core/permission/types.ts';
 import { CrudStore } from './crud-store.ts';
 import type {
   StoredPolicy, UserGroup, PermissionGroup, PermissionRule, PermissionCheckInput, PolicyMatchResult,
 } from './types.ts';
-
-const FACILITY = createFacility('perm');
 
 const POLICY_PREFIX = 'policy:';
 const POLICY_INDEX_KEY = 'policy:ids';
@@ -33,7 +44,7 @@ export class PermissionChecker {
 
   constructor(
     private readonly atomic: IAtomicStore,
-    private readonly logger: ILogWriter,
+    _logger: ILogWriter,
     _audit?: IAuditWriter,
   ) {
     this.policyStore = new CrudStore(atomic, POLICY_PREFIX, POLICY_INDEX_KEY, 'POLICY_NOT_FOUND');
@@ -41,7 +52,6 @@ export class PermissionChecker {
     this.pgStore = new CrudStore(atomic, PERMGROUP_PREFIX, PERMGROUP_INDEX_KEY, 'PERMGROUP_NOT_FOUND');
   }
 
-  /** Invalidate the in-memory cache on any write through the parent service. */
   invalidateCache(): void {
     this.#cache = { policies: null, userGroups: null, permGroups: null };
   }
@@ -71,64 +81,125 @@ export class PermissionChecker {
   }
 
   /**
-   * Main permission evaluation: user → groups → policies → rules → match.
-   * Logic identical to the original PermissionService.check().
+   * Evaluate permission via DAG: user → groups → rules → PolicyNode → deny-overrides.
    */
-  async check(input: PermissionCheckInput, _macRules: PermissionRule[]): Promise<PolicyMatchResult> {
-    const { userId, action, resource, resourceOwnerId, ip } = input;
-    const resourceId = resourceOwnerId;
+  async check(input: PermissionCheckInput, macRules: PermissionRule[]): Promise<PolicyMatchResult> {
+    const { userId, action, resource, resourceOwnerId } = input;
 
     // 1) User must exist
     const userEntry = await this.atomic.get<any>('user:' + userId);
     if (!userEntry) return { allowed: false, reason: 'User not found' };
 
-    // 2) Resolve user → userGroups → permGroups → rules
+    // 2) Resolve user → userGroups (walking dependsOn DAG) → permGroups → rules
     const allUserGroups = await this.#cachedUserGroupList();
-    const userGroupIds = allUserGroups.filter(g => g.memberIds?.includes(userId)).map(g => g.id);
+    const userGroupIds = resolveDagGroupIds(allUserGroups, userId);
 
     const allPermGroups = await this.#cachedPermGroupList();
     const matchedGroups = allPermGroups.filter(pg =>
       pg.userGroupIds?.some(ugId => userGroupIds.includes(ugId as any))
       || pg.userIds?.includes(userId)
     );
-    const macRules = Array.isArray(_macRules) ? _macRules : [];
-    const rules: Array<PermissionRule & { _source?: string }> = [
-      ...macRules.map(r => ({ ...r, _source: 'MAC' })),
-      ...matchedGroups.flatMap(pg => pg.rules.map(r => ({ ...r, _source: pg.name }))),
-    ];
 
-    // 3) Add global deny policies
+    // 3) Build DAG from MAC rules + perm group rules + global policies
+    const dag = new PermissionDag();
+
+    // MAC rules first (highest priority — deny-overrides)
+    for (const rule of (Array.isArray(macRules) ? macRules : [])) {
+      dag.addPolicy(ruleToNode(rule, 'MAC', resourceOwnerId));
+    }
+
+    // Permission group rules
+    for (const pg of matchedGroups) {
+      for (const rule of pg.rules) {
+        dag.addPolicy(ruleToNode(rule, pg.name, resourceOwnerId));
+      }
+    }
+
+    // Global allow/deny policies (only enabled, with any effect)
     const policies = await this.#cachedPolicyList();
     for (const p of policies) {
-      if (p.effect === 'deny' && p.actions) {
-        rules.push({ effect: 'deny', actions: p.actions, resource: p.resource, priority: p.priority, _source: p.name });
-      }
+      if (!p.enabled) continue;
+      dag.addPolicy(ruleToNode(
+        { effect: p.effect, actions: p.actions, resource: p.resource, priority: p.priority, description: p.name },
+        p.name, resourceOwnerId,
+      ));
     }
 
-    // 4) Evaluate by priority (highest first)
-    const resourceTarget = resourceId ? `${resource}:${resourceId}` : resource;
-    rules.sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
+    // 4) Evaluate via DAG
+    const params: PermissionCheck = {
+      actor: userId,
+      action,
+      resource,
+      resourceId: resourceOwnerId ?? '',
+    };
+    const result = dag.evaluate(params);
 
-    for (const rule of rules) {
-      if (!ruleMatches(rule, action, resourceTarget, ip)) continue;
-      if (rule.effect !== 'allow') {
-        this.logger.logAsync({
-          facility: FACILITY, level: 0 as any,
-          message: `Rule "${rule._source}" denied ${action} on ${resourceTarget}`,
-          metadata: { eventType: 'perm.check', userId, action, resource, result: false, reason: rule._source, ip },
-        });
-      }
-      return { allowed: rule.effect === 'allow', reason: `Matched rule from ${rule._source}` };
-    }
-
-    return { allowed: false, reason: 'No matching rule' };
+    return { allowed: result.allowed, reason: result.reason };
   }
 }
 
-function ruleMatches(rule: PermissionRule, action: string, resourceTarget: string, _ip?: string): boolean {
-  if (rule.actions && !matchPattern(rule.actions, action)) return false;
-  if (rule.resource && !matchPattern(rule.resource, resourceTarget)) return false;
-  return true;
+/**
+ * Walk the UserGroup dependsOn DAG to collect all group IDs
+ * that a user belongs to (directly or via group inheritance).
+ *
+ * Example: user is in group A. Group A dependsOn B, group B dependsOn C.
+ * Returns [A.id, B.id, C.id].
+ */
+function resolveDagGroupIds(groups: UserGroup[], userId: string): string[] {
+  const result = new Set<string>();
+  const visited = new Set<string>();
+  const byId = new Map<string, UserGroup>(groups.map(g => [g.id as string, g]));
+
+  // Find groups the user directly belongs to
+  const directIds = groups.filter(g => g.memberIds?.includes(userId)).map(g => g.id as string);
+
+  // BFS through dependsOn chain
+  const queue = [...directIds];
+  while (queue.length > 0) {
+    const gid = queue.shift()!;
+    if (visited.has(gid)) continue;
+    visited.add(gid);
+    result.add(gid);
+
+    const group = byId.get(gid);
+    if (group?.dependsOn) {
+      for (const depId of group.dependsOn) {
+        if (!visited.has(depId)) queue.push(depId);
+      }
+    }
+  }
+
+  return [...result];
+}
+
+// ─── Rule → PolicyNode converter ───
+
+function ruleToNode(rule: PermissionRule, source: string, resourceOwnerId?: string): PolicyNode {
+  return {
+    id: createPolicyId(`rule_${crypto.randomUUID()}`),
+    effect: rule.effect === 'deny' ? PermissionEffect.DENY : PermissionEffect.ALLOW,
+    description: rule.description ?? source,
+    match: (params) => {
+      // Actions match
+      if (rule.actions && rule.actions.length > 0) {
+        if (!matchPattern(rule.actions, params.action)) return false;
+      }
+      // Resource match with $self expansion
+      if (rule.resource) {
+        const target = expandSelf(rule.resource, resourceOwnerId, params.resourceId);
+        if (!matchPattern(target, params.resource)) return false;
+      }
+      return true;
+    },
+  };
+}
+
+/** Expand $self in resource pattern to the effective resource target. */
+function expandSelf(pattern: string, ownerId?: string, resourceId?: string): string {
+  if (!pattern.includes('$self')) return pattern;
+  const effective = ownerId || resourceId;
+  if (!effective) return pattern;
+  return pattern.replace(/\$self/g, effective);
 }
 
 function matchPattern(pattern: string | string[], target: string): boolean {

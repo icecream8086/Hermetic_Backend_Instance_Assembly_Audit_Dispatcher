@@ -9,6 +9,8 @@ export interface CreateBucketBody {
   name: string;
   bucketType: RegionBucketType;
   instanceId: string;
+  /** 自动为引用此 bucket 的沙箱生成 S3 访问密钥对。 */
+  autoGenerateKeys?: boolean | undefined;
 }
 
 export interface UpdateBucketBody {
@@ -16,6 +18,7 @@ export interface UpdateBucketBody {
   bucketType?: RegionBucketType | undefined;
   instanceId?: string | undefined;
   status?: 'Active' | 'Inactive' | undefined;
+  autoGenerateKeys?: boolean | undefined;
 }
 
 // ─── Instance types ───

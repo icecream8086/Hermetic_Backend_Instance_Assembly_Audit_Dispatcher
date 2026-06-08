@@ -64,6 +64,7 @@ export interface MappableVolumeMount {
   readonly mountPath: string;
   readonly readOnly: boolean;
   readonly mountPropagation?: string | undefined;
+  readonly credentialRef?: string | undefined;
 }
 
 export function mapVolumeMount(vm: MappableVolumeMount): VolumeMountConfig {
@@ -72,6 +73,7 @@ export function mapVolumeMount(vm: MappableVolumeMount): VolumeMountConfig {
     mountPath: vm.mountPath,
     readOnly: vm.readOnly,
     ...(vm.mountPropagation ? { mountPropagation: vm.mountPropagation } : {}),
+    ...(vm.credentialRef ? { credentialRef: vm.credentialRef } : {}),
   };
 }
 
@@ -86,14 +88,23 @@ export interface MappableVolume {
   readonly id: string;
   readonly type: string;
   readonly nfs?: { readonly server: string; readonly path: string; readonly readOnly: boolean } | undefined;
+  readonly disk?: { readonly diskId: string; readonly fsType: string; readonly sizeGiB?: number; readonly readOnly: boolean; readonly deleteWithInstance?: boolean } | undefined;
+  readonly secret?: { readonly name: string; readonly items?: readonly { key: string; path: string; mode?: number }[] } | undefined;
 }
 
 export function mapVolume(v: MappableVolume): VolumeConfigInput {
-  return {
-    id: v.id,
-    type: v.type,
-    ...(v.nfs ? { options: { server: v.nfs.server, path: v.nfs.path, readOnly: v.nfs.readOnly } } : {}),
-  };
+  let options: Record<string, unknown> | undefined;
+  if (v.nfs) {
+    options = { server: v.nfs.server, path: v.nfs.path, readOnly: v.nfs.readOnly };
+  } else if (v.disk) {
+    options = { diskId: v.disk.diskId, fsType: v.disk.fsType, readOnly: v.disk.readOnly };
+    if (v.disk.sizeGiB !== undefined) options.sizeGiB = v.disk.sizeGiB;
+    if (v.disk.deleteWithInstance !== undefined) options.deleteWithInstance = v.disk.deleteWithInstance;
+  } else if (v.secret) {
+    options = { name: v.secret.name };
+    if (v.secret.items) options.items = [...v.secret.items];
+  }
+  return { id: v.id, type: v.type, ...(options ? { options } : {}) };
 }
 
 export function mapVolumes(vols: readonly MappableVolume[] | undefined): readonly VolumeConfigInput[] | undefined {

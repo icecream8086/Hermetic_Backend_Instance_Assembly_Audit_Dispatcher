@@ -1,6 +1,7 @@
 import type { IAtomicStore } from '../store/interfaces.ts';
 import type { Platform } from '../region/types.ts';
 import { AppError } from '../types.ts';
+import { SecretEncryption } from './secret-encryption.ts';
 
 // ─── Credential type ───
 
@@ -65,8 +66,7 @@ export interface MaskedCredential {
 }
 
 export function maskSecret(secret: string): string {
-  if (secret.length <= 12) return secret.slice(0, 4) + '***';
-  return secret.slice(0, 12) + '***';
+  return secret.slice(0, 6) + '***';
 }
 
 export function toMasked(cred: ManagedCredential): MaskedCredential {
@@ -80,7 +80,7 @@ export function toMasked(cred: ManagedCredential): MaskedCredential {
     ...(cred.token ? { token: maskSecret(cred.token) } : {}),
     ...(cred.username ? { username: cred.username } : {}),
     ...(cred.password ? { password: maskSecret(cred.password) } : {}),
-    ...(cred.registryCredentials?.length ? { registryCredentials: [...cred.registryCredentials] } : {}),
+    ...(cred.registryCredentials?.length ? { registryCredentials: cred.registryCredentials.map(rc => ({ ...rc, password: maskSecret(rc.password) })) } : {}),
     ...(cred.instanceId ? { instanceId: cred.instanceId } : {}),
     status: cred.status,
     createdAt: cred.createdAt,
@@ -123,7 +123,46 @@ const INDEX_KEY = 'cred:ids';
 // ─── Service ───
 
 export class CredentialService {
-  constructor(private readonly atomic: IAtomicStore) {}
+  constructor(
+    private readonly atomic: IAtomicStore,
+    private readonly encryption?: SecretEncryption,
+  ) {}
+
+  /** Encrypt sensitive fields before storage. */
+  async #encryptFields(cred: ManagedCredential): Promise<ManagedCredential> {
+    const enc = this.encryption;
+    if (!enc) return cred;
+    return {
+      ...cred,
+      ...(cred.accessKeySecret ? { accessKeySecret: await enc.encrypt(cred.accessKeySecret) } : {}),
+      ...(cred.token ? { token: await enc.encrypt(cred.token) } : {}),
+      ...(cred.password ? { password: await enc.encrypt(cred.password) } : {}),
+      ...(cred.registryCredentials?.length ? {
+        registryCredentials: await Promise.all(cred.registryCredentials.map(async rc => ({
+          ...rc,
+          password: await enc.encrypt(rc.password),
+        }))),
+      } : {}),
+    };
+  }
+
+  /** Decrypt sensitive fields after read.  Plaintext fields pass through. */
+  async #decryptFields(cred: ManagedCredential): Promise<ManagedCredential> {
+    const enc = this.encryption;
+    if (!enc) return cred;
+    return {
+      ...cred,
+      ...(cred.accessKeySecret ? { accessKeySecret: await enc.decrypt(cred.accessKeySecret) } : {}),
+      ...(cred.token ? { token: await enc.decrypt(cred.token) } : {}),
+      ...(cred.password ? { password: await enc.decrypt(cred.password) } : {}),
+      ...(cred.registryCredentials?.length ? {
+        registryCredentials: await Promise.all(cred.registryCredentials.map(async rc => ({
+          ...rc,
+          password: await enc.decrypt(rc.password),
+        }))),
+      } : {}),
+    };
+  }
 
   async create(input: CreateCredentialInput): Promise<ManagedCredential> {
     const id = generateCredentialId();
@@ -146,34 +185,41 @@ export class CredentialService {
       updatedAt: now,
     };
 
-    await this.atomic.set(PREFIX + id, cred, null);
+    const toStore = await this.#encryptFields(cred);
+    await this.atomic.set(PREFIX + id, toStore, null);
     await this.#addToIndex(id);
-    return cred;
+    return cred; // return plaintext
   }
 
   async get(id: CredentialId): Promise<ManagedCredential | null> {
     const entry = await this.atomic.get<ManagedCredential>(PREFIX + id);
-    return entry?.value ?? null;
+    if (!entry) return null;
+    return this.#decryptFields(entry.value);
   }
 
   /** 按 name 查找凭证（provider resolver 用）。 */
   async findByName(name: string): Promise<ManagedCredential | null> {
     const all = await this.#listAll();
-    return all.find(c => c.name === name) ?? null;
+    const decrypted = await Promise.all(all.map(c => this.#decryptFields(c)));
+    return decrypted.find(c => c.name === name) ?? null;
   }
 
   async list(filter?: { platform?: string | undefined }): Promise<ManagedCredential[]> {
     const all = await this.#listAll();
-    if (!filter?.platform) return all;
-    return all.filter(c => c.platform === filter.platform);
+    const decrypted = await Promise.all(all.map(c => this.#decryptFields(c)));
+    if (!filter?.platform) return decrypted;
+    return decrypted.filter(c => c.platform === filter.platform);
   }
 
   async update(id: CredentialId, input: UpdateCredentialInput): Promise<ManagedCredential> {
     const entry = await this.atomic.get<ManagedCredential>(PREFIX + id);
     if (!entry) throw new AppError(404, 'CREDENTIAL_NOT_FOUND', 'Credential not found');
 
+    // Decrypt existing so merge + re-encrypt stays consistent
+    const existing = await this.#decryptFields(entry.value);
+
     const updated: ManagedCredential = {
-      ...entry.value,
+      ...existing,
       ...(input.name !== undefined ? { name: input.name } : {}),
       ...(input.type !== undefined ? { type: input.type } : {}),
       ...(input.accessKeyId !== undefined ? { accessKeyId: input.accessKeyId } : {}),
@@ -187,9 +233,10 @@ export class CredentialService {
       updatedAt: Date.now(),
     };
 
-    const newVersion = await this.atomic.set(PREFIX + id, updated, entry.version);
+    const toStore = await this.#encryptFields(updated);
+    const newVersion = await this.atomic.set(PREFIX + id, toStore, entry.version);
     if (!newVersion) throw new AppError(409, 'CONFLICT', 'Concurrent modification detected');
-    return updated;
+    return updated; // plaintext
   }
 
   async delete(id: CredentialId): Promise<void> {

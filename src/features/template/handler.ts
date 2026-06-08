@@ -363,17 +363,19 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
     return c.json(ok(tpl), 201);
   });
 
-  // GET / — list all templates (paginated, filtered by visibility)
+  // GET / — list all templates (paginated, filtered by visibility + query)
   router.get('/', async (c) => {
     const user = (c as any).var?.currentUser as { id: string; role?: string } | undefined;
     const page = parseInt(c.req.query('page') ?? '') || 1;
     const limit = parseInt(c.req.query('limit') ?? '') || 50;
+    const name = c.req.query('name');
     const idx = await atomic.get<string[]>(INDEX_KEY);
     const allIds = idx?.value ?? [];
 
     const entries = await Promise.all(allIds.map(id => atomic.get<SandboxTemplate>(PREFIX + id)));
     let visible = entries.filter(e => e).map(e => e!.value);
     if (user) visible = visible.filter(t => canAccessTemplate(t, user));
+    if (name) visible = visible.filter(t => t.name.toLowerCase().includes(name.toLowerCase()));
 
     const total = visible.length;
     const start = (page - 1) * limit;
@@ -448,7 +450,10 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
       }
       if (!svc) return c.json(fail('SERVICE_UNAVAILABLE', 'Sandbox service not available'), 503);
 
-      const input = applyTemplate(resolved, body.name, body.region);
+      const input = await applyTemplate(resolved, body.name, body.region, async (volumeId) => {
+        const volEntry = await atomic.get<Record<string, unknown>>('volume:' + volumeId);
+        return volEntry?.value ?? null;
+      });
       const sandbox = await svc.provision(
         user?.id ? { ...input, creatorId: user.id } : input,
       );

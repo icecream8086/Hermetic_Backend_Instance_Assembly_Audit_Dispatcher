@@ -40,7 +40,8 @@ export enum PermissionAction {
 
 export interface PermissionCheck {
   readonly actor: string;
-  readonly action: PermissionAction;
+  /** Action string — accepts PermissionAction enum values or arbitrary strings for pattern matching. */
+  readonly action: string;
   readonly resource: string;
   readonly resourceId: string;
   readonly context?: Record<string, unknown>;

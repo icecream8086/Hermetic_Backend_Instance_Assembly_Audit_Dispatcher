@@ -3,7 +3,6 @@ import { TransactConflictError } from '../../core/store/interfaces.ts';
 
 // ─── MAC (Mandatory Access Control) — immutable rules, never modifiable via API ───
 const MAC_KEY = '_init:mac-policy';
-let _macRules: PermissionRule[] = [];
 import type { ILogWriter } from '../../core/logger/interfaces.ts';
 import type { IAuditWriter } from '../../core/audit/types.ts';
 import { createFacility } from '../../core/brand.ts';
@@ -12,6 +11,8 @@ import { KernLevel } from '../../core/audit/kern-level.ts';
 import { applyUpdate } from '../../core/utils/apply-update.ts';
 import type { AuditActor } from './audit.ts';
 import { CrudStore, type PaginatedResult } from './crud-store.ts';
+import type { Invitation, InviteStatus, CreateInviteInput } from './types.ts';
+import { INVITE_PREFIX, INVITE_INDEX_KEY } from './types.ts';
 import { setActivePolicy, DEFAULT_POLICY } from '../../core/logger/log-policy.ts';
 import type {
   StoredPolicy, CreatePolicyInput, UpdatePolicyInput,
@@ -54,21 +55,21 @@ const TEMPLATES: Template[] = [
 export interface IPermissionService {
   createPolicy(input: CreatePolicyInput, actor?: AuditActor): Promise<StoredPolicy>;
   listPolicies(): Promise<StoredPolicy[]>;
-  listPoliciesPaginated(page?: number, limit?: number): Promise<PaginatedResult<StoredPolicy>>;
+  listPoliciesPaginated(page?: number, limit?: number, filter?: (item: StoredPolicy) => boolean): Promise<PaginatedResult<StoredPolicy>>;
   getPolicy(id: string): Promise<StoredPolicy | null>;
   updatePolicy(id: string, input: UpdatePolicyInput, actor?: AuditActor): Promise<StoredPolicy>;
   deletePolicy(id: string, actor?: AuditActor): Promise<void>;
 
   createUserGroup(input: CreateUserGroupInput, actor?: AuditActor): Promise<UserGroup>;
   listUserGroups(): Promise<UserGroup[]>;
-  listUserGroupsPaginated(page?: number, limit?: number): Promise<PaginatedResult<UserGroup>>;
+  listUserGroupsPaginated(page?: number, limit?: number, filter?: (item: UserGroup) => boolean): Promise<PaginatedResult<UserGroup>>;
   getUserGroup(id: string): Promise<UserGroup | null>;
   updateUserGroup(id: string, input: UpdateUserGroupInput, actor?: AuditActor): Promise<UserGroup>;
   deleteUserGroup(id: string, actor?: AuditActor): Promise<void>;
 
   createPermGroup(input: CreatePermGroupInput, actor?: AuditActor): Promise<PermissionGroup>;
   listPermGroups(): Promise<PermissionGroup[]>;
-  listPermGroupsPaginated(page?: number, limit?: number): Promise<PaginatedResult<PermissionGroup>>;
+  listPermGroupsPaginated(page?: number, limit?: number, filter?: (item: PermissionGroup) => boolean): Promise<PaginatedResult<PermissionGroup>>;
   getPermGroup(id: string): Promise<PermissionGroup | null>;
   updatePermGroup(id: string, input: UpdatePermGroupInput, actor?: AuditActor): Promise<PermissionGroup>;
   deletePermGroup(id: string, actor?: AuditActor): Promise<void>;
@@ -79,7 +80,7 @@ export interface IPermissionService {
 
   createRouteAcl(input: CreateRouteAclInput, actor?: AuditActor): Promise<RouteAcl>;
   listRouteAcls(): Promise<RouteAcl[]>;
-  listRouteAclsPaginated(page?: number, limit?: number): Promise<PaginatedResult<RouteAcl>>;
+  listRouteAclsPaginated(page?: number, limit?: number, filter?: (item: RouteAcl) => boolean): Promise<PaginatedResult<RouteAcl>>;
   getRouteAcl(id: string): Promise<RouteAcl | null>;
   updateRouteAcl(id: string, input: UpdateRouteAclInput, actor?: AuditActor): Promise<RouteAcl>;
   deleteRouteAcl(id: string, actor?: AuditActor): Promise<void>;
@@ -93,7 +94,7 @@ export interface IPermissionService {
 
   createUserTpl(input: CreateUserTplInput, actor?: AuditActor): Promise<UserTemplate>;
   listUserTpls(): Promise<UserTemplate[]>;
-  listUserTplsPaginated(page?: number, limit?: number): Promise<PaginatedResult<UserTemplate>>;
+  listUserTplsPaginated(page?: number, limit?: number, filter?: (item: UserTemplate) => boolean): Promise<PaginatedResult<UserTemplate>>;
   getUserTpl(id: string): Promise<UserTemplate | null>;
   updateUserTpl(id: string, input: UpdateUserTplInput, actor?: AuditActor): Promise<UserTemplate>;
   deleteUserTpl(id: string, actor?: AuditActor): Promise<void>;
@@ -106,6 +107,12 @@ export interface IPermissionService {
   grantTempElevation(userId: string, durationMs?: number): Promise<number>;
   revokeTempElevation(userId: string): Promise<void>;
   listTempElevations(): Promise<Array<{ userId: string; expiry: number }>>;
+
+  // ── Invitations ──
+  sendInvite(input: CreateInviteInput, invitedBy: string): Promise<Invitation>;
+  acceptInvite(inviteId: string, userId: string): Promise<void>;
+  rejectInvite(inviteId: string, userId: string): Promise<void>;
+  listInvitations(userId: string): Promise<Invitation[]>;
 }
 
 export class PermissionService implements IPermissionService {
@@ -114,6 +121,7 @@ export class PermissionService implements IPermissionService {
   readonly #groupMgr: GroupManager;
   readonly #routeAclMgr: RouteAclManager;
   readonly #checker: PermissionChecker;
+  #macRules: PermissionRule[] = [];
 
   constructor(
     private readonly atomic: IAtomicStore,
@@ -129,9 +137,13 @@ export class PermissionService implements IPermissionService {
   }
 
   // ── Policy CRUD ──
-  createPolicy(input: CreatePolicyInput, actor?: AuditActor) { return this.#policyMgr.create(input, actor); }
+  async createPolicy(input: CreatePolicyInput, actor?: AuditActor) {
+    const result = await this.#policyMgr.create(input, actor);
+    this.#checker.invalidateCache();
+    return result;
+  }
   listPolicies() { return this.#policyMgr.list(); }
-  listPoliciesPaginated(page?: number, limit?: number) { return this.#policyMgr.listPaginated(page, limit); }
+  listPoliciesPaginated(page?: number, limit?: number, filter?: (item: StoredPolicy) => boolean) { return this.#policyMgr.listPaginated(page, limit, filter); }
   getPolicy(id: string) { return this.#policyMgr.get(id); }
   async updatePolicy(id: string, input: UpdatePolicyInput, actor?: AuditActor) {
     const result = await this.#policyMgr.update(id, input, actor);
@@ -144,9 +156,13 @@ export class PermissionService implements IPermissionService {
   }
 
   // ── User Groups ──
-  createUserGroup(input: CreateUserGroupInput, actor?: AuditActor) { return this.#groupMgr.createUserGroup(input, actor); }
+  async createUserGroup(input: CreateUserGroupInput, actor?: AuditActor) {
+    const result = await this.#groupMgr.createUserGroup(input, actor);
+    this.#checker.invalidateCache();
+    return result;
+  }
   listUserGroups() { return this.#groupMgr.listUserGroups(); }
-  listUserGroupsPaginated(page?: number, limit?: number) { return this.#groupMgr.listUserGroupsPaginated(page, limit); }
+  listUserGroupsPaginated(page?: number, limit?: number, filter?: (item: UserGroup) => boolean) { return this.#groupMgr.listUserGroupsPaginated(page, limit, filter); }
   getUserGroup(id: string) { return this.#groupMgr.getUserGroup(id); }
   async updateUserGroup(id: string, input: UpdateUserGroupInput, actor?: AuditActor) {
     const result = await this.#groupMgr.updateUserGroup(id, input, actor);
@@ -159,9 +175,13 @@ export class PermissionService implements IPermissionService {
   }
 
   // ── Permission Groups ──
-  createPermGroup(input: CreatePermGroupInput, actor?: AuditActor) { return this.#groupMgr.createPermGroup(input, actor); }
+  async createPermGroup(input: CreatePermGroupInput, actor?: AuditActor) {
+    const result = await this.#groupMgr.createPermGroup(input, actor);
+    this.#checker.invalidateCache();
+    return result;
+  }
   listPermGroups() { return this.#groupMgr.listPermGroups(); }
-  listPermGroupsPaginated(page?: number, limit?: number) { return this.#groupMgr.listPermGroupsPaginated(page, limit); }
+  listPermGroupsPaginated(page?: number, limit?: number, filter?: (item: PermissionGroup) => boolean) { return this.#groupMgr.listPermGroupsPaginated(page, limit, filter); }
   getPermGroup(id: string) { return this.#groupMgr.getPermGroup(id); }
   async updatePermGroup(id: string, input: UpdatePermGroupInput, actor?: AuditActor) {
     const result = await this.#groupMgr.updatePermGroup(id, input, actor);
@@ -183,7 +203,7 @@ export class PermissionService implements IPermissionService {
   // ── Route ACL ──
   createRouteAcl(input: CreateRouteAclInput, actor?: AuditActor) { return this.#routeAclMgr.create(input, actor); }
   listRouteAcls() { return this.#routeAclMgr.list(); }
-  listRouteAclsPaginated(page?: number, limit?: number) { return this.#routeAclMgr.listPaginated(page, limit); }
+  listRouteAclsPaginated(page?: number, limit?: number, filter?: (item: RouteAcl) => boolean) { return this.#routeAclMgr.listPaginated(page, limit, filter); }
   getRouteAcl(id: string) { return this.#routeAclMgr.get(id); }
   updateRouteAcl(id: string, input: UpdateRouteAclInput, actor?: AuditActor) { return this.#routeAclMgr.update(id, input, actor); }
   deleteRouteAcl(id: string, actor?: AuditActor) { return this.#routeAclMgr.delete(id, actor); }
@@ -239,7 +259,7 @@ export class PermissionService implements IPermissionService {
     return tpl;
   }
   listUserTpls() { return this.userTplStore.list(); }
-  listUserTplsPaginated(page?: number, limit?: number) { return this.userTplStore.listPaginated(page, limit); }
+  listUserTplsPaginated(page?: number, limit?: number, filter?: (item: UserTemplate) => boolean) { return this.userTplStore.listPaginated(page, limit, filter); }
   getUserTpl(id: string) { return this.userTplStore.get(id); }
 
   async updateUserTpl(id: string, input: UpdateUserTplInput, actor?: AuditActor): Promise<UserTemplate> {
@@ -249,7 +269,7 @@ export class PermissionService implements IPermissionService {
       ...input,
       updatedAt: Date.now(),
     });
-    await this.userTplStore.commitUpdate(id, updated, '');
+    await this.userTplStore.commitUpdate(id, updated);
     this.audit?.write({
       level: KernLevel.WARNING, facility: FACILITY, message: `User template updated — ${updated.name}`,
       actorId: actor?.userId, metadata: { eventType: 'userTpl.updated', templateId: id },
@@ -269,22 +289,22 @@ export class PermissionService implements IPermissionService {
 
   // ── Permission Check ──
   check(input: PermissionCheckInput): Promise<PolicyMatchResult> {
-    return this.#checker.check(input, _macRules);
+    return this.#checker.check(input, this.#macRules);
   }
 
   // ── MAC Rules ──
   async loadMacRules(): Promise<void> {
     try {
       const entry = await this.atomic.get<PermissionRule[]>(MAC_KEY);
-      if (entry) _macRules = entry.value ?? [];
-    } catch { _macRules = []; }
+      if (entry) this.#macRules = entry.value ?? [];
+    } catch { this.#macRules = []; }
   }
 
   async seedMacRules(rules: PermissionRule[]): Promise<void> {
     const existing = await this.atomic.get<PermissionRule[]>(MAC_KEY);
     if (existing) return;
     await this.atomic.set(MAC_KEY, rules, null);
-    _macRules = rules;
+    this.#macRules = rules;
   }
 
   // ── Temporary Elevation ──
@@ -329,6 +349,80 @@ export class PermissionService implements IPermissionService {
       await this.atomic.set('temp:elev:ids', ids.filter((id: string) => !stale.includes(id)), idsEntry.version);
     }
     return result;
+  }
+
+  // ── Invitations ──
+
+  async sendInvite(input: CreateInviteInput, invitedBy: string): Promise<Invitation> {
+    const group = await this.#groupMgr.getUserGroup(input.groupId);
+    if (!group) throw new AppError(404, 'GROUP_NOT_FOUND', 'User group not found');
+    if (!group.adminIds.includes(invitedBy)) throw new AppError(403, 'FORBIDDEN', 'Only group admins can send invitations');
+
+    const id = `inv_${crypto.randomUUID()}`;
+    const invite: Invitation = {
+      id, groupId: input.groupId, inviteeId: input.inviteeId,
+      invitedBy, status: 'pending',
+      createdAt: Date.now(), expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000,
+    };
+    // Store invitation + update index
+    await this.atomic.transact(async (txn) => {
+      const idx = await txn.get<string[]>(INVITE_INDEX_KEY);
+      txn.set(INVITE_INDEX_KEY, [...(idx ?? []), id]);
+      txn.set(INVITE_PREFIX + id, invite);
+    });
+    this.audit?.write({
+      level: KernLevel.INFO, facility: 'perm',
+      message: `Invitation sent: ${invitedBy} invited ${input.inviteeId} to group ${input.groupId}`,
+      metadata: { eventType: 'perm.invite.sent', inviteId: id, groupId: input.groupId, inviteeId: input.inviteeId },
+    });
+    return invite;
+  }
+
+  async acceptInvite(inviteId: string, userId: string): Promise<void> {
+    const entry = await this.atomic.get<Invitation>(INVITE_PREFIX + inviteId);
+    if (!entry) throw new AppError(404, 'INVITE_NOT_FOUND', 'Invitation not found');
+    if (entry.value.inviteeId !== userId) throw new AppError(403, 'FORBIDDEN', 'Only the invitee can accept');
+    if (entry.value.status !== 'pending') throw new AppError(409, 'ALREADY_PROCESSED', 'Invitation already processed');
+    if (Date.now() > entry.value.expiresAt) throw new AppError(410, 'EXPIRED', 'Invitation has expired');
+
+    // Update invitation status + add user to group
+    await this.atomic.transact(async (txn) => {
+      const inv = await txn.get<Invitation>(INVITE_PREFIX + inviteId);
+      if (!inv || inv.status !== 'pending') throw new AppError(409, 'ALREADY_PROCESSED', 'Invitation already processed');
+      txn.set(INVITE_PREFIX + inviteId, { ...inv, status: 'accepted' as InviteStatus });
+
+      const grp = await txn.get<any>('usergroup:' + entry.value.groupId);
+      if (grp) {
+        const members = grp.memberIds ?? [];
+        if (!members.includes(userId)) {
+          txn.set('usergroup:' + entry.value.groupId, { ...grp, memberIds: [...members, userId], updatedAt: Date.now() });
+        }
+      }
+    });
+    this.audit?.write({
+      level: KernLevel.INFO, facility: 'perm',
+      message: `Invitation accepted: ${userId} joined group ${entry.value.groupId}`,
+      metadata: { eventType: 'perm.invite.accepted', inviteId, groupId: entry.value.groupId, userId },
+    });
+  }
+
+  async rejectInvite(inviteId: string, userId: string): Promise<void> {
+    const entry = await this.atomic.get<Invitation>(INVITE_PREFIX + inviteId);
+    if (!entry) throw new AppError(404, 'INVITE_NOT_FOUND', 'Invitation not found');
+    if (entry.value.inviteeId !== userId) throw new AppError(403, 'FORBIDDEN', 'Only the invitee can reject');
+    if (entry.value.status !== 'pending') throw new AppError(409, 'ALREADY_PROCESSED', 'Invitation already processed');
+
+    await this.atomic.set(INVITE_PREFIX + inviteId, { ...entry.value, status: 'rejected' as InviteStatus }, entry.version);
+  }
+
+  async listInvitations(userId: string): Promise<Invitation[]> {
+    const idx = await this.atomic.get<string[]>(INVITE_INDEX_KEY);
+    if (!idx) return [];
+    const entries = await Promise.all(idx.value.map(id => this.atomic.get<Invitation>(INVITE_PREFIX + id)));
+    return entries
+      .filter((e): e is NonNullable<typeof e> => e !== null)
+      .map(e => e.value)
+      .filter(inv => inv.inviteeId === userId);
   }
 
   async #transactWithRetry<T>(fn: (txn: IStoreTransaction) => Promise<T>, retries = 3): Promise<T> {

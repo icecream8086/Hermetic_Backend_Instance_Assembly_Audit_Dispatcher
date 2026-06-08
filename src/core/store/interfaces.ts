@@ -101,7 +101,7 @@ export class TransactConflictError extends Error {
  * Binary archive layer: large objects and log backups.
  */
 export interface IBlobStore {
-  put(key: string, body: ReadableStream | Buffer, metadata?: BlobMetadata): Promise<void>;
+  put(key: string, body: ReadableStream | ArrayBuffer, metadata?: BlobMetadata): Promise<void>;
   get(key: string): Promise<ReadableStream | null>;
   delete(key: string): Promise<void>;
 }

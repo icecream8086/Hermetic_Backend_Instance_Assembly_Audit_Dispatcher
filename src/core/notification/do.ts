@@ -16,11 +16,7 @@ const MAX_BROADCAST_BYTES = 65_536;
 
 const ALLOWED_EVENT_TYPES = new Set([
   'sandbox.provisioned',
-  'sandbox.stopped',
-  'sandbox.terminated',
   'sandbox.status',
-  'user.login',
-  'audit.alert',
 ]);
 
 export class NotificationDO implements DurableObject {

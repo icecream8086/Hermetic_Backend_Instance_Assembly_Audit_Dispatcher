@@ -58,6 +58,11 @@ const config = loadConfig({
 
 const instance = await createApp(config);
 
+// Run seeding synchronously in dev mode — no ctx.waitUntil() available locally.
+// On first run this seeds policy lib, default instance, and templates (~100 I/O ops).
+// Subsequent starts only check gate keys (negligible cost).
+instance.seed().catch((err) => console.error('[dev] seed error:', err));
+
 serve({ fetch: instance.app.fetch, port: config.server.port }, (info) => {
   // eslint-disable-next-line no-console
   console.log(`[${new Date().toISOString()}] INFO: [dev] Server listening on http://localhost:${info.port}`);

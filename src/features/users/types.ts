@@ -32,6 +32,7 @@ export enum UserRole {
   Root = 'root',
   Operator = 'Operator',
   Viewer = 'Viewer',
+  Wheel = 'wheel',
 }
 
 // ─── Entity ───

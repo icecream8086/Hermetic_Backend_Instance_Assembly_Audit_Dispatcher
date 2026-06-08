@@ -36,6 +36,13 @@ export interface TimerBackendOptions {
  * ```
  */
 export function createTimerBackend(type: SchedulerBackendType, options?: TimerBackendOptions): ITimerBackend {
+  // Production auto-detection: when DO namespace is available, use do-alarm
+  // even if 'worker' was configured. setInterval doesn't survive Worker
+  // request lifetime — DO alarm is the correct production pattern.
+  if (type === 'worker' && options?.doNamespace) {
+    type = 'do-alarm';
+  }
+
   switch (type) {
     case 'worker':
       return new SetIntervalBackend();
@@ -43,10 +50,8 @@ export function createTimerBackend(type: SchedulerBackendType, options?: TimerBa
       return new ManualBackend();
     case 'do-alarm': {
       if (!options?.doNamespace) {
-        throw new Error(
-          'Cannot create do-alarm backend: missing doNamespace. ' +
-          'Pass { doNamespace: env.ALARM_TIMER_DO } to createTimerBackend().',
-        );
+        // Without DO namespace, fall back to setInterval
+        return new SetIntervalBackend();
       }
       const id = options.doNamespace.idFromName('event-loop');
       const doStub = options.doNamespace.get(id);

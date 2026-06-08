@@ -11,7 +11,8 @@ export function createSubnetRouter(svc: ISubnetService): Hono<{ Variables: AppCo
   router.get('/', async (c) => {
     const page = parseInt(c.req.query('page') ?? '') || 1;
     const limit = parseInt(c.req.query('limit') ?? '') || 20;
-    const result = await svc.list(page, limit);
+    const name = c.req.query('name');
+    const result = await svc.list(page, limit, name);
     return c.json(ok(result));
   });
 

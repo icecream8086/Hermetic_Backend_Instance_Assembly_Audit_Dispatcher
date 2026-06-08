@@ -140,6 +140,21 @@ export function createSandboxRouter(
     }
   });
 
+  // POST /:id/start — start a stopped sandbox
+  router.post('/:id/start', async (c) => {
+    const id = createSandboxId(c.req.param('id'));
+    const sandbox = await svc.getById(id);
+    const ownerId = sandbox?.config?.creatorId;
+    { const r = await requirePerm(c, permissionChecker, 'update', 'sandbox', ownerId); if (r) return r; }
+    try {
+      if (!svc.start) return c.json(fail('START_FAILED', 'Start not supported by this service'), 501);
+      const started = await svc.start(id);
+      return c.json(ok(started));
+    } catch (e: any) {
+      return c.json(fail('START_FAILED', e.message), 409);
+    }
+  });
+
   // DELETE /:id — terminate and delete a sandbox
   router.delete('/:id', async (c) => {
     const id = createSandboxId(c.req.param('id'));
@@ -191,7 +206,9 @@ export const sandboxRouteMeta: RouteMeta[] = [
   { method: 'GET', path: '/', description: '列出所有沙箱（支持 ?status=&limit=&cursor= 过滤）', responseDescription: '{ items: Sandbox[], nextCursor }' },
   { method: 'GET', path: '/:id', description: '获取沙箱详情（含网络/容器/事件）', responseDescription: 'Sandbox' },
   { method: 'POST', path: '/:id/stop', description: '停止沙箱', responseDescription: 'Sandbox' },
+  { method: 'POST', path: '/:id/start', description: '启动已停止的沙箱', responseDescription: 'Sandbox' },
   { method: 'DELETE', path: '/:id', description: '终止并删除沙箱', responseDescription: '{ ok: true }' },
   { method: 'POST', path: '/:id/sync', description: '从 provider 同步最新运行状态', responseDescription: 'ContainerGroupRuntime' },
   { method: 'GET', path: '/:id/health', description: '获取容器健康状态', responseDescription: 'ContainerHealth[]' },
+  { method: 'GET', path: '/:id/logs', description: '实时容器日志流（WebSocket）— 升级为 WebSocket 后持续推送 stdout/stderr。支持标准日志参数: tail=N（最近 N 行后再 follow）, since=ts（UNIX 时间戳后的日志）, follow=1（持续推送，默认）。Podman 走 HTTP streaming，ECI 走 2s 轮询。容器停止时推 {"event":"container_stopped"}，删除时推 {"event":"container_deleted"} 后关闭连接。', responseDescription: 'WebSocket stream — 日志行文本 / JSON 事件' },
 ];

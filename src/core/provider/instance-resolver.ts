@@ -15,6 +15,7 @@ import type { IS3Provider } from './s3.ts';
 import type { ComputeInstance } from '../region/instance.ts';
 import type { InstanceService, InstanceId } from '../region/instance.ts';
 import type { CredentialService, RegistryCredential } from '../auth/credential.ts';
+import { AppError } from '../types.ts';
 import { secureContainerProvider, secureContainerGroupProvider } from './security.ts';
 import { PodmanContainerProvider } from '../../providers/podman/podman-provider.ts';
 import { PodmanImageProvider } from '../../providers/podman/podman-image.ts';
@@ -40,6 +41,7 @@ export class InstanceProviderResolver {
     if (instanceId) {
       const inst = await this.instanceService.get(instanceId);
       if (inst) return this.#createContainerProvider(inst);
+      throw new AppError(404, 'INSTANCE_NOT_FOUND', `Container instance ${instanceId} not found`);
     }
     const all = await this.instanceService.resolveByCapability('container');
     if (all.length > 0) return this.#createContainerProvider(all[0]!);
@@ -51,6 +53,7 @@ export class InstanceProviderResolver {
     if (instanceId) {
       const inst = await this.instanceService.get(instanceId);
       if (inst?.capabilities.image) return this.#createImageProvider(inst);
+      throw new AppError(404, 'INSTANCE_NOT_FOUND', `Image instance ${instanceId} not found`);
     }
     const all = await this.instanceService.resolveByCapability('image');
     if (all.length > 0) return this.#createImageProvider(all[0]!);
@@ -62,6 +65,7 @@ export class InstanceProviderResolver {
     if (instanceId) {
       const inst = await this.instanceService.get(instanceId);
       if (inst?.capabilities.group) return this.#createGroupProvider(inst);
+      throw new AppError(404, 'INSTANCE_NOT_FOUND', `Group instance ${instanceId} not found or lacks group capability`);
     }
     const all = await this.instanceService.resolveByCapability('group');
     if (all.length > 0) return this.#createGroupProvider(all[0]!);
@@ -138,7 +142,7 @@ export class InstanceProviderResolver {
         const cred = await this.#resolveCredential(instance.credentialRef);
         return new AlibabaEciImageProvider(
           cred.accessKeyId ?? '', cred.accessKeySecret ?? '', instance.endpoint,
-          'cn-hangzhou',
+          instance.region,
           cred.registryCredentials as Array<{ server: string; userName: string; password: string }> | undefined,
         );
       }

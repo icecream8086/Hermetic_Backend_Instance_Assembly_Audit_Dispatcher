@@ -3,8 +3,14 @@ import { AuditTier } from './interfaces.ts';
 import type { LogInput, LogEntry, LogQuery } from './types.ts';
 import type { LogId } from '../brand.ts';
 import { generateLogId } from '../brand.ts';
-import { shouldLog } from './log-policy.ts';
+import { shouldLog, weight } from './log-policy.ts';
 import { formatDmesgLine } from '../utils/dmesg.ts';
+
+/** Global panic hook — called when a FATAL-level log is written. */
+let _onPanic: ((msg: string) => void) | null = null;
+export function setPanicHandler(handler: ((msg: string) => void) | null): void {
+  _onPanic = handler;
+}
 
 /** Minimal console logger for local development. */
 export class ConsoleLogger implements ILogger {
@@ -24,6 +30,11 @@ export class ConsoleLogger implements ILogger {
     this.#entries.push(entry);
     if (shouldLog(input.facility, input.level)) {
       this.#print(entry);
+    }
+    // FATAL level → trigger panic (isolate restart in Workers)
+    if (weight(entry.level) >= 5) {
+      console.error(`\x1b[31m🔥 KERNEL PANIC: ${entry.message}\x1b[0m`);
+      _onPanic?.(entry.message);
     }
     return id;
   }

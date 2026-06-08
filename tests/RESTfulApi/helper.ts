@@ -36,6 +36,7 @@ export async function startTestServer(): Promise<TestServer> {
   });
 
   const instance = await createApp(config);
+  await instance.seed(); // ensure seed data is available for tests
 
   return new Promise((resolve, reject) => {
     const server = serve(

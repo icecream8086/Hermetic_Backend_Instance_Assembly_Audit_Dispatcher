@@ -34,6 +34,9 @@ export class PolicyManager {
       description: input.description,
       effect: input.effect,
       actions: input.actions ?? [],
+      resource: input.resource,
+      userId: input.userId,
+      role: input.role,
       priority: input.priority ?? 0,
       enabled: true,
       createdAt: Date.now(), updatedAt: Date.now(),
@@ -48,7 +51,7 @@ export class PolicyManager {
   }
 
   async list(): Promise<StoredPolicy[]> { return this.store.list(); }
-  async listPaginated(page?: number, limit?: number) { return this.store.listPaginated(page, limit); }
+  async listPaginated(page?: number, limit?: number, filter?: (item: StoredPolicy) => boolean) { return this.store.listPaginated(page, limit, filter); }
   async get(id: string): Promise<StoredPolicy | null> { return this.store.get(id); }
 
   async update(id: string, input: UpdatePolicyInput, actor?: AuditActor): Promise<StoredPolicy> {
@@ -58,7 +61,7 @@ export class PolicyManager {
       ...input,
       updatedAt: Date.now(),
     });
-    await this.store.commitUpdate(id, updated, '');
+    await this.store.commitUpdate(id, updated);
     this.logger.logAsync({
       facility: FACILITY, level: LogLevel.INFO, message: 'Policy updated',
       metadata: { policyId: id, name: updated.name },

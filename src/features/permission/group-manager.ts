@@ -40,10 +40,13 @@ export class GroupManager {
 
   async createUserGroup(input: CreateUserGroupInput, actor?: AuditActor): Promise<UserGroup> {
     const id = generateUserGroupId();
+    const memberIds = input.memberIds ?? [];
+    const adminIds = input.adminIds ?? (actor?.userId ? [actor.userId] : []);
     const group: UserGroup = {
       id, name: input.name,
       description: input.description,
-      memberIds: input.memberIds ?? [],
+      memberIds,
+      adminIds,
       dependsOn: input.dependsOn ?? [],
       createdAt: Date.now(), updatedAt: Date.now(),
     };
@@ -57,7 +60,7 @@ export class GroupManager {
   }
 
   async listUserGroups() { return this.ugStore.list(); }
-  async listUserGroupsPaginated(page?: number, limit?: number) { return this.ugStore.listPaginated(page, limit); }
+  async listUserGroupsPaginated(page?: number, limit?: number, filter?: (item: UserGroup) => boolean) { return this.ugStore.listPaginated(page, limit, filter); }
   async getUserGroup(id: string) { return this.ugStore.get(id); }
 
   async updateUserGroup(id: string, input: UpdateUserGroupInput, actor?: AuditActor): Promise<UserGroup> {
@@ -67,7 +70,7 @@ export class GroupManager {
       ...input,
       updatedAt: Date.now(),
     });
-    await this.ugStore.commitUpdate(id, updated, '');
+    await this.ugStore.commitUpdate(id, updated);
     permLogAudit(this.logger, this.audit, 'perm.userGroup.updated', actor, { entityType: 'userGroup', entityId: id, changes: { old, new: updated } }, KernLevel.WARNING);
     return updated;
   }
@@ -107,7 +110,7 @@ export class GroupManager {
   }
 
   async listPermGroups() { return this.pgStore.list(); }
-  async listPermGroupsPaginated(page?: number, limit?: number) { return this.pgStore.listPaginated(page, limit); }
+  async listPermGroupsPaginated(page?: number, limit?: number, filter?: (item: PermissionGroup) => boolean) { return this.pgStore.listPaginated(page, limit, filter); }
   async getPermGroup(id: string) { return this.pgStore.get(id); }
 
   async updatePermGroup(id: string, input: UpdatePermGroupInput, actor?: AuditActor): Promise<PermissionGroup> {
@@ -117,7 +120,7 @@ export class GroupManager {
       ...input,
       updatedAt: Date.now(),
     });
-    await this.pgStore.commitUpdate(id, updated, '');
+    await this.pgStore.commitUpdate(id, updated);
     permLogAudit(this.logger, this.audit, 'perm.permissionGroup.updated', actor, { entityType: 'permissionGroup', entityId: id, changes: { old, new: updated } }, KernLevel.WARNING);
     return updated;
   }

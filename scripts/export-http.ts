@@ -11,6 +11,7 @@ import { createPlatformsRouter, platformsRouteMeta } from '../src/features/platf
 import { createNetworkRouter, networkRouteMeta } from '../src/features/network/handler.ts';
 import { createTopologyRouter, topologyRouteMeta } from '../src/features/topology/handler.ts';
 import { createSubnetRouter, subnetRouteMeta } from '../src/features/subnet/handler.ts';
+import { createVolumeRouter, volumeRouteMeta } from '../src/features/volume/handler.ts';
 import type { RouteMeta } from '../src/core/http-docs/types.ts';
 import { createAuditRouter } from '../src/core/audit/audit-router.ts';
 import { WorkersAuditLogger } from '../src/core/audit/workers-audit-logger.ts';
@@ -108,6 +109,9 @@ collect('tpl', 'Tpl', '/api/templates', createTemplateRouter(stubAtomic as any),
 const stubSandboxSvc: any = { getById: async () => null, stop: async () => {}, terminate: async () => {}, syncRuntime: async () => {}, list: async () => ({ items: [] }) };
 collect('sbx', 'Sbx', '/api/sandboxes', createSandboxRouter(stubSandboxSvc as any), () => true, sandboxRouteMeta);
 
+const stubVolumeSvc: any = { create: async () => ({}), get: async () => null, listPaginated: async () => ({ items: [], total: 0, page: 1, limit: 50 }), update: async () => ({}), delete: async () => {} };
+collect('vol', 'Vol', '/api/volumes', createVolumeRouter(stubVolumeSvc), () => true, volumeRouteMeta);
+
 const stubRegistry: any = { availableProviders: () => [{ name: 'stub' }, { name: 'podman' }] };
 collect('plf', 'Plf', '/api/platforms', createPlatformsRouter(stubRegistry as any), () => true, platformsRouteMeta);
 collect('net', 'Net', '/api/networks', createNetworkRouter({
@@ -124,12 +128,18 @@ collect('sub', 'Sub', '/api/subnets', createSubnetRouter(stubSubnetSvc), () => t
 const stubClusterSvc: any = { create: async () => ({}), get: async () => null, list: async () => [], update: async () => ({}), delete: async () => {} };
 const stubBucketSvc: any = { create: async () => ({}), get: async () => null, list: async () => [], update: async () => ({}), delete: async () => {} };
 const stubImageSvc: any = { create: async () => ({}), get: async () => null, list: async () => [], update: async () => ({}), delete: async () => {} };
-collect('topo', 'Topo', '/api/topology', createTopologyRouter(stubClusterSvc, stubBucketSvc, stubImageSvc), () => true, topologyRouteMeta);
+const stubPolicyMgr: any = { list: async () => [], create: async () => ({}), get: async () => null, update: async () => ({}), delete: async () => {} };
+collect('topo', 'Topo', '/api/topology', createTopologyRouter(stubClusterSvc, stubBucketSvc, stubImageSvc, undefined, stubPolicyMgr), () => true, topologyRouteMeta);
 
 // Manually-added routes (not in any feature router)
 routes.push({
   method: 'POST', path: '/__tick', fileTag: 'events', tag: 'Dev',
   meta: { method: 'POST', path: '/__tick', description: '[DEV] 手动触发事件循环 tick', responseDescription: '{ ok, queueSize, processedCount, running }' },
+});
+// Log stream WebSocket (route registered in app.ts, not in sandbox handler)
+routes.push({
+  method: 'GET', path: '/api/sandboxes/:id/logs', fileTag: 'sbx', tag: 'Sandbox',
+  meta: { method: 'GET', path: '/:id/logs', description: 'WebSocket 实时容器日志流 — 支持 ?tail=N&since=ts', responseDescription: 'WebSocket stream (升级后持续推送日志行 / JSON 事件)' },
 });
 routes.push({
   method: 'POST', path: '/__admin/migrate-user-index', fileTag: 'users', tag: 'Dev',
@@ -171,13 +181,14 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const httpDir = resolve(__dirname, '..', 'http');
 mkdirSync(httpDir, { recursive: true });
 
-const fileTagOrder = ['info', 'auth', 'sysgrp', 'tpl', 'sbx', 'plf', 'perm', 'audit', 'users', 'events', 'topo', 'sub'];
+const fileTagOrder = ['info', 'auth', 'sysgrp', 'tpl', 'sbx', 'vol', 'plf', 'perm', 'audit', 'users', 'events', 'topo', 'sub'];
 const fileTagTitle: Record<string, string> = {
   info: 'Info',
   auth: 'Auth',
   sysgrp: 'SysGrp',
   tpl: 'Tpl',
   sbx: 'Sbx',
+  vol: 'Vol',
   plf: 'Plf',
   perm: 'Perm',
   audit: 'Audit',

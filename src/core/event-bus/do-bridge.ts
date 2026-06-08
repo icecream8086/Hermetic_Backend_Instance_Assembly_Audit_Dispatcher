@@ -15,12 +15,9 @@ export class DoBridge {
     bus: EventBus,
     private readonly notifDO: DurableObjectNamespace,
   ) {
+    // Only register events that are actually dispatched via eventBus.dispatch()
     bus.on('sandbox.provisioned', this.#forward('sandbox.provisioned'));
-    bus.on('sandbox.stopped', this.#forward('sandbox.stopped'));
-    bus.on('sandbox.terminated', this.#forward('sandbox.terminated'));
     bus.on('sandbox.status', this.#forward('sandbox.status'));
-    bus.on('user.login', this.#forward('user.login'));
-    bus.on('audit.alert', this.#forward('audit.alert'));
   }
 
   /** Create a handler that forwards an event to NotificationDO for broadcast. */

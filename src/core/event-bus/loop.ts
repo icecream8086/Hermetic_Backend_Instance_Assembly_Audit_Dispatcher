@@ -59,6 +59,13 @@ export interface IEventLoopControl {
    */
   enqueueTrigger<T>(input: TriggerEventInput<T>): Event;
 
+  /**
+   * Enqueue a system event that bypasses the maxQueueSize limit.
+   * Use for critical internal events (health:check, etc.) that must
+   * never be dropped due to queue pressure.
+   */
+  enqueuePriority<T>(input: TriggerEventInput<T>): Event;
+
   /** List pending events in the queue (type + id, no payload). */
   pendingEvents(): Array<{ type: string; id: string }>;
 
@@ -119,6 +126,7 @@ export class EventLoop implements IEventLoopControl {
   readonly #store: IAtomicStore | undefined;
   #timerHandle: TimerHandle | null = null;
   #paused = false;
+  #ticking = false;
   #processedCount = 0;
   #startTime = 0;
   #config: EventLoopConfig;
@@ -213,8 +221,11 @@ export class EventLoop implements IEventLoopControl {
       );
       return;
     }
-    this.#queue.enqueue(event);
+    // Persist BEFORE memory enqueue to close the crash window.
+    // If persist is in-flight when crash occurs, the event is in the store
+    // and will be recovered on restart (at-least-once delivery).
     if (this.#store) this.#persistEnqueue(event).catch(err => this.#reportError(err, 'persist-enqueue'));
+    this.#queue.enqueue(event);
   }
 
   enqueueTrigger<T>(input: TriggerEventInput<T>): Event {
@@ -226,8 +237,15 @@ export class EventLoop implements IEventLoopControl {
       );
       return event;
     }
-    this.#queue.enqueue(event);
     if (this.#store) this.#persistEnqueue(event).catch(err => this.#reportError(err, 'persist-enqueue'));
+    this.#queue.enqueue(event);
+    return event;
+  }
+
+  enqueuePriority<T>(input: TriggerEventInput<T>): Event {
+    const event = eventFromTrigger(input);
+    if (this.#store) this.#persistEnqueue(event).catch(err => this.#reportError(err, 'persist-enqueue'));
+    this.#queue.enqueue(event);
     return event;
   }
 
@@ -240,10 +258,14 @@ export class EventLoop implements IEventLoopControl {
   }
 
   async triggerTick(): Promise<void> {
+    if (this.#ticking) return;
+    this.#ticking = true;
     try {
       await this.#tick();
     } catch (err) {
       this.#reportError(err, 'tick');
+    } finally {
+      this.#ticking = false;
     }
   }
 
@@ -290,15 +312,19 @@ export class EventLoop implements IEventLoopControl {
 
   /** Recover pending events from store after construction. */
   async #recover(): Promise<void> {
-    const entry = await this.#store!.get<Event[]>(KEY_PENDING);
-    if (!entry) return;
-    for (const event of entry.value) {
-      // Skip stale health:check — re-created on startup tick
-      if (event.type === 'health:check') continue;
-      this.#queue.enqueue(event);
+    try {
+      await this.#store!.transact(async (txn) => {
+        const pending = await txn.get<Event[]>(KEY_PENDING);
+        if (!pending) return;
+        for (const event of pending) {
+          if (event.type === 'health:check') continue;
+          this.#queue.enqueue(event);
+        }
+        txn.set(KEY_PENDING, []);
+      });
+    } catch (err) {
+      this.#reportError(err, 'recover');
     }
-    // Clear persisted store so stale events don't compound across restarts
-    await this.#store!.set(KEY_PENDING, [], entry.version).catch(() => {});
   }
 
   /** Event types that should survive Worker restarts (image.pull, user events). */

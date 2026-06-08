@@ -10,22 +10,17 @@ import { CachedAtomicStore } from './adapters/cached.ts';
 import { D1QueryStore } from './adapters/d1.ts';
 import { R2BlobStore } from './adapters/r2.ts';
 
-// Local dev adapters
-import { FileKVAtomicStore } from './adapters/file-kv.ts';
-import { FileQueryStore } from './adapters/file-query.ts';
-import { FileBlobStore } from './adapters/file-blob.ts';
-
 // Metrics abstraction
 import { AtomicStoreMetrics } from './metrics.ts';
 
-export function createStores(config: StorageConfig, platformBindings?: Record<string, unknown>): Stores {
+export async function createStores(config: StorageConfig, platformBindings?: Record<string, unknown>): Promise<Stores> {
   const filePath = config.connections.filePath ?? '.data';
   const metrics = new AtomicStoreMetrics();
 
   return {
-    atomic: createAtomicStore(config, platformBindings, filePath, metrics),
-    query: createQueryStore(config, platformBindings, filePath),
-    blob: createBlobStore(config, platformBindings, filePath),
+    atomic: await createAtomicStore(config, platformBindings, filePath, metrics),
+    query: await createQueryStore(config, platformBindings, filePath),
+    blob: await createBlobStore(config, platformBindings, filePath),
     metrics,
   };
 }
@@ -38,12 +33,12 @@ function resolveBinding<T>(name: string, bindings?: Record<string, unknown>): T 
   return bindings?.[name] as T | undefined;
 }
 
-function createAtomicStore(
+async function createAtomicStore(
   config: StorageConfig,
   bindings?: Record<string, unknown>,
   filePath?: string,
   metrics?: AtomicStoreMetrics,
-): IAtomicStore {
+): Promise<IAtomicStore> {
   const doNsName = config.connections.doNamespace ?? 'ATOMIC_STORE_DO';
   const kvNsName = config.connections.kvNamespace ?? 'KV_STORE';
 
@@ -61,6 +56,7 @@ function createAtomicStore(
   if (doStore) return doStore;
   if (kvStore) return kvStore;
 
+  const { FileKVAtomicStore } = await import('./adapters/file-kv.ts');
   return new FileKVAtomicStore(filePath ?? '.data/kv');
 }
 
@@ -68,16 +64,17 @@ function createAtomicStore(
 // Query store (D1 > file > none)
 // ══════════════════════════════════════════════
 
-function createQueryStore(
+async function createQueryStore(
   config: StorageConfig,
   bindings?: Record<string, unknown>,
   filePath?: string,
-): IQueryStore {
+): Promise<IQueryStore> {
   const d1Name = config.connections.d1Binding ?? 'QUERY_DB';
   const db = resolveBinding<D1Database>(d1Name, bindings);
   if (db) return new D1QueryStore(db);
 
   if (config.queryBackend === 'file' || config.queryBackend === 'd1') {
+    const { FileQueryStore } = await import('./adapters/file-query.ts');
     return new FileQueryStore(filePath ?? '.data');
   }
 
@@ -92,16 +89,17 @@ function createQueryStore(
 // Blob store (R2 > file > none)
 // ══════════════════════════════════════════════
 
-function createBlobStore(
+async function createBlobStore(
   config: StorageConfig,
   bindings?: Record<string, unknown>,
   filePath?: string,
-): IBlobStore {
+): Promise<IBlobStore> {
   const r2Name = config.connections.r2Binding ?? 'BLOB_STORE';
   const bucket = resolveBinding<R2Bucket>(r2Name, bindings);
   if (bucket) return new R2BlobStore(bucket);
 
   if (config.blobBackend === 'file' || config.blobBackend === 'r2') {
+    const { FileBlobStore } = await import('./adapters/file-blob.ts');
     return new FileBlobStore(filePath ?? '.data');
   }
 

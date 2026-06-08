@@ -5,6 +5,7 @@ import { loadConfig } from './config/env.ts';
 export { AtomicStoreDO } from './core/store/adapters/durable-object.ts';
 export { AlarmTimerDO } from './core/scheduler/alarm-timer-do.ts';
 export { NotificationDO } from './core/notification/do.ts';
+export { LogStreamDO } from './features/sandbox/log-stream-do.ts';
 
 let _appPromise: Promise<AppInstance> | null = null;
 
@@ -25,8 +26,12 @@ function getApp(platformBindings: Record<string, unknown>): Promise<AppInstance>
 }
 
 export default {
-  async fetch(request: Request, env: Record<string, unknown>) {
+  async fetch(request: Request, env: Record<string, unknown>, ctx: ExecutionContext) {
     const instance = await getApp(env);
-    return instance.app.fetch(request, env);
+    const response = await instance.app.fetch(request, env);
+    // Background seeding: policy lib, default instance, templates.
+    // Does NOT block the first response — runs via ctx.waitUntil().
+    ctx.waitUntil(instance.seed());
+    return response;
   },
 };

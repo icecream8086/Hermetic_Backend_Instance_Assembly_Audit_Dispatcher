@@ -116,6 +116,13 @@ export const UpdateRouteAclSchema = z.object({
   priority: z.number().int().optional(),
 });
 
+// ─── Invitation ───
+
+export const CreateInviteSchema = z.object({
+  groupId: z.string().min(1, 'Group ID is required'),
+  inviteeId: z.string().min(1, 'Invitee user ID is required'),
+});
+
 // ─── Permission check (existing) ───
 
 export const PermissionCheckSchema = z.object({

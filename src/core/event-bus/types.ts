@@ -80,19 +80,17 @@ export const DEFAULT_EVENT_LOOP_CONFIG: EventLoopConfig = {
   intervalMs: 60000,
   batchSize: 0,
   autoStart: false,
-  maxQueueSize: 0,
+  maxQueueSize: 10000,
 };
 
 // ─── Event factory ───
-
-let _idCounter = 0;
 
 /** Create an {@link Event} from a type discriminator and optional payload. */
 export function createEvent<T>(type: string, payload?: T, metadata?: Record<string, unknown>): Event<T> {
   return {
     type,
     ...(payload !== undefined ? { payload } : {}),
-    id: `evt_${Date.now().toString(36)}_${(_idCounter++).toString(36)}`,
+    id: `evt_${crypto.randomUUID().slice(0, 12)}`,
     timestamp: Date.now(),
     ...(metadata !== undefined ? { metadata } : {}),
   } as Event<T>;

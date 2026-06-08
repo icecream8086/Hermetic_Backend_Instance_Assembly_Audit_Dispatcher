@@ -19,6 +19,44 @@ interface CacheEntry<T> {
 }
 
 /**
+ * Simple Bloom filter for fast negative lookup — avoids redundant store reads
+ * for keys that have never been written.
+ */
+class BloomFilter {
+  static readonly #SIZE = 524288;
+  static readonly #SEEDS = [0x9e3779b9, 0xabcdef01, 0x12345678];
+  readonly #bits: Uint8Array;
+
+  constructor() {
+    this.#bits = new Uint8Array(Math.ceil(BloomFilter.#SIZE / 8));
+  }
+
+  add(key: string): void {
+    for (const seed of BloomFilter.#SEEDS) {
+      const idx = this.#hash(key, seed) % BloomFilter.#SIZE;
+      const i = idx >> 3;
+      this.#bits[i] = (this.#bits[i] ?? 0) | (1 << (idx & 7));
+    }
+  }
+
+  mightContain(key: string): boolean {
+    for (const seed of BloomFilter.#SEEDS) {
+      const idx = this.#hash(key, seed) % BloomFilter.#SIZE;
+      if (!((this.#bits[idx >> 3] ?? 0) & (1 << (idx & 7)))) return false;
+    }
+    return true;
+  }
+
+  #hash(key: string, seed: number): number {
+    let h = seed;
+    for (let i = 0; i < key.length; i++) {
+      h = Math.imul(h ^ key.charCodeAt(i), 0x9e3779b9);
+    }
+    return h >>> 0;
+  }
+}
+
+/**
  * Two-layer store: coordinator (DO) for OCC + lifecycle, store (KV) for durability.
  *
  * - `set`: coordinator validates OCC → store persists (sync).
@@ -28,6 +66,10 @@ interface CacheEntry<T> {
  *
  * This keeps reads fast (no DO round-trip on cache hit) while writes are
  * durably persisted to KV after DO coordination.
+ *
+ * 参数命名区分:
+ *   `readTtlMs` — 读缓存 TTL（毫秒），`get()` 命中 KV 后多长时间内认为有效
+ *   `storeTtlSeconds` — 存储侧 TTL（秒），传给底层 KV 的服务器端过期时间
  */
 export class CachedAtomicStore implements IAtomicStore {
   /**
@@ -41,26 +83,31 @@ export class CachedAtomicStore implements IAtomicStore {
    * full read-then-write to prime the map.
    */
   readonly #storeVersion = new Map<string, VersionId | null>();
+  readonly #bloom = new BloomFilter();
 
   constructor(
     private readonly coordinator: IAtomicStore,
     private readonly store: IAtomicStore,
-    private readonly cacheTtlMs: number = DEFAULT_CACHE_TTL_MS,
-    private readonly cacheTtlSeconds?: number,
+    private readonly readTtlMs: number = DEFAULT_CACHE_TTL_MS,
+    private readonly storeTtlSeconds?: number,
     readonly metrics?: AtomicStoreMetrics,
   ) {}
 
   async get<T>(key: string): Promise<{ value: T; version: VersionId } | null> {
     this.metrics?.recordGet();
-    const hit = await this.store.get<CacheEntry<T>>(key);
-    if (hit !== null) {
-      const entry = hit.value;
-      if (Date.now() - entry.cachedAt < this.cacheTtlMs) {
-        // Tombstone within TTL — data genuinely absent
-        if (entry.data === null) return null;
-        this.metrics?.recordHit();
-        if (entry.coordinatorVersion !== null) {
-          return { value: entry.data, version: entry.coordinatorVersion as VersionId };
+
+    // Bloom gate: skip store read for keys we've never seen
+    if (this.#bloom.mightContain(key)) {
+      const hit = await this.store.get<CacheEntry<T>>(key);
+      if (hit !== null) {
+        const entry = hit.value;
+        if (Date.now() - entry.cachedAt < this.readTtlMs) {
+          // Tombstone within TTL — data genuinely absent
+          if (entry.data === null) return null;
+          this.metrics?.recordHit();
+          if (entry.coordinatorVersion !== null) {
+            return { value: entry.data, version: entry.coordinatorVersion as VersionId };
+          }
         }
       }
     }
@@ -68,9 +115,10 @@ export class CachedAtomicStore implements IAtomicStore {
     this.metrics?.recordMiss();
     const miss = await this.coordinator.get<T>(key);
     if (miss !== null) {
+      this.#bloom.add(key);
       const cacheEntry = { data: miss.value, cachedAt: Date.now(), coordinatorVersion: miss.version as string } satisfies CacheEntry<T>;
       const lastVer = this.#storeVersion.get(key) ?? null;
-      void this.store.set(key, cacheEntry, lastVer, this.cacheTtlSeconds)
+      void this.store.set(key, cacheEntry, lastVer, this.storeTtlSeconds)
         .then(v => { if (v) this.#storeVersion.set(key, v); })
         .catch(() => {});
     }
@@ -81,16 +129,17 @@ export class CachedAtomicStore implements IAtomicStore {
     this.metrics?.recordSet();
     const version = await this.coordinator.set(key, value, expectedVersion, ttlSeconds);
     if (version !== null) {
+      this.#bloom.add(key);
       const lastVer = this.#storeVersion.get(key) ?? null;
       const cacheEntry = { data: value, cachedAt: Date.now(), coordinatorVersion: version as string } satisfies CacheEntry<T>;
-      const storeVer = await this.store.set(key, cacheEntry, lastVer, this.cacheTtlSeconds);
+      const storeVer = await this.store.set(key, cacheEntry, lastVer, this.storeTtlSeconds);
       if (storeVer) {
         this.#storeVersion.set(key, storeVer);
       } else {
         // OCC conflict on cache layer — fall back to read-then-write.
         const current = await this.store.get<CacheEntry<T>>(key);
         const currentVer = current?.version ?? null;
-        const retryVer = await this.store.set(key, cacheEntry, currentVer, this.cacheTtlSeconds);
+        const retryVer = await this.store.set(key, cacheEntry, currentVer, this.storeTtlSeconds);
         if (retryVer) this.#storeVersion.set(key, retryVer);
       }
     }

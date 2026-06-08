@@ -46,7 +46,7 @@ export class RouteAclManager {
   }
 
   async list() { return this.store.list(); }
-  async listPaginated(page?: number, limit?: number) { return this.store.listPaginated(page, limit); }
+  async listPaginated(page?: number, limit?: number, filter?: (item: RouteAcl) => boolean) { return this.store.listPaginated(page, limit, filter); }
   async get(id: string) { return this.store.get(id); }
 
   async update(id: string, input: UpdateRouteAclInput, actor?: AuditActor): Promise<RouteAcl> {
@@ -56,7 +56,7 @@ export class RouteAclManager {
       ...input,
       updatedAt: Date.now(),
     });
-    await this.store.commitUpdate(id, updated, '');
+    await this.store.commitUpdate(id, updated);
     permLogAudit(this.logger, this.audit, 'perm.routeAcl.updated', actor, { entityType: 'routeAcl', entityId: id, changes: { old, new: updated } }, KernLevel.WARNING);
     return updated;
   }

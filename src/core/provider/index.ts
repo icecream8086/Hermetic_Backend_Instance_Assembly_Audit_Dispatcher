@@ -43,6 +43,7 @@ export type {
   ContainerGroupNetworkInput,
   VolumeConfigInput,
   VolumeMountConfig,
+  SecretMountConfig,
   NodeCapacity,
   NodeCondition,
   EnvVar,

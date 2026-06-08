@@ -21,7 +21,12 @@ declare module '../app.ts' {
 // ─── Config ───
 
 export interface AuthzConfig {
-  store: IAtomicStore;
+  /**
+   * Atomic store for session/user lookups.
+   * Should be wrapped with RequestCachedAtomicStore for per-request dedup.
+   * Set to 'auto' to read from c.var.stores.atomic at request time.
+   */
+  store: IAtomicStore | 'auto';
   /** Route access check function: (method, path, userId) → boolean. */
   checkRouteAccess?: (method: string, path: string, userId: string) => Promise<boolean>;
   /** Path prefixes that skip auth entirely. */
@@ -48,6 +53,9 @@ const SESSION_TTL_MS = 2 * 60 * 60 * 1000;
  */
 export function authz(config: AuthzConfig): MiddlewareHandler<{ Variables: AppContext }> {
   return async (c, next) => {
+    // Resolve store: use request-cached version from context when configured as 'auto'
+    const store: IAtomicStore = config.store === 'auto' ? c.var.stores.atomic : config.store;
+
     const path = c.req.path;
     const method = c.req.method;
     const ip = c.req.header('x-forwarded-for')?.split(',')[0]?.trim();
@@ -75,20 +83,30 @@ export function authz(config: AuthzConfig): MiddlewareHandler<{ Variables: AppCo
       return;
     }
 
-    // 2. Extract Bearer token
+    // 2. Extract Bearer token (Authorization header, or ?token= for WebSocket)
+    let token = '';
     const auth = c.req.header('authorization');
-    if (!auth || !auth.startsWith('Bearer ')) {
+    if (auth?.startsWith('Bearer ')) {
+      token = auth.slice(7);
+    } else if (c.req.header('upgrade')?.toLowerCase() === 'websocket') {
+      // WebSocket API can't set custom headers — fallback to query param
+      token = c.req.query('token') ?? '';
+      if (!token) {
+        secAudit('perm.unauthorized', KernLevel.WARNING, { reason: 'missing_ws_token' });
+        return c.json({ success: false, data: null, error: { code: 'UNAUTHORIZED', message: 'WebSocket requires ?token=' } }, 401);
+      }
+    }
+    if (!token) {
       secAudit('perm.unauthorized', KernLevel.WARNING, { reason: 'missing_auth_header' });
       return c.json({ success: false, data: null, error: { code: 'UNAUTHORIZED', message: 'Missing or invalid Authorization header' } }, 401);
     }
-    const token = auth.slice(7);
     if (!token) {
       secAudit('perm.unauthorized', KernLevel.WARNING, { reason: 'empty_token' });
       return c.json({ success: false, data: null, error: { code: 'UNAUTHORIZED', message: 'Empty token' } }, 401);
     }
 
     // 3. Validate session
-    const sessionEntry = await config.store.get<{ userId: string; createdAt: number; expiresAt?: number }>(TOKEN_PREFIX + token).catch(() => null);
+    const sessionEntry = await store.get<{ userId: string; createdAt: number; expiresAt?: number }>(TOKEN_PREFIX + token).catch(() => null);
     if (!sessionEntry) {
       secAudit('perm.unauthorized', KernLevel.WARNING, { reason: 'invalid_token' });
       return c.json({ success: false, data: null, error: { code: 'UNAUTHORIZED', message: 'Invalid or expired token' } }, 401);
@@ -101,7 +119,7 @@ export function authz(config: AuthzConfig): MiddlewareHandler<{ Variables: AppCo
 
     // 4. Get user
     const uid = sessionEntry.value.userId;
-    const userEntry = await config.store.get<any>(USER_PREFIX + uid).catch(() => null);
+    const userEntry = await store.get<any>(USER_PREFIX + uid).catch(() => null);
     if (!userEntry) {
       secAudit('perm.unauthorized', KernLevel.WARNING, { reason: 'user_not_found', userId: uid });
       return c.json({ success: false, data: null, error: { code: 'UNAUTHORIZED', message: 'User not found' } }, 401);

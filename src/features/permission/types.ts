@@ -72,6 +72,8 @@ export interface UserGroup {
   name: string;
   description?: string | undefined;
   memberIds: string[];
+  /** User IDs who can administer this group (invite, remove members). Creator is first admin. */
+  adminIds: string[];
   dependsOn: string[];
   createdAt: number;
   updatedAt: number;
@@ -81,6 +83,7 @@ export interface CreateUserGroupInput {
   name: string;
   description?: string | undefined;
   memberIds?: string[] | undefined;
+  adminIds?: string[] | undefined;
   dependsOn?: string[] | undefined;
 }
 
@@ -88,6 +91,7 @@ export interface UpdateUserGroupInput {
   name?: string | undefined;
   description?: string | null | undefined;
   memberIds?: string[] | undefined;
+  adminIds?: string[] | undefined;
   dependsOn?: string[] | null | undefined;
 }
 
@@ -240,6 +244,32 @@ export interface UpdateRouteAclInput {
   userId?: string | null | undefined;
   userGroupId?: string | null | undefined;
   priority?: number | undefined;
+}
+
+// ─── Invitation ───
+
+export const INVITE_PREFIX = 'invite:';
+export const INVITE_INDEX_KEY = 'invite:ids';
+export const INVITE_PENDING_KEY = 'invite:pending:';
+
+export type InviteStatus = 'pending' | 'accepted' | 'rejected';
+
+export interface Invitation {
+  id: string;
+  /** Target user group ID. */
+  groupId: string;
+  /** User being invited. */
+  inviteeId: string;
+  /** User who sent the invitation. */
+  invitedBy: string;
+  status: InviteStatus;
+  createdAt: number;
+  expiresAt: number;
+}
+
+export interface CreateInviteInput {
+  groupId: string;
+  inviteeId: string;
 }
 
 // ─── Comparison ───

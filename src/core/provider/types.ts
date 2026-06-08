@@ -301,11 +301,20 @@ export interface ContainerCreateConfig {
   readonly providerOverrides?: Record<string, unknown> | undefined;
 }
 
+export interface SecretMountConfig {
+  readonly mountPath: string;
+  /** Resolved plaintext content. */
+  readonly data: string;
+  readonly mode?: number | undefined;
+}
+
 export interface VolumeMountConfig {
   readonly volumeId: string;
   readonly mountPath: string;
   readonly readOnly: boolean;
   readonly mountPropagation?: string | undefined;
+  /** Credential reference for external auth, resolved at provider level. */
+  readonly credentialRef?: string | undefined;
 }
 
 export interface VolumeConfigInput {
@@ -342,6 +351,7 @@ export interface CreateContainerGroupInput {
   readonly restartPolicy: string;
   readonly containers: readonly ContainerCreateConfig[];
   readonly volumes?: readonly VolumeConfigInput[] | undefined;
+  readonly secretMounts?: readonly SecretMountConfig[] | undefined;
   readonly network: ContainerGroupNetworkInput;
   readonly tags?: readonly { key: string; value: string }[] | undefined;
   readonly providerOverrides?: Record<string, unknown> | undefined;

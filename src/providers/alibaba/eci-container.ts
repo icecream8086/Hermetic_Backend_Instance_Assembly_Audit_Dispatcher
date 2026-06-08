@@ -112,7 +112,7 @@ export class AlibabaEciContainerProvider implements IContainerProvider {
       }
     });
 
-    // Volumes
+    // Volumes — handles NFS, OSS (S3), Disk, ConfigMap, Secret
     if (input.volumes?.length) {
       input.volumes.forEach((v, i) => {
         const vidx = `Volume.${i + 1}`;
@@ -132,6 +132,35 @@ export class AlibabaEciContainerProvider implements IContainerProvider {
           if (volOpts.path) params[`${vidx}.OSSVolume.Path`] = String(volOpts.path);
           if (volOpts.readOnly) params[`${vidx}.OSSVolume.ReadOnly`] = 'true';
           if (volOpts.endpoint) params[`${vidx}.OSSVolume.Endpoint`] = String(volOpts.endpoint);
+        }
+        if (volOpts?.diskId) {
+          // Cloud disk (云盘) — persistent block storage
+          params[`${vidx}.DiskVolume.DiskId`] = String(volOpts.diskId);
+          params[`${vidx}.DiskVolume.FsType`] = String(volOpts.fsType ?? 'ext4');
+          if (volOpts.sizeGiB) params[`${vidx}.DiskVolume.DiskSize`] = String(volOpts.sizeGiB);
+          if (volOpts.readOnly) params[`${vidx}.DiskVolume.ReadOnly`] = 'true';
+        }
+        if (v.type === 'ConfigMapVolume' || volOpts?.configMapName) {
+          // Legacy ConfigMap — replaced by env-var injection, kept for backward compat with existing sandbox status
+          const name = String(volOpts?.configMapName ?? volOpts?.name ?? '');
+          const items = (volOpts?.items as Array<{ key: string; path: string; mode?: number }> | undefined) ?? [];
+          params[`${vidx}.ConfigMapVolume.Name`] = name;
+          items.forEach((item, j) => {
+            params[`${vidx}.ConfigMapVolume.Items.${j + 1}.Key`] = item.key;
+            params[`${vidx}.ConfigMapVolume.Items.${j + 1}.Path`] = item.path;
+            if (item.mode !== undefined) params[`${vidx}.ConfigMapVolume.Items.${j + 1}.Mode`] = String(item.mode);
+          });
+        }
+        if (v.type === 'SecretVolume' || volOpts?.secretName) {
+          // Secret — inject sensitive data as files
+          const name = String(volOpts?.secretName ?? volOpts?.name ?? '');
+          const items = (volOpts?.items as Array<{ key: string; path: string; mode?: number }> | undefined) ?? [];
+          params[`${vidx}.SecretVolume.SecretName`] = name;
+          items.forEach((item, j) => {
+            params[`${vidx}.SecretVolume.Items.${j + 1}.Key`] = item.key;
+            params[`${vidx}.SecretVolume.Items.${j + 1}.Path`] = item.path;
+            if (item.mode !== undefined) params[`${vidx}.SecretVolume.Items.${j + 1}.Mode`] = String(item.mode);
+          });
         }
       });
     }

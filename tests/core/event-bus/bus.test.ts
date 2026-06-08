@@ -125,6 +125,18 @@ describe('EventBus', () => {
       await bus.dispatch(createEvent('foo'));
       expect(good).toHaveBeenCalledOnce();
     });
+
+    it('remaining handlers still run with default onError (which throws)', async () => {
+      // Default onError re-throws — verify the loop is protected
+      const bus = new EventBus();
+      const good = vi.fn();
+      bus.on('foo', () => { throw new Error('bad'); });
+      bus.on('foo', good);
+
+      await bus.dispatch(createEvent('foo'));
+      // Second handler must have run despite first handler's error
+      expect(good).toHaveBeenCalledOnce();
+    });
   });
 
   describe('queries', () => {

@@ -18,6 +18,8 @@ export interface RegionBucket {
   readonly credentialRef: string;
   readonly instanceId: InstanceId;
   readonly status: 'Active' | 'Inactive';
+  /** 自动生成 S3 访问密钥对，引用此 bucket 的沙箱签发 AK/SK，销毁时自动回收。 */
+  readonly autoGenerateKeys?: boolean;
   readonly createdAt: number;
   readonly updatedAt: number;
 }
@@ -29,6 +31,8 @@ export interface CreateBucketInput {
   instanceId: string;
   /** 凭证引用，有则用此值，无则从计算实例继承 */
   credentialRef?: string | undefined;
+  /** 自动为引用此 bucket 的沙箱生成 S3 访问密钥对。默认 false。 */
+  autoGenerateKeys?: boolean | undefined;
 }
 
 export interface UpdateBucketInput {
@@ -37,16 +41,37 @@ export interface UpdateBucketInput {
   instanceId?: string | undefined;
   credentialRef?: string | null | undefined;
   status?: 'Active' | 'Inactive' | undefined;
+  autoGenerateKeys?: boolean | undefined;
+}
+
+// ─── BucketKeyBinding ───
+
+export interface BucketKeyBinding {
+  readonly sandboxId: string;
+  readonly bucketId: string;
+  readonly secretValue: string;         // "AK:SK" 明文（加密存 atomic store）
+  readonly accessKeyId: string;
+  readonly version: number;
+  readonly expiresAt: number;
+  readonly rotationIntervalMs: number;
+  readonly createdAt: number;
+}
+
+/** 生成随机 S3 访问密钥对 (AK/SK)。 */
+export function generateS3KeyPair(): { accessKeyId: string; secretAccessKey: string } {
+  const accessKeyId = `auto_${crypto.randomUUID().slice(0, 12)}`;
+  const secretAccessKey = Array.from(crypto.getRandomValues(new Uint8Array(32)))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+  return { accessKeyId, secretAccessKey };
 }
 
 // ─── Constants ───
 
 const BUCKET_PREFIX = 'region-bucket:';
 const BUCKET_INDEX_KEY = 'region-bucket:ids';
-let _bucketCounter = 0;
-
 function generateBucketId(): string {
-  return `bkt_${++_bucketCounter}_${Date.now().toString(36)}`;
+  return `bkt_${crypto.randomUUID()}`;
 }
 
 // ─── Service ───
@@ -73,6 +98,7 @@ export class BucketService {
       credentialRef: input.credentialRef ?? inst.credentialRef ?? '',
       instanceId: input.instanceId as InstanceId,
       status: 'Active',
+      ...(input.autoGenerateKeys ? { autoGenerateKeys: true } : {}),
       createdAt: now,
       updatedAt: now,
     };
@@ -101,13 +127,25 @@ export class BucketService {
     const entry = await this.atomic.get<RegionBucket>(BUCKET_PREFIX + id);
     if (!entry) throw new AppError(404, 'BUCKET_NOT_FOUND', 'Bucket not found');
 
+    // If instanceId changes, re-inherit platform/region/endpoint from the new instance
+    let inheritedFields: Partial<RegionBucket> = {};
+    if (input.instanceId !== undefined) {
+      const instSvc = new InstanceService(this.atomic);
+      const inst = await instSvc.get(input.instanceId as InstanceId);
+      if (inst) {
+        inheritedFields = { platform: inst.platform, region: inst.region, endpoint: inst.endpoint };
+      }
+    }
+
     const updated: RegionBucket = {
       ...entry.value,
+      ...inheritedFields,
       ...(input.name !== undefined ? { name: input.name } : {}),
       ...(input.bucketType !== undefined ? { bucketType: input.bucketType } : {}),
       ...(input.instanceId !== undefined ? { instanceId: input.instanceId as InstanceId } : {}),
       ...(input.credentialRef !== undefined ? { credentialRef: input.credentialRef ?? '' } : {}),
       ...(input.status !== undefined ? { status: input.status } : {}),
+      ...(input.autoGenerateKeys !== undefined ? { autoGenerateKeys: input.autoGenerateKeys } : {}),
       updatedAt: Date.now(),
     };
 

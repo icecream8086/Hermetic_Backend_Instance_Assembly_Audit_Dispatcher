@@ -43,6 +43,7 @@ import { KernLevel } from '../../core/audit/kern-level.ts';
 import type { NetworkResolverFn } from '../../core/network/types.ts';
 import type { InstanceService } from '../../core/region/instance.ts';
 import { mapEnvVars, mapPorts, mapVolumeMounts, mapVolumes, mapTags, mapNetwork } from '../../core/provider/mapper.ts';
+import { QuotaService } from './quota.ts';
 
 const FACILITY = createFacility('sandbox-service');
 const KEY_PREFIX = 'sandbox:';
@@ -98,6 +99,12 @@ export class SandboxService implements ISandboxService {
       mergedNetwork = { ...mergedNetwork, instanceId: resolvedInst.id as any };
     }
 
+    // 0c. Check user quota before provisioning
+    if (input.creatorId) {
+      const quotaService = new QuotaService(this.atomic, this.audit);
+      await quotaService.checkQuota(input.creatorId, input.resourceSpec.cpu, input.resourceSpec.memory);
+    }
+
     // 1. Generate sandbox identity and persist as Scheduling
     const id = createSandboxId(crypto.randomUUID());
     const initial: Sandbox = {
@@ -140,6 +147,40 @@ export class SandboxService implements ISandboxService {
     }
 
     const providerInput = toContainerGroupInput(clusterEnriched);
+
+    // 3b. Auto-generate S3 access keys for buckets with autoGenerateKeys
+    const BINDING_PREFIX = 'bucket-key:';
+    const BINDING_INDEX_KEY = 'bucket-key:ids';
+    if (input.bucketMounts?.length) {
+      (providerInput as any).secretMounts ??= [];
+      for (const bm of input.bucketMounts) {
+        if (!bm.autoGenerateKeys) continue;
+        const ak = `auto_${crypto.randomUUID().slice(0, 12)}`;
+        const sk = Array.from(crypto.getRandomValues(new Uint8Array(32)))
+          .map(b => b.toString(16).padStart(2, '0'))
+          .join('');
+        const secretValue = `${ak}:${sk}`;
+        const binding = {
+          sandboxId: id as string,
+          bucketId: bm.bucketId,
+          secretValue,
+          accessKeyId: ak,
+          version: 1,
+          expiresAt: Date.now() + 24 * 60 * 60 * 1000,
+          rotationIntervalMs: 24 * 60 * 60 * 1000,
+          createdAt: Date.now(),
+        };
+        await this.atomic.set(BINDING_PREFIX + id, binding, null);
+        const idx_ = await this.atomic.get<string[]>(BINDING_INDEX_KEY);
+        await this.atomic.set(BINDING_INDEX_KEY, [...(idx_?.value ?? []), id as string], idx_?.version ?? null);
+        (providerInput as any).secretMounts.push({
+          mountPath: bm.mountPath,
+          data: secretValue,
+          mode: 0o600,
+        });
+      }
+    }
+
     const containerProvider = await this.#resolveProvider(input.instanceId);
     let providerId: string;
     try {
@@ -162,6 +203,12 @@ export class SandboxService implements ISandboxService {
 
     const updated = await this.atomic.set(`${KEY_PREFIX}${id}`, running, created);
     if (!updated) throw new AppError(409, 'CONFLICT', 'Concurrent modification during provision');
+
+    // Record quota usage
+    if (input.creatorId) {
+      const quotaService = new QuotaService(this.atomic, this.audit);
+      await quotaService.recordCreate(input.creatorId, input.resourceSpec.cpu, input.resourceSpec.memory);
+    }
 
     if (idempotencyKey) {
       await this.atomic.set(`${KEY_PREFIX}idem:${idempotencyKey}`, running, null);
@@ -243,9 +290,34 @@ export class SandboxService implements ISandboxService {
     return this.transition(id, SandboxStatus.Stopped, 'user requested stop');
   }
 
+  async start(id: SandboxId): Promise<Sandbox> {
+    const sandbox = await this.getById(id);
+    if (!sandbox) throw new AppError(404, 'SANDBOX_NOT_FOUND', `Sandbox ${id} not found`);
+
+    try {
+      await this.containerProvider.start?.(sandbox.providerId ?? String(id));
+    } catch {
+      // Provider unreachable — proceed with local state
+    }
+
+    return this.transition(id, SandboxStatus.Running, 'user requested start');
+  }
+
   async terminate(id: SandboxId, actorId?: string): Promise<void> {
     const sandbox = await this.getById(id);
     if (!sandbox) throw new AppError(404, 'SANDBOX_NOT_FOUND', `Sandbox ${id} not found`);
+
+    // Clean up auto-generated S3 bucket keys
+    const BINDING_PREFIX = 'bucket-key:';
+    const BINDING_INDEX_KEY = 'bucket-key:ids';
+    const bindingEntry = await this.atomic.get<any>(BINDING_PREFIX + id);
+    if (bindingEntry) {
+      await this.atomic.set(BINDING_PREFIX + id, null, bindingEntry.version);
+      const idx_ = await this.atomic.get<string[]>(BINDING_INDEX_KEY);
+      if (idx_) {
+        await this.atomic.set(BINDING_INDEX_KEY, idx_.value.filter((i: string) => i !== id), idx_.version);
+      }
+    }
 
     // Best-effort provider cleanup — don't let provider errors block local state cleanup.
     // Orphaned provider resources are handled by the periodic health check loop (event bus
@@ -408,20 +480,31 @@ export class SandboxService implements ISandboxService {
     const newVersion = await this.atomic.set(`${KEY_PREFIX}${id}`, updated, entry.version);
     if (!newVersion) throw new AppError(409, 'CONFLICT', 'Concurrent modification detected');
 
+    const uptime = Date.now() - from.createdAt;
+    const meta = {
+      eventType: 'sandbox.transition' as const,
+      sandboxId: id as string,
+      name: from.name,
+      from: from.status,
+      to,
+      reason,
+      providerId: from.providerId ?? '',
+      containers: from.containers.length,
+      createdAt: from.createdAt,
+      uptimeMs: uptime,
+      actorId: actorId ?? '',
+    };
     await this.logger.logAsync({
-      facility: FACILITY,
-      level: LogLevel.NOTICE,
-      message: `Sandbox ${from.status} → ${to}`,
+      facility: FACILITY, level: LogLevel.NOTICE,
+      message: `sandbox ${from.status}→${to} name=${from.name} provider=${from.providerId ?? ''} containers=${from.containers.length} uptime=${uptime}ms reason=${reason}`,
       actorId,
-      metadata: { sandboxId: id as string, fromStatus: from.status, toStatus: to, reason },
+      metadata: meta,
     });
-
     this.audit?.write({
-      level: KernLevel.INFO,
-      facility: FACILITY,
+      level: KernLevel.INFO, facility: FACILITY,
       message: `Sandbox ${from.status} → ${to} — ${reason}`,
       actorId,
-      metadata: { eventType: 'sandbox.transition', sandboxId: id as string, fromStatus: from.status, toStatus: to, reason },
+      metadata: meta,
     });
 
     this.eventBus?.dispatch(createEvent('sandbox.status', {

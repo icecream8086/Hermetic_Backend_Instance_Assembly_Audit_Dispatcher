@@ -62,6 +62,10 @@ export enum VolumeType {
   NFS = 'NFSVolume',
   HostPath = 'HostPathVolume',
   EmptyDir = 'EmptyDirVolume',
+  /** Cloud disk (阿里云 Disk / 云盘) — persistent block storage, single-instance attach. */
+  Disk = 'DiskVolume',
+  /** Secret — inject sensitive data (e.g. passwords, tokens) as in-memory files via provider (podman secret / KMS). */
+  Secret = 'SecretVolume',
 }
 
 export interface NFSVolumeConfig {
@@ -70,10 +74,36 @@ export interface NFSVolumeConfig {
   readonly readOnly: boolean;
 }
 
-/** Volume entity — independent of any single Sandbox. */
+export interface DiskVolumeConfig {
+  /** Cloud disk ID (e.g. Alibaba Cloud disk ID: d-xxxxxxxx). */
+  readonly diskId: string;
+  /** Filesystem type: 'ext4' | 'xfs'. */
+  readonly fsType: string;
+  /** Disk size in GiB (for auto-provision). */
+  readonly sizeGiB?: number;
+  /** Whether the disk is read-only. */
+  readonly readOnly: boolean;
+  /** Whether to delete the disk when the instance is released. */
+  readonly deleteWithInstance?: boolean;
+}
+
+export interface SecretVolumeConfig {
+  /** Secret name (provider-resolved). */
+  readonly name: string;
+  /** Specific items to project as files. Omit to project all keys. */
+  readonly items?: readonly { readonly key: string; readonly path: string; readonly mode?: number }[];
+}
+
+/** Volume entity — bound to a ComputeInstance (spatial locality). */
 export interface Volume extends BaseEntity<VolumeId, VolumeStatus> {
   readonly type: VolumeType;
+  /** The compute instance this volume is bound to. Required — volumes do not exist outside an instance. */
+  readonly instanceId: string;
+  /** Reference a named Credential (from CredentialService) for external auth — NFS Kerberos, OSS AK/SK, etc. */
+  readonly credentialRef?: string;
   readonly nfs?: NFSVolumeConfig;
+  readonly disk?: DiskVolumeConfig;
+  readonly secret?: SecretVolumeConfig;
 }
 
 // ─── VolumeMount ───
@@ -83,6 +113,8 @@ export interface VolumeMount {
   readonly mountPath: string;
   readonly readOnly: boolean;
   readonly mountPropagation?: string;
+  /** Named credential reference for external auth (e.g. NFS Kerberos, OSS AK/SK). */
+  readonly credentialRef?: string | undefined;
 }
 
 // ─── Container ───
@@ -225,6 +257,15 @@ export interface CreateSandboxInput {
   readonly initContainers?: readonly InitContainerConfig[];
   readonly containers: readonly ContainerConfig[];
   readonly volumes?: readonly Volume[];
+  /** S3 存储桶挂载引用。由 template applicator 填充，用于自动生成访问密钥等。 */
+  readonly bucketMounts?: readonly {
+    readonly bucketId: string;
+    readonly bucket: string;
+    readonly endpoint: string;
+    readonly region: string;
+    readonly autoGenerateKeys?: boolean | undefined;
+    readonly mountPath: string;
+  }[];
   readonly network: SandboxNetworkConfig;
   readonly tags?: readonly Tag[];
   readonly account?: string | undefined;

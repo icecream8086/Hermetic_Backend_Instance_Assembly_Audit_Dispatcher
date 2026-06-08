@@ -5,7 +5,7 @@ import type { IBlobStore, BlobMetadata } from '../interfaces.ts';
 export class R2BlobStore implements IBlobStore {
   constructor(private readonly bucket: R2Bucket) {}
 
-  async put(key: string, body: ReadableStream | Buffer, metadata?: BlobMetadata): Promise<void> {
+  async put(key: string, body: ReadableStream | ArrayBuffer, metadata?: BlobMetadata): Promise<void> {
     const options: Record<string, unknown> = {};
     if (metadata?.contentType) {
       options.httpMetadata = { contentType: metadata.contentType };

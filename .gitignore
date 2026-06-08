@@ -18,3 +18,4 @@ openapi-summary.json
 deps/
 .cpuprof/
 note.txt
+log.md

@@ -80,6 +80,8 @@ interface PodmanInspectResult {
 
 export class PodmanContainerProvider implements IContainerProvider {
   readonly #apiBase: string;
+  /** Tracks created Podman secret IDs for cleanup on container delete. */
+  readonly #createdSecrets = new Map<string, string[]>();
 
   constructor(endpoint = 'http://127.0.0.1:8080') {
     this.#apiBase = `${endpoint}/v1.24`;
@@ -157,6 +159,36 @@ export class PodmanContainerProvider implements IContainerProvider {
       if (binds.length > 0) hostConfig.Binds = binds;
     }
 
+    // Secret mounts — create as Podman secrets via libpod API, mount to /run/secrets/{name}
+    // The container sees them as regular files in a tmpfs (memory-backed).
+    const createdSecrets: string[] = [];
+    if (input.secretMounts?.length) {
+      const mounts = (hostConfig.Mounts as Array<Record<string, unknown>>) ?? [];
+      for (const sm of input.secretMounts) {
+        const secretName = `hbi_${crypto.randomUUID().slice(0, 8)}`;
+        try {
+          // Create Podman secret via libpod API
+          const secResp = await fetch(`${this.#apiBase.replace('/v1.24', '')}/libpod/secrets/create`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: secretName, data: btoa(sm.data) }),
+          });
+          if (secResp.ok) {
+            const sec = await secResp.json() as { ID: string };
+            createdSecrets.push(sec.ID);
+            mounts.push({
+              Type: 'tmpfs',
+              Target: sm.mountPath,
+              TmpfsOptions: { SizeBytes: Math.max(sm.data.length * 2, 4096), Mode: sm.mode ?? 0o600 },
+            });
+          }
+        } catch {
+          // libpod API unavailable — skip; secret data stays encrypted at rest
+        }
+      }
+      if (mounts.length > 0) hostConfig.Mounts = mounts;
+    }
+
     const body: Record<string, unknown> = {
       Image: c?.image ?? '',
       Entrypoint: c?.command ? [...c.command] : undefined,
@@ -197,6 +229,11 @@ export class PodmanContainerProvider implements IContainerProvider {
       throw new Error(`Podman start failed (${startResp.status}): ${err}`);
     }
 
+    // Track created secrets for cleanup
+    if (createdSecrets.length > 0) {
+      this.#createdSecrets.set(data.Id, createdSecrets);
+    }
+
     return { providerId: data.Id };
   }
 
@@ -230,6 +267,17 @@ export class PodmanContainerProvider implements IContainerProvider {
   }
 
   async delete(input: DeleteContainerGroupInput): Promise<void> {
+    // Clean up Podman secrets created for this container
+    const secretIds = this.#createdSecrets.get(input.providerId);
+    if (secretIds?.length) {
+      for (const sid of secretIds) {
+        try {
+          await fetch(`${this.#apiBase.replace('/v1.24', '')}/libpod/secrets/${sid}`, { method: 'DELETE' });
+        } catch { /* best-effort cleanup */ }
+      }
+      this.#createdSecrets.delete(input.providerId);
+    }
+
     const resp = await fetch(`${this.#apiBase}/containers/${input.providerId}?force=true`, {
       method: 'DELETE',
     });
@@ -436,10 +484,34 @@ export class PodmanContainerProvider implements IContainerProvider {
         },
       }],
       volumes: [],
-      events: [],
+      events: runtimeEvents(info),
       tags: [{ key: 'provider', value: 'podman' }],
     } as any;
   }
+}
+
+/** Synthesize ContainerGroupRuntimeEvent[] from Podman container inspect. */
+function runtimeEvents(info: any): Array<{ reason: string; type: 'Normal' | 'Warning'; message: string; count: number; lastTimestamp?: string }> {
+  const events: Array<{ reason: string; type: 'Normal' | 'Warning'; message: string; count: number; lastTimestamp?: string }> = [];
+  const ts = info.State?.StartedAt || info.Created;
+
+  if (info.State?.Running && info.State?.StartedAt) {
+    events.push({ reason: 'Started', type: 'Normal', message: 'Container started', count: 1, lastTimestamp: info.State.StartedAt });
+  }
+  if (info.State?.Status === 'exited' || info.State?.Status === 'stopped') {
+    events.push({ reason: 'Stopped', type: 'Normal', message: `Container exited with code ${info.State.ExitCode ?? '?'}`, count: 1, lastTimestamp: info.State.FinishedAt ?? ts });
+  }
+  if (info.State?.Health?.Status === 'healthy') {
+    events.push({ reason: 'HealthCheck', type: 'Normal', message: 'Health check passed', count: info.State.Health.Log?.length ?? 1, lastTimestamp: info.State.Health.Log?.[info.State.Health.Log.length - 1]?.End ?? ts });
+  }
+  if (info.State?.Health?.Status === 'unhealthy') {
+    events.push({ reason: 'Unhealthy', type: 'Warning', message: `Health check failed (${info.State.Health.FailingStreak}x)`, count: info.State.Health.FailingStreak ?? 1, lastTimestamp: ts });
+  }
+  if (info.State?.Error && info.State.Error !== '') {
+    events.push({ reason: 'Error', type: 'Warning', message: info.State.Error, count: 1, lastTimestamp: ts });
+  }
+
+  return events;
 }
 
 // ─── Helpers ───

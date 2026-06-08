@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import type { BucketService, InstanceService, ImageRepositoryService } from '../../core/region/index.ts';
+import { createInstanceId } from '../../core/region/index.ts';
 import type { CreateImageInput, UpdateImageInput } from '../../core/region/image.ts';
 import { AlibabaRegion, AwsRegion, PodmanRegion } from '../../core/region/types.ts';
 import type { AppContext } from '../../core/app.ts';
@@ -11,12 +12,23 @@ import type {
   CreateCredentialBody, UpdateCredentialBody,
 } from './types.ts';
 import { CredentialService, toMasked } from '../../core/auth/credential.ts';
+import { S3PolicyManager } from '../../core/s3-policy/manager.ts';
+import type { CreateS3PolicyInput, UpdateS3PolicyInput } from '../../core/s3-policy/types.ts';
+
+function requireRoot(c: any): Response | null {
+  const user = c.var?.currentUser;
+  if (!user) return null;
+  const isRoot = user.role === 'root' || user.role === 'Operator' || user.role === 'wheel';
+  if (!isRoot) return c.json(fail('FORBIDDEN', 'Admin access required'), 403);
+  return null;
+}
 
 export function createTopologyRouter(
   buckets: BucketService,
   instances: InstanceService,
   images: ImageRepositoryService,
   credentials?: CredentialService,
+  policyManager?: S3PolicyManager,
 ): Hono<{ Variables: AppContext }> {
   const router = new Hono<{ Variables: AppContext }>();
 
@@ -72,7 +84,7 @@ export function createTopologyRouter(
   });
 
   router.get('/instances/:id', async (c) => {
-    const id = c.req.param('id') as any;
+    const id = createInstanceId(c.req.param('id'));
     const instance = await instances.get(id);
     if (!instance) return c.json(fail('NOT_FOUND', 'Instance not found'), 404);
     return c.json(ok(instance));
@@ -80,7 +92,7 @@ export function createTopologyRouter(
 
   router.put('/instances/:id', async (c) => {
     try {
-      const id = c.req.param('id') as any;
+      const id = createInstanceId(c.req.param('id'));
       const body = await c.req.json<UpdateInstanceBody>();
       const instance = await instances.update(id, body);
       return c.json(ok(instance));
@@ -91,7 +103,7 @@ export function createTopologyRouter(
 
   router.delete('/instances/:id', async (c) => {
     try {
-      const id = c.req.param('id') as any;
+      const id = createInstanceId(c.req.param('id'));
       await instances.delete(id);
       return c.json(ok(null));
     } catch (e: any) {
@@ -101,7 +113,7 @@ export function createTopologyRouter(
 
   router.post('/instances/:id/heartbeat', async (c) => {
     try {
-      const id = c.req.param('id') as any;
+      const id = createInstanceId(c.req.param('id'));
       const body = await c.req.json<HeartbeatBody>();
       await instances.heartbeat(id, body.capacity, body.status ?? 'online');
       return c.json(ok(null));
@@ -185,7 +197,7 @@ export function createTopologyRouter(
     try {
       const body = await c.req.json<CreateBucketBody>();
       if (!body.name || !body.bucketType || !body.instanceId) {
-        return c.json(fail('VALIDATION_ERROR', 'name, platform, region, endpoint, bucketType, and credentialRef are required'), 400);
+        return c.json(fail('VALIDATION_ERROR', 'name, bucketType, and instanceId are required'), 400);
       }
       const bucket = await buckets.create(body);
       return c.json(ok(bucket), 201);
@@ -221,6 +233,53 @@ export function createTopologyRouter(
       return c.json(fail('DELETE_FAILED', e.message), e.status ?? 400);
     }
   });
+
+  // ─── S3 Policy CRUD (admin) ───
+
+  if (policyManager) {
+    router.get('/buckets/:id/policies', async (c) => {
+      const items = await policyManager.list(c.req.param('id'));
+      return c.json(ok({ items, total: items.length }));
+    });
+
+    router.post('/buckets/:id/policies', async (c) => {
+      const r = requireRoot(c); if (r) return r;
+      try {
+        const body: unknown = await c.req.json();
+        const policy = await policyManager.create(c.req.param('id'), body as CreateS3PolicyInput);
+        return c.json(ok(policy), 201);
+      } catch (e: any) {
+        return c.json(fail('CREATE_FAILED', e.message), 400);
+      }
+    });
+
+    router.get('/policies/:id', async (c) => {
+      const policy = await policyManager.get(c.req.param('id'));
+      if (!policy) return c.json(fail('NOT_FOUND', 'S3 policy not found'), 404);
+      return c.json(ok(policy));
+    });
+
+    router.put('/policies/:id', async (c) => {
+      const r = requireRoot(c); if (r) return r;
+      try {
+        const body: unknown = await c.req.json();
+        const policy = await policyManager.update(c.req.param('id'), body as UpdateS3PolicyInput);
+        return c.json(ok(policy));
+      } catch (e: any) {
+        return c.json(fail('UPDATE_FAILED', e.message), e.status ?? 400);
+      }
+    });
+
+    router.delete('/policies/:id', async (c) => {
+      const r = requireRoot(c); if (r) return r;
+      try {
+        await policyManager.delete(c.req.param('id'));
+        return c.json(ok(null));
+      } catch (e: any) {
+        return c.json(fail('DELETE_FAILED', e.message), e.status ?? 400);
+      }
+    });
+  }
 
   // ─── Image Repository CRUD ───
 
@@ -336,6 +395,11 @@ export function createTopologyRouter(
 export const topologyRouteMeta: RouteMeta[] = [
   { method: 'GET', path: '/regions', description: '列出已知 region（?platform=alibaba|aws|podman）', responseDescription: '{ platform, regions[] }' },
   { method: 'GET', path: '/buckets', description: '列出 region-scoped 存储桶', responseDescription: '{ items: RegionBucket[] }' },
+  { method: 'GET', path: '/buckets/:id/policies', description: '列出指定 bucket 的 S3 策略', responseDescription: '{ items: S3Policy[] }' },
+  { method: 'POST', path: '/buckets/:id/policies', description: '创建 S3 策略（admin only）', requestBody: { name: 'read-static', effect: 'Allow', actions: ['s3:GetObject'], pathPrefix: 'static/' }, responseDescription: 'S3Policy' },
+  { method: 'GET', path: '/policies/:id', description: '获取 S3 策略详情', responseDescription: 'S3Policy' },
+  { method: 'PUT', path: '/policies/:id', description: '更新 S3 策略（admin only）', responseDescription: 'S3Policy' },
+  { method: 'DELETE', path: '/policies/:id', description: '删除 S3 策略（admin only）', responseDescription: '{ ok: true }' },
   { method: 'POST', path: '/buckets', description: '创建 region bucket 记录', responseDescription: 'RegionBucket' },
   { method: 'PUT', path: '/buckets/:id', description: '更新 bucket 记录', responseDescription: 'RegionBucket' },
   { method: 'DELETE', path: '/buckets/:id', description: '删除 bucket 记录', responseDescription: '{ ok: true }' },

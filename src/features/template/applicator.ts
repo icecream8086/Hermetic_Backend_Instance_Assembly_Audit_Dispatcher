@@ -11,7 +11,21 @@ import type { SpotStrategy } from '../sandbox/types.ts';
  * Network from template.network
  * Provider overrides from template.providerOverrides
  */
-export function applyTemplate(tpl: SandboxTemplate, name?: string, region?: string): CreateSandboxInput {
+/**
+ * @param resolveVolume Optional callback to resolve a Volume entity by ID.
+ *   When a TemplateStorage has `volumeId`, this callback fetches the Volume
+ *   and merges its nfs/disk/configMap/secret config into the storage entry.
+ * @param resolveBucket Optional callback to resolve a RegionBucket by ID.
+ *   When a TemplateStorage has `bucketId`, this callback fetches the bucket
+ *   and populates bucketMounts for autoGenerateKeys processing.
+ */
+export async function applyTemplate(
+  tpl: SandboxTemplate,
+  name?: string,
+  region?: string,
+  resolveVolume?: (id: string) => Promise<Record<string, unknown> | null>,
+  resolveBucket?: (id: string) => Promise<Record<string, unknown> | null>,
+): Promise<CreateSandboxInput> {
   const container: ContainerSpec = tpl.container ?? { region: 'local' as any, containers: [] };
   const containers = container.containers ?? [];
   const cpu = containers.reduce((s, c) => s + (c.resources?.limits?.cpu ?? c.resources?.requests?.cpu ?? 1), 0);
@@ -19,13 +33,22 @@ export function applyTemplate(tpl: SandboxTemplate, name?: string, region?: stri
   const gpu = Math.max(...containers.map(c => c.resources?.limits?.gpu ?? 0));
 
   const ext = tpl.extensions;
-  const { volumes, volumeMounts } = mapStorage(ext?.storage);
+  const { volumes, volumeMounts, configMapEnv, bucketMounts } = await mapStorage(ext?.storage, resolveVolume, resolveBucket);
+
+  // Assign volume mounts to first container only (backward compat)
+  const mainVolMounts = volumeMounts.length > 0 ? volumeMounts : undefined;
 
   // Build a per-container probe map from healthChecks[]
   const probeMap = buildProbeMap(tpl.healthChecks);
 
-  // Assign volume mounts to first container only (backward compat)
-  const mainVolMounts = volumeMounts.length > 0 ? volumeMounts : undefined;
+  // Merge template-level env + configMap env for main containers
+  function mergeEnv(existing: readonly { name: string; value?: string; valueFrom?: unknown }[] | undefined): Record<string, unknown>[] | undefined {
+    const merged: Record<string, unknown>[] = [
+      ...(existing?.map(e => ({ name: e.name, ...(e.value !== undefined ? { value: e.value } : {}), ...(e.valueFrom !== undefined ? { valueFrom: e.valueFrom } : {}) })) ?? []),
+      ...configMapEnv,
+    ];
+    return merged.length > 0 ? merged : undefined;
+  }
 
   return {
     name: name ?? tpl.name,
@@ -38,11 +61,7 @@ export function applyTemplate(tpl: SandboxTemplate, name?: string, region?: stri
       image: c.image,
       ...(c.command ? { command: [...c.command] } : {}),
       ...(c.args ? { args: [...c.args] } : {}),
-      ...(c.env ? { env: c.env.map(e => ({
-        name: e.name,
-        ...(e.value !== undefined ? { value: e.value } : {}),
-        ...(e.valueFrom !== undefined ? { valueFrom: e.valueFrom } : {}),
-      })) } : {}),
+      ...(mergeEnv(c.env) ? { env: mergeEnv(c.env) } : {}),
       ...(c.resources ? {
         resources: {
           ...(c.resources.requests ? { requests: { cpu: c.resources.requests.cpu ?? 0, memory: c.resources.requests.memory ?? 0 } } : {}),
@@ -78,6 +97,7 @@ export function applyTemplate(tpl: SandboxTemplate, name?: string, region?: stri
       })),
     } : {}),
     ...(volumes.length > 0 ? { volumes } : {}),
+    ...(bucketMounts.length > 0 ? { bucketMounts } : {}),
     ...(container.account ? { account: container.account } : {}),
     ...(container.instanceId ? { instanceId: container.instanceId } : {}),
     ...(ext?.healthMaxRetries !== undefined ? { healthMaxRetries: ext.healthMaxRetries as number } : {}),
@@ -132,24 +152,74 @@ function mapNetwork(network: NetworkSpec | undefined) {
 
 // ─── Storage → Volume + VolumeMount ───
 
-export function mapStorage(
+export async function mapStorage(
   storage: readonly TemplateStorage[] | undefined,
-): { volumes: Volume[]; volumeMounts: VolumeMount[] } {
-  if (!storage || storage.length === 0) return { volumes: [], volumeMounts: [] };
+  resolveVolume?: (id: string) => Promise<Record<string, unknown> | null>,
+  resolveBucket?: (id: string) => Promise<Record<string, unknown> | null>,
+): Promise<{
+  volumes: Volume[];
+  volumeMounts: VolumeMount[];
+  configMapEnv: { name: string; value: string }[];
+  bucketMounts: { bucketId: string; bucket: string; endpoint: string; region: string; autoGenerateKeys?: boolean; mountPath: string }[];
+}> {
+  if (!storage || storage.length === 0) return { volumes: [], volumeMounts: [], configMapEnv: [], bucketMounts: [] };
 
   const now = Date.now();
   const volumes: Volume[] = [];
   const volumeMounts: VolumeMount[] = [];
+  const bucketMounts: { bucketId: string; bucket: string; endpoint: string; region: string; autoGenerateKeys?: boolean; mountPath: string }[] = [];
+  const configMapEnv: { name: string; value: string }[] = [];
 
   for (const s of storage) {
     const vid = createVolumeId(s.name);
 
+    // If volumeId is set, resolve from store and merge config
+    if (s.volumeId && resolveVolume) {
+      const vol = await resolveVolume(s.volumeId);
+      if (vol) {
+        volumes.push({
+          id: vid, name: s.name, tags: [], createdAt: now, updatedAt: now,
+          status: VolumeStatus.Detached, type: (vol as any).type ?? s.type,
+          instanceId: s.instanceId,
+          ...((vol as any).nfs ? { nfs: (vol as any).nfs } : {}),
+          ...((vol as any).disk ? { disk: (vol as any).disk } : {}),
+          ...((vol as any).secret ? { secret: (vol as any).secret } : {}),
+        });
+        volumeMounts.push({ volumeId: vid, mountPath: s.mountPath, readOnly: false, ...((vol as any).credentialRef ? { credentialRef: (vol as any).credentialRef } : {}) });
+        continue;
+      }
+    }
+
+    // If bucketId is set, resolve from store → populate bucketMounts for S3 key generation
+    if (s.bucketId && resolveBucket) {
+      const bkt = await resolveBucket(s.bucketId);
+      if (bkt) {
+        bucketMounts.push({
+          bucketId: s.bucketId,
+          bucket: (s.oss?.bucket) ?? (bkt as any).name ?? '',
+          endpoint: (bkt as any).endpoint ?? '',
+          region: (bkt as any).region ?? 'auto',
+          autoGenerateKeys: (bkt as any).autoGenerateKeys === true,
+          mountPath: s.mountPath,
+        });
+        continue;
+      }
+    }
+
+    // Inline storage — credentialRef not applicable here (managed at Volume level)
     switch (s.type) {
+      // ConfigMap is env-only — handled inline, no Volume entity needed
+      case 'configMap': {
+        if (!s.configMap?.env?.length) break;
+        configMapEnv.push(...s.configMap.env.map(e => ({ name: e.key, value: e.value })));
+        break;
+      }
       case 'nfs': {
         if (!s.nfs) break;
         volumes.push({
           id: vid, name: s.name, tags: [], createdAt: now, updatedAt: now,
           status: VolumeStatus.Detached, type: VolumeType.NFS,
+          instanceId: s.instanceId,
           nfs: { server: s.nfs.server, path: s.nfs.path, readOnly: s.nfs.readOnly ?? false },
         });
         volumeMounts.push({ volumeId: vid, mountPath: s.mountPath, readOnly: s.nfs.readOnly ?? false });
@@ -159,6 +229,7 @@ export function mapStorage(
         volumes.push({
           id: vid, name: s.name, tags: [], createdAt: now, updatedAt: now,
           status: VolumeStatus.Detached, type: VolumeType.HostPath,
+          instanceId: s.instanceId,
         });
         volumeMounts.push({ volumeId: vid, mountPath: s.mountPath, readOnly: false });
         break;
@@ -167,6 +238,7 @@ export function mapStorage(
         volumes.push({
           id: vid, name: s.name, tags: [], createdAt: now, updatedAt: now,
           status: VolumeStatus.Detached, type: VolumeType.EmptyDir,
+          instanceId: s.instanceId,
         });
         volumeMounts.push({ volumeId: vid, mountPath: s.mountPath, readOnly: false });
         break;
@@ -176,12 +248,41 @@ export function mapStorage(
         volumes.push({
           id: vid, name: s.name, tags: [], createdAt: now, updatedAt: now,
           status: VolumeStatus.Detached, type: VolumeType.NFS,
+          instanceId: s.instanceId,
         });
         volumeMounts.push({ volumeId: vid, mountPath: s.mountPath, readOnly: s.oss.readOnly ?? false });
+        break;
+      }
+      case 'disk': {
+        if (!s.disk) break;
+        volumes.push({
+          id: vid, name: s.name, tags: [], createdAt: now, updatedAt: now,
+          status: VolumeStatus.Detached, type: VolumeType.Disk,
+          instanceId: s.instanceId,
+          disk: {
+            diskId: s.disk.diskId,
+            fsType: s.disk.fsType ?? 'ext4',
+            readOnly: s.disk.readOnly ?? false,
+            ...(s.disk.sizeGiB !== undefined ? { sizeGiB: s.disk.sizeGiB } : {}),
+            ...(s.disk.deleteWithInstance !== undefined ? { deleteWithInstance: s.disk.deleteWithInstance } : {}),
+          },
+        });
+        volumeMounts.push({ volumeId: vid, mountPath: s.mountPath, readOnly: s.disk.readOnly ?? false });
+        break;
+      }
+      case 'secret': {
+        if (!s.secret) break;
+        volumes.push({
+          id: vid, name: s.name, tags: [], createdAt: now, updatedAt: now,
+          status: VolumeStatus.Detached, type: VolumeType.Secret,
+          instanceId: s.instanceId,
+          secret: { name: s.secret.name, ...(s.secret.items ? { items: s.secret.items.map(i => ({ key: i.key, path: i.path, ...(i.mode !== undefined ? { mode: i.mode } : {}) })) } : {}) },
+        });
+        volumeMounts.push({ volumeId: vid, mountPath: s.mountPath, readOnly: true });
         break;
       }
     }
   }
 
-  return { volumes, volumeMounts };
+  return { volumes, volumeMounts, configMapEnv, bucketMounts };
 }

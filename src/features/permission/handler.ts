@@ -14,6 +14,7 @@ import {
   UpdateRouteAclSchema,
   CreateUserTplSchema,
   UpdateUserTplSchema,
+  CreateInviteSchema,
 } from './schema.ts';
 import { ok, fail } from '../../core/response.ts';
 import type { AuditActor } from './audit.ts';
@@ -53,6 +54,19 @@ function requireRoot(c: any): Response | null {
   return null;
 }
 
+/**
+ * Reject non-wheel users. Only users with role 'wheel' have full access to ALL groups.
+ * root/Operator can only manage groups where they're explicitly listed as admin.
+ */
+function requireWheel(c: any): Response | null {
+  const user = c.var?.currentUser;
+  if (!user) return null; // authz disabled
+  if (user.role !== 'wheel') {
+    return c.json(fail('FORBIDDEN', 'Wheel privilege required'), 403);
+  }
+  return null;
+}
+
 export function createPermissionRouter(svc: IPermissionService): Hono<{ Variables: AppContext }> {
   const router = new Hono<{ Variables: AppContext }>();
 
@@ -72,7 +86,9 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
   router.get('/policies', async (c) => {
     const page = parseInt(c.req.query('page') ?? '') || 1;
     const limit = parseInt(c.req.query('limit') ?? '') || 50;
-    return c.json(ok(await svc.listPoliciesPaginated(page, limit)));
+    const name = c.req.query('name');
+    const filter = name ? (item: any) => item.name?.toLowerCase().includes(name.toLowerCase()) : undefined;
+    return c.json(ok(await svc.listPoliciesPaginated(page, limit, filter)));
   });
 
   router.get('/policies/:id', async (c) => {
@@ -100,7 +116,7 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
   // ═══════════════════════════════════
 
   router.post('/user-groups', async (c) => {
-    { const r = requireRoot(c); if (r) return r; }
+    { const r = requireWheel(c); if (r) return r; }
     const body: unknown = await c.req.json();
     const parsed = CreateUserGroupSchema.safeParse(body);
     if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
@@ -111,7 +127,9 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
   router.get('/user-groups', async (c) => {
     const page = parseInt(c.req.query('page') ?? '') || 1;
     const limit = parseInt(c.req.query('limit') ?? '') || 50;
-    return c.json(ok(await svc.listUserGroupsPaginated(page, limit)));
+    const name = c.req.query('name');
+    const filter = name ? (item: any) => item.name?.toLowerCase().includes(name.toLowerCase()) : undefined;
+    return c.json(ok(await svc.listUserGroupsPaginated(page, limit, filter)));
   });
 
   router.get('/user-groups/:id', async (c) => {
@@ -121,7 +139,7 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
   });
 
   router.put('/user-groups/:id', async (c) => {
-    { const r = requireRoot(c); if (r) return r; }
+    { const r = requireWheel(c); if (r) return r; }
     const body: unknown = await c.req.json();
     const parsed = UpdateUserGroupSchema.safeParse(body);
     if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
@@ -129,7 +147,7 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
   });
 
   router.delete('/user-groups/:id', async (c) => {
-    { const r = requireRoot(c); if (r) return r; }
+    { const r = requireWheel(c); if (r) return r; }
     await svc.deleteUserGroup(c.req.param('id'), actorFrom(c));
     return c.json(ok(null));
   });
@@ -164,7 +182,9 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
   router.get('/groups', async (c) => {
     const page = parseInt(c.req.query('page') ?? '') || 1;
     const limit = parseInt(c.req.query('limit') ?? '') || 50;
-    return c.json(ok(await svc.listPermGroupsPaginated(page, limit)));
+    const name = c.req.query('name');
+    const filter = name ? (item: any) => item.name?.toLowerCase().includes(name.toLowerCase()) : undefined;
+    return c.json(ok(await svc.listPermGroupsPaginated(page, limit, filter)));
   });
 
   router.get('/groups/:id', async (c) => {
@@ -217,7 +237,9 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
   router.get('/user-templates', async (c) => {
     const page = parseInt(c.req.query('page') ?? '') || 1;
     const limit = parseInt(c.req.query('limit') ?? '') || 50;
-    return c.json(ok(await svc.listUserTplsPaginated(page, limit)));
+    const name = c.req.query('name');
+    const filter = name ? (item: any) => item.name?.toLowerCase().includes(name.toLowerCase()) : undefined;
+    return c.json(ok(await svc.listUserTplsPaginated(page, limit, filter)));
   });
 
   router.get('/user-templates/:id', async (c) => {
@@ -256,7 +278,9 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
   router.get('/route-acls', async (c) => {
     const page = parseInt(c.req.query('page') ?? '') || 1;
     const limit = parseInt(c.req.query('limit') ?? '') || 50;
-    return c.json(ok(await svc.listRouteAclsPaginated(page, limit)));
+    const q = c.req.query('q'); // search by pathPrefix or method
+    const filter = q ? (item: any) => (item.pathPrefix ?? '').toLowerCase().includes(q.toLowerCase()) || (item.method ?? '').toLowerCase().includes(q.toLowerCase()) : undefined;
+    return c.json(ok(await svc.listRouteAclsPaginated(page, limit, filter)));
   });
 
   router.get('/route-acls/:id', async (c) => {
@@ -276,6 +300,45 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
   router.delete('/route-acls/:id', async (c) => {
     { const r = requireRoot(c); if (r) return r; }
     await svc.deleteRouteAcl(c.req.param('id'), actorFrom(c));
+    return c.json(ok(null));
+  });
+
+  // ═══════════════════════════════════
+  // Invitations
+  // ═══════════════════════════════════
+
+  // POST /invite — send invitation (requires admin of the group)
+  router.post('/invite', async (c) => {
+    const body: unknown = await c.req.json();
+    const parsed = CreateInviteSchema.safeParse(body);
+    if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
+    const user = c.var?.currentUser;
+    if (!user) return c.json(fail('UNAUTHORIZED', 'Authentication required'), 401);
+    const invite = await svc.sendInvite(parsed.data, user.id);
+    return c.json(ok(invite), 201);
+  });
+
+  // GET /invitations — list current user's pending invitations
+  router.get('/invitations', async (c) => {
+    const user = c.var?.currentUser;
+    if (!user) return c.json(fail('UNAUTHORIZED', 'Authentication required'), 401);
+    const invites = await svc.listInvitations(user.id);
+    return c.json(ok(invites));
+  });
+
+  // POST /invitations/:id/accept — accept invitation
+  router.post('/invitations/:id/accept', async (c) => {
+    const user = c.var?.currentUser;
+    if (!user) return c.json(fail('UNAUTHORIZED', 'Authentication required'), 401);
+    await svc.acceptInvite(c.req.param('id'), user.id);
+    return c.json(ok(null));
+  });
+
+  // POST /invitations/:id/reject — reject invitation
+  router.post('/invitations/:id/reject', async (c) => {
+    const user = c.var?.currentUser;
+    if (!user) return c.json(fail('UNAUTHORIZED', 'Authentication required'), 401);
+    await svc.rejectInvite(c.req.param('id'), user.id);
     return c.json(ok(null));
   });
 
