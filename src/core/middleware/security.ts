@@ -1,5 +1,5 @@
 import type { MiddlewareHandler } from 'hono';
-import type { AppContext } from '../app.ts';
+import type { AppContext } from '../deps.ts';
 
 // ─── JSON depth limit ───
 

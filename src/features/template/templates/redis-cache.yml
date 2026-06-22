@@ -1,0 +1,32 @@
+# category: middleware
+# tags: redis, cache, alpine, tcp
+name: "redis-cache"
+description: "Redis 7 缓存服务 — 无持久化，适合 session / 缓存场景"
+apiVersion: "hbi-aad/v1"
+kind: "Container"
+provider: "alibaba"
+region: "cn-hangzhou"
+containers:
+  - name: "redis"
+    image: "docker.io/library/redis:7-alpine"
+    command:
+      - "redis-server"
+      - "--save"
+      - ""
+      - "--appendonly"
+      - "no"
+    resources:
+      limits:
+        cpu: 0.5
+        memory: 512
+    ports:
+      - containerPort: 6379
+        protocol: "TCP"
+    livenessProbe:
+      tcpSocket:
+        port: 6379
+      periodSeconds: 10
+      initialDelaySeconds: 5
+network:
+  allocatePublicIp: false
+restartPolicy: "Always"

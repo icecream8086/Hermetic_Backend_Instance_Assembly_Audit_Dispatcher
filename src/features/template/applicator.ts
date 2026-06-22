@@ -29,7 +29,7 @@ export async function applyTemplate(
   const container: ContainerSpec = tpl.container ?? { region: 'local' as any, containers: [] };
   const containers = container.containers ?? [];
   const cpu = containers.reduce((s, c) => s + (c.resources?.limits?.cpu ?? c.resources?.requests?.cpu ?? 1), 0);
-  const memory = containers.reduce((s, c) => s + (c.resources?.limits?.memory ?? c.resources?.requests?.memory ?? 512), 0);
+  const memory = containers.reduce((s, c) => s + (c.resources?.limits?.memory ?? c.resources?.requests?.memory ?? 2048), 0);
   const gpu = Math.max(...containers.map(c => c.resources?.limits?.gpu ?? 0));
 
   const ext = tpl.extensions;

@@ -88,7 +88,7 @@ export interface MappableVolume {
   readonly id: string;
   readonly type: string;
   readonly nfs?: { readonly server: string; readonly path: string; readonly readOnly: boolean } | undefined;
-  readonly disk?: { readonly diskId: string; readonly fsType: string; readonly sizeGiB?: number; readonly readOnly: boolean; readonly deleteWithInstance?: boolean } | undefined;
+  readonly disk?: { readonly diskId: string; readonly fsType: string; readonly sizeGiB?: number; readonly diskCategory?: string | undefined; readonly readOnly: boolean; readonly deleteWithInstance?: boolean | undefined } | undefined;
   readonly secret?: { readonly name: string; readonly items?: readonly { key: string; path: string; mode?: number }[] } | undefined;
 }
 
@@ -99,6 +99,7 @@ export function mapVolume(v: MappableVolume): VolumeConfigInput {
   } else if (v.disk) {
     options = { diskId: v.disk.diskId, fsType: v.disk.fsType, readOnly: v.disk.readOnly };
     if (v.disk.sizeGiB !== undefined) options.sizeGiB = v.disk.sizeGiB;
+    if (v.disk.diskCategory) options.diskCategory = v.disk.diskCategory;
     if (v.disk.deleteWithInstance !== undefined) options.deleteWithInstance = v.disk.deleteWithInstance;
   } else if (v.secret) {
     options = { name: v.secret.name };

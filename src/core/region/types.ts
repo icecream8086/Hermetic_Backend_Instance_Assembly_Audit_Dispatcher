@@ -88,8 +88,8 @@ declare const ZONE_ID_BRAND: unique symbol;
 
 export type ZoneId = string & { readonly [ZONE_ID_BRAND]: true };
 
-/** Alibaba zone pattern: cn-hangzhou-[a-z], cn-beijing-[a-z], etc. */
-const ALIBABA_ZONE_RE = /^[a-z]+-[a-z]+\d+-[a-z]$/;
+/** Alibaba zone pattern: cn-hangzhou-g, cn-beijing-g, us-east-1-a, etc. */
+const ALIBABA_ZONE_RE = /^[a-z]+(?:-[a-z0-9]+)+-[a-z]$/;
 
 /** Podman zone: 'local' or 'local-<name>'. */
 const PODMAN_ZONE_RE = /^local(?:-[a-zA-Z0-9_-]+)?$/;

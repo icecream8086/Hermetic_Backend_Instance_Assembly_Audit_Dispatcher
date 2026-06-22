@@ -2,27 +2,24 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { secureHeaders } from 'hono/secure-headers';
 import { bodyLimit } from 'hono/body-limit';
-import { fail } from './response.ts';
+import { ok, fail } from './response.ts';
 import type { AppConfig } from '../config/types.ts';
-import type { Stores } from './store/interfaces.ts';
 import { createStores } from './store/factory.ts';
 import { globalErrorHandler } from './middleware/error-handler.ts';
 import { rateLimit } from './middleware/rate-limit.ts';
 import { createFacility } from './brand.ts';
 import { getFeatures } from '../features/generated.ts';
-import type { IProviderRegistry } from './provider/interfaces.ts';
 import { createProviderRegistry } from './provider/factory.ts';
 import { createTimerBackend } from './scheduler/factory.ts';
 import { EventBus } from './event-bus/bus.ts';
 import { EventLoop } from './event-bus/loop.ts';
-import { CredentialService } from './auth/credential.ts';
 import { SecretEncryption } from './auth/secret-encryption.ts';
 import type { EventLoopConfig, TriggerEventInput } from './event-bus/types.ts';
 import type { IAuditWriter, IAuditReader } from './audit/types.ts';
 import type { Sandbox } from '../features/sandbox/types.ts';
-import { SandboxStatus, createSandboxId } from '../features/sandbox/types.ts';
+import { createSandboxId } from '../features/sandbox/types.ts';
 import type { ComputeInstance } from '../core/region/instance.ts';
-import { WorkersAuditLogger, KvAuditLogger, createAuditRouter } from './audit/index.ts';
+import { WorkersAuditLogger, KvAuditLogger, HybridAuditLogger, createAuditRouter } from './audit/index.ts';
 import { LocalAuditLogger } from './audit/local-audit-logger.ts';
 import { NoopAuditLogger } from './audit/noop-audit-logger.ts';
 import { authz } from './middleware/auth.ts';
@@ -35,40 +32,13 @@ import { createWsRouter } from './ws/router.ts';
 import { seedIfNeeded, ensureMacRules } from './seed.ts';
 import { RequestCachedAtomicStore } from './store/request-cache.ts';
 import { formatDmesgLine } from './utils/dmesg.ts';
-
-export interface AppContext {
-  stores: Stores;
-  providers: IProviderRegistry;
-  eventBus: EventBus;
-  eventLoop: EventLoop;
-  audit: IAuditWriter;
-  requestId?: string;
-  permissionChecker?: FeatureDeps['permissionChecker'];
-}
-
-/** Shared dependencies injected into every feature's createRouter(). */
-export interface FeatureDeps {
-  stores: Stores;
-  providers: IProviderRegistry;
-  eventBus: EventBus;
-  eventLoop: EventLoop;
-  audit: IAuditWriter;
-  /** Optional action+resource level permission checker (PermissionService.check compatible). */
-  permissionChecker?: { check(params: { userId: string; action: string; resource: string; ip?: string; resourceOwnerId?: string }): Promise<{ allowed: boolean; reason: string }> };
-  /** AES-256-GCM envelope encryption for credential secrets at rest. */
-  secretEncryption?: import('./auth/secret-encryption.ts').SecretEncryption;
-}
-
-export interface AppInstance {
-  app: Hono<{ Variables: AppContext }>;
-  stores: Stores;
-  providers: IProviderRegistry;
-  eventBus: EventBus;
-  eventLoop: EventLoop;
-  dispose: () => Promise<void>;
-  /** Run background seeding (policy lib, default instance, templates). Use with ctx.waitUntil() in Worker mode. */
-  seed: () => Promise<void>;
-}
+import { createMessageQueue } from '../queue/producer.ts';
+import type { AppContext, FeatureDeps, AppInstance } from './deps.ts';
+import { registerHealthCheck } from './events/health-check.ts';
+import { registerImagePullHandler } from './events/image-pull.ts';
+import { registerLogFetchHandler } from './events/log-fetch.ts';
+// Re-export for external consumers (index.ts, dev.ts, feature handlers)
+export type { AppContext, FeatureDeps, AppInstance } from './deps.ts';
 
 /**
  * Assemble the application: wire stores, logger, providers, event system, middleware, and routes.
@@ -81,7 +51,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
   const stores = await createStores(config.storage, platformBindings);
 
   // 1b. 审计日志: 根据配置选择后端
-  const auditBackend = config.audit?.backend ?? (config.storage.stateBackend === 'file' ? 'local' : 'workers');
+  const auditBackend = config.audit?.backend ?? 'hybrid';
   let auditLogger: IAuditWriter & IAuditReader;
   switch (auditBackend) {
     case 'kv':
@@ -94,8 +64,13 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
       auditLogger = new NoopAuditLogger();
       break;
     case 'local':
-    default:
       auditLogger = new LocalAuditLogger();
+      break;
+    case 'hybrid':
+    default:
+      // 统一日志器：本地/Workers 自动适配, 查询可用, 零外部依赖
+      // 上线后可选配 Logpush→R2 + CloudflareLogReader 做长期归档
+      auditLogger = new HybridAuditLogger(stores.atomic);
       break;
   }
   const audit: IAuditWriter = auditLogger;
@@ -109,6 +84,19 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
 
   // 2b. Create provider registry (backed by ComputeInstance entities)
   const providers = createProviderRegistry(config.provider, config.s3, stores.atomic, secretEncryption);
+
+  // 3. Create queue producer for async task dispatch
+  // In wrangler dev, Miniflare provides a local queue; in production, the TASK_QUEUE
+  // binding routes messages to the Cloudflare Queues service.
+  // When unavailable, createMessageQueue() returns a NoopMessageQueue — callers fall back to inline.
+  const queueProducer = createMessageQueue(
+    platformBindings?.['TASK_QUEUE'] as Queue<any> | undefined,
+  );
+  if (queueProducer.available) {
+    console.log(formatDmesgLine('[app] Queue producer enabled (TASK_QUEUE)'));
+  } else {
+    console.log(formatDmesgLine('[app] Queue producer unavailable — falling back to EventLoop'));
+  }
 
   // 4. Create timer backend (driven by SCHEDULER_BACKEND env var)
   const schedulerBackend = createTimerBackend(config.scheduler.backend, {
@@ -130,154 +118,30 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
     stores.atomic,
   );
 
-  // 5b. 健康检查事件：每 tick 查询 provider 实时状态，可配重试次数，-1 为白名单
-  eventBus.on('health:check', async () => {
-    try {
-      const idx = await stores.atomic.get<string[]>('sandbox:ids');
-      if (!idx || !providers.container.getStatus) return;
-      for (const sid of idx.value) {
-        try {
-          const entry = await stores.atomic.get<Sandbox>(`sandbox:${sid}`);
-          if (!entry || entry.value.status === SandboxStatus.Deleted) continue;
-          // Stopped 超过 2 tick 的沙箱 → 回收
-          if (entry.value.status === SandboxStatus.Stopped) {
-            const stoppedDuration = Date.now() - entry.value.updatedAt;
-            if (stoppedDuration > 60_000) { // 停止超过 60 秒才回收
-              await stores.atomic.set(`sandbox:${sid}`, { ...entry.value, status: SandboxStatus.Deleted, updatedAt: Date.now() }, entry.version);
-              const idxEntry = await stores.atomic.get<string[]>('sandbox:ids');
-              if (idxEntry) await stores.atomic.set('sandbox:ids', idxEntry.value.filter((i: string) => i !== sid), idxEntry.version);
-              console.log(formatDmesgLine(`sandbox DELETED (stopped-gc) id=${sid} name=${entry.value.name} provider=${entry.value.providerId ?? ''} containers=${entry.value.containers.length} uptime=${Date.now() - entry.value.createdAt}ms`));
-            }
-            continue;
-          }
-          const maxRetries = entry.value.config.healthMaxRetries ?? 3;
-          if (maxRetries === -1) continue;
-          const runtime = await providers.container.getStatus(entry.value.providerId ?? sid);
-          if (!runtime) {
-            // Provider 已无此容器 → 标记已清理并从索引移除
-            for (let attempt = 0; attempt < 3; attempt++) {
-              const latest = await stores.atomic.get<Sandbox>(`sandbox:${sid}`);
-              if (!latest) break;
-              const ver = await stores.atomic.set(`sandbox:${sid}`, { ...latest.value, status: SandboxStatus.Deleted, updatedAt: Date.now() }, latest.version);
-              if (!ver) continue;
-              const idxEntry = await stores.atomic.get<string[]>('sandbox:ids');
-              if (idxEntry) await stores.atomic.set('sandbox:ids', idxEntry.value.filter((i: string) => i !== sid), idxEntry.version);
-              console.log(formatDmesgLine(`sandbox DELETED (provider-gone) id=${sid} name=${entry.value.name} provider=${entry.value.providerId ?? ''} containers=${entry.value.containers.length} uptime=${Date.now() - entry.value.createdAt}ms`));
-              break;
-            }
-            continue;
-          }
-          const allHealthy = runtime.containers.every(cc => cc.alive);
-          const failKey = `health:fails:${sid}`;
-          if (allHealthy) {
-            const failEntry = await stores.atomic.get<number>(failKey);
-            if (failEntry) await stores.atomic.set(failKey, 0, failEntry.version);
-          } else {
-            const failEntry = await stores.atomic.get<number>(failKey);
-            const fails = (failEntry?.value ?? 0) + 1;
-            await stores.atomic.set(failKey, fails, failEntry?.version ?? null);
-            if (fails >= maxRetries) {
-              await providers.container.delete({ region: entry.value.config.region, providerId: entry.value.providerId ?? sid });
-              for (let attempt = 0; attempt < 3; attempt++) {
-                const latest = await stores.atomic.get<Sandbox>(`sandbox:${sid}`);
-                if (!latest) break;
-                const ver = await stores.atomic.set(`sandbox:${sid}`, { ...latest.value, status: SandboxStatus.Deleted, updatedAt: Date.now() }, latest.version);
-                if (!ver) continue;
-                const idxEntry = await stores.atomic.get<string[]>('sandbox:ids');
-                if (idxEntry) await stores.atomic.set('sandbox:ids', idxEntry.value.filter((i: string) => i !== sid), idxEntry.version);
-                console.log(formatDmesgLine(`sandbox DELETED (unhealthy-gc) id=${sid} name=${entry.value.name} provider=${entry.value.providerId ?? ''} containers=${entry.value.containers.length} uptime=${Date.now() - entry.value.createdAt}ms`));
-                break;
-              }
-            }
-          }
-        } catch (e) { console.error(`[health] check error ${sid}:`, e instanceof Error ? e.message : e); }
-      }
-
-      // Instance heartbeat timeout — 120s no heartbeat → offline
-      const instIdx = await stores.atomic.get<string[]>('instance:ids');
-      if (instIdx) {
-        const now = Date.now();
-        for (const iid of instIdx.value) {
-          try {
-            const instEntry = await stores.atomic.get<any>('instance:' + iid);
-            if (!instEntry?.value || instEntry.value.status !== 'online') continue;
-            if (instEntry.value.updatedAt && (now - instEntry.value.updatedAt > 120_000)) {
-              await stores.atomic.set('instance:' + iid, { ...instEntry.value, status: 'offline', updatedAt: now }, instEntry.version);
-            }
-          } catch { /* skip problematic instances */ }
-        }
-      }
-
-      // Bucket key rotation — rotate expired auto-generated S3 access keys
-      const BINDING_INDEX_KEY = 'bucket-key:ids';
-      const BINDING_PREFIX = 'bucket-key:';
-      const bIdx = await stores.atomic.get<string[]>(BINDING_INDEX_KEY);
-      if (bIdx) {
-        for (const sid of bIdx.value) {
-          try {
-            const entry = await stores.atomic.get<any>(BINDING_PREFIX + sid);
-            if (!entry?.value || entry.value.expiresAt > Date.now()) continue;
-            const binding = entry.value;
-            const ak = binding.accessKeyId;
-            const sk = Array.from(crypto.getRandomValues(new Uint8Array(32)))
-              .map((b: number) => b.toString(16).padStart(2, '0'))
-              .join('');
-            binding.secretValue = `${ak}:${sk}`;
-            binding.version++;
-            binding.expiresAt = Date.now() + (binding.rotationIntervalMs ?? 24 * 60 * 60 * 1000);
-            await stores.atomic.set(BINDING_PREFIX + sid, binding, entry.version);
-          } catch { /* skip problematic bindings */ }
-        }
-      }
-    } finally {
-      // 重新入队，保证每 tick 执行一次
-      eventLoop.enqueuePriority({ type: 'health:check', payload: {} });
-    }
+  // 5b. 健康检查事件 — 委托到 src/core/events/health-check.ts
+  registerHealthCheck({
+    stores: { atomic: stores.atomic },
+    providers: { container: providers.container, resolveContainer: providers.resolveContainer.bind(providers) },
+    eventBus,
+    eventLoop,
+    audit,
+    queueProducer,
   });
-  // 触发首次健康检查
-  eventLoop.enqueuePriority({ type: 'health:check', payload: {} });
 
-  // 5b2. 镜像拉取事件：从事件循环队列中异步处理
-  eventBus.on('image.pull', async (event) => {
-    const payload = event.payload as Record<string, unknown> | undefined;
-    if (!payload) return;
-    const { taskId, image, instanceId, clusterId, credentialRef, registryCredential } = payload as {
-      taskId?: string; image?: string; instanceId?: string; clusterId?: string;
-      credentialRef?: string; registryCredential?: { server: string; userName: string; password: string };
-    };
-    if (!taskId || !image) return;
+  // 5b2. 镜像拉取事件 — 委托到 src/core/events/image-pull.ts
+  registerImagePullHandler({
+    atomic: stores.atomic,
+    providers,
+    eventBus,
+    queueProducer,
+    ...(secretEncryption ? { secretEncryption } : {}),
+  });
 
-    const entry = await stores.atomic.get<any>('pull-task:' + taskId);
-    if (!entry) return;
-    const taskBase = { id: taskId, repositoryId: entry.value.repositoryId, image, createdAt: entry.value.createdAt };
-
-    try {
-      const imgProvider = instanceId ? await providers.resolveImage(instanceId as any) : providers.image;
-
-      // Resolve registry credentials from credential module if credentialRef is set
-      let credArg: string | { server: string; userName: string; password: string } | undefined = clusterId;
-      if (credentialRef) {
-        const credSvc = new CredentialService(stores.atomic, secretEncryption);
-        const managed = await credSvc.findByName(credentialRef);
-        if (managed?.registryCredentials?.length) {
-          // Pass first registry credential to pull (ECI supports one per pull via pull param,
-          // additional ones were baked into the provider at construction time)
-          credArg = { server: managed.registryCredentials[0]!.server, userName: managed.registryCredentials[0]!.userName, password: managed.registryCredentials[0]!.password };
-        }
-      } else if (registryCredential) {
-        credArg = registryCredential;
-      }
-
-      const info = await imgProvider.pull(image, credArg as any);
-      await stores.atomic.set('pull-task:' + taskId, {
-        ...taskBase, status: 'completed', result: { id: info.id, tags: [...info.tags] }, completedAt: Date.now(),
-      }, entry.version);
-    } catch (e: any) {
-      console.error(`[pull-task] ${taskId} failed:`, e.message);
-      await stores.atomic.set('pull-task:' + taskId, {
-        ...taskBase, status: 'failed', error: e.message, failedAt: Date.now(),
-      }, entry.version);
-    }
+  // 5b3. 日志获取事件 — 异步缓存，最终一致性
+  registerLogFetchHandler({
+    atomic: stores.atomic,
+    providers,
+    eventBus,
   });
 
   // 5c. Load log policy into runtime (non-blocking)
@@ -314,6 +178,18 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
     c.header('x-request-id', reqId);
     await next();
   });
+  // Passive tick driver — workerd's setInterval can stall when the Worker
+  // is idle between requests.  Every API call nudges the event loop tick
+  // if the interval has elapsed, so frontend polling keeps GC running.
+  let _lastPassiveTick = 0;
+  app.use('*', async (_c, next) => {
+    const now = Date.now();
+    if (now - _lastPassiveTick > 30_000) {
+      _lastPassiveTick = now;
+      eventLoop.triggerTick().catch(() => {});
+    }
+    await next();
+  });
   app.use('*', secureHeaders());
   app.use('*', cors());
   app.use('*', bodyLimit({ maxSize: 5 * 1024 * 1024 }));  // 5 MB
@@ -331,6 +207,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
     c.set('eventBus', eventBus);
     c.set('eventLoop', eventLoop);
     c.set('audit', audit);
+    c.set('queueProducer', queueProducer);
     await next();
   });
 
@@ -370,18 +247,20 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
     if (!user) return c.json({ error: 'Authentication required' }, 401);
     try {
       const expiry = await permService.grantTempElevation(user.id);
-      return c.json({ ok: true, data: { expiry, durationMs: 30 * 60 * 1000 } });
+      return c.json(ok({ expiry, durationMs: 30 * 60 * 1000 }));
     } catch (e: any) {
       return c.json({ error: e.message }, 403);
     }
   });
 
-  // 11. DO alarm callback route — DO Alarm fires POST /__scheduled → triggerTick()
-  app.post('/__scheduled', async (c) => {
+  // 11. Tick trigger — DO Alarm fires POST /__scheduled, dev tools fire POST /__tick
+  const tickHandler = async (c: any) => {
     await eventLoop.triggerTick();
     const st = eventLoop.status();
     return c.json({ ok: true, queueSize: st.queueSize, processedCount: st.processedCount, running: st.running });
-  });
+  };
+  app.post('/__scheduled', tickHandler);
+  app.post('/__tick', tickHandler);
 
   // 10. Migration endpoint (local only) — rebuild sharded user index from existing user keys
   app.post('/__admin/migrate-user-index', async (c) => {
@@ -453,7 +332,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
   // 13. Auto-register features from generated registry
   // Mount at both /path and /path/ since Hono's route() doesn't normalize
   // trailing slashes — /api/users matches but /api/users/ does not.
-  const featureDeps: FeatureDeps = { stores, providers, eventBus, eventLoop, audit, permissionChecker: permService as any, ...(secretEncryption ? { secretEncryption } : {}) };
+  const featureDeps: FeatureDeps = { stores, providers, eventBus, eventLoop, audit, queueProducer, permissionChecker: permService as any, ...(secretEncryption ? { secretEncryption } : {}) };
   // Mount each feature with and without trailing slash (Hono app.route() doesn't normalize)
   for (const feat of getFeatures()) {
     const router = feat.mount(featureDeps);
@@ -463,45 +342,74 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
     }
   }
 
-  // 12. Log stream WebSocket — real-time container logs via DO
+  // 12. Container logs — direct provider call (batch mode for ECI, Podman via Docker API)
+  app.get('/api/sandboxes/:id/logs', async (c) => {
+    const id = createSandboxId(c.req.param('id'));
+    const user = (c as any).var?.currentUser as { id: string } | undefined;
+    if (permService && user) {
+      const result = await permService.check({ userId: user.id, action: 'read', resource: 'sandbox' });
+      if (!result.allowed) return c.json(fail('FORBIDDEN', result.reason), 403);
+    }
+
+    const entry = await stores.atomic.get<Sandbox>('sandbox:' + id);
+    if (!entry) return c.json(fail('SANDBOX_NOT_FOUND', 'Sandbox not found'), 404);
+    const sandbox = entry.value;
+    if (!sandbox.providerId) return c.json(fail('NO_PROVIDER', 'Sandbox has no provider resource'), 400);
+
+    const containers = sandbox.containers;
+    if (containers.length === 0) return c.json(fail('NO_CONTAINER', 'No containers in sandbox'), 400);
+    const containerName = containers[0]!.name;
+    const tail = c.req.query('tail') ? parseInt(c.req.query('tail')!) : undefined;
+    const since = c.req.query('since') ? parseInt(c.req.query('since')!) : undefined;
+
+    try {
+      const logProvider = sandbox.config.instanceId
+        ? await providers.resolveContainer(sandbox.config.instanceId as any)
+        : providers.container;
+      const logResult = await logProvider.getLogs({
+        region: sandbox.config.region as any,
+        providerId: sandbox.providerId,
+        containerName,
+        ...(tail ? { limitBytes: tail } : {}),
+        ...(since ? { sinceSeconds: since } : {}),
+      });
+      // Persist for future requests
+      if (logResult.content) {
+        await stores.atomic.set('log:' + id, { content: logResult.content, containerName, timestamp: logResult.timestamp, fetchedAt: Date.now() }, null).catch(() => {});
+      }
+      return c.json(ok({ content: logResult.content || '', containerName, timestamp: logResult.timestamp }));
+    } catch (e: any) {
+      // Try cached
+      const cached = await stores.atomic.get<{ content: string; containerName: string; fetchedAt: number }>('log:' + id);
+      if (cached) return c.json(ok({ content: cached.value.content, containerName: cached.value.containerName, cached: true }));
+      return c.json(fail('LOGS_UNAVAILABLE', e.message || 'Logs unavailable'), 502);
+    }
+  });
+
+  // Optional: WebSocket streaming via DO for Podman live tail
   const logStreamNs = platformBindings?.['LOG_STREAM_DO'] as DurableObjectNamespace | undefined;
   if (logStreamNs) {
-    app.get('/api/sandboxes/:id/logs', async (c) => {
+    app.get('/api/sandboxes/:id/logs/stream', async (c) => {
       const id = createSandboxId(c.req.param('id'));
-
-      // Permission check: user needs 'read' on this sandbox
-      const user = (c as any).var?.currentUser as { id: string } | undefined;
-      if (permService && user) {
-        const result = await permService.check({ userId: user.id, action: 'read', resource: 'sandbox' });
-        if (!result.allowed) return c.json(fail('FORBIDDEN', result.reason), 403);
-      }
-
       const entry = await stores.atomic.get<Sandbox>('sandbox:' + id);
       if (!entry) return c.json(fail('SANDBOX_NOT_FOUND', 'Sandbox not found'), 404);
       const sandbox = entry.value;
       if (!sandbox.providerId) return c.json(fail('NO_PROVIDER', 'Sandbox has no provider resource'), 400);
 
-      // Resolve provider endpoint and platform from the ComputeInstance config
       const instanceId = sandbox.config.instanceId;
       let endpoint = 'http://127.0.0.1:8080/v1.24';
-      let provider = 'podman';
       if (instanceId) {
         const instEntry = await stores.atomic.get<ComputeInstance>('instance:' + instanceId);
-        if (instEntry) {
-          endpoint = instEntry.value.endpoint;
-          provider = instEntry.value.platform;
-        }
+        if (instEntry) endpoint = instEntry.value.endpoint || endpoint;
       }
 
-      // Forward WebSocket to the DO with standard log API params
-      const tail = c.req.query('tail') ?? '';
-      const since = c.req.query('since') ?? '';
       const stub = logStreamNs.get(logStreamNs.idFromName('logstream:' + id));
-      const qs = new URLSearchParams({ providerId: sandbox.providerId, endpoint, provider });
-      if (tail) qs.set('tail', tail);
-      if (since) qs.set('since', since);
-      const doUrl = `/logs?${qs.toString()}`;
-      return stub.fetch(new URL(doUrl, 'https://do/'), c.req.raw);
+      const qs = new URLSearchParams({ providerId: sandbox.providerId, provider: 'podman', endpoint,
+        containerName: sandbox.containers[0]?.name ?? '',
+        ...(c.req.query('tail') ? { tail: c.req.query('tail')! } : {}),
+        ...(c.req.query('since') ? { since: c.req.query('since')! } : {}),
+      });
+      return stub.fetch(new URL(`/logs?${qs.toString()}`, 'https://do/'), c.req.raw);
     });
   }
 
@@ -512,6 +420,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
     providers,
     eventBus,
     eventLoop,
+    audit,
     dispose: async () => {
       eventLoop.stop();
     },

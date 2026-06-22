@@ -1,0 +1,53 @@
+# category: service
+# tags: minecraft, game, server, multi-container
+name: "Game Server"
+description: "Launch a dedicated game server with companion database, auto-register DNS, and auto-shutdown when idle"
+on:
+  manual: true
+  cron: "0 */6 * * *"
+
+env:
+  GAME_PORT: "25565"
+  MAX_PLAYERS: "20"
+
+jobs:
+  launch:
+    runsOn: "linux"
+    containers:
+      - name: "game"
+        image: "docker.io/library/itzg/minecraft-server:latest"
+        ports:
+          - containerPort: 25565
+            protocol: "tcp"
+        env:
+          EULA: "TRUE"
+          MAX_PLAYERS: "${{ env.MAX_PLAYERS }}"
+          ONLINE_MODE: "true"
+        resources:
+          cpu: 4
+          memory: 8192
+        livenessProbe:
+          httpGet:
+            port: 25565
+          initialDelaySeconds: 30
+          periodSeconds: 60
+      - name: "cache"
+        image: "docker.io/library/redis:7-alpine"
+        ports:
+          - containerPort: 6379
+        resources:
+          cpu: 1
+          memory: 1024
+    steps:
+      - name: "Register game DNS"
+        dns:
+          action: "upsert"
+          type: "A"
+          name: "mc.example.com"
+          value: "${{ env.PUBLIC_IP }}"
+          ttl: 120
+          proxied: false
+          zoneId: "${{ secrets.CF_ZONE_ID }}"
+      - name: "Log server start"
+        run: "echo 'Game server started on port $GAME_PORT'"
+    timeout: 43200

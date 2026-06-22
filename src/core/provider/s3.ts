@@ -16,9 +16,21 @@ import type {
   S3ObjectInfo,
   S3ListObjectsResult,
   S3ProviderType,
+  S3CreateMultipartUploadInput,
+  S3CreateMultipartUploadResult,
+  S3UploadPartInput,
+  S3UploadPartResult,
+  S3CompleteMultipartUploadInput,
+  S3AbortMultipartUploadInput,
+  S3ListPartsResult,
 } from './s3-types.ts';
 
-export type { S3PutObjectInput, S3GetObjectResult, S3ObjectInfo, S3ListObjectsResult, S3ProviderType };
+export type {
+  S3PutObjectInput, S3GetObjectResult, S3ObjectInfo, S3ListObjectsResult, S3ProviderType,
+  S3CreateMultipartUploadInput, S3CreateMultipartUploadResult,
+  S3UploadPartInput, S3UploadPartResult,
+  S3CompleteMultipartUploadInput, S3AbortMultipartUploadInput, S3ListPartsResult,
+};
 
 export interface IS3Provider {
   /** The backend type discriminator. */
@@ -52,4 +64,21 @@ export interface IS3Provider {
 
   /** Generate a presigned PUT URL. */
   putPresignedUrl?(bucket: string, key: string, expiresInSeconds?: number): Promise<string>;
+
+  // ─── Multi-part upload (optional — providers signal support by implementing) ───
+
+  /** Initiate a multipart upload session. Returns the uploadId. */
+  createMultipartUpload?(input: S3CreateMultipartUploadInput): Promise<S3CreateMultipartUploadResult>;
+
+  /** Upload a single part. Returns the ETag for that part. */
+  uploadPart?(input: S3UploadPartInput, body: Uint8Array): Promise<S3UploadPartResult>;
+
+  /** Complete a multipart upload by providing the ordered list of part ETags. */
+  completeMultipartUpload?(input: S3CompleteMultipartUploadInput): Promise<{ location?: string }>;
+
+  /** Abort an in-progress multipart upload. */
+  abortMultipartUpload?(input: S3AbortMultipartUploadInput): Promise<void>;
+
+  /** List uploaded parts for an in-progress upload. */
+  listParts?(bucket: string, key: string, uploadId: string): Promise<S3ListPartsResult>;
 }

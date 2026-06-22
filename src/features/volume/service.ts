@@ -33,7 +33,18 @@ export class VolumeService implements IVolumeService {
     _audit?: IAuditWriter,
   ) {}
 
+  /** Validate that an instanceId refers to an existing ComputeInstance. */
+  async #validateInstance(instanceId: string): Promise<void> {
+    const { InstanceService } = await import('../../core/region/instance.ts');
+    const svc = new InstanceService(this.atomic);
+    const inst = await svc.get(instanceId as any);
+    if (!inst) throw new AppError(400, 'INSTANCE_NOT_FOUND', `ComputeInstance ${instanceId} not found`);
+  }
+
   async create(input: CreateVolumeInput): Promise<Volume> {
+    // Validate that the target ComputeInstance exists
+    if (input.instanceId) await this.#validateInstance(input.instanceId);
+
     const now = Date.now();
     const id = createVolumeId(crypto.randomUUID());
 

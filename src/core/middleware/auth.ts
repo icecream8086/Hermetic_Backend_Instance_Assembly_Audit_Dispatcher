@@ -1,6 +1,6 @@
 import type { IAtomicStore } from '../store/interfaces.ts';
 import type { MiddlewareHandler } from 'hono';
-import type { AppContext } from '../app.ts';
+import type { AppContext } from '../deps.ts';
 import type { IAuditWriter } from '../audit/types.ts';
 import { KernLevel } from '../audit/kern-level.ts';
 
@@ -12,7 +12,7 @@ export interface CurrentUser {
   email: string;
 }
 
-declare module '../app.ts' {
+declare module '../deps.ts' {
   interface AppContext {
     currentUser?: CurrentUser;
   }

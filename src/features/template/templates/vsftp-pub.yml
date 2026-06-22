@@ -1,0 +1,51 @@
+# category: service
+# tags: sftp, vsftp, public, spot
+name: "vsftp_pub"
+description: "VSFTP public access with EIP — spot instance, auto public IP, multi-zone"
+apiVersion: "hbi-aad/v1"
+kind: "Container"
+region: "cn-hangzhou"
+containers:
+  - name: "vsftp"
+    image: "registry-vpc.cn-hangzhou.aliyuncs.com/minecraft-graalvm/ftp_bp:latest"
+    ports:
+      - containerPort: 22
+        protocol: "TCP"
+    env:
+      - name: "SFTP_USERS"
+        value: "test:test123:::upload"
+    resources:
+      limits:
+        cpu: 2
+        memory: 2048
+    livenessProbe:
+      tcpSocket:
+        port: 22
+      periodSeconds: 30
+      initialDelaySeconds: 10
+    imagePullPolicy: "Always"
+    stdin: true
+    tty: true
+extensions:
+  spotStrategy: "SpotAsPriceGo"
+  healthMaxRetries: 3
+  providerOverrides:
+    alibaba:
+      ingressBandwidth: 100
+      egressBandwidth: 100
+      autoCreateEip: true
+      eipBandwidth: 19
+      autoMatchImageCache: true
+network:
+  mode: "vpc"
+  publicIp:
+    allocate: true
+    bandwidth: 19
+  vpc:
+    securityGroupId: "sg-bp16o5urk39itwcqmdzj"
+    subnetIds:
+      - "vsw-bp1xx36ys1jou7o1bsdpp"
+      - "vsw-bp1grwzlgy2739dxnskbz"
+      - "vsw-bp1rv5m61jx4kmld0cc12"
+      - "vsw-bp1wfyusfye82wm3d3zew"
+restartPolicy: "Always"

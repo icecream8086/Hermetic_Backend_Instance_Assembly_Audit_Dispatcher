@@ -1,0 +1,42 @@
+# category: deploy
+# tags: nginx, deploy, dns
+name: "Deploy Container"
+description: "Pull a container image, start it with health checks, and register a DNS record"
+on:
+  manual: true
+  http:
+    signatureSecret: "${{ secrets.WEBHOOK_SECRET }}"
+
+env:
+  IMAGE_TAG: "latest"
+  DEPLOY_PORT: "80"
+
+jobs:
+  deploy:
+    runsOn: "linux"
+    container:
+      image: "docker.io/library/nginx:${{ env.IMAGE_TAG }}"
+      ports:
+        - containerPort: 80
+      resources:
+        cpu: 1
+        memory: 2048
+      livenessProbe:
+        httpGet:
+          port: 80
+          path: "/health"
+        initialDelaySeconds: 10
+        periodSeconds: 30
+    steps:
+      - name: "Health check"
+        run: "curl -f http://localhost:80/health || exit 1"
+      - name: "Register DNS"
+        dns:
+          action: "upsert"
+          type: "A"
+          name: "app.example.com"
+          value: "${{ env.PUBLIC_IP }}"
+          ttl: 300
+          proxied: true
+          zoneId: "${{ secrets.CF_ZONE_ID }}"
+    timeout: 300

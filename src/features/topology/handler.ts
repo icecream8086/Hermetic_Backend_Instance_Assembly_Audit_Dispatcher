@@ -3,7 +3,7 @@ import type { BucketService, InstanceService, ImageRepositoryService } from '../
 import { createInstanceId } from '../../core/region/index.ts';
 import type { CreateImageInput, UpdateImageInput } from '../../core/region/image.ts';
 import { AlibabaRegion, AwsRegion, PodmanRegion } from '../../core/region/types.ts';
-import type { AppContext } from '../../core/app.ts';
+import type { AppContext } from '../../core/deps.ts';
 import { ok, fail } from '../../core/response.ts';
 import type { RouteMeta } from '../../core/http-docs/types.ts';
 import type {
@@ -14,6 +14,8 @@ import type {
 import { CredentialService, toMasked } from '../../core/auth/credential.ts';
 import { S3PolicyManager } from '../../core/s3-policy/manager.ts';
 import type { CreateS3PolicyInput, UpdateS3PolicyInput } from '../../core/s3-policy/types.ts';
+import type { IS3Provider } from '../../core/provider/s3.ts';
+import type { S3MultipartUploadSession, S3MultipartDownloadSession } from '../../core/provider/s3-types.ts';
 
 function requireRoot(c: any): Response | null {
   const user = c.var?.currentUser;
@@ -29,6 +31,7 @@ export function createTopologyRouter(
   images: ImageRepositoryService,
   credentials?: CredentialService,
   policyManager?: S3PolicyManager,
+  s3Provider?: IS3Provider,
 ): Hono<{ Variables: AppContext }> {
   const router = new Hono<{ Variables: AppContext }>();
 
@@ -73,10 +76,15 @@ export function createTopologyRouter(
   router.post('/instances', async (c) => {
     try {
       const body = await c.req.json<CreateInstanceBody>();
-      if (!body.name || !body.platform || !body.region || !body.zone || !body.endpoint) {
-        return c.json(fail('VALIDATION_ERROR', 'name, platform, region, zone, and endpoint are required'), 400);
+      if (!body.name || !body.platform || !body.region) {
+        return c.json(fail('VALIDATION_ERROR', 'name, platform, and region are required'), 400);
       }
-      const instance = await instances.create(body);
+      // Treat empty string endpoint as "not provided" → auto-default
+      const endpoint = body.endpoint?.trim() || undefined;
+      if (body.platform === 'podman' && !endpoint) {
+        return c.json(fail('VALIDATION_ERROR', 'endpoint is required for podman platform'), 400);
+      }
+      const instance = await instances.create({ ...body, endpoint });
       return c.json(ok(instance), 201);
     } catch (e: any) {
       return c.json(fail('CREATE_FAILED', e.message), 400);
@@ -389,6 +397,125 @@ export function createTopologyRouter(
     return c.json(ok({ items: tasks, total: tasks.length }));
   });
 
+  // ─── Multi-part upload / download (admin) ───
+
+  if (s3Provider) {
+    const DEFAULT_PART_SIZE = 5 * 1024 * 1024; // 5 MB
+    const DEFAULT_EXPIRES = 3600; // 1 hour
+
+    /** POST /buckets/:id/uploads — 创建分片上传会话 */
+    router.post('/buckets/:id/uploads', async (c) => {
+      const bucketId = c.req.param('id');
+      const bucket = await buckets.get(bucketId);
+      if (!bucket) return c.json(fail('NOT_FOUND', 'Bucket not found'), 404);
+      if (!s3Provider.createMultipartUpload || !s3Provider.putPresignedUrl) {
+        return c.json(fail('NOT_SUPPORTED', 'Multi-part upload not supported by this provider'), 400);
+      }
+      try {
+        const body = await c.req.json<{ key: string; contentType?: string; partSize?: number; parts: number; expiresIn?: number }>();
+        if (!body.key || !body.parts) return c.json(fail('VALIDATION_ERROR', 'key and parts are required'), 400);
+        const partSize = body.partSize ?? DEFAULT_PART_SIZE;
+        const expiresIn = body.expiresIn ?? DEFAULT_EXPIRES;
+
+        const upload = await s3Provider.createMultipartUpload({
+          bucket: bucket.name, key: body.key,
+          ...(body.contentType ? { contentType: body.contentType } : {}),
+        });
+
+        const presignedUrls = [];
+        for (let i = 1; i <= body.parts; i++) {
+          const url = await (s3Provider.putPresignedUrl
+            ? s3Provider.putPresignedUrl(bucket.name, `${body.key}?partNumber=${i}&uploadId=${upload.uploadId}`, expiresIn)
+            : Promise.resolve(''));
+          presignedUrls.push({ partNumber: i, url });
+        }
+
+        const session: S3MultipartUploadSession = {
+          uploadId: upload.uploadId, bucket: bucket.name, key: body.key,
+          presignedUrls, partSize, expiresIn,
+        };
+        return c.json(ok(session), 201);
+      } catch (e: any) {
+        return c.json(fail('UPLOAD_FAILED', e.message), 500);
+      }
+    });
+
+    /** POST /buckets/:id/uploads/:uploadId/complete — 合并分片 */
+    router.post('/buckets/:id/uploads/:uploadId/complete', async (c) => {
+      const bucketId = c.req.param('id');
+      const bucket = await buckets.get(bucketId);
+      if (!bucket) return c.json(fail('NOT_FOUND', 'Bucket not found'), 404);
+      if (!s3Provider.completeMultipartUpload) return c.json(fail('NOT_SUPPORTED', 'Not supported'), 400);
+      try {
+        const body = await c.req.json<{ key: string; parts: { partNumber: number; etag: string }[] }>();
+        if (!body.key || !body.parts) return c.json(fail('VALIDATION_ERROR', 'key and parts are required'), 400);
+        const result = await s3Provider.completeMultipartUpload({
+          bucket: bucket.name, key: body.key,
+          uploadId: c.req.param('uploadId'), parts: body.parts,
+        });
+        return c.json(ok(result));
+      } catch (e: any) {
+        return c.json(fail('COMPLETE_FAILED', e.message), 500);
+      }
+    });
+
+    /** DELETE /buckets/:id/uploads/:uploadId — 取消上传 */
+    router.delete('/buckets/:id/uploads/:uploadId', async (c) => {
+      const bucketId = c.req.param('id');
+      const bucket = await buckets.get(bucketId);
+      if (!bucket) return c.json(fail('NOT_FOUND', 'Bucket not found'), 404);
+      if (!s3Provider.abortMultipartUpload) return c.json(fail('NOT_SUPPORTED', 'Not supported'), 400);
+      const body = await c.req.json<{ key: string }>().catch(() => ({ key: '' }));
+      await s3Provider.abortMultipartUpload({ bucket: bucket.name, key: body.key || '', uploadId: c.req.param('uploadId') });
+      return c.json(ok({ aborted: true }));
+    });
+
+    /** GET /buckets/:id/uploads/:uploadId/parts — 列出已上传分片 */
+    router.get('/buckets/:id/uploads/:uploadId/parts', async (c) => {
+      const bucketId = c.req.param('id');
+      const bucket = await buckets.get(bucketId);
+      if (!bucket) return c.json(fail('NOT_FOUND', 'Bucket not found'), 404);
+      if (!s3Provider.listParts) return c.json(fail('NOT_SUPPORTED', 'Not supported'), 400);
+      const key = c.req.query('key') ?? '';
+      if (!key) return c.json(fail('VALIDATION_ERROR', 'key query param required'), 400);
+      const parts = await s3Provider.listParts(bucket.name, key, c.req.param('uploadId'));
+      return c.json(ok(parts));
+    });
+
+    /** GET /buckets/:id/objects/:key/download — 获取分片下载 presigned URLs */
+    router.get('/buckets/:id/objects/:key/download', async (c) => {
+      const bucketId = c.req.param('id');
+      const bucket = await buckets.get(bucketId);
+      if (!bucket) return c.json(fail('NOT_FOUND', 'Bucket not found'), 404);
+      if (!s3Provider.getPresignedUrl) return c.json(fail('NOT_SUPPORTED', 'Presigned URLs not supported'), 400);
+
+      const key = c.req.param('key');
+      const partSize = parseInt(c.req.query('partSize') ?? String(DEFAULT_PART_SIZE), 10);
+      const parts = parseInt(c.req.query('parts') ?? '1', 10);
+      const expiresIn = parseInt(c.req.query('expiresIn') ?? String(DEFAULT_EXPIRES), 10);
+
+      // Get object size via headObject
+      const info = await s3Provider.headObject(bucket.name, key);
+      if (!info) return c.json(fail('NOT_FOUND', 'Object not found'), 404);
+
+      const presignedUrls = [];
+      for (let i = 0; i < parts; i++) {
+        const start = i * partSize;
+        const end = Math.min(start + partSize - 1, info.size - 1);
+        if (start >= info.size) break;
+        const range = `bytes=${start}-${end}`;
+        const url = await s3Provider.getPresignedUrl(bucket.name, key, expiresIn);
+        const urlWithRange = `${url}&range=${encodeURIComponent(range)}`;
+        presignedUrls.push({ partNumber: i + 1, url: urlWithRange, range });
+      }
+
+      const session: S3MultipartDownloadSession = {
+        bucket: bucket.name, key, size: info.size, presignedUrls,
+      };
+      return c.json(ok(session));
+    });
+  }
+
   return router;
 }
 
@@ -400,8 +527,8 @@ export const topologyRouteMeta: RouteMeta[] = [
   { method: 'GET', path: '/policies/:id', description: '获取 S3 策略详情', responseDescription: 'S3Policy' },
   { method: 'PUT', path: '/policies/:id', description: '更新 S3 策略（admin only）', responseDescription: 'S3Policy' },
   { method: 'DELETE', path: '/policies/:id', description: '删除 S3 策略（admin only）', responseDescription: '{ ok: true }' },
-  { method: 'POST', path: '/buckets', description: '创建 region bucket 记录', responseDescription: 'RegionBucket' },
-  { method: 'PUT', path: '/buckets/:id', description: '更新 bucket 记录', responseDescription: 'RegionBucket' },
+  { method: 'POST', path: '/buckets', description: '创建 region bucket 记录（autoGenerateKeys=true 自动签发 S3 密钥）', requestBody: { name: 'game-saves', bucketType: 'minio', instanceId: 'inst_xxx', autoGenerateKeys: true }, responseDescription: 'RegionBucket' },
+  { method: 'PUT', path: '/buckets/:id', description: '更新 bucket 记录（含 autoGenerateKeys）', responseDescription: 'RegionBucket' },
   { method: 'DELETE', path: '/buckets/:id', description: '删除 bucket 记录', responseDescription: '{ ok: true }' },
   { method: 'GET', path: '/instances', description: '列出计算实例（?region=&platform=&status=）', responseDescription: '{ items: ComputeInstance[] }' },
   { method: 'POST', path: '/instances', description: '创建计算实例', responseDescription: 'ComputeInstance' },
@@ -422,4 +549,10 @@ export const topologyRouteMeta: RouteMeta[] = [
   { method: 'POST', path: '/images/:id/pull', description: '异步拉取镜像（返回 taskId，轮询 pull-tasks/:taskId 确认完成）', responseDescription: '{ taskId }' },
   { method: 'GET', path: '/pull-tasks/:taskId', description: '查询拉取任务状态', responseDescription: '{ id, status, result? }' },
   { method: 'GET', path: '/images/:id/tasks', description: '列出某个仓库的历史拉取任务', responseDescription: '{ items: PullTask[] }' },
+  // Multi-part upload / download (admin, 需 S3 provider 配置)
+  { method: 'POST', path: '/buckets/:id/uploads', description: '创建分片上传会话 — 返回 per-part presigned PUT URL 列表（admin only）', requestBody: { key: 'large-file.zip', contentType: 'application/zip', partSize: 5242880, parts: 4, expiresIn: 3600 }, responseDescription: '{ uploadId, bucket, key, presignedUrls: [{ partNumber, url }], partSize, expiresIn }' },
+  { method: 'POST', path: '/buckets/:id/uploads/:uploadId/complete', description: '合并所有分片为完整对象（admin only）', requestBody: { key: 'large-file.zip', parts: [{ partNumber: 1, etag: '"abc123"' }] }, responseDescription: '{ location? }' },
+  { method: 'DELETE', path: '/buckets/:id/uploads/:uploadId', description: '取消分片上传 — 删除已上传的分片（admin only）', requestBody: { key: 'large-file.zip' }, responseDescription: '{ aborted: true }' },
+  { method: 'GET', path: '/buckets/:id/uploads/:uploadId/parts', description: '列出已上传的分片（admin only）', queryExamples: [{ key: 'large-file.zip' }], responseDescription: '{ parts: [{ partNumber, size, etag }], uploadId, isTruncated }' },
+  { method: 'GET', path: '/buckets/:id/objects/:key/download', description: '获取分片下载 presigned GET URL 列表 — 用于多线程下载', queryExamples: [{ partSize: '5242880', parts: '4', expiresIn: '3600' }], responseDescription: '{ bucket, key, size, presignedUrls: [{ partNumber, url, range }] }' },
 ];

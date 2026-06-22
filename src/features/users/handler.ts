@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import type { AppContext } from '../../core/app.ts';
+import type { AppContext } from '../../core/deps.ts';
 import type { IUserService } from './service.ts';
 import type { RouteMeta } from '../../core/http-docs/types.ts';
 import { RegisterUserSchema, LoginUserSchema, UpdateUserSchema, UserResponseSchema, LoginResponseSchema, LoginPolicySchema, NoPasswordLoginSchema, PublicKeySchema } from './schema.ts';

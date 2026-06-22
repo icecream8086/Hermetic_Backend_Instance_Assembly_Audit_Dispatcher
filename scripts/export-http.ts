@@ -12,6 +12,8 @@ import { createNetworkRouter, networkRouteMeta } from '../src/features/network/h
 import { createTopologyRouter, topologyRouteMeta } from '../src/features/topology/handler.ts';
 import { createSubnetRouter, subnetRouteMeta } from '../src/features/subnet/handler.ts';
 import { createVolumeRouter, volumeRouteMeta } from '../src/features/volume/handler.ts';
+import { createImagesRouter, imagesRouteMeta } from '../src/features/images/handler.ts';
+import { createActionsRouter, actionRouteMeta } from '../src/features/actions/handler.ts';
 import type { RouteMeta } from '../src/core/http-docs/types.ts';
 import { createAuditRouter } from '../src/core/audit/audit-router.ts';
 import { WorkersAuditLogger } from '../src/core/audit/workers-audit-logger.ts';
@@ -131,6 +133,21 @@ const stubImageSvc: any = { create: async () => ({}), get: async () => null, lis
 const stubPolicyMgr: any = { list: async () => [], create: async () => ({}), get: async () => null, update: async () => ({}), delete: async () => {} };
 collect('topo', 'Topo', '/api/topology', createTopologyRouter(stubClusterSvc, stubBucketSvc, stubImageSvc, undefined, stubPolicyMgr), () => true, topologyRouteMeta);
 
+const stubImageProvider: any = { list: async () => [], inspect: async () => null, pull: async () => ({}), remove: async () => {}, tag: async () => {}, search: async () => [], prune: async () => ({}), history: async () => [], build: async () => ({}) };
+const stubProvidersRegistry: any = { image: stubImageProvider, resolveImage: async () => stubImageProvider };
+collect('img', 'Images', '/api/images', createImagesRouter(stubProvidersRegistry), () => true, imagesRouteMeta);
+
+const stubActionDeps: any = {
+  stores: { atomic: null as any, blob: null as any, query: null as any, metrics: null as any },
+  providers: { container: {} as any, dns: {} as any, resolveContainer: async () => ({} as any) },
+  audit: { write: async () => {} },
+  eventBus: { on: () => {}, dispatch: async () => {} } as any,
+  eventLoop: { enqueuePriority: () => {} } as any,
+  queueProducer: { send: async () => false, sendSandboxGc: async () => false, sendImagePull: async () => false, sendSandboxProvision: async () => false, sendBucketKeyRotate: async () => false, sendBatch: async () => 0 } as any,
+  secretEncryption: undefined,
+};
+collect('action', 'Actions', '/api/actions', createActionsRouter(stubActionDeps), () => true, actionRouteMeta);
+
 // Manually-added routes (not in any feature router)
 routes.push({
   method: 'POST', path: '/__tick', fileTag: 'events', tag: 'Dev',
@@ -181,7 +198,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const httpDir = resolve(__dirname, '..', 'http');
 mkdirSync(httpDir, { recursive: true });
 
-const fileTagOrder = ['info', 'auth', 'sysgrp', 'tpl', 'sbx', 'vol', 'plf', 'perm', 'audit', 'users', 'events', 'topo', 'sub'];
+const fileTagOrder = ['info', 'auth', 'sysgrp', 'tpl', 'sbx', 'vol', 'plf', 'perm', 'audit', 'users', 'events', 'topo', 'sub', 'img', 'action'];
 const fileTagTitle: Record<string, string> = {
   info: 'Info',
   auth: 'Auth',
@@ -196,6 +213,8 @@ const fileTagTitle: Record<string, string> = {
   events: 'Events',
   topo: 'Topo',
   sub: 'Sub',
+  img: 'Images',
+  action: 'Actions',
 };
 
 for (const ft of fileTagOrder) {

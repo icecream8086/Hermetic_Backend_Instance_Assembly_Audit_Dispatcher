@@ -85,7 +85,7 @@ export interface CorsConfig {
 /** Audit backend selection. */
 export interface AuditConfig {
   /** Which audit backend to use. */
-  backend: 'kv' | 'workers' | 'none' | 'local';
+  backend: 'kv' | 'workers' | 'none' | 'local' | 'hybrid';
 }
 
 export interface AppConfig {

@@ -1,0 +1,25 @@
+# category: application
+# tags: production, multi-service, stack, dag
+name: "prod-stack"
+description: "生产环境完整技术栈 — 合并 web + api + redis，带资源组保护和健康重试"
+apiVersion: "hbi-aad/v1"
+kind: "ContainerGroup"
+dependsOn: ["web-service", "api-service", "redis-cache"]
+containers:
+  - name: "nginx"
+    env:
+      - name: "UPSTREAM_API"
+        value: "api:3000"
+  - name: "api"
+    env:
+      - name: "REDIS_URL"
+        value: "redis://redis:6379"
+      - name: "DB_URL"
+        value: "placeholder://replace-me"
+  - name: "redis"
+extensions:
+  healthMaxRetries: 3
+providerOverrides:
+  alibaba:
+    resourceGroupId: "rg-prod"
+    deletionProtection: true

@@ -4,4 +4,4 @@ export * as store from './store/interfaces.ts';
 export * as logger from './logger/index.ts';
 export * as middleware from './middleware/index.ts';
 export { createApp } from './app.ts';
-export type { AppContext, AppInstance } from './app.ts';
+export type { AppContext, AppInstance } from './deps.ts';

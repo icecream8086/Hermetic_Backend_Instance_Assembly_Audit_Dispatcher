@@ -1,0 +1,17 @@
+# category: infrastructure
+# tags: network, security-group, vpc, base
+name: "base-network"
+description: "基础网络层 — VPC + 安全组 + 子网，被其他服务模板继承"
+apiVersion: "hbi-aad/v1"
+kind: "Container"
+provider: "alibaba"
+region: "cn-hangzhou"
+network:
+  securityGroupId: "sg-bp1axxx"
+  subnetIds:
+    - "vsw-bp1xxx"
+  allocatePublicIp: false
+restartPolicy: "Always"
+providerOverrides:
+  alibaba:
+    instanceType: "ecs.g7.xlarge"

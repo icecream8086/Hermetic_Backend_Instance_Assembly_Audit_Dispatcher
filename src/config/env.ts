@@ -135,6 +135,9 @@ export function loadConfig(overrides?: Partial<AppConfig>): AppConfig {
     provider: providerConfig,
     s3: s3Config,
     scheduler: schedulerConfig,
+    audit: {
+      backend: (process.env['AUDIT_BACKEND'] as any) ?? (storageConfig.stateBackend === 'file' ? 'hybrid' : 'hybrid'),
+    },
     server: {
       port: Number(process.env['PORT'] ?? 3000),
       ...overrides?.server,

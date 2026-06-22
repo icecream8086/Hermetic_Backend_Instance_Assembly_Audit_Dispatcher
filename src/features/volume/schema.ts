@@ -11,6 +11,7 @@ const DiskOptionsSchema = z.object({
   diskId: z.string().min(1, 'Disk ID is required'),
   fsType: z.string().default('ext4'),
   sizeGiB: z.number().int().positive().optional(),
+  diskCategory: z.enum(['cloud_efficiency', 'cloud_ssd', 'cloud_essd']).optional(),
   readOnly: z.boolean().default(false),
   deleteWithInstance: z.boolean().optional(),
 });

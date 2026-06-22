@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import type { FeatureDeps } from '../../core/app.ts';
+import type { FeatureDeps } from '../../core/deps.ts';
 import { ConsoleLogger } from '../../core/logger/console-logger.ts';
 import { PermissionService } from './service.ts';
 import { createPermissionRouter } from './handler.ts';

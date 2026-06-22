@@ -1,24 +1,24 @@
 /// <reference types="@cloudflare/workers-types" />
 
 /**
- * LogStreamDO — 实时容器日志流。
+ * LogStreamDO — 容器日志 WebSocket 流。
  *
- * 生命周期:
- *   CONTAINER_RUNNING → 流式推送
- *   CONTAINER_STOPPED → WS 保持, 推 container_stopped 事件
- *   CONTAINER_DELETED → DO 自毁 (alarm 清理)
- *   DO 闲置 5 min    → alarm 关闭所有连接
+ * 双模式:
+ *   snapshot — app.ts 预取日志内容传入，DO 一次推送后关闭
+ *   stream   — 连 Podman Docker API 实时流式推送（follow=1）
  *
- * 标准日志 API 参数（按 Docker logs 惯例）:
- *   tail=N   — 连接后先推最近 N 行, 再 follow
- *   since=ts — 只推该时间戳之后的日志
- *   follow=1 — 持续推送 (默认)
+ * 标准日志参数:
+ *   content       — 预取日志内容（snapshot 模式）
+ *   containerName — 容器名称（snapshot 模式）
+ *   endpoint      — Docker API endpoint（stream 模式）
+ *   providerId    — 容器/容器组 ID
+ *   provider      — 平台类型
+ *   tail, since   — 日志过滤参数
  *
- * Podman: HTTP streaming (follow=1), 流结束时 inspect 容器状态
- * Alibaba ECI: 2s 轮询 DescribeContainerLog, 检测 404 自毁
+ * Podman: HTTP streaming, 流结束时 inspect 容器状态
+ * 其他 (Alibaba/AWS/GCP): app.ts 预取 → snapshot
  */
 
-const POLL_INTERVAL_MS = 2_000;
 const IDLE_ALARM_MS = 300_000; // 5 min
 
 function podmanLogsUrl(base: string, id: string, tail?: number, since?: number): string {
@@ -34,11 +34,6 @@ function podmanInspectUrl(base: string, id: string): string {
   return `${ep}/containers/${id}/json`;
 }
 
-function eciLogsUrl(base: string, id: string, since: number): string {
-  const ep = base.replace(/\/+$/, '');
-  return `${ep}/containers/${id}/logs?stdout=1&stderr=1&since=${since}&tail=50`;
-}
-
 export class LogStreamDO implements DurableObject {
   readonly #sessions = new Set<WebSocket>();
   #abortController: AbortController | null = null;
@@ -50,11 +45,13 @@ export class LogStreamDO implements DurableObject {
     const providerId = url.searchParams.get('providerId');
     const endpoint = url.searchParams.get('endpoint');
     const provider = url.searchParams.get('provider') ?? 'podman';
+    const content = url.searchParams.get('content');
+    const containerName = url.searchParams.get('containerName') ?? '';
     const tail = parseInt(url.searchParams.get('tail') ?? '0', 10) || undefined;
     const since = parseInt(url.searchParams.get('since') ?? '0', 10) || undefined;
 
-    if (!providerId || !endpoint) {
-      return new Response('Missing providerId or endpoint', { status: 400 });
+    if (!providerId) {
+      return new Response('Missing providerId', { status: 400 });
     }
 
     // WebSocket upgrade
@@ -78,18 +75,31 @@ export class LogStreamDO implements DurableObject {
 
     // Start streaming (only on first connection)
     if (!this.#abortController) {
-      this.#start(provider, endpoint, providerId, tail, since);
+      if (content !== null) {
+        this.#snapshot(content, containerName);
+      } else {
+        this.#start(provider, endpoint, providerId, tail, since);
+      }
     }
 
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  #start(provider: string, endpoint: string, containerId: string, tail?: number, since?: number): void {
-    if (provider === 'podman') {
+  #start(provider: string, endpoint: string | null, containerId: string, tail?: number, since?: number): void {
+    if (provider === 'podman' && endpoint) {
       this.#streamFromPodman(endpoint, containerId, tail, since);
     } else {
-      this.#pollFromProvider(endpoint, containerId, since);
+      this.#broadcast(JSON.stringify({ event: 'error', message: `Unsupported provider: ${provider}` }));
+      this.#stop();
     }
+  }
+
+  /** Snapshot mode: push pre-fetched content once, then close. */
+  #snapshot(content: string, containerName: string): void {
+    this.#abortController = new AbortController();
+    this.#broadcast(JSON.stringify({ content, containerName, event: 'container_logs' }));
+    this.#broadcast(JSON.stringify({ event: 'container_stopped' }));
+    this.#stop();
   }
 
   async #streamFromPodman(endpoint: string, containerId: string, tail?: number, since?: number): Promise<void> {
@@ -136,32 +146,6 @@ export class LogStreamDO implements DurableObject {
       // Container exists but stopped → stay alive, wait for restart
     } catch {
       // Network error — stay alive, retry logic could go here
-    }
-  }
-
-  async #pollFromProvider(endpoint: string, containerId: string, since?: number): Promise<void> {
-    this.#abortController = new AbortController();
-    let lastFetch = since ?? Math.floor(Date.now() / 1000) - 10;
-
-    while (!this.#abortController.signal.aborted) {
-      try {
-        const url = eciLogsUrl(endpoint, containerId, lastFetch);
-        const resp = await fetch(url, { signal: this.#abortController.signal });
-        if (resp.status === 404) {
-          this.#broadcast(JSON.stringify({ event: 'container_deleted' }));
-          this.#scheduleCleanup(10_000);
-          return;
-        }
-        if (resp.ok) {
-          const text = await resp.text();
-          if (text) this.#broadcast(text);
-        }
-        lastFetch = Math.floor(Date.now() / 1000);
-      } catch (e: unknown) {
-        if ((e as Error)?.name === 'AbortError') return;
-      }
-
-      await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
     }
   }
 

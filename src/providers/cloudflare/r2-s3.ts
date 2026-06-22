@@ -4,7 +4,7 @@
  */
 import { S3ClientBase } from '../../core/provider/s3-client.ts';
 import type { S3ProviderConfig } from '../../core/provider/s3-types.ts';
-import { signSigV4, emptyPayloadHash } from '../../core/provider/s3-signer.ts';
+import { signSigV4, emptyPayloadHash, signPresignedUrl } from '../../core/provider/s3-signer.ts';
 import type { SigV4Credentials } from '../../core/provider/s3-signer.ts';
 
 const CLOCK_SKEW_RETRIES = 2;
@@ -41,5 +41,25 @@ export class CloudflareR2S3Provider extends S3ClientBase {
       throw new Error(`R2 ${method} failed: ${res.status} ${await res.text()}`);
     }
     throw new Error(`R2 ${method} failed after ${CLOCK_SKEW_RETRIES} retries`);
+  }
+
+  async getPresignedUrl(bucket: string, key: string, expiresInSeconds = 3600): Promise<string> {
+    const now = this.#signingTime();
+    const canonicalUri = `/${this.#bucketMapping(bucket)}/${key.split('/').map(encodeURIComponent).join('/')}`;
+    const host = `${this.#accountId}.r2.cloudflarestorage.com`;
+    const url = await signPresignedUrl('GET', canonicalUri, this.#credentials, 'auto', 's3', expiresInSeconds, now, host);
+    return url.toString();
+  }
+
+  async putPresignedUrl(bucket: string, key: string, expiresInSeconds = 3600): Promise<string> {
+    const now = this.#signingTime();
+    const canonicalUri = `/${this.#bucketMapping(bucket)}/${key.split('/').map(encodeURIComponent).join('/')}`;
+    const host = `${this.#accountId}.r2.cloudflarestorage.com`;
+    const url = await signPresignedUrl('PUT', canonicalUri, this.#credentials, 'auto', 's3', expiresInSeconds, now, host);
+    return url.toString();
+  }
+
+  #bucketMapping(bucket: string): string {
+    return this.config.bucketNameMapping?.[bucket] ?? bucket;
   }
 }

@@ -16,9 +16,8 @@ import type {
   IContainerGroupProvider,
   DescribeContainerGroupsInput,
   DescribeContainerGroupsResult,
-  CreateContainerGroupInput,
-  ContainerGroupRuntime,
-} from '../../core/provider/index.ts';
+} from '../../core/provider/interfaces.ts';
+import type { CreateContainerGroupInput, ContainerGroupRuntime } from '../../core/provider/types.ts';
 
 // ─── Podman API response types ───
 

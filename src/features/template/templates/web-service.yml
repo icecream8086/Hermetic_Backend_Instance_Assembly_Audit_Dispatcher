@@ -1,0 +1,39 @@
+# category: application
+# tags: nginx, web, public-ip, health-check
+name: "web-service"
+description: "Nginx Web 服务 — 公网可达，HTTP 健康检查，支持 EIP 带宽配置"
+apiVersion: "hbi-aad/v1"
+kind: "Container"
+provider: "alibaba"
+dependsOn: ["base-network"]
+containers:
+  - name: "nginx"
+    image: "docker.io/library/nginx:alpine"
+    ports:
+      - containerPort: 80
+        protocol: "TCP"
+      - containerPort: 443
+        protocol: "TCP"
+    resources:
+      limits:
+        cpu: 1
+        memory: 256
+    livenessProbe:
+      httpGet:
+        port: 80
+        path: "/health"
+      periodSeconds: 15
+      initialDelaySeconds: 10
+    readinessProbe:
+      httpGet:
+        port: 80
+        path: "/health"
+      periodSeconds: 5
+    providerOverrides:
+      eipBandwidth: 50
+network:
+  allocatePublicIp: true
+  publicIpBandwidth: 50
+providerOverrides:
+  alibaba:
+    spotStrategy: "SpotAsPriceGo"

@@ -84,6 +84,65 @@ export abstract class S3ClientBase implements IS3Provider {
     return parseListResult(await res.text());
   }
 
+  // ─── Multi-part upload ───
+
+  async createMultipartUpload(input: { bucket: string; key: string; contentType?: string }): Promise<{ uploadId: string; key: string; bucket: string }> {
+    const path = `/${this.bucketMapping(input.bucket)}/${encodeKey(input.key)}?uploads`;
+    const url = `${this.endpointFor(input.bucket)}${path}`;
+    const amzHeaders: Record<string, string> = { host: new URL(url).host };
+    if (input.contentType) amzHeaders['content-type'] = input.contentType;
+    const res = await this.authFetch(url, 'POST', `/${this.bucketMapping(input.bucket)}/${encodeKey(input.key)}`, 'uploads', amzHeaders, '');
+    const xml = await res.text();
+    const uploadId = xml.match(/<UploadId>(.*?)<\/UploadId>/)?.[1] ?? '';
+    return { uploadId, key: input.key, bucket: input.bucket };
+  }
+
+  async uploadPart(input: { bucket: string; key: string; uploadId: string; partNumber: number }, body: Uint8Array): Promise<{ etag: string; partNumber: number }> {
+    const path = `/${this.bucketMapping(input.bucket)}/${encodeKey(input.key)}?partNumber=${input.partNumber}&uploadId=${encodeURIComponent(input.uploadId)}`;
+    const url = `${this.endpointFor(input.bucket)}${path}`;
+    const amzHeaders: Record<string, string> = { host: new URL(url).host };
+    const bodyBuf = body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength) as ArrayBuffer;
+    const bodyHash = await payloadHash(bodyBuf);
+    const res = await this.authFetch(url, 'PUT', `/${this.bucketMapping(input.bucket)}/${encodeKey(input.key)}`, `partNumber=${input.partNumber}&uploadId=${encodeURIComponent(input.uploadId)}`, amzHeaders, bodyHash, bodyBuf);
+    return { etag: (res.headers.get('etag') ?? '').replace(/"/g, ''), partNumber: input.partNumber };
+  }
+
+  async completeMultipartUpload(input: { bucket: string; key: string; uploadId: string; parts: ReadonlyArray<{ partNumber: number; etag: string }> }): Promise<{ location?: string }> {
+    const path = `/${this.bucketMapping(input.bucket)}/${encodeKey(input.key)}?uploadId=${encodeURIComponent(input.uploadId)}`;
+    const url = `${this.endpointFor(input.bucket)}${path}`;
+    const body = buildCompleteXml(input.parts);
+    const amzHeaders: Record<string, string> = { host: new URL(url).host, 'content-type': 'application/xml' };
+    const res = await this.authFetch(url, 'POST', `/${this.bucketMapping(input.bucket)}/${encodeKey(input.key)}`, `uploadId=${encodeURIComponent(input.uploadId)}`, amzHeaders, '', body);
+    const xml = await res.text();
+    const location = xml.match(/<Location>(.*?)<\/Location>/)?.[1];
+    return { ...(location ? { location } : {}) };
+  }
+
+  async abortMultipartUpload(input: { bucket: string; key: string; uploadId: string }): Promise<void> {
+    const path = `/${this.bucketMapping(input.bucket)}/${encodeKey(input.key)}?uploadId=${encodeURIComponent(input.uploadId)}`;
+    const url = `${this.endpointFor(input.bucket)}${path}`;
+    const amzHeaders: Record<string, string> = { host: new URL(url).host };
+    await this.authFetch(url, 'DELETE', `/${this.bucketMapping(input.bucket)}/${encodeKey(input.key)}`, `uploadId=${encodeURIComponent(input.uploadId)}`, amzHeaders, '');
+  }
+
+  async listParts(bucket: string, key: string, uploadId: string): Promise<{ parts: ReadonlyArray<{ partNumber: number; size: number; etag: string }>; uploadId: string; isTruncated: boolean; nextPartNumberMarker?: number }> {
+    const path = `/${this.bucketMapping(bucket)}/${encodeKey(key)}?uploadId=${encodeURIComponent(uploadId)}`;
+    const url = `${this.endpointFor(bucket)}${path}`;
+    const amzHeaders: Record<string, string> = { host: new URL(url).host };
+    const res = await this.authFetch(url, 'GET', `/${this.bucketMapping(bucket)}/${encodeKey(key)}`, `uploadId=${encodeURIComponent(uploadId)}`, amzHeaders, '');
+    const xml = await res.text();
+    const parts: { partNumber: number; size: number; etag: string }[] = [];
+    for (const m of xml.matchAll(/<Part>(.*?)<\/Part>/gs)) {
+      const pn = parseInt(m[1]!.match(/<PartNumber>(.*?)<\/PartNumber>/)?.[1] ?? '0', 10);
+      const sz = parseInt(m[1]!.match(/<Size>(.*?)<\/Size>/)?.[1] ?? '0', 10);
+      const et = (m[1]!.match(/<ETag>(.*?)<\/ETag>/)?.[1] ?? '').replace(/"/g, '');
+      parts.push({ partNumber: pn, size: sz, etag: et });
+    }
+    const truncated = xml.includes('<IsTruncated>true</IsTruncated>');
+    const nextMarker = xml.match(/<NextPartNumberMarker>(.*?)<\/NextPartNumberMarker>/)?.[1];
+    return { parts, uploadId, isTruncated: truncated, ...(nextMarker ? { nextPartNumberMarker: parseInt(nextMarker, 10) } : {}) };
+  }
+
   /** Get the base endpoint URL for a given bucket. Override for provider-specific logic. */
   protected endpointFor(_bucket: string): string { return ''; }
 
@@ -156,4 +215,10 @@ function parseListResult(xml: string): S3ListObjectsResult {
   if (tokenMatch) nextToken = tokenMatch[1];
 
   return { objects, commonPrefixes, isTruncated, ...(nextToken ? { nextContinuationToken: nextToken } : {}) };
+}
+
+function buildCompleteXml(parts: ReadonlyArray<{ partNumber: number; etag: string }>): string {
+  const sorted = [...parts].sort((a, b) => a.partNumber - b.partNumber);
+  const partTags = sorted.map(p => `  <Part><PartNumber>${p.partNumber}</PartNumber><ETag>"${p.etag}"</ETag></Part>`).join('\n');
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<CompleteMultipartUpload>\n${partTags}\n</CompleteMultipartUpload>`;
 }

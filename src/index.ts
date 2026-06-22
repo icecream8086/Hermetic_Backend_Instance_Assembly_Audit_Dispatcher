@@ -1,5 +1,6 @@
 import { createApp, type AppInstance } from './core/app.ts';
 import { loadConfig } from './config/env.ts';
+import type { TaskMessage } from './queue/types.ts';
 
 // DO classes must be exported at module scope for wrangler to discover them
 export { AtomicStoreDO } from './core/store/adapters/durable-object.ts';
@@ -33,5 +34,15 @@ export default {
     // Does NOT block the first response — runs via ctx.waitUntil().
     ctx.waitUntil(instance.seed());
     return response;
+  },
+
+  // ─── Queue consumer ───
+  // Cloudflare platform invokes this when messages arrive on the TASK_QUEUE.
+  // Each message gets its own CPU budget — heavy tasks (image pull, GC) run
+  // here so they don't compete with API response latency.
+  async queue(batch: MessageBatch<TaskMessage>, env: Record<string, unknown>, ctx: ExecutionContext) {
+    const { processTaskBatch } = await import('./queue/consumer.ts');
+    await processTaskBatch(batch, () => getApp(env));
+    ctx.waitUntil(Promise.resolve()); // acknowledge platform invocation
   },
 };

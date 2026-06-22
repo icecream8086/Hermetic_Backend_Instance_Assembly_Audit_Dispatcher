@@ -45,3 +45,73 @@ export interface S3ProviderConfig {
   /** Map logical bucket names to physical names on this backend. */
   readonly bucketNameMapping?: Readonly<Record<string, string>>;
 }
+
+// ─── Multi-part upload types ───
+
+export interface S3CreateMultipartUploadInput {
+  readonly bucket: string;
+  readonly key: string;
+  readonly contentType?: string;
+}
+
+export interface S3CreateMultipartUploadResult {
+  readonly uploadId: string;
+  readonly key: string;
+  readonly bucket: string;
+}
+
+export interface S3UploadPartInput {
+  readonly bucket: string;
+  readonly key: string;
+  readonly uploadId: string;
+  readonly partNumber: number;
+}
+
+export interface S3UploadPartResult {
+  readonly etag: string;
+  readonly partNumber: number;
+}
+
+export interface S3CompleteMultipartUploadInput {
+  readonly bucket: string;
+  readonly key: string;
+  readonly uploadId: string;
+  readonly parts: ReadonlyArray<{ readonly partNumber: number; readonly etag: string }>;
+}
+
+export interface S3AbortMultipartUploadInput {
+  readonly bucket: string;
+  readonly key: string;
+  readonly uploadId: string;
+}
+
+export interface S3ListPartsResult {
+  readonly parts: ReadonlyArray<{ readonly partNumber: number; readonly size: number; readonly etag: string }>;
+  readonly uploadId: string;
+  readonly isTruncated: boolean;
+  readonly nextPartNumberMarker?: number;
+}
+
+// ─── Client-facing multipart orchestration types ───
+
+export interface S3PresignedPartUrl {
+  readonly partNumber: number;
+  readonly url: string;
+  readonly range?: string;
+}
+
+export interface S3MultipartUploadSession {
+  readonly uploadId: string;
+  readonly bucket: string;
+  readonly key: string;
+  readonly presignedUrls: ReadonlyArray<S3PresignedPartUrl>;
+  readonly partSize: number;
+  readonly expiresIn: number;
+}
+
+export interface S3MultipartDownloadSession {
+  readonly bucket: string;
+  readonly key: string;
+  readonly size: number;
+  readonly presignedUrls: ReadonlyArray<S3PresignedPartUrl>;
+}

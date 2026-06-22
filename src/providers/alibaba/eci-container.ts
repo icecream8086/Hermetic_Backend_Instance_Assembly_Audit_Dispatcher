@@ -12,20 +12,30 @@ import type {
   DeleteContainerGroupInput,
   GetContainerLogInput,
   ContainerLogResult,
+} from '../../core/provider/interfaces.ts';
+import type {
   CreateContainerGroupInput,
-} from '../../core/provider/index.ts';
-import type { ContainerGroupRuntime } from '../../core/provider/index.ts';
-import type { ContainerGroupStatus } from '../../core/provider/types.ts';
+  ContainerGroupRuntime,
+  ContainerGroupStatus,
+} from '../../core/provider/types.ts';
 import { rpcCall } from './eci-signer.ts';
 import { createRegionId, createZoneId } from '../../core/region/types.ts';
 import { AppError } from '../../core/types.ts';
+import { applyExtensionOverrides } from '../../core/provider/extension-schema.ts';
+import './eci-schema.ts'; // register Alibaba ECI extension fields
 
 export class AlibabaEciContainerProvider implements IContainerProvider {
+  private readonly region: string;
+
   constructor(
     private readonly accessKeyId: string,
     private readonly accessKeySecret: string,
     private readonly endpoint = 'eci.cn-hangzhou.aliyuncs.com',
-  ) {}
+  ) {
+    // Extract region from endpoint: eci.cn-hangzhou.aliyuncs.com → cn-hangzhou
+    const m = endpoint.match(/eci\.([^.]+)\./);
+    this.region = m?.[1] ?? 'cn-hangzhou';
+  }
 
   /**
    * Create an ECI container group.
@@ -37,6 +47,7 @@ export class AlibabaEciContainerProvider implements IContainerProvider {
     const params: Record<string, string> = {
       RegionId: input.region,
       ContainerGroupName: input.name,
+      ...(input.zoneId ? { ZoneId: input.zoneId } : {}),
       RestartPolicy: input.restartPolicy,
       Cpu: String(input.cpu),
       Memory: String(input.memory),
@@ -138,7 +149,9 @@ export class AlibabaEciContainerProvider implements IContainerProvider {
           params[`${vidx}.DiskVolume.DiskId`] = String(volOpts.diskId);
           params[`${vidx}.DiskVolume.FsType`] = String(volOpts.fsType ?? 'ext4');
           if (volOpts.sizeGiB) params[`${vidx}.DiskVolume.DiskSize`] = String(volOpts.sizeGiB);
+          if (volOpts.diskCategory) params[`${vidx}.DiskVolume.DiskCategory`] = String(volOpts.diskCategory);
           if (volOpts.readOnly) params[`${vidx}.DiskVolume.ReadOnly`] = 'true';
+          if (volOpts.deleteWithInstance) params[`${vidx}.DiskVolume.DeleteWithInstance`] = 'true';
         }
         if (v.type === 'ConfigMapVolume' || volOpts?.configMapName) {
           // Legacy ConfigMap — replaced by env-var injection, kept for backward compat with existing sandbox status
@@ -165,18 +178,39 @@ export class AlibabaEciContainerProvider implements IContainerProvider {
       });
     }
 
-    // Network
+    // Network — multi-zone via comma-separated VSwitchIds
     params['SecurityGroupId'] = input.network.securityGroupId ?? '';
     if (input.network.subnetIds?.length) {
-      params['VSwitchId'] = input.network.subnetIds[0]!;
+      params['VSwitchId'] = input.network.subnetIds.join(',');
+      params['ScheduleStrategy'] = 'VSwitchRandom';
+      delete params['ZoneId'];
+    }
+    // Public IP
+    if (input.network.allocatePublicIp) {
+      params['AutoCreateEip'] = 'true';
+      if (input.network.publicIpBandwidth) params['EipBandwidth'] = String(input.network.publicIpBandwidth);
+    }
+    // Image cache
+    params['AutoMatchImageCache'] = 'true';
+
+    // Extension fields (providerOverrides) — maps Alibaba-specific params via schema
+    if (input.providerOverrides) {
+      const ext = applyExtensionOverrides('alibaba', input.providerOverrides);
+      for (const [k, v] of Object.entries(ext)) {
+        params[k] = v;
+      }
     }
 
-    const resp = await rpcCall(
-      this.endpoint, this.accessKeyId, this.accessKeySecret,
-      'CreateContainerGroup', params,
-    );
-
-    return { providerId: resp.ContainerGroupId };
+    try {
+      const resp = await rpcCall(
+        this.endpoint, this.accessKeyId, this.accessKeySecret,
+        'CreateContainerGroup', params,
+      );
+      return { providerId: resp.ContainerGroupId };
+    } catch (e) {
+      console.error('[eci] CreateContainerGroup params:', JSON.stringify(params, null, 2));
+      throw e;
+    }
   }
 
   async describe(input: DescribeContainerGroupsInput): Promise<DescribeContainerGroupsResult> {
@@ -236,7 +270,7 @@ export class AlibabaEciContainerProvider implements IContainerProvider {
   /** Get status of a single container group by provider ID. */
   async getStatus(providerId: string): Promise<ContainerGroupRuntime | null> {
     const result = await this.describe({
-      region: createRegionId('unknown'),
+      region: createRegionId(this.region),
       sandboxId: providerId,
     });
     return result.sandboxes[0] ?? null;
@@ -245,8 +279,7 @@ export class AlibabaEciContainerProvider implements IContainerProvider {
   // ─── Container lifecycle operations ───
 
   async stop(providerId: string): Promise<void> {
-    // ECI does not support stop — delete is the closest equivalent.
-    await this.delete({ region: createRegionId('unknown'), providerId });
+    await this.delete({ region: createRegionId(this.region), providerId });
   }
 
   async start(_providerId: string): Promise<void> {
@@ -255,14 +288,13 @@ export class AlibabaEciContainerProvider implements IContainerProvider {
 
   async restart(providerId: string): Promise<void> {
     await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret, 'RestartContainerGroup', {
-      RegionId: 'cn-hangzhou',
+      RegionId: this.region,
       ContainerGroupId: providerId,
     });
   }
 
   async kill(providerId: string): Promise<void> {
-    // ECI doesn't have a "kill" API — delete is the closest equivalent.
-    await this.delete({ region: createRegionId('unknown'), providerId });
+    await this.delete({ region: createRegionId(this.region), providerId });
   }
 
   async pause(_providerId: string): Promise<void> {
@@ -327,6 +359,7 @@ function statusToAlibaba(status: ContainerGroupStatus): string {
   switch (status) {
     case 'Pending': return 'Pending';
     case 'Scheduling': return 'Scheduling';
+    case 'ScheduleFailed': return 'ScheduleFailed';
     case 'Running': return 'Running';
     case 'Succeeded': return 'Succeeded';
     case 'Failed': return 'Failed';

@@ -28,6 +28,9 @@ import { StubContainerProvider } from '../../providers/stub/container.ts';
 import { StubImageProvider } from '../../providers/stub/image.ts';
 import { AwsS3Provider } from '../../providers/s3/aws-s3.ts';
 import { AlibabaOssProvider } from '../../providers/alibaba/oss.ts';
+import { AlibabaEciApiClient } from '../../providers/alibaba/eci-api.ts';
+import { AlibabaCrApiClient } from '../../providers/alibaba/cr-api.ts';
+import { AlibabaOssOpenApiClient } from '../../providers/alibaba/oss-openapi.ts';
 
 export class InstanceProviderResolver {
   constructor(
@@ -94,7 +97,7 @@ export class InstanceProviderResolver {
 
   // ─── Provider factory methods ───
 
-  async #resolveCredential(credentialRef?: string): Promise<{
+  async #resolveCredential(credentialRef?: string, instanceId?: string): Promise<{
     type?: string | undefined;
     accessKeyId: string | undefined;
     accessKeySecret: string | undefined;
@@ -103,18 +106,30 @@ export class InstanceProviderResolver {
     password?: string | undefined;
     registryCredentials?: readonly RegistryCredential[] | undefined;
   }> {
-    if (!credentialRef) return { accessKeyId: undefined, accessKeySecret: undefined };
-    const cred = await this.credentialService.findByName(credentialRef);
-    if (!cred) return { accessKeyId: undefined, accessKeySecret: undefined };
-    return {
-      type: cred.type,
-      accessKeyId: cred.accessKeyId,
-      accessKeySecret: cred.accessKeySecret,
-      token: cred.token,
-      username: cred.username,
-      password: cred.password,
-      registryCredentials: cred.registryCredentials,
-    };
+    // 1. Try credential manager (preferred — per-instance, encrypted)
+    if (credentialRef) {
+      // credentialRef may be a credential ID (cred_xxx) or a name (eci_profile@...)
+      const cred = await this.credentialService.get(credentialRef as any)
+        ?? await this.credentialService.findByName(credentialRef, instanceId);
+      if (cred?.accessKeyId && cred?.accessKeySecret) {
+        return {
+          type: cred.type,
+          accessKeyId: cred.accessKeyId,
+          accessKeySecret: cred.accessKeySecret,
+          token: cred.token,
+          username: cred.username,
+          password: cred.password,
+          registryCredentials: cred.registryCredentials,
+        };
+      }
+    }
+    // 2. Fallback to environment variables (backward compatible)
+    const envAk = process.env['ALIBABA_ACCESS_KEY_ID'];
+    const envSk = process.env['ALIBABA_ACCESS_KEY_SECRET'];
+    if (envAk && envSk) {
+      return { accessKeyId: envAk, accessKeySecret: envSk };
+    }
+    return { accessKeyId: undefined, accessKeySecret: undefined };
   }
 
   async #createContainerProvider(instance: ComputeInstance): Promise<IContainerProvider> {
@@ -122,7 +137,7 @@ export class InstanceProviderResolver {
       case 'podman':
         return secureContainerProvider(new PodmanContainerProvider(instance.endpoint));
       case 'alibaba': {
-        const cred = await this.#resolveCredential(instance.credentialRef);
+        const cred = await this.#resolveCredential(instance.credentialRef, instance.id);
         return secureContainerProvider(new AlibabaEciContainerProvider(
           cred.accessKeyId ?? '', cred.accessKeySecret ?? '', instance.endpoint,
         ));
@@ -139,7 +154,7 @@ export class InstanceProviderResolver {
       case 'podman':
         return new PodmanImageProvider(instance.endpoint);
       case 'alibaba': {
-        const cred = await this.#resolveCredential(instance.credentialRef);
+        const cred = await this.#resolveCredential(instance.credentialRef, instance.id);
         return new AlibabaEciImageProvider(
           cred.accessKeyId ?? '', cred.accessKeySecret ?? '', instance.endpoint,
           instance.region,
@@ -158,7 +173,7 @@ export class InstanceProviderResolver {
       case 'podman':
         return secureContainerGroupProvider(new PodmanContainerGroupProvider(instance.endpoint));
       case 'alibaba': {
-        const cred = await this.#resolveCredential(instance.credentialRef);
+        const cred = await this.#resolveCredential(instance.credentialRef, instance.id);
         return secureContainerGroupProvider(new AlibabaEciContainerGroupProvider(
           cred.accessKeyId ?? '', cred.accessKeySecret ?? '', instance.endpoint,
         ));
@@ -181,7 +196,7 @@ export class InstanceProviderResolver {
   }
 
   async #createS3Provider(instance: ComputeInstance): Promise<IS3Provider | undefined> {
-    const cred = await this.#resolveCredential(instance.credentialRef);
+    const cred = await this.#resolveCredential(instance.credentialRef, instance.id);
     switch (instance.platform) {
       case 'podman':
         // Podman has no native S3 — MinIO-compatible endpoint via AwsS3Provider
@@ -197,5 +212,32 @@ export class InstanceProviderResolver {
       default:
         return undefined;
     }
+  }
+
+  /** Resolve a raw ECI API client for a specific instance. */
+  async resolveRawEciApi(instanceId: InstanceId): Promise<any | undefined> {
+    const inst = await this.instanceService.get(instanceId);
+    if (!inst || inst.platform !== 'alibaba') return undefined;
+    const cred = await this.#resolveCredential(inst.credentialRef);
+    if (!cred.accessKeyId || !cred.accessKeySecret) return undefined;
+    return new AlibabaEciApiClient(cred.accessKeyId, cred.accessKeySecret, inst.endpoint);
+  }
+
+  /** Resolve a CR (Container Registry) API client for a specific instance. */
+  async resolveCrApi(instanceId: InstanceId): Promise<any | undefined> {
+    const inst = await this.instanceService.get(instanceId);
+    if (!inst || inst.platform !== 'alibaba') return undefined;
+    const cred = await this.#resolveCredential(inst.credentialRef);
+    if (!cred.accessKeyId || !cred.accessKeySecret) return undefined;
+    return new AlibabaCrApiClient(cred.accessKeyId, cred.accessKeySecret);
+  }
+
+  /** Resolve an OSS management-plane API client for a specific instance. */
+  async resolveOssOpenApi(instanceId: InstanceId): Promise<any | undefined> {
+    const inst = await this.instanceService.get(instanceId);
+    if (!inst || inst.platform !== 'alibaba') return undefined;
+    const cred = await this.#resolveCredential(inst.credentialRef);
+    if (!cred.accessKeyId || !cred.accessKeySecret) return undefined;
+    return new AlibabaOssOpenApiClient(cred.accessKeyId, cred.accessKeySecret);
   }
 }

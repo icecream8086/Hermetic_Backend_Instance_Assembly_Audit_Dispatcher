@@ -1,7 +1,7 @@
 // Alibaba Cloud ECI metrics provider — placeholder.
 // Implements IMetricsProvider via DescribeContainerGroupMetric OpenAPI.
 
-import type { IMetricsProvider, FetchMetricsInput, FetchMetricsResult } from '../../core/provider/index.ts';
+import type { IMetricsProvider, FetchMetricsInput, FetchMetricsResult } from '../../core/provider/interfaces.ts';
 
 export class AlibabaEciMetricsProvider implements IMetricsProvider {
   constructor(

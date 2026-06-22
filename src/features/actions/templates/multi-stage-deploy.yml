@@ -1,0 +1,79 @@
+# category: deploy
+# tags: dag, pipeline, parallel, demo
+name: "Multi-stage Deploy"
+description: "Demonstrates DAG dependency graph: Build → parallel Test×2 → Deploy. All dependencies enforced — a failed test blocks deploy. Ideal for verifying the GET /runs/:id/dag endpoint."
+on:
+  manual: true
+
+env:
+  APP_NAME: "my-app"
+  DEPLOY_REGION: "us-east-1"
+
+jobs:
+  # Stage 1 — Build produces the artifact
+  build:
+    runsOn: "linux"
+    container:
+      image: "docker.io/library/node:20-alpine"
+      resources:
+        cpu: 2
+        memory: 4096
+    steps:
+      - name: "Install"
+        run: "npm ci"
+      - name: "Build"
+        run: "npm run build"
+      - name: "Package artifact"
+        run: "tar -czf /tmp/$APP_NAME.tar.gz dist/"
+    timeout: 600
+
+  # Stage 2a — Unit tests (parallel with integration)
+  unit-test:
+    needs: ["build"]
+    runsOn: "linux"
+    container:
+      image: "docker.io/library/node:20-alpine"
+      resources:
+        cpu: 1
+        memory: 2048
+    steps:
+      - name: "Unit tests"
+        run: "npm run test:unit -- --coverage"
+    timeout: 300
+
+  # Stage 2b — Integration tests (parallel with unit)
+  integration-test:
+    needs: ["build"]
+    runsOn: "linux"
+    container:
+      image: "docker.io/library/node:20-alpine"
+      resources:
+        cpu: 1
+        memory: 2048
+    steps:
+      - name: "Integration tests"
+        run: "npm run test:integration"
+    timeout: 300
+
+  # Stage 3 — Deploy (requires both test suites to pass)
+  deploy:
+    needs: ["unit-test", "integration-test"]
+    runsOn: "linux"
+    container:
+      image: "docker.io/library/alpine:latest"
+      resources:
+        cpu: 1
+        memory: 1024
+    steps:
+      - name: "Deploy"
+        run: "echo 'Deploying $APP_NAME to $DEPLOY_REGION...'"
+      - name: "Register DNS"
+        dns:
+          action: "upsert"
+          type: "A"
+          name: "${{ env.APP_NAME }}.example.com"
+          value: "${{ env.PUBLIC_IP }}"
+          ttl: 300
+          proxied: true
+          zoneId: "${{ secrets.CF_ZONE_ID }}"
+    timeout: 300

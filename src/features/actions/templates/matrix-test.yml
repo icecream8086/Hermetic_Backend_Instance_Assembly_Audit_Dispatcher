@@ -1,0 +1,30 @@
+# category: test
+# tags: matrix, ci, multi-os
+name: "Matrix Test"
+description: "Run the same test suite across multiple OS and Node.js version combinations"
+on:
+  push:
+    branches: ["main"]
+  manual: true
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: ["alpine", "ubuntu"]
+        node: ["18", "20", "22"]
+      exclude:
+        - { os: "alpine", node: "18" }
+      maxParallel: 4
+      failFast: true
+    container:
+      image: "docker.io/library/node:${{ matrix.node }}-${{ matrix.os }}"
+      resources:
+        cpu: 2
+        memory: 4096
+    steps:
+      - name: "Install"
+        run: "npm ci"
+      - name: "Test"
+        run: "npm test"
+    timeout: 600

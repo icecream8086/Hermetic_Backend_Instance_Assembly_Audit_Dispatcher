@@ -39,6 +39,9 @@ import { AlibabaEciContainerProvider } from '../../providers/alibaba/eci-contain
 import { AlibabaEciImageProvider } from '../../providers/alibaba/eci-image.ts';
 import { AlibabaEciMetricsProvider } from '../../providers/alibaba/eci-metrics.ts';
 import { AlibabaEciContainerGroupProvider } from '../../providers/alibaba/eci-group-provider.ts';
+import { AlibabaEciApiClient } from '../../providers/alibaba/eci-api.ts';
+import { AlibabaCrApiClient } from '../../providers/alibaba/cr-api.ts';
+import { AlibabaOssOpenApiClient } from '../../providers/alibaba/oss-openapi.ts';
 import { CloudflareDnsProvider } from '../../providers/cloudflare/dns.ts';
 
 // ─── Lazy provider registry ───
@@ -54,6 +57,9 @@ class LazyProviderRegistry implements IProviderRegistry {
   private _dns?: IDnsProvider;
   private _metrics?: IMetricsProvider;
   private _groupContainer: IContainerGroupProvider | undefined;
+  private _rawEciApi: any | undefined;
+  private _crApi: any | undefined;
+  private _ossOpenApi: any | undefined;
   private _typeEntries?: Map<string, ProviderEntry>;
   private _s3Entries?: S3ProviderEntry[];
   private _instanceResolver?: InstanceProviderResolver;
@@ -121,6 +127,30 @@ class LazyProviderRegistry implements IProviderRegistry {
       this._groupContainer = this._createGroupProvider();
     }
     return this._groupContainer;
+  }
+
+  get rawEciApi(): any | undefined {
+    if (!this._rawEciApi) {
+      const cred = this._firstAlibabaCred();
+      if (cred) this._rawEciApi = new AlibabaEciApiClient(cred.accessKeyId, cred.accessKeySecret);
+    }
+    return this._rawEciApi;
+  }
+
+  get crApi(): any | undefined {
+    if (!this._crApi) {
+      const cred = this._firstAlibabaCred();
+      if (cred) this._crApi = new AlibabaCrApiClient(cred.accessKeyId, cred.accessKeySecret);
+    }
+    return this._crApi;
+  }
+
+  get ossOpenApi(): any | undefined {
+    if (!this._ossOpenApi) {
+      const cred = this._firstAlibabaCred();
+      if (cred) this._ossOpenApi = new AlibabaOssOpenApiClient(cred.accessKeyId, cred.accessKeySecret);
+    }
+    return this._ossOpenApi;
   }
 
   get capabilities(): ProviderCapabilities {
@@ -213,10 +243,42 @@ class LazyProviderRegistry implements IProviderRegistry {
     return this.groupContainer;
   }
 
+  async resolveRawEciApi(instanceId?: InstanceId): Promise<any | undefined> {
+    await this._ensureResolver();
+    if (this._instanceResolver && instanceId) {
+      return this._instanceResolver.resolveRawEciApi(instanceId);
+    }
+    return this.rawEciApi;
+  }
+
+  async resolveCrApi(instanceId?: InstanceId): Promise<any | undefined> {
+    await this._ensureResolver();
+    if (this._instanceResolver && instanceId) {
+      return this._instanceResolver.resolveCrApi(instanceId);
+    }
+    return this.crApi;
+  }
+
+  async resolveOssOpenApi(instanceId?: InstanceId): Promise<any | undefined> {
+    await this._ensureResolver();
+    if (this._instanceResolver && instanceId) {
+      return this._instanceResolver.resolveOssOpenApi(instanceId);
+    }
+    return this.ossOpenApi;
+  }
+
   // ─── Internal helpers ───
 
   private get _isAlibaba(): boolean {
     return this.config.container === 'alibaba' && this._hasAlibabaAccounts;
+  }
+
+  /** First valid Alibaba credential from config, or undefined if none configured. */
+  private _firstAlibabaCred(): { accessKeyId: string; accessKeySecret: string } | undefined {
+    const found = this.config.accounts.find(
+      (a): a is Credential & { accessKeyId: string; accessKeySecret: string } => !!(a.accessKeyId && a.accessKeySecret),
+    );
+    return found ? { accessKeyId: found.accessKeyId, accessKeySecret: found.accessKeySecret } : undefined;
   }
 
   private _resolveDefaultEntry(): ProviderEntry {

@@ -36,10 +36,10 @@ export interface TimerBackendOptions {
  * ```
  */
 export function createTimerBackend(type: SchedulerBackendType, options?: TimerBackendOptions): ITimerBackend {
-  // Production auto-detection: when DO namespace is available, use do-alarm
-  // even if 'worker' was configured. setInterval doesn't survive Worker
-  // request lifetime — DO alarm is the correct production pattern.
-  if (type === 'worker' && options?.doNamespace) {
+  // Auto-upgrade only when callbackUrl is set (production-ready).
+  // In dev without WORKER_URL, keep setInterval — DO alarm in workerd
+  // requires continuous I/O to fire, and stalls when the Worker is idle.
+  if (type === 'worker' && options?.doNamespace && options?.callbackUrl) {
     type = 'do-alarm';
   }
 

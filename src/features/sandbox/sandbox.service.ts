@@ -42,6 +42,7 @@ import type { IAuditWriter } from '../../core/audit/types.ts';
 import { KernLevel } from '../../core/audit/kern-level.ts';
 import type { NetworkResolverFn } from '../../core/network/types.ts';
 import type { InstanceService } from '../../core/region/instance.ts';
+import type { IMessageQueue } from '../../queue/interfaces.ts';
 import { mapEnvVars, mapPorts, mapVolumeMounts, mapVolumes, mapTags, mapNetwork } from '../../core/provider/mapper.ts';
 import { QuotaService } from './quota.ts';
 
@@ -62,7 +63,22 @@ export class SandboxService implements ISandboxService {
     private readonly resolveNetwork?: NetworkResolverFn | undefined,
     /** Optional: resolve ComputeInstance by ID to get endpoint/capabilities. */
     private readonly instanceService?: InstanceService | undefined,
+    private readonly queueProducer?: IMessageQueue,
   ) {}
+
+  async #enqueueGcRetry(id: string, sandbox: Sandbox): Promise<void> {
+    if (!this.queueProducer?.sendSandboxGc) return;
+    await this.queueProducer.sendSandboxGc({
+      sandboxId: id,
+      reason: 'manual',
+      providerId: sandbox.providerId ?? id,
+      region: sandbox.config.region as unknown as string,
+      ...(sandbox.config.instanceId ? { instanceId: sandbox.config.instanceId as any } : {}),
+      containerCount: sandbox.containers.length,
+      sandboxName: sandbox.name,
+      createdAt: sandbox.createdAt,
+    }).catch(() => {});
+  }
 
   /** Resolve the container provider, optionally by instanceId. Falls back to default. */
   async #resolveProvider(instanceId?: string): Promise<IContainerProvider> {
@@ -116,7 +132,7 @@ export class SandboxService implements ISandboxService {
       updatedAt: Date.now(),
       status: SandboxStatus.Scheduling,
       version: generateVersionId(),
-      config: { ...input, network: mergedNetwork },
+      config: { ...input, ...(resolvedInst ? { instanceId: resolvedInst.id as any } : {}), network: mergedNetwork },
       ...(input.creatorId ? { creatorId: input.creatorId } : {}),
       network: {} as NetworkInfo,
       containers: [] as ContainerRuntime[],
@@ -131,7 +147,9 @@ export class SandboxService implements ISandboxService {
     await this.atomic.set(INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
 
     // 2. Build provider input (with merged VNet + cluster settings) and create cloud resource
-    const clusterEnriched = resolvedInst ? { ...input, instanceId: resolvedInst.id as any, network: mergedNetwork } : { ...input, network: mergedNetwork };
+    const clusterEnriched = resolvedInst
+      ? { ...input, instanceId: resolvedInst.id as any, network: mergedNetwork, zoneId: resolvedInst.zone as string }
+      : { ...input, network: mergedNetwork };
 
     // 3. Resolve SecurityGroup system UID (sg_*) → cloud ID + bandwidth
     if (mergedNetwork?.securityGroupId?.startsWith('sg_')) {
@@ -188,7 +206,7 @@ export class SandboxService implements ISandboxService {
     } catch (e) {
       // Provider creation failed — mark sandbox as Failed so it's not orphaned
       await this.atomic.set(`${KEY_PREFIX}${id}`, { ...initial, status: SandboxStatus.Failed, updatedAt: Date.now() }, created).catch(() => {});
-      throw e;
+      throw translateProviderError(e, input.name);
     }
 
     // 3. Transition to Running with provider details (no redundant re-read: we just
@@ -282,7 +300,8 @@ export class SandboxService implements ISandboxService {
 
     // Tell the provider to stop the container (best-effort)
     try {
-      await this.containerProvider.stop?.(sandbox.providerId ?? String(id));
+      const provider = await this.#resolveProvider(sandbox.config.instanceId);
+      await provider.stop?.(sandbox.providerId ?? String(id));
     } catch {
       // Provider may be unreachable or container already stopped — proceed.
     }
@@ -295,7 +314,8 @@ export class SandboxService implements ISandboxService {
     if (!sandbox) throw new AppError(404, 'SANDBOX_NOT_FOUND', `Sandbox ${id} not found`);
 
     try {
-      await this.containerProvider.start?.(sandbox.providerId ?? String(id));
+      const provider = await this.#resolveProvider(sandbox.config.instanceId);
+      await provider.start?.(sandbox.providerId ?? String(id));
     } catch {
       // Provider unreachable — proceed with local state
     }
@@ -319,17 +339,17 @@ export class SandboxService implements ISandboxService {
       }
     }
 
-    // Best-effort provider cleanup — don't let provider errors block local state cleanup.
-    // Orphaned provider resources are handled by the periodic health check loop (event bus
-    // 'health:check' tick), which detects containers that exist on the provider but have
-    // no corresponding local sandbox.
-    try {
-      await this.containerProvider.delete({
-        region: sandbox.config.region,
-        providerId: sandbox.providerId ?? String(id),
-      });
-    } catch {
-      // Provider may be unreachable or container already gone — proceed with local cleanup.
+    // Provider cleanup — sync delete + async GC retry for reliability
+    if (sandbox.providerId) {
+      try {
+        const provider = await this.#resolveProvider(sandbox.config.instanceId);
+        await provider.delete({ region: sandbox.config.region, providerId: sandbox.providerId });
+      } catch (e) {
+        console.error(`[sandbox] terminate: provider delete failed for ${id} (${sandbox.providerId}), enqueuing GC — ${e instanceof Error ? e.message : String(e)}`);
+        this.#enqueueGcRetry(id as string, sandbox);
+      }
+    } else {
+      console.error(`[sandbox] terminate: sandbox ${id} has no providerId — cloud resource may be orphaned`);
     }
 
     await this.transition(id, SandboxStatus.Deleted, 'user requested termination', actorId);
@@ -419,7 +439,8 @@ export class SandboxService implements ISandboxService {
     if (!sandbox.providerId) {
       throw new AppError(404, 'PROVIDER_ID_MISSING', `Sandbox ${id} has no providerId — provider resource was never created or was cleaned up`);
     }
-    const result = await this.containerProvider.describe({
+    const provider = await this.#resolveProvider(sandbox.config.instanceId);
+    const result = await provider.describe({
       region: sandbox.config.region,
       sandboxId: sandbox.providerId,
     });
@@ -567,12 +588,13 @@ export class SandboxLogService implements ISandboxLogService {
 
 export function toContainerGroupInput(input: CreateSandboxInput): CreateContainerGroupInput {
   return {
-    name: input.name,
+    name: sanitizeName(input.name),
     description: input.description,
     region: input.region,
     ...(input.instanceId ? { instanceId: input.instanceId } : {}),
+    ...((input as any).zoneId ? { zoneId: (input as any).zoneId } : {}),
     cpu: input.resourceSpec.cpu,
-    memory: input.resourceSpec.memory,
+    memory: Math.max(1, Math.ceil(input.resourceSpec.memory / 1024)), // ECI expects GB, applicator provides MB
     gpu: input.resourceSpec.gpu,
     gpuType: input.resourceSpec.gpuType,
     spotStrategy: input.spotStrategy,
@@ -604,6 +626,8 @@ export function toContainerGroupInput(input: CreateSandboxInput): CreateContaine
       id: String(v.id),
       type: v.type,
       nfs: v.nfs,
+      disk: v.disk,
+      secret: v.secret,
     }))),
     network: mapNetwork({
       subnetIds: input.network.subnetIds,
@@ -689,10 +713,57 @@ function runtimeToEvents(r: ContainerGroupRuntime): ContainerEvent[] {
 function mapProviderStatus(providerStatus: ContainerGroupRuntime['status']): SandboxStatus | null {
   switch (providerStatus) {
     case 'Running': return null;
-    case 'Failed': return SandboxStatus.Failed;
+    case 'Failed':
+    case 'ScheduleFailed': return SandboxStatus.Failed;
     case 'Expired':
     case 'Expiring': return SandboxStatus.Terminated;
     case 'Succeeded': return SandboxStatus.Stopped;
+    case 'Restarting': return SandboxStatus.Pending;
+    case 'Pending':
+    case 'Scheduling':
     default: return null;
   }
+}
+
+/** 将云厂商错误翻译为用户可读的 AppError */
+function translateProviderError(e: unknown, sandboxName: string): AppError {
+  const msg = e instanceof Error ? e.message : String(e);
+  const lower = msg.toLowerCase();
+
+  if (lower.includes('fetch failed') || lower.includes('econnrefused') || lower.includes('connection refused')) {
+    return new AppError(503, 'PROVIDER_UNREACHABLE',
+      `Cannot reach container provider for sandbox "${sandboxName}". Is Podman running? Check PODMAN_ENDPOINT or instance connectivity. (detail: ${msg.slice(0, 200)})`);
+  }
+  if (lower.includes('401') || lower.includes('unauthorized') || lower.includes('invalid security token') || lower.includes('signature') || lower.includes('invalidaccesskeyid')) {
+    return new AppError(401, 'PROVIDER_AUTH_FAILED',
+      `Authentication failed for sandbox "${sandboxName}". Check your cloud credentials (ALIBABA_ACCESS_KEY_ID / ALIBABA_ACCESS_KEY_SECRET). (detail: ${msg.slice(0, 200)})`);
+  }
+  if (lower.includes('403') || lower.includes('forbidden') || lower.includes('accessdenied')) {
+    return new AppError(403, 'PROVIDER_FORBIDDEN',
+      `Access denied by cloud provider for sandbox "${sandboxName}". Check IAM/RAM permissions. (detail: ${msg.slice(0, 200)})`);
+  }
+  if (lower.includes('timeout') || lower.includes('timed out') || lower.includes('etimedout')) {
+    return new AppError(504, 'PROVIDER_TIMEOUT',
+      `Cloud provider timed out for sandbox "${sandboxName}". Check network connectivity and provider health. (detail: ${msg.slice(0, 200)})`);
+  }
+  if (lower.includes('not found') || lower.includes('404') || lower.includes('nosuchbucket') || lower.includes('nosuchkey')) {
+    return new AppError(404, 'PROVIDER_NOT_FOUND',
+      `Cloud resource not found for sandbox "${sandboxName}". Check that the target resource exists. (detail: ${msg.slice(0, 200)})`);
+  }
+  if (lower.includes('quota') || lower.includes('limit exceeded') || lower.includes('throttl')) {
+    return new AppError(429, 'PROVIDER_QUOTA_EXCEEDED',
+      `Cloud provider quota exceeded for sandbox "${sandboxName}". Check your account limits. (detail: ${msg.slice(0, 200)})`);
+  }
+
+  // Generic fallback with original message preserved
+  return new AppError(502, 'PROVIDER_ERROR',
+    `Cloud provider failed for sandbox "${sandboxName}": ${msg.slice(0, 300)}`);
+}
+
+/** Sanitize sandbox name for provider API constraints (Alibaba ECI: [a-zA-Z][a-zA-Z0-9._-]{1,62}). */
+function sanitizeName(name: string): string {
+  let s = name.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9._-]/g, '').slice(0, 63).replace(/^-+|-+$/g, '');
+  if (!s || s.length < 2) s = 'sandbox-' + Date.now().toString(36);
+  if (!/^[a-zA-Z]/.test(s)) s = 's-' + s;
+  return s;
 }

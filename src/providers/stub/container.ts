@@ -5,12 +5,15 @@ import type {
   DeleteContainerGroupInput,
   GetContainerLogInput,
   ContainerLogResult,
+} from '../../core/provider/interfaces.ts';
+import type {
+  CreateContainerGroupInput,
+  ContainerId,
   ContainerGroupRuntime,
   ContainerGroupRuntimeEvent,
   AssociatedResource,
   OciContainer,
-} from '../../core/provider/index.ts';
-import type { CreateContainerGroupInput, ContainerId } from '../../core/provider/types.ts';
+} from '../../core/provider/types.ts';
 import type { ZoneId } from '../../core/region/types.ts';
 import { StubOciRuntime } from '../../features/ociruntime/oci-runtime.stub.ts';
 import type { OciCreateSpec } from '../../features/ociruntime/types.ts';

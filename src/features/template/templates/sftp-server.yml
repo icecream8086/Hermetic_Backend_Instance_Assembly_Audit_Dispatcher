@@ -1,0 +1,45 @@
+# category: service
+# tags: sftp, file-transfer, storage, alibaba
+name: "SFTP Server"
+description: "Secure file transfer server (SFTP/SSH) — mount volumes for persistent storage, per-user UID/GID, SSH key auth support. Based on atmoz/sftp OpenSSH server."
+apiVersion: "hbi-aad/v1"
+kind: "Container"
+region: "cn-hangzhou"
+containers:
+  - name: "sftp"
+    image: "registry.cn-hangzhou.aliyuncs.com/minecraft-graalvm/ftp_bp:latest"
+    ports:
+      - containerPort: 22
+        protocol: "TCP"
+    env:
+      - name: "SFTP_USERS"
+        value: "sftpuser:changeme:::upload"
+    resources:
+      limits:
+        cpu: 2
+        memory: 2048
+    livenessProbe:
+      tcpSocket:
+        port: 22
+      periodSeconds: 30
+      initialDelaySeconds: 10
+    readinessProbe:
+      tcpSocket:
+        port: 22
+      periodSeconds: 10
+      initialDelaySeconds: 5
+extensions:
+  healthMaxRetries: 3
+network:
+  mode: "vpc"
+  publicIp:
+    allocate: true
+    bandwidth: 10
+  vpc:
+    securityGroupId: "sg-bp16o5urk39itwcqmdzj"
+    subnetIds:
+      - "vsw-bp1xx36ys1jou7o1bsdpp"
+      - "vsw-bp1grwzlgy2739dxnskbz"
+      - "vsw-bp1rv5m61jx4kmld0cc12"
+      - "vsw-bp1wfyusfye82wm3d3zew"
+restartPolicy: "Always"

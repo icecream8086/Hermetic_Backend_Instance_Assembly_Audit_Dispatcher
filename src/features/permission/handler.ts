@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import type { AppContext } from '../../core/app.ts';
+import type { AppContext } from '../../core/deps.ts';
 import type { IPermissionService } from './service.ts';
 import type { RouteMeta } from '../../core/http-docs/types.ts';
 import {

@@ -1,0 +1,30 @@
+# category: maintenance
+# tags: cron, cleanup, maintenance
+name: "Cron Cleanup"
+description: "Periodic system maintenance: prune old images, rotate logs, health-check endpoints"
+on:
+  cron: "0 3 * * *"
+
+jobs:
+  cleanup:
+    runsOn: "linux"
+    container:
+      image: "docker.io/library/alpine:latest"
+      resources:
+        cpu: 0.5
+        memory: 512
+    steps:
+      - name: "Prune unused images"
+        run: "podman image prune -f --filter 'until=168h' || true"
+        continueOnError: true
+      - name: "Rotate stale DNS"
+        dns:
+          action: "delete"
+          type: "A"
+          name: "ephemeral-*.example.com"
+          value: "0.0.0.0"
+          zoneId: "${{ secrets.CF_ZONE_ID }}"
+        continueOnError: true
+      - name: "Log completion"
+        run: "echo 'Cleanup completed at $(date -u +%Y-%m-%dT%H:%M:%SZ)'"
+    timeout: 600

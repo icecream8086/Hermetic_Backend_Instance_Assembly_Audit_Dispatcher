@@ -14,9 +14,8 @@ import type {
   DeleteContainerGroupInput,
   GetContainerLogInput,
   ContainerLogResult,
-  CreateContainerGroupInput,
-} from '../../core/provider/index.ts';
-import type { ContainerGroupRuntime } from '../../core/provider/index.ts';
+} from '../../core/provider/interfaces.ts';
+import type { CreateContainerGroupInput, ContainerGroupRuntime } from '../../core/provider/types.ts';
 import { debugLog } from '../../core/logger/log-policy.ts';
 
 interface PodmanContainer {
@@ -316,14 +315,21 @@ export class PodmanContainerProvider implements IContainerProvider {
     const resp = await this.#fetch(url, { method: 'POST' });
     if (!resp) throw new Error('Podman daemon unreachable');
     if (resp.status === 304) return; // already stopped
-    if (!resp.ok) throw new Error(`Podman stop failed (${resp.status})`);
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => '');
+      throw new Error(`Podman stop failed (${resp.status}): ${body.slice(0, 200)}`);
+    }
   }
 
   async start(providerId: string): Promise<void> {
     const url = `${this.#apiBase}/containers/${encodeURIComponent(providerId)}/start`;
     const resp = await this.#fetch(url, { method: 'POST' });
     if (!resp) throw new Error('Podman daemon unreachable');
-    if (!resp.ok) throw new Error(`Podman start failed (${resp.status})`);
+    if (resp.status === 304) return; // already started
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => '');
+      throw new Error(`Podman start failed (${resp.status}): ${body.slice(0, 200)}`);
+    }
   }
 
   async restart(providerId: string, timeoutSeconds?: number): Promise<void> {
@@ -331,7 +337,11 @@ export class PodmanContainerProvider implements IContainerProvider {
     if (timeoutSeconds !== undefined) url += `?t=${timeoutSeconds}`;
     const resp = await this.#fetch(url, { method: 'POST' });
     if (!resp) throw new Error('Podman daemon unreachable');
-    if (!resp.ok) throw new Error(`Podman restart failed (${resp.status})`);
+    if (resp.status === 304) return; // already restarting
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => '');
+      throw new Error(`Podman restart failed (${resp.status}): ${body.slice(0, 200)}`);
+    }
   }
 
   async kill(providerId: string, signal?: string): Promise<void> {
@@ -340,7 +350,10 @@ export class PodmanContainerProvider implements IContainerProvider {
     const resp = await this.#fetch(url, { method: 'POST' });
     if (!resp) throw new Error('Podman daemon unreachable');
     if (resp.status === 304) return; // already stopped/killed
-    if (!resp.ok) throw new Error(`Podman kill failed (${resp.status})`);
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => '');
+      throw new Error(`Podman kill failed (${resp.status}): ${body.slice(0, 200)}`);
+    }
   }
 
   async pause(providerId: string): Promise<void> {

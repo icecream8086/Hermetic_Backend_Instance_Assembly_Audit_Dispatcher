@@ -32,12 +32,13 @@ export async function rpcCall(
     ...params,
   }).filter(([_, v]) => v !== undefined) as [string, string][];
 
-  const queryString = queryEntries.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
+  // Alibaba RPC expects commas in VSwitchId/InstanceType to be literal (not %2C)
+  const encodeVal = (v: string) => encodeURIComponent(v).replace(/%2C/g, ',');
+  const queryString = queryEntries.map(([k, v]) => `${encodeURIComponent(k)}=${encodeVal(v)}`).join('&');
   const baseUrl = `https://${endpoint}/?${queryString}`;
 
   const { url: signedUrl } = await aksk.sign({ method: 'POST', url: baseUrl, headers: {} });
   if (!signedUrl) throw new Error('AkSkProvider did not produce a signed URL');
-
   const resp = await fetch(signedUrl, { method: 'POST' });
   const body = await resp.json() as any;
   if (body.Code) {

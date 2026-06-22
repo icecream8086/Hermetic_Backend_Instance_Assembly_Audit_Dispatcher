@@ -14,6 +14,7 @@
 export type ContainerGroupStatus =
   | 'Pending'
   | 'Scheduling'
+  | 'ScheduleFailed'
   | 'Running'
   | 'Succeeded'
   | 'Failed'
@@ -343,6 +344,7 @@ export interface CreateContainerGroupInput {
   readonly description?: string | undefined;
   readonly region: RegionId;
   readonly instanceId?: InstanceId | undefined;
+  readonly zoneId?: string | undefined;
   readonly cpu: number;
   readonly memory: number;
   readonly gpu?: number | undefined;

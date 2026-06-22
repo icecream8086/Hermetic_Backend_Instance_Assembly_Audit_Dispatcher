@@ -5,7 +5,7 @@ import { createSandboxId } from './types.ts';
 import type { PodSpec } from './assembly/types.ts';
 import type { IContainerGroupProvider } from '../../core/provider/interfaces.ts';
 import type { RouteMeta } from '../../core/http-docs/types.ts';
-import type { AppContext } from '../../core/app.ts';
+import type { AppContext } from '../../core/deps.ts';
 import { ok, fail } from '../../core/response.ts';
 
 type PermissionCheckFn = { check(params: { userId: string; action: string; resource: string; ip?: string }): Promise<{ allowed: boolean; reason: string }> };
@@ -170,16 +170,13 @@ export function createSandboxRouter(
     }
   });
 
-  // POST /:id/sync — sync runtime status from provider
+  // POST /:id/sync — fire-and-forget async sync from provider
   router.post('/:id/sync', async (c) => {
     { const r = await requirePerm(c, permissionChecker, 'update', 'sandbox'); if (r) return r; }
     const id = createSandboxId(c.req.param('id'));
-    try {
-      const runtime = await svc.syncRuntime(id);
-      return c.json(ok(runtime));
-    } catch (e: any) {
-      return c.json(fail('SYNC_FAILED', e.message), 404);
-    }
+    // Fire async, return immediately — frontend polls GET /:id for result
+    svc.syncRuntime(id).catch(e => console.error(`[sandbox] async sync failed ${id}: ${e instanceof Error ? e.message : String(e)}`));
+    return c.json(ok({ status: 'syncing', message: 'Sync dispatched. Poll GET /api/sandboxes/:id for updated status.' }), 202);
   });
 
   // GET /:id/health — container health status

@@ -32,6 +32,10 @@ tag = "v1"
 new_classes = ["AtomicStoreDO"]
 
 [[migrations]]
+tag = "v2-alarm"
+new_classes = ["AlarmTimerDO"]
+
+[[migrations]]
 tag = "v5-realtime"
 new_classes = ["NotificationDO"]
 
@@ -54,6 +58,25 @@ database_id = "local-dev"
 [[r2_buckets]]
 binding = "BLOB_STORE"
 bucket_name = "hbi-aad-blobs"
+
+# ─── Cloudflare Queues — async task dispatch (image pull, sandbox GC) ───
+# Producer: Worker sends tasks to the queue
+[[queues.producers]]
+binding = "TASK_QUEUE"
+queue = "hbi-aad-tasks"
+
+# Consumer: Worker receives & processes queued tasks
+[[queues.consumers]]
+queue = "hbi-aad-tasks"
+max_batch_size = 5
+max_batch_timeout = 10          # seconds — Miniflare default is 1s; set longer for dev batching
+max_retries = 3                 # messages that fail 3× are dropped (unless DLQ configured)
+# dead_letter_queue = "hbi-aad-dlq"  # uncomment after creating the DLQ in production
+
+# In wrangler dev, queues run locally via Miniflare — no Cloudflare account needed.
+# Consumer fires within max_batch_timeout (10s) after the first message arrives.
+# In production, the queue must be created first:
+#   npx wrangler queues create hbi-aad-tasks
 
 [env.production]
 # Production overrides — set real IDs via `wrangler secret` and `wrangler deploy --env production`

@@ -2,8 +2,8 @@ import type {
   IMetricsProvider,
   FetchMetricsInput,
   FetchMetricsResult,
-  MetricSnapshot,
-} from '../../core/provider/index.ts';
+} from '../../core/provider/interfaces.ts';
+import type { MetricSnapshot } from '../../core/provider/types.ts';
 
 export class StubMetricsProvider implements IMetricsProvider {
   async fetchMetrics(input: FetchMetricsInput): Promise<FetchMetricsResult> {

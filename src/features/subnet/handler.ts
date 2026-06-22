@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { ISubnetService } from './service.ts';
-import type { AppContext } from '../../core/app.ts';
+import type { AppContext } from '../../core/deps.ts';
 import { ok, fail } from '../../core/response.ts';
 import type { RouteMeta } from '../../core/http-docs/types.ts';
 import type { CreateSubnetInput, UpdateSubnetInput } from './types.ts';

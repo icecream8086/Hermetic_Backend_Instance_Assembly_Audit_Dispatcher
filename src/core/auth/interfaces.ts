@@ -59,4 +59,4 @@ export interface NoAuthCredentials {
 
 export type ProviderCredentials = AkSkCredentials | BearerCredentials | NoAuthCredentials;
 
-export type { IAuthProvider as IAuthProviderType } from './interfaces.ts';
+export type { IAuthProvider as IAuthProviderType };

@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "generate": "node scripts/generate-features.mjs",
+    "generate": "node scripts/generate-features.mjs && node scripts/generate-templates.mjs && node scripts/generate-instance-templates.mjs",
     "predev": "npm run generate",
     "predev:worker": "npm run generate",
     "pretypecheck": "npm run generate",
@@ -32,8 +32,10 @@
       "network": "/api/networks",
       "topology": "/api/topology",
       "subnet": "/api/subnets",
-    "volume": "/api/volumes",
-    "container-secret": "/api/container-secrets"
+      "volume": "/api/volumes",
+      "container-secret": "/api/container-secrets",
+      "images": "/api/images",
+      "actions": "/api/actions"
     }
   },
   "dependencies": {
@@ -48,6 +50,7 @@
     "@types/node": "^22.19.19",
     "0x": "^6.0.0",
     "dependency-cruiser": "^17.4.3",
+    "fast-check": "^4.8.0",
     "knip": "^6.16.0",
     "madge": "^8.0.0",
     "pactum": "^3.9.1",

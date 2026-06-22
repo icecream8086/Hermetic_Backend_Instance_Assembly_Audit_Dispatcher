@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
 import type { RouteMeta } from '../../core/http-docs/types.ts';
 import { ok, fail } from '../../core/response.ts';
-import type { AppContext } from '../../core/app.ts';
+import type { AppContext } from '../../core/deps.ts';
 import type { ISandboxService } from '../sandbox/interfaces.ts';
 import type { SandboxTemplate, CreateTemplateInput, UpdateTemplateInput } from './types.ts';
 import { KernLevel } from '../../core/audit/kern-level.ts';
@@ -440,20 +440,45 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
         return c.json(ok(result), 201);
       }
 
-      // v1: existing single-container path
+      // v1: single-container path — resolve instance dynamically
       const providerName = body.provider;
+      const explicitInstanceId = body.instanceId ?? resolved.container?.instanceId as (string | undefined);
+      const targetRegion = (body.region ?? resolved.container?.region) as (string | undefined);
       let svc = sandboxService;
-      if (providerName && providers) {
+      let resolvedInstanceId: string | undefined;
+
+      if (explicitInstanceId && providers?.resolveContainer) {
+        // 1. User or template explicitly picked an instance
+        const instProvider = await providers.resolveContainer(explicitInstanceId as any);
+        svc = new SandboxService(atomic, new ConsoleLogger(), instProvider, undefined, undefined, undefined, createAtomicNetworkResolver(atomic), new InstanceService(atomic));
+        resolvedInstanceId = explicitInstanceId as string;
+      } else if (providers && targetRegion) {
+        // 2. Auto-resolve: pick first online instance in the requested region with container capability
+        const instSvc = new InstanceService(atomic);
+        const allInst = await instSvc.resolveByCapability('container');
+        const match = allInst.find(i => i.status === 'online' && i.region === targetRegion);
+        if (match) {
+          const instProvider = await providers.resolveContainer(match.id as any);
+          svc = new SandboxService(atomic, new ConsoleLogger(), instProvider, undefined, undefined, undefined, createAtomicNetworkResolver(atomic), instSvc);
+          resolvedInstanceId = match.id as string;
+        }
+      } else if (providerName && providers) {
+        // 3. Legacy: named provider from request body
         const entry = providers.provider(providerName);
         if (!entry) return c.json(fail('PROVIDER_NOT_FOUND', `Provider "${providerName}" not available`), 400);
         svc = new SandboxService(atomic, new ConsoleLogger(), entry.container, undefined, undefined, undefined, createAtomicNetworkResolver(atomic), new InstanceService(atomic));
       }
       if (!svc) return c.json(fail('SERVICE_UNAVAILABLE', 'Sandbox service not available'), 503);
 
-      const input = await applyTemplate(resolved, body.name, body.region, async (volumeId) => {
+      // Inject resolved instanceId into input if auto-resolved
+      const baseInput = await applyTemplate(resolved, body.name, body.region, async (volumeId) => {
         const volEntry = await atomic.get<Record<string, unknown>>('volume:' + volumeId);
         return volEntry?.value ?? null;
       });
+      const input = resolvedInstanceId && !explicitInstanceId
+        ? { ...baseInput, instanceId: resolvedInstanceId as any }
+        : baseInput;
+
       const sandbox = await svc.provision(
         user?.id ? { ...input, creatorId: user.id } : input,
       );
@@ -465,13 +490,15 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
       });
       return c.json(ok(sandbox), 201);
     } catch (e: any) {
-      console.error(`[debug] template apply failed:`, { message: e.message, stack: e.stack, status: e.status, templateId: c.req.param('id') });
+      const status = typeof e.status === 'number' ? e.status : (typeof e.statusCode === 'number' ? e.statusCode : 500);
+      const code = e.code && typeof e.code === 'string' ? e.code : (status === 404 ? 'TEMPLATE_NOT_FOUND' : 'APPLY_FAILED');
+      console.error(`[template] apply failed for ${c.req.param('id')}:`, { code, status, message: e.message });
       // Release claimed resources if template resolution succeeded before the failure
       if (resolved) {
         await releaseInstanceSlot(atomic, resolved, (c as any).var?.currentUser?.id ?? 'anonymous').catch(() => {});
         await releaseResourceBinding(atomic, resolved).catch(() => {});
       }
-      return c.json(fail(e.status === 404 ? 'TEMPLATE_NOT_FOUND' : 'APPLY_FAILED', e.message), e.status ?? 500);
+      return c.json(fail(code, e.message), status);
     }
   });
 

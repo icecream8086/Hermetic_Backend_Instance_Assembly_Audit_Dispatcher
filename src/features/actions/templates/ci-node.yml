@@ -1,0 +1,31 @@
+# category: ci
+# tags: node, javascript, typescript, ci
+name: "Node.js CI"
+description: "Standard Node.js CI pipeline: install dependencies, run linter, execute tests, build"
+on:
+  push:
+    branches: ["main", "develop"]
+  manual: true
+
+env:
+  NODE_ENV: "test"
+
+jobs:
+  ci:
+    runsOn: "linux"
+    container:
+      image: "docker.io/library/node:20-alpine"
+      resources:
+        cpu: 2
+        memory: 4096
+    steps:
+      - name: "Install dependencies"
+        run: "npm ci --prefer-offline"
+      - name: "Lint"
+        run: "npm run lint"
+        continueOnError: true
+      - name: "Test"
+        run: "npm test -- --coverage"
+      - name: "Build"
+        run: "npm run build"
+    timeout: 900

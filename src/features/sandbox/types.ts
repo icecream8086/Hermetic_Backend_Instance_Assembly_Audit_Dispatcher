@@ -36,8 +36,8 @@ export enum SandboxStatus {
 
 export const VALID_TRANSITIONS: Readonly<Record<SandboxStatus, readonly SandboxStatus[]>> = {
   [SandboxStatus.Pending]: [SandboxStatus.Scheduling, SandboxStatus.Running, SandboxStatus.Failed, SandboxStatus.Deleted],
-  [SandboxStatus.Scheduling]: [SandboxStatus.Running, SandboxStatus.Failed, SandboxStatus.Deleted],
-  [SandboxStatus.Running]: [SandboxStatus.Stopped, SandboxStatus.Terminated, SandboxStatus.Deleted],
+  [SandboxStatus.Scheduling]: [SandboxStatus.Running, SandboxStatus.Stopped, SandboxStatus.Failed, SandboxStatus.Deleted],
+  [SandboxStatus.Running]: [SandboxStatus.Stopped, SandboxStatus.Failed, SandboxStatus.Terminated, SandboxStatus.Deleted],
   [SandboxStatus.Stopped]: [SandboxStatus.Running, SandboxStatus.Terminated, SandboxStatus.Deleted],
   [SandboxStatus.Terminated]: [SandboxStatus.Deleted],
   [SandboxStatus.Failed]: [SandboxStatus.Deleted],
@@ -81,6 +81,8 @@ export interface DiskVolumeConfig {
   readonly fsType: string;
   /** Disk size in GiB (for auto-provision). */
   readonly sizeGiB?: number;
+  /** Cloud disk category: cloud_efficiency | cloud_ssd | cloud_essd. */
+  readonly diskCategory?: string | undefined;
   /** Whether the disk is read-only. */
   readonly readOnly: boolean;
   /** Whether to delete the disk when the instance is released. */

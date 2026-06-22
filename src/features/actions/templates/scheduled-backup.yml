@@ -1,0 +1,37 @@
+# category: maintenance
+# tags: backup, cron, postgresql
+name: "Scheduled Backup"
+description: "Periodic database dump and upload to object storage with expiry tracking"
+on:
+  cron: "0 2 * * *"
+  manual: true
+
+env:
+  BACKUP_RETENTION_DAYS: "30"
+
+jobs:
+  backup:
+    runsOn: "linux"
+    container:
+      image: "docker.io/library/postgres:16-alpine"
+      env:
+        PGPASSWORD: "${{ secrets.DB_PASSWORD }}"
+      resources:
+        cpu: 1
+        memory: 2048
+    steps:
+      - name: "Dump database"
+        run: |
+          FILENAME="backup-$(date -u +%Y%m%d-%H%M%S).sql.gz"
+          pg_dump -h "$DB_HOST" -U "$DB_USER" "$DB_NAME" | gzip > "/tmp/$FILENAME"
+          echo "BACKUP_FILE=$FILENAME" >> /tmp/backup.env
+      - name: "Upload to S3"
+        run: |
+          source /tmp/backup.env
+          echo "Uploading $BACKUP_FILE to object storage..."
+          # Uses S3 presigned URL or mounted bucket credentials
+        timeout: 1800
+      - name: "Cleanup old backups"
+        run: "find /tmp -name 'backup-*.sql.gz' -mtime +$BACKUP_RETENTION_DAYS -delete || true"
+        continueOnError: true
+    timeout: 3600

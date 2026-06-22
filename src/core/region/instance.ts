@@ -56,8 +56,8 @@ export interface CreateInstanceInput {
   name: string;
   platform: Platform;
   region: string;
-  zone: string;
-  endpoint: string;
+  zone?: string | undefined;
+  endpoint?: string | undefined;
   credentialRef?: string | undefined;
   capabilities?: InstanceCapabilities | undefined;
   capacity?: InstanceCapacity | undefined;
@@ -79,6 +79,17 @@ export interface UpdateInstanceInput {
 const PREFIX = 'instance:';
 const INDEX_KEY = 'instance:ids';
 
+// ─── Default endpoint helpers ───
+
+/** Default endpoint per platform+region when not explicitly provided. */
+function defaultEndpoint(platform: Platform, region: string): string {
+  switch (platform) {
+    case 'alibaba': return `eci.${region}.aliyuncs.com`;
+    case 'podman': return 'http://127.0.0.1:8080'; // fallback — handler enforces override
+    default: return region;
+  }
+}
+
 // ─── Service ───
 
 export class InstanceService {
@@ -87,7 +98,9 @@ export class InstanceService {
 
   async create(input: CreateInstanceInput): Promise<ComputeInstance> {
     const id = generateInstanceId();
-    const zone = createZoneId(input.zone, input.platform);
+    // Default zone: Podman → "local", Alibaba → region+"-g" (ECI auto-schedules, suffix is metadata)
+    const zoneRaw = input.zone ?? (input.platform === 'podman' ? 'local' : (input.platform === 'alibaba' ? `${input.region}-g`.replace(/--/g, '-') : 'unknown'));
+    const zone = createZoneId(zoneRaw, input.platform);
     const now = Date.now();
 
     const instance: ComputeInstance = {
@@ -96,7 +109,7 @@ export class InstanceService {
       platform: input.platform,
       region: input.region as RegionId,
       zone,
-      endpoint: input.endpoint,
+      endpoint: input.endpoint ?? defaultEndpoint(input.platform, input.region),
       ...(input.credentialRef ? { credentialRef: input.credentialRef } : {}),
       capabilities: input.capabilities ?? { container: true, image: true },
       ...(input.capacity ? { capacity: input.capacity } : {}),

@@ -15,9 +15,11 @@ export class DoBridge {
     bus: EventBus,
     private readonly notifDO: DurableObjectNamespace,
   ) {
-    // Only register events that are actually dispatched via eventBus.dispatch()
     bus.on('sandbox.provisioned', this.#forward('sandbox.provisioned'));
     bus.on('sandbox.status', this.#forward('sandbox.status'));
+    // Action system events
+    bus.on('workflow:completed', this.#forward('workflow:completed'));
+    bus.on('workflow:job:status', this.#forward('workflow:job:status'));
   }
 
   /** Create a handler that forwards an event to NotificationDO for broadcast. */

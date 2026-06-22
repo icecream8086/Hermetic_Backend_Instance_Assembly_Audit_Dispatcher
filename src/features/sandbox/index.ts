@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { ConsoleLogger } from '../../core/logger/console-logger.ts';
-import type { FeatureDeps } from '../../core/app.ts';
+import type { FeatureDeps } from '../../core/deps.ts';
 import { SandboxService } from './sandbox.service.ts';
 import { createSandboxRouter } from './handler.ts';
 import { PodResolver } from './assembly/pod-resolver.ts';
@@ -10,7 +10,7 @@ import { InstanceService } from '../../core/region/instance.ts';
 export function createRouter(deps: FeatureDeps): Hono<any> {
   const resolveNetwork = createAtomicNetworkResolver(deps.stores.atomic);
   const instanceService = new InstanceService(deps.stores.atomic);
-  const svc = new SandboxService(deps.stores.atomic, new ConsoleLogger(), deps.providers.container, deps.providers, deps.eventBus, deps.audit, resolveNetwork, instanceService);
+  const svc = new SandboxService(deps.stores.atomic, new ConsoleLogger(), deps.providers.container, deps.providers, deps.eventBus, deps.audit, resolveNetwork, instanceService, deps.queueProducer);
 
   // Resolve container group provider from registry (platform-agnostic).
   // Falls back to Podman for local dev if no group provider is registered.

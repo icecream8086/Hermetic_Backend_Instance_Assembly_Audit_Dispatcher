@@ -197,10 +197,16 @@ export class CredentialService {
     return this.#decryptFields(entry.value);
   }
 
-  /** 按 name 查找凭证（provider resolver 用）。 */
-  async findByName(name: string): Promise<ManagedCredential | null> {
+  /** 按 name 查找凭证（provider resolver 用）。可传 instanceId 精确匹配。 */
+  async findByName(name: string, instanceId?: string): Promise<ManagedCredential | null> {
     const all = await this.#listAll();
     const decrypted = await Promise.all(all.map(c => this.#decryptFields(c)));
+    // 先找 name + instanceId 精确匹配
+    if (instanceId) {
+      const matched = decrypted.find(c => c.name === name && c.instanceId === instanceId);
+      if (matched) return matched;
+    }
+    // 回退到仅 name 匹配
     return decrypted.find(c => c.name === name) ?? null;
   }
 

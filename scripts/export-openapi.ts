@@ -22,6 +22,8 @@ import { createNetworkRouter, networkRouteMeta } from '../src/features/network/h
 import { createTopologyRouter, topologyRouteMeta } from '../src/features/topology/handler.ts';
 import { createSubnetRouter, subnetRouteMeta } from '../src/features/subnet/handler.ts';
 import { createVolumeRouter, volumeRouteMeta } from '../src/features/volume/handler.ts';
+import { createImagesRouter, imagesRouteMeta } from '../src/features/images/handler.ts';
+import { createActionsRouter, actionRouteMeta } from '../src/features/actions/handler.ts';
 import type { RouteMeta } from '../src/core/http-docs/types.ts';
 import { createAuditRouter } from '../src/core/audit/audit-router.ts';
 import { WorkersAuditLogger } from '../src/core/audit/workers-audit-logger.ts';
@@ -194,6 +196,21 @@ const stubBucketSvc: any = { create: async () => ({}), get: async () => null, li
 const stubImageSvc: any = { create: async () => ({}), get: async () => null, list: async () => [], update: async () => ({}), delete: async () => {} };
 const stubPolicyMgr: any = { list: async () => [], create: async () => ({}), get: async () => null, update: async () => ({}), delete: async () => {} };
 collect('Topology', '/api/topology', createTopologyRouter(stubClusterSvc, stubBucketSvc, stubImageSvc, undefined, stubPolicyMgr), topologyRouteMeta);
+
+const stubImageProvider: any = { list: async () => [], inspect: async () => null, pull: async () => ({}), remove: async () => {}, tag: async () => {}, search: async () => [], prune: async () => ({}), history: async () => [], build: async () => ({}) };
+const stubProvidersRegistry: any = { image: stubImageProvider, resolveImage: async () => stubImageProvider };
+collect('Images', '/api/images', createImagesRouter(stubProvidersRegistry), imagesRouteMeta);
+
+const stubActionDeps2: any = {
+  stores: { atomic: null as any, blob: null as any, query: null as any, metrics: null as any },
+  providers: { container: {} as any, dns: {} as any, resolveContainer: async () => ({} as any) },
+  audit: { write: async () => {} },
+  eventBus: { on: () => {}, dispatch: async () => {} } as any,
+  eventLoop: { enqueuePriority: () => {} } as any,
+  queueProducer: { send: async () => false, sendSandboxGc: async () => false, sendImagePull: async () => false, sendSandboxProvision: async () => false, sendBucketKeyRotate: async () => false, sendBatch: async () => 0 } as any,
+  secretEncryption: undefined,
+};
+collect('Actions', '/api/actions', createActionsRouter(stubActionDeps2), actionRouteMeta);
 
 // Manually-added routes
 function addRoute(method: string, path: string, tag: string, meta?: RouteMeta) {

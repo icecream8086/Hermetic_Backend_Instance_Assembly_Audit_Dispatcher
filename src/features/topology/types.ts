@@ -27,8 +27,8 @@ export interface CreateInstanceBody {
   name: string;
   platform: Platform;
   region: string;
-  zone: string;
-  endpoint: string;
+  zone?: string | undefined;
+  endpoint?: string | undefined;
   credentialRef?: string | undefined;
   capabilities?: InstanceCapabilities | undefined;
   capacity?: InstanceCapacity | undefined;
