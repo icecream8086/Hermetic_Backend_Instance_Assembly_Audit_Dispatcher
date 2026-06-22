@@ -218,26 +218,33 @@ class LazyProviderRegistry implements IProviderRegistry {
   }
 
   async resolveContainer(instanceId?: InstanceId): Promise<IContainerProvider> {
-    await this._ensureResolver();
-    if (this._instanceResolver) {
-      const p = await this._instanceResolver.resolveContainer(instanceId);
-      if (p) return p;
+    if (instanceId) {
+      await this._ensureResolver();
+      if (!this._instanceResolver) {
+        throw new Error('InstanceProviderResolver not available — atomicStore is required for per-instance provider resolution');
+      }
+      return this._instanceResolver.resolveContainer(instanceId);
     }
     return this.container;
   }
 
   async resolveImage(instanceId?: InstanceId): Promise<IImageProvider> {
-    await this._ensureResolver();
-    if (this._instanceResolver) {
-      const p = await this._instanceResolver.resolveImage(instanceId);
-      if (p) return p;
+    if (instanceId) {
+      await this._ensureResolver();
+      if (!this._instanceResolver) {
+        throw new Error('InstanceProviderResolver not available — atomicStore is required for per-instance provider resolution');
+      }
+      return this._instanceResolver.resolveImage(instanceId);
     }
     return this.image;
   }
 
   async resolveGroup(instanceId?: InstanceId): Promise<IContainerGroupProvider | undefined> {
-    await this._ensureResolver();
-    if (this._instanceResolver) {
+    if (instanceId) {
+      await this._ensureResolver();
+      if (!this._instanceResolver) {
+        throw new Error('InstanceProviderResolver not available — atomicStore is required for per-instance provider resolution');
+      }
       return this._instanceResolver.resolveGroup(instanceId);
     }
     return this.groupContainer;

@@ -10,6 +10,13 @@ import { ok, fail } from '../../core/response.ts';
 
 type PermissionCheckFn = { check(params: { userId: string; action: string; resource: string; ip?: string }): Promise<{ allowed: boolean; reason: string }> };
 
+/** Extract HTTP status and error code from a caught error, respecting AppError subtypes. */
+function errorStatus(e: unknown, fallbackCode: string, fallbackStatus = 500): { code: string; status: any } {
+  const status: any = (e as any)?.statusCode ?? (e as any)?.status ?? fallbackStatus;
+  const code = (e as any)?.code ?? fallbackCode;
+  return { code, status };
+}
+
 async function requirePerm(c: any, checker: PermissionCheckFn | undefined, action: string, resource: string, resourceOwnerId?: string): Promise<Response | null> {
   if (!checker) return null;
   const user = (c as any).var?.currentUser;
@@ -136,7 +143,8 @@ export function createSandboxRouter(
       const stopped = await svc.stop(id);
       return c.json(ok(stopped));
     } catch (e: any) {
-      return c.json(fail('STOP_FAILED', e.message), 409);
+      const { code, status } = errorStatus(e, 'STOP_FAILED', 409);
+      return c.json(fail(code, e.message), status);
     }
   });
 
@@ -151,7 +159,8 @@ export function createSandboxRouter(
       const started = await svc.start(id);
       return c.json(ok(started));
     } catch (e: any) {
-      return c.json(fail('START_FAILED', e.message), 409);
+      const { code, status } = errorStatus(e, 'START_FAILED', 409);
+      return c.json(fail(code, e.message), status);
     }
   });
 
@@ -166,7 +175,8 @@ export function createSandboxRouter(
       await svc.terminate(id, actorId);
       return c.json(ok(null));
     } catch (e: any) {
-      return c.json(fail('DELETE_FAILED', e.message), 404);
+      const { code, status } = errorStatus(e, 'DELETE_FAILED', 404);
+      return c.json(fail(code, e.message), status);
     }
   });
 

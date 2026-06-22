@@ -85,14 +85,14 @@ describe('applyTemplate', async () => {
     expect(r.resourceSpec.memory).toBe(3072);
   });
 
-  it('defaults memory to 512 per container', async () => {
+  it('defaults memory to 2048 per container', async () => {
     const r = await applyTemplate(minimalTpl({
       container: {
         region: 'local' as any,
         containers: [{ name: 'a', image: 'a' }, { name: 'b', image: 'b' }],
       },
     }));
-    expect(r.resourceSpec.memory).toBe(1024);
+    expect(r.resourceSpec.memory).toBe(4096); // 2048 default × 2 containers
   });
 
   it('maps container name and image', async () => {

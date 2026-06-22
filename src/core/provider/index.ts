@@ -53,6 +53,7 @@ export type {
 
 export { createProviderRegistry } from './factory.ts';
 export { InstanceProviderResolver } from './instance-resolver.ts';
+export { ProviderResolutionError, ProviderOperationError, CredentialResolutionError } from './errors.ts';
 
 export type {
   IS3Provider,

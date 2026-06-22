@@ -450,7 +450,7 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
       if (explicitInstanceId && providers?.resolveContainer) {
         // 1. User or template explicitly picked an instance
         const instProvider = await providers.resolveContainer(explicitInstanceId as any);
-        svc = new SandboxService(atomic, new ConsoleLogger(), instProvider, undefined, undefined, undefined, createAtomicNetworkResolver(atomic), new InstanceService(atomic));
+        svc = new SandboxService(atomic, new ConsoleLogger(), instProvider, providers, undefined, undefined, createAtomicNetworkResolver(atomic), new InstanceService(atomic));
         resolvedInstanceId = explicitInstanceId as string;
       } else if (providers && targetRegion) {
         // 2. Auto-resolve: pick first online instance in the requested region with container capability
@@ -459,14 +459,14 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
         const match = allInst.find(i => i.status === 'online' && i.region === targetRegion);
         if (match) {
           const instProvider = await providers.resolveContainer(match.id as any);
-          svc = new SandboxService(atomic, new ConsoleLogger(), instProvider, undefined, undefined, undefined, createAtomicNetworkResolver(atomic), instSvc);
+          svc = new SandboxService(atomic, new ConsoleLogger(), instProvider, providers, undefined, undefined, createAtomicNetworkResolver(atomic), instSvc);
           resolvedInstanceId = match.id as string;
         }
       } else if (providerName && providers) {
         // 3. Legacy: named provider from request body
         const entry = providers.provider(providerName);
         if (!entry) return c.json(fail('PROVIDER_NOT_FOUND', `Provider "${providerName}" not available`), 400);
-        svc = new SandboxService(atomic, new ConsoleLogger(), entry.container, undefined, undefined, undefined, createAtomicNetworkResolver(atomic), new InstanceService(atomic));
+        svc = new SandboxService(atomic, new ConsoleLogger(), entry.container, providers, undefined, undefined, createAtomicNetworkResolver(atomic), new InstanceService(atomic));
       }
       if (!svc) return c.json(fail('SERVICE_UNAVAILABLE', 'Sandbox service not available'), 503);
 

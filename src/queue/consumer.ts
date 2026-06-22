@@ -162,12 +162,13 @@ async function handleSandboxGc(
   const sid = sandboxId;
 
   try {
-    // Delete provider resource first (best-effort) — resolve per-instance provider
+    // Delete provider resource first (best-effort) — resolve per-instance provider.
+    // Never fall back to default for a specific instance: sending an ECI delete to
+    // Podman (or vice-versa) would silently orphan the cloud resource.
     try {
-      const containerProvider = instanceId
-        ? await providers.resolveContainer?.(instanceId as any)
-        : undefined;
-      const provider = containerProvider ?? providers.container;
+      const provider = instanceId
+        ? await providers.resolveContainer!(instanceId as any)
+        : providers.container;
       await Promise.race([
         provider.delete({ region: region as any, providerId }),
         new Promise((_, reject) => setTimeout(() => reject(new Error('GC delete timeout after 10s')), 10_000)),

@@ -16,6 +16,7 @@ import type { ComputeInstance } from '../region/instance.ts';
 import type { InstanceService, InstanceId } from '../region/instance.ts';
 import type { CredentialService, RegistryCredential } from '../auth/credential.ts';
 import { AppError } from '../types.ts';
+import { CredentialResolutionError } from './errors.ts';
 import { secureContainerProvider, secureContainerGroupProvider } from './security.ts';
 import { PodmanContainerProvider } from '../../providers/podman/podman-provider.ts';
 import { PodmanImageProvider } from '../../providers/podman/podman-image.ts';
@@ -122,6 +123,12 @@ export class InstanceProviderResolver {
           registryCredentials: cred.registryCredentials,
         };
       }
+      // credentialRef was explicitly configured but cannot be resolved — fail loudly
+      throw new CredentialResolutionError(
+        `Credential "${credentialRef}" not found or missing access keys for instance ${instanceId ?? 'unknown'}. Check that the credential exists and has ALIBABA_ACCESS_KEY_ID / ALIBABA_ACCESS_KEY_SECRET set.`,
+        credentialRef,
+        instanceId,
+      );
     }
     // 2. Fallback to environment variables (backward compatible)
     const envAk = process.env['ALIBABA_ACCESS_KEY_ID'];

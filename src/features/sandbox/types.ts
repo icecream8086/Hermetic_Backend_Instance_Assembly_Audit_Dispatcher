@@ -227,6 +227,19 @@ export interface PodCondition {
 
 // ─── Network config (input) ───
 
+export interface ProviderIdentity {
+  /** Provider platform: 'podman' | 'alibaba' | 'aws' | 'stub' */
+  readonly platform: string;
+  /** ComputeInstance ID used for credential resolution */
+  readonly instanceId?: string;
+  /** Instance region (for ECI/OSS API calls) */
+  readonly region?: string;
+  /** Instance zone (for multi-AZ) */
+  readonly zoneId?: string;
+  /** Credential reference used at creation time */
+  readonly credentialRef?: string;
+}
+
 export interface SandboxNetworkConfig {
   /** 引用 VirtualNetwork，继承其安全组和规则 */
   readonly networkId?: NetworkId | undefined;

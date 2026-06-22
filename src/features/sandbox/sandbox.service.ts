@@ -36,6 +36,7 @@ import { createFacility, generateVersionId } from '../../core/brand.ts';
 import type { RegionId } from '../../core/region/types.ts';
 import { createRegionId } from '../../core/region/types.ts';
 import { AppError } from '../../core/types.ts';
+import { ProviderResolutionError, ProviderOperationError } from '../../core/provider/errors.ts';
 import type { EventBus } from '../../core/event-bus/bus.ts';
 import { createEvent } from '../../core/event-bus/types.ts';
 import type { IAuditWriter } from '../../core/audit/types.ts';
@@ -80,11 +81,21 @@ export class SandboxService implements ISandboxService {
     }).catch(() => {});
   }
 
-  /** Resolve the container provider, optionally by instanceId. Falls back to default. */
+  /** Resolve the container provider for a specific instance. Never silently falls back when instanceId is set. */
   async #resolveProvider(instanceId?: string): Promise<IContainerProvider> {
-    if (this.providerRegistry?.resolveContainer && instanceId) {
+    if (instanceId) {
+      if (!this.providerRegistry?.resolveContainer) {
+        throw new ProviderResolutionError(
+          `Cannot resolve provider for instance "${instanceId}" — SandboxService was constructed without a providerRegistry. This is a wiring bug.`,
+          instanceId,
+        );
+      }
       const p = await this.providerRegistry.resolveContainer(instanceId as any);
       if (p) return p;
+      throw new ProviderResolutionError(
+        `Failed to resolve container provider for instance "${instanceId}". Check that the instance is online and its credential is valid.`,
+        instanceId,
+      );
     }
     return this.containerProvider;
   }
@@ -114,6 +125,14 @@ export class SandboxService implements ISandboxService {
     if (resolvedInst) {
       mergedNetwork = { ...mergedNetwork, instanceId: resolvedInst.id as any };
     }
+    // Build provider identity for persistence (audit trail + deterministic re-resolution)
+    const providerIdentity = resolvedInst ? {
+      platform: resolvedInst.platform,
+      instanceId: resolvedInst.id,
+      region: resolvedInst.region,
+      zoneId: resolvedInst.zone as string | undefined,
+      credentialRef: resolvedInst.credentialRef,
+    } : undefined;
 
     // 0c. Check user quota before provisioning
     if (input.creatorId) {
@@ -132,7 +151,7 @@ export class SandboxService implements ISandboxService {
       updatedAt: Date.now(),
       status: SandboxStatus.Scheduling,
       version: generateVersionId(),
-      config: { ...input, ...(resolvedInst ? { instanceId: resolvedInst.id as any } : {}), network: mergedNetwork },
+      config: { ...input, ...(resolvedInst ? { instanceId: resolvedInst.id as any } : {}), network: mergedNetwork, ...(providerIdentity ? { providerIdentity } : {}) },
       ...(input.creatorId ? { creatorId: input.creatorId } : {}),
       network: {} as NetworkInfo,
       containers: [] as ContainerRuntime[],
@@ -440,10 +459,19 @@ export class SandboxService implements ISandboxService {
       throw new AppError(404, 'PROVIDER_ID_MISSING', `Sandbox ${id} has no providerId — provider resource was never created or was cleaned up`);
     }
     const provider = await this.#resolveProvider(sandbox.config.instanceId);
-    const result = await provider.describe({
-      region: sandbox.config.region,
-      sandboxId: sandbox.providerId,
-    });
+    let result;
+    try {
+      result = await provider.describe({
+        region: sandbox.config.region,
+        sandboxId: sandbox.providerId,
+      });
+    } catch (e) {
+      throw new ProviderOperationError(
+        `Failed to describe sandbox ${id}: ${e instanceof Error ? e.message : String(e)}`,
+        'describe',
+        sandbox.providerId,
+      );
+    }
 
     const runtime = result.sandboxes[0];
     if (!runtime) {

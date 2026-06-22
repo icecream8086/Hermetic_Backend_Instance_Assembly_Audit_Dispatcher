@@ -4,6 +4,7 @@ import { processTaskBatch } from '../../src/queue/consumer.ts';
 import type { TaskMessage } from '../../src/queue/types.ts';
 import { FileKVAtomicStore } from '../../src/core/store/adapters/file-kv.ts';
 import { SandboxStatus } from '../../src/features/sandbox/types.ts';
+import type { IContainerProvider } from '../../src/core/provider/interfaces.ts';
 
 function store() { return new FileKVAtomicStore(join(tmpdir(), 'hbi-test-' + crypto.randomUUID().slice(0, 8))); }
 
@@ -85,6 +86,94 @@ describe('processTaskBatch (white-box)', () => {
       const batchMsg = { body: msg, id: msg.id, timestamp: new Date(), ack: () => { acked = true; }, retry: () => {} };
       await processTaskBatch({ messages: [batchMsg as any], queue: 't', ackAll: () => {}, retryAll: () => {} } as any, async () => app);
       expect(acked).toBe(true);
+    });
+
+    it('uses resolveContainer when instanceId is set (no fallback to providers.container)', async () => {
+      let defaultDeleteCalled = false;
+      let resolvedDeleteCalled = false;
+
+      app.providers.container.delete = async () => { defaultDeleteCalled = true; };
+      const resolvedProvider: IContainerProvider = {
+        create: async () => ({ providerId: 'p_resolved' }),
+        describe: async () => ({ sandboxes: [] }),
+        delete: async () => { resolvedDeleteCalled = true; },
+        getLogs: async () => ({ containerName: 'c1', content: '' }),
+      };
+      app.providers.resolveContainer = async (_id: any) => resolvedProvider;
+
+      await app.stores.atomic.set('sandbox:ids', ['sb_eci'], null);
+      await app.stores.atomic.set('sandbox:sb_eci', {
+        status: SandboxStatus.Running, providerId: 'eci_abc',
+        config: { region: 'cn-hangzhou', instanceId: 'inst_ali' },
+        name: 'eci-sandbox', containers: [{ name: 'c1' }], createdAt: 1, updatedAt: Date.now(),
+      }, null);
+
+      const msg = makeMsg('sandbox:gc', {
+        sandboxId: 'sb_eci', reason: 'manual', providerId: 'eci_abc',
+        region: 'cn-hangzhou', instanceId: 'inst_ali', containerCount: 1,
+        sandboxName: 'eci-sandbox', createdAt: 1,
+      });
+      let acked = false;
+      const batchMsg = { body: msg, id: msg.id, timestamp: new Date(), ack: () => { acked = true; }, retry: () => {} };
+      await processTaskBatch({ messages: [batchMsg as any], queue: 't', ackAll: () => {}, retryAll: () => {} } as any, async () => app);
+
+      // Must use resolveContainer result, NOT the default container
+      expect(resolvedDeleteCalled).toBe(true);
+      expect(defaultDeleteCalled).toBe(false);
+      expect(acked).toBe(true);
+    });
+
+    it('falls back to providers.container when instanceId is NOT set', async () => {
+      let defaultDeleteCalled = false;
+      let resolveCalled = false;
+
+      app.providers.container.delete = async () => { defaultDeleteCalled = true; };
+      app.providers.resolveContainer = async (_id: any) => { resolveCalled = true; return null as any; };
+
+      await app.stores.atomic.set('sandbox:ids', ['sb_local'], null);
+      await app.stores.atomic.set('sandbox:sb_local', {
+        status: SandboxStatus.Running, providerId: 'p_local',
+        config: { region: 'local' },
+        name: 'local-sandbox', containers: [{ name: 'c1' }], createdAt: 1, updatedAt: Date.now(),
+      }, null);
+
+      const msg = makeMsg('sandbox:gc', {
+        sandboxId: 'sb_local', reason: 'manual', providerId: 'p_local',
+        region: 'local', containerCount: 1, sandboxName: 'local-sandbox', createdAt: 1,
+        // No instanceId → uses providers.container
+      });
+      let acked = false;
+      const batchMsg = { body: msg, id: msg.id, timestamp: new Date(), ack: () => { acked = true; }, retry: () => {} };
+      await processTaskBatch({ messages: [batchMsg as any], queue: 't', ackAll: () => {}, retryAll: () => {} } as any, async () => app);
+
+      expect(defaultDeleteCalled).toBe(true);
+      // resolveContainer should not be called when no instanceId
+      expect(resolveCalled).toBe(false);
+      expect(acked).toBe(true);
+    });
+
+    it('still acks GC when provider delete fails (best-effort)', async () => {
+      app.providers.container.delete = async () => { throw new Error('ECI API unreachable'); };
+
+      await app.stores.atomic.set('sandbox:ids', ['sb_fail'], null);
+      await app.stores.atomic.set('sandbox:sb_fail', {
+        status: SandboxStatus.Running, providerId: 'p_fail',
+        config: { region: 'cn-hangzhou' },
+        name: 'fail-sandbox', containers: [{ name: 'c1' }], createdAt: 1, updatedAt: Date.now(),
+      }, null);
+
+      const msg = makeMsg('sandbox:gc', {
+        sandboxId: 'sb_fail', reason: 'manual', providerId: 'p_fail',
+        region: 'cn-hangzhou', containerCount: 1, sandboxName: 'fail-sandbox', createdAt: 1,
+      });
+      let acked = false;
+      const batchMsg = { body: msg, id: msg.id, timestamp: new Date(), ack: () => { acked = true; }, retry: () => {} };
+      await processTaskBatch({ messages: [batchMsg as any], queue: 't', ackAll: () => {}, retryAll: () => {} } as any, async () => app);
+
+      // Should still complete — provider delete is best-effort
+      expect(acked).toBe(true);
+      const entry = await app.stores.atomic.get<any>('sandbox:sb_fail');
+      expect(entry!.value.status).toBe(SandboxStatus.Deleted);
     });
   });
 
