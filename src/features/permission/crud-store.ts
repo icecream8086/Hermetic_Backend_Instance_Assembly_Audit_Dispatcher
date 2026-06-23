@@ -95,15 +95,15 @@ export class CrudStore<T extends { id: string }> {
     throw new AppError(409, 'CONFLICT', 'Concurrent modification detected after 3 retries');
   }
 
+  /** Load all entities — uses transact().getMany() to batch DO reads into 1 round-trip. */
   async #loadAll(): Promise<T[]> {
-    const entry = await this.atomic.get<string[]>(this.indexKey);
-    if (!entry || !entry.value.length) return [];
-    const entries = await Promise.all(
-      entry.value.map(id => this.atomic.get<T>(this.prefix + id)),
-    );
-    return entries
-      .filter((e): e is NonNullable<typeof e> => e !== null)
-      .map(e => e.value);
+    return this.atomic.transact(async (txn) => {
+      const idxEntry = await txn.get<string[]>(this.indexKey);
+      if (!idxEntry || !idxEntry.length) return [];
+      const keys = idxEntry.map(id => this.prefix + id);
+      const entries = await txn.getMany<T>(keys);
+      return entries.filter((e: T | null): e is T => e !== null);
+    });
   }
 
 }

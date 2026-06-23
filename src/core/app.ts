@@ -24,6 +24,7 @@ import { LocalAuditLogger } from './audit/local-audit-logger.ts';
 import { NoopAuditLogger } from './audit/noop-audit-logger.ts';
 import { authz } from './middleware/auth.ts';
 import { jsonDepthLimit } from './middleware/security.ts';
+import { idempotency } from './middleware/idempotency.ts';
 import { setActivePolicy } from './logger/log-policy.ts';
 import { PermissionService } from '../features/permission/service.ts';
 import { ConsoleLogger, setPanicHandler } from './logger/console-logger.ts';
@@ -144,10 +145,11 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
     eventBus,
   });
 
-  // 5c. Load log policy into runtime (non-blocking)
-  stores.atomic.get<any>('_sys:log-policy').then(entry => {
-    if (entry) setActivePolicy(entry.value);
-  }).catch((err: unknown) => console.error('[init] Failed to load log policy:', err instanceof Error ? err.message : err));
+  // 5c. Load log policy into runtime
+  try {
+    const policyEntry = await stores.atomic.get<any>('_sys:log-policy');
+    if (policyEntry) setActivePolicy(policyEntry.value);
+  } catch (err: unknown) { console.error('[init] Failed to load log policy:', err instanceof Error ? err.message : err); }
 
   // 5d. Bridge EventBus → WebSocket DOs for real-time notifications
   const notifDONamespace = platformBindings?.['NOTIFICATION_DO'] as DurableObjectNamespace | undefined;
@@ -191,7 +193,10 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
     await next();
   });
   app.use('*', secureHeaders());
-  app.use('*', cors());
+  app.use('*', cors({
+    origin: config.cors?.origins ?? ['http://localhost:8086'],
+    credentials: true,
+  }));
   app.use('*', bodyLimit({ maxSize: 5 * 1024 * 1024 }));  // 5 MB
   app.use('*', jsonDepthLimit(10));                   // max JSON nesting
   app.use('*', rateLimit({
@@ -201,6 +206,9 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
     ...(config.rateLimit?.bypassIps ? { bypassIps: config.rateLimit.bypassIps } : {}),
     ...(config.rateLimit?.bypassToken ? { bypassToken: config.rateLimit.bypassToken } : {}),
   }));
+  if (config.rateLimit?.enabled === false) {
+    console.warn('[app] RATE LIMITING DISABLED — not suitable for production');
+  }
   app.onError(globalErrorHandler);
 
   // 8. Inject context variables (with per-request atomic store cache)
@@ -216,6 +224,9 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
     c.set('queueProducer', queueProducer);
     await next();
   });
+
+  // Idempotency: replay protection for mutation endpoints (requires c.var.stores)
+  app.use('*', idempotency());
 
   // 9. Dev-only: localhost → add user to the seed 'wheel' group (bypasses auth)
   // NOTE: This adds to wheel group ONLY. Does NOT elevate role to 'root'.
