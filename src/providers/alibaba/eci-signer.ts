@@ -23,7 +23,7 @@ export async function rpcCall(
   action: string,
   params: RpcParams,
 ): Promise<any> {
-  const aksk = new AkSkProvider(accessKeyId, accessKeySecret);
+  const aksk = AkSkProvider.getOrCreate(accessKeyId, accessKeySecret);
 
   // Build query params for the specific action
   const queryEntries = Object.entries({

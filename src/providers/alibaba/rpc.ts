@@ -34,7 +34,7 @@ export async function rpcCall(
   version: string,
   params: RpcParams,
 ): Promise<any> {
-  const aksk = new AkSkProvider(accessKeyId, accessKeySecret);
+  const aksk = AkSkProvider.getOrCreate(accessKeyId, accessKeySecret);
 
   const queryEntries = Object.entries({
     Action: action,

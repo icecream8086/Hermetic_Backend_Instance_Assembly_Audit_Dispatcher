@@ -102,4 +102,12 @@ export interface AppConfig {
   cors?: CorsConfig | undefined;
   /** Audit backend config — defaults to 'local' in dev, 'workers' in production. */
   audit?: AuditConfig | undefined;
+  /** Rate limit config (optional overrides for middleware). */
+  rateLimit?: {
+    enabled?: boolean;
+    windowMs?: number;
+    maxRequests?: number;
+    bypassIps?: string[];
+    bypassToken?: string;
+  };
 }

@@ -40,6 +40,9 @@ const GC_MARKER_TTL_MS = 120_000;
 export function registerHealthCheck(deps: HealthCheckDeps): void {
   const { stores, providers, eventBus, eventLoop, audit, queueProducer } = deps;
 
+  /** Track last stable updatedAt per sandbox to skip redundant provider.getStatus() calls. */
+  const stableSince = new Map<string, number>();
+
   eventBus.on('health:check', async () => {
     try {
       const idx = await stores.atomic.get<string[]>('sandbox:ids');
@@ -85,7 +88,11 @@ export function registerHealthCheck(deps: HealthCheckDeps): void {
           if (entry.value.status !== SandboxStatus.Running) continue;
 
           const maxRetries = entry.value.config.healthMaxRetries ?? 3;
-          if (maxRetries === -1) continue;
+          if (maxRetries === -1) { stableSince.delete(sid); continue; }
+
+          // Skip provider check if sandbox hasn't changed since last healthy check
+          const lastStableAt = stableSince.get(sid);
+          if (lastStableAt !== undefined && entry.value.updatedAt <= lastStableAt) continue;
 
           const containerProvider = instanceId
             ? await providers.resolveContainer?.(instanceId as any)
@@ -95,6 +102,7 @@ export function registerHealthCheck(deps: HealthCheckDeps): void {
 
           const runtime = await provider.getStatus(entry.value.providerId ?? sid);
           if (!runtime) {
+            stableSince.delete(sid);
             await dispatchGc(stores.atomic, queueProducer, providers, audit, {
               sandboxId: sid, reason: 'provider-gone',
               providerId: entry.value.providerId ?? sid,
@@ -111,6 +119,7 @@ export function registerHealthCheck(deps: HealthCheckDeps): void {
           const failKey = `health:fails:${sid}`;
 
           if (!anyRunning) {
+            stableSince.delete(sid);
             await dispatchGc(stores.atomic, queueProducer, providers, audit, {
               sandboxId: sid, reason: 'exited-gc',
               providerId: entry.value.providerId ?? sid,
@@ -125,11 +134,15 @@ export function registerHealthCheck(deps: HealthCheckDeps): void {
           if (allHealthy) {
             const failEntry = await stores.atomic.get<number>(failKey);
             if (failEntry) await stores.atomic.set(failKey, 0, failEntry.version);
+            // Mark as stable — skip provider check next tick if unchanged
+            stableSince.set(sid, entry.value.updatedAt);
           } else {
+            stableSince.delete(sid); // unhealthy — re-check next tick
             const failEntry = await stores.atomic.get<number>(failKey);
             const fails = (failEntry?.value ?? 0) + 1;
             await stores.atomic.set(failKey, fails, failEntry?.version ?? null);
             if (fails >= maxRetries) {
+              stableSince.delete(sid);
               await dispatchGc(stores.atomic, queueProducer, providers, audit, {
                 sandboxId: sid, reason: 'unhealthy-gc',
                 providerId: entry.value.providerId ?? sid,

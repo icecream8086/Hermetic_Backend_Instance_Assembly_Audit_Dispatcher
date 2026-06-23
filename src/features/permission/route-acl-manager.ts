@@ -22,13 +22,26 @@ function routeMatches(method: string, path: string, acl: RouteAcl): boolean {
 
 export class RouteAclManager {
   private readonly store: CrudStore<RouteAcl>;
+  private readonly atomic: IAtomicStore;
+  /** Cache of sorted ACLs with store version for cross-instance coherency. */
+  #cachedAclsVersion = -1;
+  #cachedAcls: readonly RouteAcl[] | null = null;
+  static readonly VERSION_KEY = 'routeacl:version';
 
   constructor(
     _atomic: IAtomicStore,
     private readonly logger: ILogWriter,
     private readonly audit?: IAuditWriter,
   ) {
+    this.atomic = _atomic;
     this.store = new CrudStore<RouteAcl>(_atomic, 'routeacl:', 'routeacl:ids', 'ROUTEACL_NOT_FOUND');
+  }
+
+  /** Bump the global version so all RouteAclManager instances see the mutation. */
+  async #bumpVersion(): Promise<void> {
+    this.#cachedAcls = null;
+    const entry = await this.atomic.get<number>(RouteAclManager.VERSION_KEY);
+    await this.atomic.set(RouteAclManager.VERSION_KEY, (entry?.value ?? 0) + 1, entry?.version ?? null);
   }
 
   async create(input: CreateRouteAclInput, actor?: AuditActor): Promise<RouteAcl> {
@@ -41,6 +54,7 @@ export class RouteAclManager {
       createdAt: Date.now(), updatedAt: Date.now(),
     };
     await this.store.insert(acl);
+    await this.#bumpVersion();
     permLogAudit(this.logger, this.audit, 'perm.routeAcl.created', actor, { entityType: 'routeAcl', entityId: id, newValue: acl }, KernLevel.INFO);
     return acl;
   }
@@ -57,6 +71,7 @@ export class RouteAclManager {
       updatedAt: Date.now(),
     });
     await this.store.commitUpdate(id, updated);
+    await this.#bumpVersion();
     permLogAudit(this.logger, this.audit, 'perm.routeAcl.updated', actor, { entityType: 'routeAcl', entityId: id, changes: { old, new: updated } }, KernLevel.WARNING);
     return updated;
   }
@@ -65,13 +80,25 @@ export class RouteAclManager {
     const old = await this.store.get(id);
     if (!old) throw new AppError(404, 'ROUTEACL_NOT_FOUND', 'Route ACL not found');
     await this.store.delete(id);
+    await this.#bumpVersion();
     permLogAudit(this.logger, this.audit, 'perm.routeAcl.deleted', actor, { entityType: 'routeAcl', entityId: id, oldValue: old }, KernLevel.NOTICE);
   }
 
+  /** Load ACLs, refreshing cache only when store version changes (cross-instance safe). */
+  async #loadCachedAcls(): Promise<readonly RouteAcl[]> {
+    const verEntry = await this.atomic.get<number>(RouteAclManager.VERSION_KEY);
+    const currentVersion = verEntry?.value ?? 0;
+    if (this.#cachedAcls === null || this.#cachedAclsVersion !== currentVersion) {
+      const raw = await this.store.list();
+      this.#cachedAcls = [...raw].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
+      this.#cachedAclsVersion = currentVersion;
+    }
+    return this.#cachedAcls;
+  }
+
   async checkAccess(method: string, path: string, userId: string, userGroupIds: string[]): Promise<boolean> {
-    const acls = await this.store.list();
-    // deny rules evaluated first (default-deny on match)
-    for (const acl of acls.sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))) {
+    const acls = await this.#loadCachedAcls();
+    for (const acl of acls) {
       if (!routeMatches(method, path, acl)) continue;
       const matchesUser = !acl.userId || acl.userId === userId;
       const matchesGroup = !acl.userGroupId || userGroupIds.includes(acl.userGroupId);

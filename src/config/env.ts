@@ -129,6 +129,10 @@ export function loadConfig(overrides?: Partial<AppConfig>): AppConfig {
 
   const corsOriginsRaw = process.env['CORS_ORIGINS'] ?? 'http://localhost:8086';
 
+  const rateLimitEnabled = process.env['RATE_LIMIT_ENABLED'];
+  const rateLimitBypassIpsRaw = process.env['RATE_LIMIT_BYPASS_IPS'];
+  const rateLimitBypassToken = process.env['RATE_LIMIT_BYPASS_TOKEN'] || undefined;
+
   return {
     storage: storageConfig,
     log: logConfig,
@@ -145,5 +149,10 @@ export function loadConfig(overrides?: Partial<AppConfig>): AppConfig {
     features: overrides?.features ?? {},
     authz: overrides?.authz,
     cors: overrides?.cors ?? { origins: corsOriginsRaw.split(',').map(s => s.trim()).filter(Boolean) },
+    rateLimit: {
+      ...(rateLimitEnabled !== undefined ? { enabled: rateLimitEnabled !== 'false' } : {}),
+      ...(rateLimitBypassIpsRaw !== undefined ? { bypassIps: rateLimitBypassIpsRaw.split(/[\s,]+/).map(s => s.trim()).filter(Boolean) } : {}),
+      ...(rateLimitBypassToken ? { bypassToken: rateLimitBypassToken } : {}),
+    },
   };
 }

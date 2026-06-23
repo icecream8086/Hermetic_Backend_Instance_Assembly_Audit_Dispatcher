@@ -101,6 +101,19 @@ async function signAlibabaRpc(
 export class AkSkProvider implements IAuthProvider {
   readonly type = 'aksk';
 
+  /** Cache of stateless AkSkProvider instances, keyed by accessKeyId. */
+  static #cache = new Map<string, AkSkProvider>();
+
+  /** Get or create a cached instance. AkSkProvider is effectively stateless — reuse is safe. */
+  static getOrCreate(accessKeyId: string, accessKeySecret: string, region?: string, endpoint?: string): AkSkProvider {
+    let p = AkSkProvider.#cache.get(accessKeyId);
+    if (!p) {
+      p = new AkSkProvider(accessKeyId, accessKeySecret, region, endpoint);
+      AkSkProvider.#cache.set(accessKeyId, p);
+    }
+    return p;
+  }
+
   constructor(
     readonly _accessKeyId: string,
     readonly _accessKeySecret: string,

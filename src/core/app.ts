@@ -194,7 +194,13 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
   app.use('*', cors());
   app.use('*', bodyLimit({ maxSize: 5 * 1024 * 1024 }));  // 5 MB
   app.use('*', jsonDepthLimit(10));                   // max JSON nesting
-  app.use('*', rateLimit({ windowMs: 60_000, maxRequests: 100 }));
+  app.use('*', rateLimit({
+    windowMs: config.rateLimit?.windowMs ?? 60_000,
+    maxRequests: config.rateLimit?.maxRequests ?? 100,
+    ...(config.rateLimit?.enabled !== undefined ? { enabled: config.rateLimit.enabled } : {}),
+    ...(config.rateLimit?.bypassIps ? { bypassIps: config.rateLimit.bypassIps } : {}),
+    ...(config.rateLimit?.bypassToken ? { bypassToken: config.rateLimit.bypassToken } : {}),
+  }));
   app.onError(globalErrorHandler);
 
   // 8. Inject context variables (with per-request atomic store cache)

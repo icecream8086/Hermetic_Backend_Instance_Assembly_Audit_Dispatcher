@@ -46,13 +46,15 @@ import type { InstanceService } from '../../core/region/instance.ts';
 import type { IMessageQueue } from '../../queue/interfaces.ts';
 import { mapEnvVars, mapPorts, mapVolumeMounts, mapVolumes, mapTags, mapNetwork } from '../../core/provider/mapper.ts';
 import { QuotaService } from './quota.ts';
+import { SandboxStore } from './sandbox-store.ts';
 
 const FACILITY = createFacility('sandbox-service');
 const KEY_PREFIX = 'sandbox:';
-const INDEX_KEY = 'sandbox:ids';
 // ─── Service ───
 
 export class SandboxService implements ISandboxService {
+  private readonly store: SandboxStore;
+
   constructor(
     private readonly atomic: IAtomicStore,
     private readonly logger: ILogWriter,
@@ -65,7 +67,9 @@ export class SandboxService implements ISandboxService {
     /** Optional: resolve ComputeInstance by ID to get endpoint/capabilities. */
     private readonly instanceService?: InstanceService | undefined,
     private readonly queueProducer?: IMessageQueue,
-  ) {}
+  ) {
+    this.store = new SandboxStore(atomic);
+  }
 
   async #enqueueGcRetry(id: string, sandbox: Sandbox): Promise<void> {
     if (!this.queueProducer?.sendSandboxGc) return;
@@ -162,8 +166,7 @@ export class SandboxService implements ISandboxService {
     if (!created) throw new AppError(500, 'CREATE_FAILED', 'Failed to persist initial sandbox state');
 
     // Add to sandbox ID index
-    const idx = await this.atomic.get<string[]>(INDEX_KEY);
-    await this.atomic.set(INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
+    await this.store.addToIndex(id as string);
 
     // 2. Build provider input (with merged VNet + cluster settings) and create cloud resource
     const clusterEnriched = resolvedInst
@@ -280,37 +283,11 @@ export class SandboxService implements ISandboxService {
   }
 
   async getById(id: SandboxId): Promise<Sandbox | null> {
-    const entry = await this.atomic.get<Sandbox>(`${KEY_PREFIX}${id}`);
-    return entry?.value ?? null;
+    return this.store.getById(id);
   }
 
   async list(status?: SandboxStatus, limit = 50, cursor?: string): Promise<{ items: Sandbox[]; nextCursor?: string }> {
-    const idx = await this.atomic.get<string[]>(INDEX_KEY);
-    if (!idx) return { items: [] };
-
-    let ids = idx.value;
-    // Apply cursor (array index)
-    const startIdx = cursor ? parseInt(cursor, 10) : 0;
-    if (isNaN(startIdx) || startIdx >= ids.length) return { items: [] };
-
-    ids = ids.slice(startIdx, startIdx + limit);
-
-    const entries = await Promise.all(
-      ids.map(id => this.atomic.get<Sandbox>(`${KEY_PREFIX}${id}`)),
-    );
-
-    let items = entries.filter(e => e !== null).map(e => e!.value);
-
-    // Optional status filter
-    if (status) {
-      items = items.filter(s => s.status === status);
-    }
-
-    const nextCursorVal = startIdx + limit < (idx?.value.length ?? 0)
-      ? String(startIdx + limit)
-      : undefined;
-
-    return { items, ...(nextCursorVal !== undefined ? { nextCursor: nextCursorVal } : {}) };
+    return this.store.list(status, limit, cursor);
   }
 
   async stop(id: SandboxId): Promise<Sandbox> {
@@ -374,8 +351,7 @@ export class SandboxService implements ISandboxService {
     await this.transition(id, SandboxStatus.Deleted, 'user requested termination', actorId);
 
     // Remove from sandbox ID index
-    const idx = await this.atomic.get<string[]>(INDEX_KEY);
-    if (idx) await this.atomic.set(INDEX_KEY, idx.value.filter((i: string) => i !== id), idx.version);
+    await this.store.removeFromIndex(id as string);
 
     await this.logger.logAsync({
       facility: FACILITY,
@@ -511,54 +487,43 @@ export class SandboxService implements ISandboxService {
   }
 
   private async transition(id: SandboxId, to: SandboxStatus, reason: string, actorId?: string): Promise<Sandbox> {
-    const entry = await this.atomic.get<Sandbox>(`${KEY_PREFIX}${id}`);
-    if (!entry) throw new AppError(404, 'SANDBOX_NOT_FOUND', `Sandbox ${id} not found`);
+    const before = await this.store.getById(id);
+    const fromStatus = before?.status ?? SandboxStatus.Deleted;
+    const createdAt = before?.createdAt ?? Date.now();
 
-    const from = entry.value;
-    if (!isValidTransition(from.status, to)) {
-      throw new AppError(409, 'INVALID_TRANSITION', `Cannot transition from ${from.status} to ${to}`);
-    }
+    const updated = await this.store.transition(id, to);
 
-    const updated: Sandbox = {
-      ...from,
-      status: to,
-      updatedAt: Date.now(),
-      version: generateVersionId(),
-    };
-
-    const newVersion = await this.atomic.set(`${KEY_PREFIX}${id}`, updated, entry.version);
-    if (!newVersion) throw new AppError(409, 'CONFLICT', 'Concurrent modification detected');
-
-    const uptime = Date.now() - from.createdAt;
+    const uptime = Date.now() - createdAt;
+    const sandbox = (await this.store.getById(id)) ?? updated;
     const meta = {
       eventType: 'sandbox.transition' as const,
       sandboxId: id as string,
-      name: from.name,
-      from: from.status,
+      name: sandbox.name,
+      from: fromStatus,
       to,
       reason,
-      providerId: from.providerId ?? '',
-      containers: from.containers.length,
-      createdAt: from.createdAt,
+      providerId: sandbox.providerId ?? '',
+      containers: sandbox.containers.length,
+      createdAt,
       uptimeMs: uptime,
       actorId: actorId ?? '',
     };
     await this.logger.logAsync({
       facility: FACILITY, level: LogLevel.NOTICE,
-      message: `sandbox ${from.status}→${to} name=${from.name} provider=${from.providerId ?? ''} containers=${from.containers.length} uptime=${uptime}ms reason=${reason}`,
+      message: `sandbox ${fromStatus}→${to} name=${sandbox.name} provider=${sandbox.providerId ?? ''} containers=${sandbox.containers.length} uptime=${uptime}ms reason=${reason}`,
       actorId,
       metadata: meta,
     });
     this.audit?.write({
       level: KernLevel.INFO, facility: FACILITY,
-      message: `Sandbox ${from.status} → ${to} — ${reason}`,
+      message: `Sandbox ${fromStatus} → ${to} — ${reason}`,
       actorId,
       metadata: meta,
     });
 
     this.eventBus?.dispatch(createEvent('sandbox.status', {
       sandboxId: id as string,
-      fromStatus: from.status,
+      fromStatus,
       toStatus: to,
       reason,
     }));
