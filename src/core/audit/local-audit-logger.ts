@@ -1,4 +1,4 @@
-import type { IAuditWriter, IAuditReader, AuditEntry, StoredAuditEntry, LogQuery } from './types.ts';
+import type { IAuditWriter, IAuditReader, IAuditAdmin, AuditEntry, StoredAuditEntry, LogQuery } from './types.ts';
 import type { LogId } from '../brand.ts';
 import { generateLogId } from '../brand.ts';
 import { shouldLogAudit } from './log-policy.ts';
@@ -7,7 +7,7 @@ import { formatDmesgLine } from '../utils/dmesg.ts';
 
 const MAX_ENTRIES = 2000;
 
-export class LocalAuditLogger implements IAuditWriter, IAuditReader {
+export class LocalAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
   readonly #entries: StoredAuditEntry[] = [];
   readonly #capacity: number;
 
@@ -58,5 +58,27 @@ export class LocalAuditLogger implements IAuditWriter, IAuditReader {
 
   stats(): { count: number; capacity: number } {
     return { count: this.#entries.length, capacity: this.#capacity };
+  }
+
+  // ─── IAuditAdmin ───
+  async forceSetTail(_facility: any, _tailId: any): Promise<void> {}
+
+
+
+  async prune(beforeTs: number): Promise<number> {
+    const kept = this.#entries.filter(e => e.timestamp >= beforeTs);
+    const removed = this.#entries.length - kept.length;
+    this.#entries.length = 0;
+    this.#entries.push(...kept);
+    return removed;
+  }
+
+  async pruneByIds(ids: readonly string[]): Promise<number> {
+    const idSet = new Set(ids);
+    const before = this.#entries.length;
+    const kept = this.#entries.filter(e => !idSet.has(e.id));
+    this.#entries.length = 0;
+    this.#entries.push(...kept);
+    return before - kept.length;
   }
 }

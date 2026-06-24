@@ -1,4 +1,4 @@
-import type { IAuditWriter, IAuditReader, AuditEntry, StoredAuditEntry, LogQuery } from './types.ts';
+import type { IAuditWriter, IAuditReader, IAuditAdmin, AuditEntry, StoredAuditEntry, LogQuery } from './types.ts';
 import type { LogId } from '../brand.ts';
 import { KernLevel, kernLevelName, resolveFacility, encodePriority } from './kern-level.ts';
 import { shouldLogAudit } from './log-policy.ts';
@@ -9,7 +9,7 @@ import { shouldLogAudit } from './log-policy.ts';
  * Write: console.log/warn/error → Workers Logs (Cloudflare platform collection)
  * Query: forwarding layer — does not store logs locally.
  */
-export class WorkersAuditLogger implements IAuditWriter, IAuditReader {
+export class WorkersAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
   async write(entry: AuditEntry): Promise<void> {
     this.#output(entry);
   }
@@ -48,4 +48,8 @@ export class WorkersAuditLogger implements IAuditWriter, IAuditReader {
   async getById(_id: LogId): Promise<StoredAuditEntry | null> {
     return null;
   }
+
+  async forceSetTail(_facility: any, _tailId: any): Promise<void> {}
+  async prune(_beforeTs: number): Promise<number> { return 0; }
+  async pruneByIds(_ids: readonly string[]): Promise<number> { return 0; }
 }

@@ -29,6 +29,13 @@ import {
   createWorkflowDefId,
 } from './types.ts';
 
+// ─── DAG Scheduler integration ───
+import { DagScheduler } from '../../core/scheduler/dag-scheduler.ts';
+import { SetIntervalBackend } from '../../core/scheduler/set-interval-backend.ts';
+import { StoreSchedulerContext } from './scheduler-context.ts';
+import { JobOperator } from './job-operator.ts';
+import { buildDagFromWorkflow, createDagRunFromTrigger } from './dag-builder.ts';
+
 export function createActionsRouter(deps: FeatureDeps): Hono<any> {
   const router = new Hono();
   const atomic = deps.stores.atomic;
@@ -47,6 +54,28 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
     eventBus: deps.eventBus,
     actionRegistry,
   });
+
+  // ── DAG Scheduler setup ──
+  const schedulerCtx = new StoreSchedulerContext(atomic);
+
+  const jobOperator = new JobOperator({
+    stores: { blob },
+    providers: {
+      dns: deps.providers.dns,
+      resolveContainer: deps.providers.resolveContainer?.bind(deps.providers),
+    },
+    audit: deps.audit,
+    eventBus: deps.eventBus,
+    actionRegistry,
+  });
+  schedulerCtx.registerExecutor(jobOperator);
+
+  const dagScheduler = new DagScheduler(
+    schedulerCtx,
+    new SetIntervalBackend(),
+    { intervalMs: 5000, parallelism: 4, autoStart: true },
+  );
+  dagScheduler.start();
 
   const guard = (action: string, resource: string) =>
     async (c: any, next: () => Promise<void>) => {
@@ -203,6 +232,40 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
     const run = await runner.startRun(entry.value, 'http', payload, inputs,
       (c as any).get?.('userId'));
     return c.json(ok(run), 201);
+  });
+
+  /** Scheduler-based trigger: POST /api/actions/workflows/:id/schedule
+   *  Converts WorkflowDef → DagDef → DagRun and submits to the Airflow-style
+   *  scheduler. The scheduler handles dependency resolution, concurrency, and
+   *  retries via TriggerRule + 5-step filter. */
+  router.post('/workflows/:id/schedule', guard('execute', 'action:workflow'), async (c) => {
+    const wid = c.req.param('id');
+    const entry = await atomic.get<WorkflowDef>(PFX_WORKFLOW_DEF + wid);
+    if (!entry) throw new AppError(404, 'WORKFLOW_NOT_FOUND', 'Workflow not found');
+
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = TriggerWorkflowSchema.safeParse(body);
+    const inputs = parsed.success && parsed.data.inputs ? parsed.data.inputs : {};
+
+    // Build DAG and persist
+    const { dag } = buildDagFromWorkflow(entry.value);
+    await schedulerCtx.saveDagDef(dag);
+
+    // Create DagRun
+    const dagRun = createDagRunFromTrigger(
+      dag.id, 'manual', undefined, inputs,
+      (c as any).get?.('userId'),
+    );
+    const run: any = { ...dagRun, version: generateVersionId() };
+    await schedulerCtx.saveNewDagRun(run);
+
+    deps.audit.write({
+      level: 5, facility: 'dag-scheduler',
+      message: `DagRun ${run.id} created via scheduler for workflow ${entry.value.name}`,
+      metadata: { dagId: dag.id, dagRunId: run.id, trigger: 'manual', taskCount: dag.tasks.length },
+    } as any);
+
+    return c.json(ok({ dagRunId: run.id, dagId: dag.id, status: run.status, taskCount: dag.tasks.length }), 201);
   });
 
   /** Generic webhook endpoint: POST /api/actions/webhook

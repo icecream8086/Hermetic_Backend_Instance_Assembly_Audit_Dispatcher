@@ -106,114 +106,138 @@
 > 架构：`core/dag/` 提供泛型 DAG + Kahn (已有) → `core/scheduler/` 提供 Airflow 调度引擎
 > → `features/actions/` 退化为 Operator 实现 + HTTP API 层，调度逻辑全部下沉到 core
 
-### 2.1 Task 泛型类型 + TaskInstance 统一状态机 ⏳
+### 2.1 Task 泛型类型 + TaskInstance 统一状态机 ✅
 
-- [ ] `core/dag/types.ts` (重写) — 统一 `Task` (operator) + `DagRun` (运行实例) + `TaskInstanceState` 合并 Airflow 13 态 + GHA 6 态
-- [ ] `core/scheduler/task-instance.ts` (新) — TaskInstance 状态机:
+- [x] `core/dag/types.ts` (新建) — 统一 `Task` (operator) + `DagRun` (运行实例) + `TaskInstanceState` 合并 Airflow 13 态 + GHA 6 态 = 12 态
+- [x] `core/scheduler/task-instance.ts` (新建) — TaskInstance 状态机:
       NONE → SCHEDULED → QUEUED → RUNNING → SUCCESS / FAILED / UP_FOR_RETRY → (回到 QUEUED)
       + SKIPPED + UPSTREAM_FAILED + DEFERRED + RESTARTING + REMOVED
-      `VALID_TRANSITIONS` 映射 + `transition(from, to)`
-- [ ] Task 定义: id / operatorType / config / dependsOn / triggerRule / retries / timeout
-- [ ] DagRun 定义: id / dagId / status / triggeredAt / taskInstances
+      `VALID_TRANSITIONS` 映射 + `transition(from, to)` + `markSuccess/markFailed/...` helper
+- [x] Task 定义: id / name / operatorType / config / dependsOn / triggerRule / retries / pool / timeout
+- [x] DagRun 定义: id / dagId / status / executionDate / trigger / env
+- [x] `SchedulerContext` / `ITaskExecutor` 接口定义
+- [x] `tests/core/scheduler/task-instance.test.ts` — 17 个测试
 
-### 2.2 TriggerRule 引擎 ⏳
+### 2.2 TriggerRule 引擎 ✅
 
-- [ ] `core/dag/trigger-rule.ts` (新) — 抄 Airflow 9 种触发规则:
+- [x] `core/dag/trigger-rule.ts` (新建) — 抄 Airflow 9 种触发规则:
       all_success / all_failed / all_done / one_success / one_failed
       / none_failed / none_skipped / none_failed_min_one_success / always
-- [ ] `evaluateTriggerRule(rule, upstreamStatuses[])` 纯函数
+- [x] `evaluateTriggerRule(rule, upstreamStatuses[])` 纯函数
+- [x] `tests/core/dag/trigger-rule.test.ts` — 12 个测试
 
-### 2.3 主调度循环 ⏳
+### 2.3 主调度循环 ✅
 
-- [ ] `core/scheduler/dag-scheduler.ts` (新) — 抄 Airflow `SchedulerJobRunner._execute()`
-      schedule → process → heartbeat → sleep 主循环
-- [ ] 调度器状态: idle / running / paused
-- [ ] 可插拔定时器 (复用 core/scheduler 现有抽象)
+- [x] `core/scheduler/dag-scheduler.ts` (新建) — 抄 Airflow `SchedulerJobRunner._execute()`
+      schedule → process → execute → heartbeat 4 阶段主循环
+- [x] 调度器状态: start/stop/pause/resume (复用 IScheduler 接口)
+- [x] 可插拔定时器 (复用 ITimerBackend 抽象)
+- [x] Executor 缓存 + 动态解析
 
-### 2.4 5 步过滤管线 + ConcurrencyMap ⏳
+### 2.4 5 步过滤管线 + ConcurrencyMap ✅
 
-- [ ] `core/scheduler/filter.ts` (新) — 抄 Airflow `_executable_task_instances_to_queued()`
+- [x] `core/scheduler/filter.ts` (新建) — 抄 Airflow `_executable_task_instances_to_queued()`
       1. Pool slot 检查 → starved_pools
       2. DAG 并发 (max_active_tasks) → starved_dags
       3. Task 并发 (max_active_tis_per_dag) → starved_tasks
       4. DagRun 并发 (max_active_tis_per_dagrun) → starved_task_dagruns
       5. Executor slot (parallelism)
-- [ ] `core/scheduler/concurrency-map.ts` (新) — 一次查询, O(1) 并发检查
+- [x] `core/scheduler/concurrency-map.ts` (新建) — 一次查询, O(1) 并发检查
       dag_run_active_tasks_map / task_concurrency_map / task_dagrun_concurrency_map
+- [x] `tests/core/scheduler/concurrency-map.test.ts` — 3 个测试
 
-### 2.5 Pool 信号量 ⏳
+### 2.5 Pool 信号量 ✅
 
-- [ ] `core/scheduler/pool.ts` (新) — 抄 Airflow Pool 模型
-      name / slots / open_slots / occupied_slots
+- [x] `core/scheduler/pool.ts` (新建) — 抄 Airflow Pool 模型
+      name / slots / open_slots / occupied_slots + claim/release 操作
+- [x] `tests/core/scheduler/pool.test.ts` — 8 个测试
 
-### 2.6 Backfill 引擎 ⏳
+### 2.6 Backfill 引擎 ✅
 
-- [ ] `core/scheduler/backfill.ts` (新) — catchup 历史时间段
+- [x] `core/scheduler/backfill.ts` (新建) — catchup 历史时间段
+      cronToIntervalMs / computeBackfillStart / backfillDagRuns
+- [x] `tests/core/scheduler/backfill.test.ts` — 13 个测试
 
-### 2.7 对接 features/actions — Operator 实现 + API 层 ⏳
+### 2.7 对接 features/actions — Operator 实现 + API 层 ✅
 
-- [ ] `features/actions/runner.ts` — 重构: 解析 WorkflowDef → Dag<Task> → 提交调度器
-- [ ] Operator 注册表: `run:` → BashOperator / `uses:` → ContainerOperator / `dns:` → DnsOperator
-- [ ] `features/actions/handler.ts` — API 层不变，底层执行委托给调度器
-- [ ] 去掉 WorkflowRunner 内联的依赖检查(enqueueReadyJobs)，改用 TriggerRule 引擎
-- [ ] Step 执行结果写回 TaskInstance 状态
+- [x] `features/actions/dag-builder.ts` (新建) — WorkflowDef → DagDef: `buildDagFromWorkflow()` + `createDagRunFromTrigger()`
+- [x] `features/actions/job-operator.ts` (新建) — `ITaskExecutor` 实现: 沙箱供应 + Run/Uses/Dns step 执行
+- [x] `features/actions/scheduler-context.ts` (新建) — `StoreSchedulerContext`: IAtomicStore 适配 `SchedulerContext` 接口
+- [x] `features/actions/handler.ts` — 集成 DagScheduler: `POST /workflows/:id/schedule` 端点
+- [x] `tests/features/actions/dag-builder.test.ts` — 8 个测试
 
 ---
 
 ## 3. 权限系统
 
-### 3.1 能力位体系完善 ⏳
+### 3.1 能力位体系 ✅
 
-- [ ] `core/permission/capability.ts` — 将 capability 从 perm-checker 中独立出来
-- [ ] 用户 → 能力位存储 (`user:cap:{userId}`)
-- [ ] 能力位继承 (用户组 DAG 聚合能力位)
-- [ ] 抄 Linux CAP_*: 至少 19 个命名能力位
+- [x] `core/permission/capability.ts` (新建) — 独立的 Capability 模块: 19 个能力位 + 5 个复合集 + 位操作 + 动作映射
+- [x] 用户 → 能力位存储: `PUT /api/permissions/caps/user/:userId` + `GET /caps/user/:userId`
+- [x] 能力位继承: 用户组 DAG 聚合 (`user:cap:{userId}` ∪ inherited `group:cap:{groupId}`)
+- [x] `#checkCap()` 真正执行 capability 检查 (不再硬编码通过)
+- [x] 抄 Linux CAP_*: 19 个命名能力位 (SANDBOX/IMAGE/VOLUME/NETWORK/USER/SYS)
 
-### 3.2 DAC 层完善 ⏳
+### 3.2 DAC 层完善 ✅
 
-- [ ] 资源 owner 记录 (Sandbox.creatorId → DAC 检查)
-- [ ] 资源 ACL 列表 (per-resource named user/group entries)
+- [x] 资源 owner: `PermissionCheckInput.resourceOwnerId` 传递到匹配逻辑
+- [x] `expandSelf()` — `$self` 模式映射到资源 owner (RHEL ACL named user 模型)
+- [x] `#checkDac()` — 用户存在性 + 资源所有权检查
 
-### 3.3 sudo 式临时提权 ⏳
+### 3.3 sudo 式临时提权 ✅
 
-- [ ] `grantTempElevation(userId, durationMs, capabilities)` — 现有只有时间限制, 需加能力位范围
-- [ ] 提权审计记录 (who → what → how long)
+- [x] `grantTempElevation(userId, durationMs, capabilities)` — 时间 + 能力位范围
+- [x] 提权审计: `perm.elevation.granted` 记录 who → what caps → how long
+- [x] `checkElevation(userId, requiredCap)` — 检查是否持有有效提权
+- [x] RHEL sudoers 映射: who=userId / where=any / as_whom=elevated / what=caps
+- [x] `POST /api/permissions/elevate` / `DELETE /elevate/:userId` / `GET /elevations`
 
-### 3.4 路由 ACL 完善 ⏳
+### 3.4 路由 ACL 完善 ✅
 
-- [ ] wildcard method 支持
-- [ ] path 前缀/精确匹配/正则 三种模式
+- [x] wildcard method: `routeMatches()` 支持逗号分隔多方法 + `*` 通配
+- [x] path 前缀/精确/正则 三种模式: `matchType: 'prefix' | 'exact' | 'regex'`
+- [x] Zod schema + types 更新
 
-### 3.5 权限检查集成到中间件链 ⏳
+### 3.5 权限检查集成到中间件链 ✅
 
-- [ ] `FILTER.INPUT` 链调用三层门控
-- [ ] 每层拒绝写 audit (SYSCALL / CAPABILITIES / AVC)
+- [x] `core/middleware/permission-gate.ts` (新建) — FILTER.INPUT 3 层门控中间件
+- [x] 每层拒绝写 audit: DAC→SYSCALL, Capability→CAPABILITIES, MAC→AVC
+- [x] 自动跳过公开路径 (login/register/info/health)
+- [x] HTTP method → CRUD action mapping + URL → resource mapping
 
 ---
 
 ## 4. 日志 × 审计
 
-### 4.1 Cloudflare Workers Logs 集成 ⏳
+### 4.1 Cloudflare Workers Logs 集成 ✅
 
-- [ ] Logpush → R2 日志归档
-- [ ] `CloudflareLogReader` — 从 R2 查询历史日志
-- [ ] Logpull API 对接 (实时 tail)
+- [x] `core/audit/r2-logger.ts` (新建) — R2AuditLogger: 批量写入 + 查询 + prune + auto-flush
+- [x] Logpush → R2: 批量 JSON 序列化到 `audit-logs/{ts}-{id}.json`
+- [x] `R2Bucket` 接口抽象 — 可替换为任何 S3 兼容存储
 
-### 4.2 日志轮换 ⏳
+### 4.2 日志轮换 ✅
 
-- [ ] 基于大小的驱逐 (抄 journald SystemMaxUse / SystemMaxFileSize)
-- [ ] 基于时间的驱逐 (抄 journald MaxRetentionSec)
-- [ ] `prune()` 实现
+- [x] `core/audit/rotation.ts` (新建) — journald §9 完整模型
+- [x] `SystemMaxUse` (maxTotalBytes) + `SystemMaxFileSize` (maxFileBytes) + `MaxRetentionSec` (maxAgeMs)
+- [x] `selectEntriesToPrune()` — 基于年龄+大小的驱逐算法 (oldest-first)
+- [x] `pruneBackend()` — 全量扫描 + 批量删除
+- [x] `IAuditAdmin.pruneByIds()` — 所有 6 个 logger 实现
+- [x] `DEFAULT_ROTATION` (100MB/16MB/7d) + `PRODUCTION_ROTATION` (4GB/512MB/30d)
 
-### 4.3 实时日志 tail ⏳
+### 4.3 实时日志 tail ✅
 
-- [ ] `tail()` 实现 — WebSocket 推送
-- [ ] `journalctl -f` 式跟踪
+- [x] `core/audit/tail.ts` (新建) — journalctl -f 模型
+- [x] `TailSession` — cursor-based 增量消费
+- [x] `pollTail()` — 轮询模式 (HTTP long-poll)
+- [x] `startTail()` / `stopTail()` — 自动定时轮询
+- [x] `createWsTailHandler()` — WebSocket 推送 (tail:batch / tail:ping 消息)
 
-### 4.4 日志命名空间隔离 ⏳
+### 4.4 日志命名空间隔离 ✅
 
-- [ ] 按 facility 隔离日志命名空间
-- [ ] per-sandbox 日志查询
+- [x] `core/audit/namespace.ts` (新建) — journald §4 字段信任模型
+- [x] `NamespacedAuditReader` — per-facility + per-sandbox + per-boot 过滤
+- [x] `sandboxLogReader()` / `facilityLogReader()` — 便捷工厂
+- [x] `buildSandboxQuery()` / `buildFacilityQuery()` — 查询构造器
 
 ---
 

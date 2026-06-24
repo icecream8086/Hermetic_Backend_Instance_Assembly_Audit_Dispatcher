@@ -1,5 +1,5 @@
 import type { IAtomicStore } from '../store/interfaces.ts';
-import type { IAuditWriter, IAuditReader, AuditEntry, StoredAuditEntry, LogQuery } from './types.ts';
+import type { IAuditWriter, IAuditReader, IAuditAdmin, AuditEntry, StoredAuditEntry, LogQuery } from './types.ts';
 import type { LogId } from '../brand.ts';
 import { generateLogId } from '../brand.ts';
 import { resolveFacility, encodePriority } from './kern-level.ts';
@@ -8,7 +8,7 @@ const AUDIT_TTL_SEC = 7 * 24 * 60 * 60;
 const AUDIT_PREFIX = 'audit:';
 const MAX_INDEX_ENTRIES = 10_000;
 
-export class KvAuditLogger implements IAuditWriter, IAuditReader {
+export class KvAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
   readonly #entries: StoredAuditEntry[] = [];
   readonly #capacity: number;
 
@@ -57,5 +57,46 @@ export class KvAuditLogger implements IAuditWriter, IAuditReader {
 
   async getById(id: LogId): Promise<StoredAuditEntry | null> {
     return this.#entries.find(e => e.id === id) ?? null;
+  }
+
+  // ─── IAuditAdmin ───
+  async forceSetTail(_facility: any, _tailId: any): Promise<void> {}
+
+
+
+  async prune(beforeTs: number): Promise<number> {
+    const idx = await this.atomic.get<string[]>(AUDIT_PREFIX + 'ids');
+    if (!idx) return 0;
+    let removed = 0;
+    const kept: string[] = [];
+    for (const id of idx.value) {
+      const entry = await this.atomic.get<StoredAuditEntry>(AUDIT_PREFIX + id);
+      if (entry && entry.value.timestamp < beforeTs) {
+        await this.atomic.set(AUDIT_PREFIX + id, null, entry.version);
+        removed++;
+      } else {
+        kept.push(id);
+      }
+    }
+    if (removed > 0) await this.atomic.set(AUDIT_PREFIX + 'ids', kept, idx.version);
+    return removed;
+  }
+
+  async pruneByIds(ids: readonly string[]): Promise<number> {
+    const idx = await this.atomic.get<string[]>(AUDIT_PREFIX + 'ids');
+    if (!idx) return 0;
+    let removed = 0;
+    const idSet = new Set(ids);
+    for (const id of idSet) {
+      const entry = await this.atomic.get<StoredAuditEntry>(AUDIT_PREFIX + id);
+      if (entry) {
+        await this.atomic.set(AUDIT_PREFIX + id, null, entry.version);
+        removed++;
+      }
+    }
+    if (removed > 0) {
+      await this.atomic.set(AUDIT_PREFIX + 'ids', idx.value.filter(i => !idSet.has(i)), idx.version);
+    }
+    return removed;
   }
 }

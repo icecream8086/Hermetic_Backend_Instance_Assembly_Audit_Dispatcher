@@ -1,5 +1,5 @@
 import type { IAtomicStore } from '../store/interfaces.ts';
-import type { IAuditWriter, IAuditReader, AuditEntry, StoredAuditEntry, LogQuery } from './types.ts';
+import type { IAuditWriter, IAuditReader, IAuditAdmin, AuditEntry, StoredAuditEntry, LogQuery } from './types.ts';
 import type { LogId } from '../brand.ts';
 import { generateLogId } from '../brand.ts';
 import { shouldLogAudit } from './log-policy.ts';
@@ -11,7 +11,7 @@ const IDX_AUDIT = 'audit:ring:ids';
 const MAX_IN_MEMORY = 2000;
 const MAX_KV_BATCH = 1000;
 
-export class HybridAuditLogger implements IAuditWriter, IAuditReader {
+export class HybridAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
   readonly #atomic: IAtomicStore | undefined;
   readonly #memory: StoredAuditEntry[] = [];
   readonly #maxInMemory: number;
@@ -106,5 +106,51 @@ export class HybridAuditLogger implements IAuditWriter, IAuditReader {
     if (params.startTs !== undefined) f = f.filter(e => e.timestamp >= params.startTs!);
     if (params.endTs !== undefined) f = f.filter(e => e.timestamp <= params.endTs!);
     return f;
+  }
+
+  // ─── IAuditAdmin ───
+
+  async forceSetTail(_facility: any, _tailId: any): Promise<void> {}
+
+  async prune(beforeTs: number): Promise<number> {
+    // Filter in-memory
+    const kept = this.#memory.filter(e => e.timestamp >= beforeTs);
+    this.#memory.length = 0;
+    this.#memory.push(...kept);
+    // Filter KV
+    if (this.#atomic) {
+      const idx = await this.#atomic.get<string[]>(IDX_AUDIT);
+      if (idx) {
+        let removed = 0;
+        for (const id of idx.value) {
+          const entry = await this.#atomic.get<StoredAuditEntry>(PFX_AUDIT + id);
+          if (entry && entry.value.timestamp < beforeTs) {
+            await this.#atomic.set(PFX_AUDIT + id, null, entry.version);
+            removed++;
+          }
+        }
+        return removed;
+      }
+    }
+    return 0;
+  }
+
+  async pruneByIds(ids: readonly string[]): Promise<number> {
+    const idSet = new Set(ids);
+    const kept = this.#memory.filter(e => !idSet.has(e.id));
+    this.#memory.length = 0;
+    this.#memory.push(...kept);
+    if (this.#atomic) {
+      let removed = 0;
+      for (const id of idSet) {
+        const entry = await this.#atomic.get<StoredAuditEntry>(PFX_AUDIT + id);
+        if (entry) {
+          await this.#atomic.set(PFX_AUDIT + id, null, entry.version);
+          removed++;
+        }
+      }
+      return removed;
+    }
+    return 0;
   }
 }

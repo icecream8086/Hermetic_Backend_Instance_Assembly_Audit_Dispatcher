@@ -1,0 +1,127 @@
+import type { SchedulerContext, DagDef, DagRun, TaskInstance, Pool, ITaskExecutor, DagRunId, DagId } from '../../core/dag/types.ts';
+import type { IAtomicStore } from '../../core/store/interfaces.ts';
+import type { VersionId } from '../../core/brand.ts';
+
+/**
+ * AtomicStore-backed implementation of SchedulerContext.
+ *
+ * Uses the existing IAtomicStore (KV/file) to persist DAG definitions,
+ * DagRuns, TaskInstances, and Pools. This adapts the new scheduler to
+ * the existing storage infrastructure.
+ */
+
+const PFX_DAG_DEF = 'dag-def:';
+const PFX_DAG_RUN = 'dag-run:';
+const PFX_TASK_INST = 'task-inst:';
+const PFX_POOL = 'pool:';
+
+export class StoreSchedulerContext implements SchedulerContext {
+  private readonly executorRegistry = new Map<string, ITaskExecutor>();
+
+  constructor(
+    private readonly atomic: IAtomicStore,
+  ) {}
+
+  /** Register an executor so the scheduler can resolve it by key. */
+  registerExecutor(executor: ITaskExecutor): void {
+    this.executorRegistry.set(executor.key, executor);
+  }
+
+  // ─── DagDef ───
+
+  async getDagDef(dagId: DagId) {
+    const entry = await this.atomic.get<DagDef>(PFX_DAG_DEF + dagId);
+    return entry ?? null;
+  }
+
+  async saveDagDef(dag: DagDef): Promise<boolean> {
+    const existing = await this.atomic.get<DagDef>(PFX_DAG_DEF + dag.id);
+    const ok = await this.atomic.set(PFX_DAG_DEF + dag.id, dag, existing?.version ?? null);
+    return ok !== null;
+  }
+
+  // ─── DagRun ───
+
+  async getActiveDagRuns(): Promise<DagRun[]> {
+    // Scan for active runs (QUEUED or RUNNING). In production, use an index.
+    // For now, we use a simple prefix scan via the known keys pattern.
+    // Since IAtomicStore doesn't support scan, we rely on an index key.
+    const idx = await this.atomic.get<string[]>(PFX_DAG_RUN + 'idx');
+    if (!idx) return [];
+
+    const runs: DagRun[] = [];
+    for (const id of idx.value) {
+      const entry = await this.atomic.get<DagRun>(PFX_DAG_RUN + id);
+      if (entry && (entry.value.status === 'QUEUED' || entry.value.status === 'RUNNING')) {
+        runs.push(entry.value);
+      }
+    }
+    return runs;
+  }
+
+  async getDagRun(dagRunId: DagRunId) {
+    const entry = await this.atomic.get<DagRun>(PFX_DAG_RUN + dagRunId);
+    return entry ?? null;
+  }
+
+  async updateDagRun(dagRun: DagRun, version: VersionId): Promise<boolean> {
+    const ok = await this.atomic.set(PFX_DAG_RUN + dagRun.id, dagRun, version);
+    return ok !== null;
+  }
+
+  async saveNewDagRun(dagRun: DagRun): Promise<boolean> {
+    const ok = await this.atomic.set(PFX_DAG_RUN + dagRun.id, dagRun, null);
+    if (ok) {
+      const idx = await this.atomic.get<string[]>(PFX_DAG_RUN + 'idx');
+      const list = [...(idx?.value ?? []), dagRun.id];
+      await this.atomic.set(PFX_DAG_RUN + 'idx', list, idx?.version ?? null);
+    }
+    return ok !== null;
+  }
+
+  // ─── TaskInstance ───
+
+  async getTaskInstances(dagRunId: DagRunId): Promise<TaskInstance[]> {
+    const idx = await this.atomic.get<string[]>(PFX_TASK_INST + dagRunId);
+    if (!idx) return [];
+
+    const tis: TaskInstance[] = [];
+    for (const id of idx.value) {
+      const entry = await this.atomic.get<TaskInstance>(PFX_TASK_INST + id);
+      if (entry) tis.push(entry.value);
+    }
+    return tis;
+  }
+
+  async saveTaskInstance(ti: TaskInstance, version?: VersionId | null): Promise<boolean> {
+    const key = PFX_TASK_INST + ti.id;
+    const ok = await this.atomic.set(key, ti, version ?? null);
+
+    // Maintain per-dagRun index
+    const idxKey = PFX_TASK_INST + ti.dagRunId;
+    const idx = await this.atomic.get<string[]>(idxKey);
+    const list = idx?.value ?? [];
+    if (!list.includes(ti.id)) {
+      await this.atomic.set(idxKey, [...list, ti.id], idx?.version ?? null);
+    }
+    return ok !== null;
+  }
+
+  // ─── Pool ───
+
+  async getPool(name: string): Promise<Pool | null> {
+    const entry = await this.atomic.get<Pool>(PFX_POOL + name);
+    return entry?.value ?? null;
+  }
+
+  async updatePool(pool: Pool): Promise<boolean> {
+    const ok = await this.atomic.set(PFX_POOL + pool.name, pool, null);
+    return ok !== null;
+  }
+
+  // ─── Executor ───
+
+  async getExecutor(key: string): Promise<ITaskExecutor | null> {
+    return this.executorRegistry.get(key) ?? null;
+  }
+}

@@ -28,6 +28,14 @@ import { PolicyManager } from './policy-manager.ts';
 import { GroupManager } from './group-manager.ts';
 import { RouteAclManager } from './route-acl-manager.ts';
 import { PermissionChecker } from './perm-checker.ts';
+import {
+  Cap,
+  hasCapability,
+  formatCapabilities,
+  USER_CAP_KEY,
+  GROUP_CAP_KEY,
+  type CapabilityValue,
+} from '../../core/permission/capability.ts';
 
 const FACILITY = createFacility('perm');
 const USERTPL_PREFIX = 'usertpl:';
@@ -104,9 +112,15 @@ export interface IPermissionService {
   loadMacRules(): Promise<void>;
   seedMacRules(rules: PermissionRule[]): Promise<void>;
 
-  grantTempElevation(userId: string, durationMs?: number): Promise<number>;
+  setUserCaps(userId: string, caps: number, actor?: AuditActor): Promise<void>;
+  getUserCaps(userId: string): Promise<{ own: number; caps: string[] }>;
+  setGroupCaps(groupId: string, caps: number, actor?: AuditActor): Promise<void>;
+  getGroupCaps(groupId: string): Promise<{ caps: number; names: string[] }>;
+
+  grantTempElevation(userId: string, durationMs?: number, capabilities?: number): Promise<number>;
   revokeTempElevation(userId: string): Promise<void>;
-  listTempElevations(): Promise<Array<{ userId: string; expiry: number }>>;
+  listTempElevations(): Promise<Array<{ userId: string; expiry: number; caps: number; capsNames: string[] }>>;
+  checkElevation(userId: string, requiredCap?: number): Promise<boolean>;
 
   // ── Invitations ──
   sendInvite(input: CreateInviteInput, invitedBy: string): Promise<Invitation>;
@@ -307,16 +321,73 @@ export class PermissionService implements IPermissionService {
     this.#macRules = rules;
   }
 
-  // ── Temporary Elevation ──
-  async grantTempElevation(userId: string, durationMs?: number): Promise<number> {
+  // ── Capability Management ──
+
+  /** Set a user's capability bitmask. */
+  async setUserCaps(userId: string, caps: CapabilityValue, actor?: AuditActor): Promise<void> {
+    const existing = await this.atomic.get<CapabilityValue>(USER_CAP_KEY + userId);
+    await this.atomic.set(USER_CAP_KEY + userId, caps, existing?.version ?? null);
+    this.#checker.invalidateCache();
+    this.audit?.write({
+      level: KernLevel.WARNING, facility: FACILITY,
+      message: `User capabilities updated: ${userId} → ${formatCapabilities(caps).join(',')}`,
+      actorId: actor?.userId, metadata: { eventType: 'perm.cap.userSet', userId, caps: formatCapabilities(caps), oldCaps: existing?.value },
+    });
+  }
+
+  /** Get a user's effective capabilities (own ∪ inherited). */
+  async getUserCaps(userId: string): Promise<{ own: CapabilityValue; caps: string[] }> {
+    const entry = await this.atomic.get<CapabilityValue>(USER_CAP_KEY + userId);
+    const own = entry?.value ?? 0;
+    return { own, caps: formatCapabilities(own) };
+  }
+
+  /** Set a group's capability bitmask (inherited by members). */
+  async setGroupCaps(groupId: string, caps: CapabilityValue, actor?: AuditActor): Promise<void> {
+    const existing = await this.atomic.get<CapabilityValue>(GROUP_CAP_KEY + groupId);
+    await this.atomic.set(GROUP_CAP_KEY + groupId, caps, existing?.version ?? null);
+    this.#checker.invalidateCache();
+    this.audit?.write({
+      level: KernLevel.WARNING, facility: FACILITY,
+      message: `Group capabilities updated: ${groupId} → ${formatCapabilities(caps).join(',')}`,
+      actorId: actor?.userId, metadata: { eventType: 'perm.cap.groupSet', groupId, caps: formatCapabilities(caps) },
+    });
+  }
+
+  /** Get a group's capability bitmask. */
+  async getGroupCaps(groupId: string): Promise<{ caps: number; names: string[] }> {
+    const entry = await this.atomic.get<CapabilityValue>(GROUP_CAP_KEY + groupId);
+    const caps = entry?.value ?? 0;
+    return { caps, names: formatCapabilities(caps) };
+  }
+
+  // ── Temporary Elevation (sudo) — RHEL §5 ──
+
+  /**
+   * Grant temporary capability elevation.
+   * Maps to RHEL sudo: who=userId, where=any, as_whom=elevated, what=caps.
+   *
+   * @param userId      — who receives elevation
+   * @param durationMs  — how long (default 30 min)
+   * @param capabilities — which capabilities to grant (default ALL)
+   */
+  async grantTempElevation(userId: string, durationMs?: number, capabilities?: CapabilityValue): Promise<number> {
     const dur = durationMs ?? 30 * 60 * 1000;
     const expiry = Date.now() + dur;
+    const caps = capabilities ?? Cap.ALL;
+
     return this.#transactWithRetry(async (txn) => {
       const ids = await txn.get<string[]>('temp:elev:ids');
       const idList = ids ?? [];
       if (!idList.includes(userId)) idList.push(userId);
-      txn.set('temp:elev:' + userId, { expiry });
+      txn.set('temp:elev:' + userId, { expiry, caps });
       txn.set('temp:elev:ids', idList);
+
+      this.audit?.write({
+        level: KernLevel.WARNING, facility: FACILITY,
+        message: `Temporary elevation granted: ${userId} for ${dur}ms, caps=${formatCapabilities(caps).join(',')}`,
+        metadata: { eventType: 'perm.elevation.granted', userId, durationMs: dur, caps: formatCapabilities(caps) },
+      });
       return expiry;
     });
   }
@@ -326,21 +397,21 @@ export class PermissionService implements IPermissionService {
       const ids = await txn.get<string[]>('temp:elev:ids');
       const idList = ids ?? [];
       txn.set('temp:elev:ids', idList.filter((id: string) => id !== userId));
-      txn.set('temp:elev:' + userId, { expiry: 0 });
+      txn.set('temp:elev:' + userId, { expiry: 0, caps: 0 });
     });
   }
 
-  async listTempElevations(): Promise<Array<{ userId: string; expiry: number }>> {
+  async listTempElevations(): Promise<Array<{ userId: string; expiry: number; caps: number; capsNames: string[] }>> {
     const idsEntry = await this.atomic.get<string[]>('temp:elev:ids');
     if (!idsEntry) return [];
     const ids = idsEntry.value;
-    const result: Array<{ userId: string; expiry: number }> = [];
+    const result: Array<{ userId: string; expiry: number; caps: number; capsNames: string[] }> = [];
     const now = Date.now();
     const stale: string[] = [];
     for (const userId of ids) {
-      const entry = await this.atomic.get<{ expiry: number }>('temp:elev:' + userId);
+      const entry = await this.atomic.get<{ expiry: number; caps?: number }>('temp:elev:' + userId);
       if (entry && entry.value.expiry > now) {
-        result.push({ userId, expiry: entry.value.expiry });
+        result.push({ userId, expiry: entry.value.expiry, caps: entry.value.caps ?? Cap.ALL, capsNames: formatCapabilities(entry.value.caps ?? Cap.ALL) });
       } else {
         stale.push(userId);
       }
@@ -349,6 +420,20 @@ export class PermissionService implements IPermissionService {
       await this.atomic.set('temp:elev:ids', ids.filter((id: string) => !stale.includes(id)), idsEntry.version);
     }
     return result;
+  }
+
+  /** Check if a user has active temporary elevation with the required capability. */
+  async checkElevation(userId: string, requiredCap?: CapabilityValue): Promise<boolean> {
+    const idsEntry = await this.atomic.get<string[]>('temp:elev:ids');
+    if (!idsEntry) return false;
+    const idList = idsEntry.value;
+    if (!idList.includes(userId)) return false;
+
+    const entry = await this.atomic.get<{ expiry: number; caps?: number }>('temp:elev:' + userId);
+    if (!entry) return false;
+    if (entry.value.expiry <= Date.now()) return false;
+    if (requiredCap && !hasCapability(entry.value.caps ?? Cap.ALL, requiredCap)) return false;
+    return true;
   }
 
   // ── Invitations ──

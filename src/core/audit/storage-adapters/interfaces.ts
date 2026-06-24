@@ -26,6 +26,7 @@ export interface ILogStorageReader {
  */
 export interface ILogStorageAdmin {
   prune(beforeTs: number): Promise<number>;
+  pruneByIds(ids: readonly string[]): Promise<number>;
 }
 
 export interface LogStorageEntry {

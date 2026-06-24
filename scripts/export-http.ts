@@ -8,11 +8,12 @@ import { createSysGroupRouter, sysGroupRouteMeta } from '../src/features/system-
 import { createTemplateRouter, templateRouteMeta } from '../src/features/template/handler.ts';
 import { createSandboxRouter, sandboxRouteMeta } from '../src/features/sandbox/handler.ts';
 import { createPlatformsRouter, platformsRouteMeta } from '../src/features/platforms/handler.ts';
-import { createNetworkRouter, networkRouteMeta } from '../src/features/network/handler.ts';
+import { createSecurityGroupRouter, networkRouteMeta } from '../src/features/network/handler.ts';
 import { createTopologyRouter, topologyRouteMeta } from '../src/features/topology/handler.ts';
 import { createSubnetRouter, subnetRouteMeta } from '../src/features/subnet/handler.ts';
 import { createVolumeRouter, volumeRouteMeta } from '../src/features/volume/handler.ts';
 import { createImagesRouter, imagesRouteMeta } from '../src/features/images/handler.ts';
+import { createContainerSecretRouter, containerSecretRouteMeta } from '../src/features/container-secret/handler.ts';
 import { createActionsRouter, actionRouteMeta } from '../src/features/actions/handler.ts';
 import type { RouteMeta } from '../src/core/http-docs/types.ts';
 import { createAuditRouter } from '../src/core/audit/audit-router.ts';
@@ -116,7 +117,7 @@ collect('vol', 'Vol', '/api/volumes', createVolumeRouter(stubVolumeSvc), () => t
 
 const stubRegistry: any = { availableProviders: () => [{ name: 'stub' }, { name: 'podman' }] };
 collect('plf', 'Plf', '/api/platforms', createPlatformsRouter(stubRegistry as any), () => true, platformsRouteMeta);
-collect('net', 'Net', '/api/networks', createNetworkRouter({
+collect('net', 'Net', '/api/networks', createSecurityGroupRouter({
   create: async () => ({} as any),
   list: async () => ({ items: [], total: 0, page: 1, limit: 20 }),
   get: async () => null,
@@ -136,6 +137,17 @@ collect('topo', 'Topo', '/api/topology', createTopologyRouter(stubClusterSvc, st
 const stubImageProvider: any = { list: async () => [], inspect: async () => null, pull: async () => ({}), remove: async () => {}, tag: async () => {}, search: async () => [], prune: async () => ({}), history: async () => [], build: async () => ({}) };
 const stubProvidersRegistry: any = { image: stubImageProvider, resolveImage: async () => stubImageProvider };
 collect('img', 'Images', '/api/images', createImagesRouter(stubProvidersRegistry), () => true, imagesRouteMeta);
+
+const stubContainerSecretSvc: any = {
+  create: async () => ({}),
+  get: async () => null,
+  list: async () => [],
+  update: async () => ({}),
+  delete: async () => {},
+  uploadBlob: async () => ({}),
+  resolveData: async () => '',
+};
+collect('secret', 'Secret', '/api/container-secrets', createContainerSecretRouter(stubContainerSecretSvc), () => true, containerSecretRouteMeta);
 
 const stubActionDeps: any = {
   stores: { atomic: null as any, blob: null as any, query: null as any, metrics: null as any },
@@ -198,15 +210,17 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const httpDir = resolve(__dirname, '..', 'http');
 mkdirSync(httpDir, { recursive: true });
 
-const fileTagOrder = ['info', 'auth', 'sysgrp', 'tpl', 'sbx', 'vol', 'plf', 'perm', 'audit', 'users', 'events', 'topo', 'sub', 'img', 'action'];
+const fileTagOrder = ['info', 'auth', 'secret', 'sysgrp', 'tpl', 'sbx', 'vol', 'plf', 'net', 'perm', 'audit', 'users', 'events', 'topo', 'sub', 'img', 'action'];
 const fileTagTitle: Record<string, string> = {
   info: 'Info',
   auth: 'Auth',
+  secret: 'Secret',
   sysgrp: 'SysGrp',
   tpl: 'Tpl',
   sbx: 'Sbx',
   vol: 'Vol',
   plf: 'Plf',
+  net: 'Net',
   perm: 'Perm',
   audit: 'Audit',
   users: 'Users',

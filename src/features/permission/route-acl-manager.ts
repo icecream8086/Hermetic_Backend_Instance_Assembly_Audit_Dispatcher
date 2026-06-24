@@ -14,10 +14,22 @@ import type { RouteAcl, CreateRouteAclInput, UpdateRouteAclInput } from './types
 import { generateRouteAclId } from './types.ts';
 
 function routeMatches(method: string, path: string, acl: RouteAcl): boolean {
-  if (acl.method !== '*' && acl.method !== method) return false;
+  // Method matching: supports comma-separated list and wildcard
+  if (acl.method !== '*') {
+    const allowed = acl.method.split(',').map(s => s.trim());
+    if (!allowed.includes(method) && !allowed.includes('*')) return false;
+  }
+  // Path matching
   if (!acl.pathPrefix || acl.pathPrefix === '*') return true;
-  if (acl.matchType === 'exact') return path === acl.pathPrefix;
-  return path.startsWith(acl.pathPrefix);
+  switch (acl.matchType) {
+    case 'exact':
+      return path === acl.pathPrefix;
+    case 'regex':
+      try { return new RegExp(acl.pathPrefix).test(path); }
+      catch { return false; }
+    default: // prefix
+      return path.startsWith(acl.pathPrefix);
+  }
 }
 
 export class RouteAclManager {

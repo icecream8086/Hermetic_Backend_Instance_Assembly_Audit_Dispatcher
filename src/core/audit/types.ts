@@ -176,11 +176,14 @@ export interface IAuditReader {
 /** Admin interface for recovery / archival. */
 export interface IAuditAdmin {
   forceSetTail(facility: Facility, tailId: LogId): Promise<void>;
+  /** Remove entries older than the given timestamp. */
   prune(beforeTs: number): Promise<number>;
+  /** Remove specific entries by ID. Returns count removed. */
+  pruneByIds(ids: readonly string[]): Promise<number>;
 }
 
 /** Full audit logger aggregate. */
-export interface IAuditLogger extends IAuditWriter, IAuditReader {
+export interface IAuditLogger extends IAuditWriter, IAuditReader, IAuditAdmin {
   readonly auditTier: AuditTier;
   flush(): Promise<void>;
   dispose(): Promise<void>;

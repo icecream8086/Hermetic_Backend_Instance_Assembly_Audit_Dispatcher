@@ -18,12 +18,13 @@ import { createSysGroupRouter, sysGroupRouteMeta } from '../src/features/system-
 import { createTemplateRouter, templateRouteMeta } from '../src/features/template/handler.ts';
 import { createSandboxRouter, sandboxRouteMeta } from '../src/features/sandbox/handler.ts';
 import { createPlatformsRouter, platformsRouteMeta } from '../src/features/platforms/handler.ts';
-import { createNetworkRouter, networkRouteMeta } from '../src/features/network/handler.ts';
+import { createSecurityGroupRouter, networkRouteMeta } from '../src/features/network/handler.ts';
 import { createTopologyRouter, topologyRouteMeta } from '../src/features/topology/handler.ts';
 import { createSubnetRouter, subnetRouteMeta } from '../src/features/subnet/handler.ts';
 import { createVolumeRouter, volumeRouteMeta } from '../src/features/volume/handler.ts';
 import { createImagesRouter, imagesRouteMeta } from '../src/features/images/handler.ts';
 import { createActionsRouter, actionRouteMeta } from '../src/features/actions/handler.ts';
+import { createContainerSecretRouter, containerSecretRouteMeta } from '../src/features/container-secret/handler.ts';
 import type { RouteMeta } from '../src/core/http-docs/types.ts';
 import { createAuditRouter } from '../src/core/audit/audit-router.ts';
 import { WorkersAuditLogger } from '../src/core/audit/workers-audit-logger.ts';
@@ -180,7 +181,7 @@ collect('Templates', '/api/templates', createTemplateRouter(stubAtomic as any), 
 collect('Sandboxes', '/api/sandboxes', createSandboxRouter(stubSandboxSvc as any), sandboxRouteMeta);
 collect('Platforms', '/api/platforms', createPlatformsRouter(stubRegistry as any), platformsRouteMeta);
 collect('Volumes', '/api/volumes', createVolumeRouter(stubVolumeSvc as any), volumeRouteMeta);
-collect('Networks', '/api/networks', createNetworkRouter({
+collect('Networks', '/api/networks', createSecurityGroupRouter({
   create: async () => ({} as any),
   list: async () => ({ items: [], total: 0, page: 1, limit: 20 }),
   get: async () => null,
@@ -200,6 +201,17 @@ collect('Topology', '/api/topology', createTopologyRouter(stubClusterSvc, stubBu
 const stubImageProvider: any = { list: async () => [], inspect: async () => null, pull: async () => ({}), remove: async () => {}, tag: async () => {}, search: async () => [], prune: async () => ({}), history: async () => [], build: async () => ({}) };
 const stubProvidersRegistry: any = { image: stubImageProvider, resolveImage: async () => stubImageProvider };
 collect('Images', '/api/images', createImagesRouter(stubProvidersRegistry), imagesRouteMeta);
+
+const stubContainerSecretSvc: any = {
+  create: async () => ({}),
+  get: async () => null,
+  list: async () => [],
+  update: async () => ({}),
+  delete: async () => {},
+  uploadBlob: async () => ({}),
+  resolveData: async () => '',
+};
+collect('Container Secrets', '/api/container-secrets', createContainerSecretRouter(stubContainerSecretSvc), containerSecretRouteMeta);
 
 const stubActionDeps2: any = {
   stores: { atomic: null as any, blob: null as any, query: null as any, metrics: null as any },

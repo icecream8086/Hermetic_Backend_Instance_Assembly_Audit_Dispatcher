@@ -62,6 +62,10 @@ export class ConsoleLogger implements IAuditLogger {
   async flush(): Promise<void> { /* noop */ }
   async dispose(): Promise<void> { this.#entries = []; }
 
+  async forceSetTail(_facility: any, _tailId: any): Promise<void> {}
+  async prune(_beforeTs: number): Promise<number> { return 0; }
+  async pruneByIds(_ids: readonly string[]): Promise<number> { return 0; }
+
   #print(entry: AuditEntry & { timestamp: number }): void {
     const actorId = entry.actorId ?? (entry.metadata?.actorId as string | undefined);
     console.log(formatDmesgLine(entry.message, actorId));

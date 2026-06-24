@@ -93,7 +93,7 @@ export const UpdateUserTplSchema = z.object({
 
 // ─── Route ACL ───
 
-export const MatchTypeSchema = z.enum(['prefix', 'exact']);
+export const MatchTypeSchema = z.enum(['prefix', 'exact', 'regex']);
 export const AclEffectSchema = z.enum(['allow', 'deny']);
 
 export const CreateRouteAclSchema = z.object({

@@ -271,6 +271,28 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
     }
   });
 
+  // 10d. 3-layer permission gate (DAC → Capability → MAC) — FILTER.INPUT
+  // Runs after auth middleware sets userId; rejects at the first layer that fails.
+  if (permService) {
+    const { createPermissionGate } = await import('./middleware/permission-gate.ts');
+    app.use('/api/*', createPermissionGate(
+      { check: (params) => permService!.check({ userId: params.actor, action: params.action, resource: params.resource }) },
+      audit,
+      {
+        skipPaths: [
+          '/api/auth/login',
+          '/api/auth/register',
+          '/api/users/register',
+          '/api/users/login',
+          '/api/users/login-info',
+          '/api/users/no-password-login',
+          '/api/openapi.json',
+          '/api/info',
+        ],
+      },
+    ));
+  }
+
   // 11. Tick trigger — DO Alarm fires POST /__scheduled, dev tools fire POST /__tick
   const tickHandler = async (c: any) => {
     await eventLoop.triggerTick();

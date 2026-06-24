@@ -362,6 +362,59 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
   });
 
   // ═══════════════════════════════════
+  // Capability management (wheel-only)
+  // ═══════════════════════════════════
+
+  router.put('/caps/user/:userId', async (c) => {
+    { const r = requireRoot(c); if (r) return r; }
+    const { caps } = await c.req.json<{ caps: number }>();
+    if (typeof caps !== 'number') return c.json(fail('VALIDATION_ERROR', 'caps must be a number (bitmask)'), 400);
+    await svc.setUserCaps(c.req.param('userId'), caps, actorFrom(c));
+    return c.json(ok({ userId: c.req.param('userId'), caps }));
+  });
+
+  router.get('/caps/user/:userId', async (c) => {
+    const result = await svc.getUserCaps(c.req.param('userId'));
+    return c.json(ok(result));
+  });
+
+  router.put('/caps/group/:groupId', async (c) => {
+    { const r = requireRoot(c); if (r) return r; }
+    const { caps } = await c.req.json<{ caps: number }>();
+    if (typeof caps !== 'number') return c.json(fail('VALIDATION_ERROR', 'caps must be a number (bitmask)'), 400);
+    await svc.setGroupCaps(c.req.param('groupId'), caps, actorFrom(c));
+    return c.json(ok({ groupId: c.req.param('groupId'), caps }));
+  });
+
+  router.get('/caps/group/:groupId', async (c) => {
+    const result = await svc.getGroupCaps(c.req.param('groupId'));
+    return c.json(ok(result));
+  });
+
+  // ═══════════════════════════════════
+  // Temporary elevation (sudo) — RHEL sudoers
+  // ═══════════════════════════════════
+
+  router.post('/elevate', async (c) => {
+    { const r = requireRoot(c); if (r) return r; }
+    const { userId, durationMs, capabilities } = await c.req.json<{ userId: string; durationMs?: number; capabilities?: number }>();
+    if (!userId) return c.json(fail('VALIDATION_ERROR', 'userId required'), 400);
+    const expiry = await svc.grantTempElevation(userId, durationMs, capabilities);
+    return c.json(ok({ userId, expiry, capabilities }));
+  });
+
+  router.delete('/elevate/:userId', async (c) => {
+    { const r = requireRoot(c); if (r) return r; }
+    await svc.revokeTempElevation(c.req.param('userId'));
+    return c.json(ok({ revoked: true }));
+  });
+
+  router.get('/elevations', async (c) => {
+    const list = await svc.listTempElevations();
+    return c.json(ok(list));
+  });
+
+  // ═══════════════════════════════════
   // Compare
   // ═══════════════════════════════════════
 

@@ -217,7 +217,7 @@ export interface RouteAcl {
   id: RouteAclId;
   method: string;
   pathPrefix: string;
-  matchType?: 'prefix' | 'exact' | undefined;
+  matchType?: 'prefix' | 'exact' | 'regex' | undefined;
   effect?: 'allow' | 'deny' | undefined;
   userId?: string | undefined;
   userGroupId?: string | undefined;
@@ -229,7 +229,7 @@ export interface RouteAcl {
 export interface CreateRouteAclInput {
   method: string;
   pathPrefix: string;
-  matchType?: 'prefix' | 'exact' | undefined;
+  matchType?: 'prefix' | 'exact' | 'regex' | undefined;
   effect?: 'allow' | 'deny' | undefined;
   userId?: string | undefined;
   userGroupId?: string | undefined;
@@ -239,7 +239,7 @@ export interface CreateRouteAclInput {
 export interface UpdateRouteAclInput {
   method?: string | undefined;
   pathPrefix?: string | undefined;
-  matchType?: 'prefix' | 'exact' | null | undefined;
+  matchType?: 'prefix' | 'exact' | 'regex' | null | undefined;
   effect?: 'allow' | 'deny' | null | undefined;
   userId?: string | null | undefined;
   userGroupId?: string | null | undefined;
