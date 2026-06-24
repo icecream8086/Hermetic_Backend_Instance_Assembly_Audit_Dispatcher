@@ -6,12 +6,16 @@ import type { IAuditWriter } from '../../core/audit/types.ts';
 import { KernLevel } from '../../core/audit/kern-level.ts';
 import type { SysGroup, CreateSysGroupInput, UpdateSysGroupInput } from './types.ts';
 import { generateSysGroupId } from './types.ts';
+import { createGid, GID_MIN } from '../users/types.ts';
+import type { Gid } from '../users/types.ts';
 
 const FACILITY = createFacility('sysgrp');
 const PREFIX = 'sysgroup:';
 const IDS_SHARDS = 4;
 const IDS_SHARD_PREFIX = 'sysgroup:idx:';
 const COUNT_KEY = 'sysgroup:count';
+const GID_COUNTER_KEY = '_sys:gid_counter';
+const GID_INDEX_PREFIX = 'sysgroup:gid:';
 
 /** Deterministic shard assignment from a sysgroup ID string. */
 function sysgroupShard(id: string): number {
@@ -28,6 +32,7 @@ export interface ISysGroupService {
   list(): Promise<SysGroup[]>;
   listPaginated(page?: number, limit?: number, name?: string): Promise<{ items: SysGroup[]; total: number }>;
   get(id: string): Promise<SysGroup | null>;
+  getByGid(gid: Gid): Promise<SysGroup | null>;
   update(id: string, input: UpdateSysGroupInput, actorId?: string): Promise<SysGroup>;
   delete(id: string, actorId?: string): Promise<void>;
 }
@@ -41,17 +46,19 @@ export class SysGroupService implements ISysGroupService {
 
   async create(input: CreateSysGroupInput, _actorId?: string): Promise<SysGroup> {
     const id = generateSysGroupId();
+    const gid = await this.#nextGid();
     const now = Date.now();
-    const group: SysGroup = { id, name: input.name, description: input.description, rules: input.rules, priority: input.priority ?? 0, dependsOn: input.dependsOn ?? [], createdAt: now, updatedAt: now };
+    const group: SysGroup = { id, gid, name: input.name, description: input.description, rules: input.rules, priority: input.priority ?? 0, dependsOn: input.dependsOn ?? [], createdAt: now, updatedAt: now };
     await this.atomic.set(PREFIX + id, group, null);
+    await this.atomic.set(GID_INDEX_PREFIX + gid, id, null);
     await this.#addToIndex(id);
     await this.#incrCounter().catch(() => {});
-    await this.logger.write({ facility: FACILITY, level: KernLevel.INFO, message: `SysGroup created: ${input.name}`, metadata: { actorId: _actorId, groupId: id, priority: group.priority } });
+    await this.logger.write({ facility: FACILITY, level: KernLevel.INFO, message: `SysGroup created: ${input.name}`, metadata: { actorId: _actorId, groupId: id, gid, priority: group.priority } });
     this.audit?.write({
       level: KernLevel.NOTICE,
       facility: FACILITY,
       message: `System group created — ${input.name}`,
-      metadata: { eventType: 'sysgrp.created', groupId: id, actorId: _actorId },
+      metadata: { eventType: 'sysgrp.created', groupId: id, gid, actorId: _actorId },
     });
     return group;
   }
@@ -192,5 +199,22 @@ export class SysGroupService implements ISysGroupService {
       const ver = await this.atomic.set(COUNT_KEY, cur - 1, entry?.version ?? null);
       if (ver) return;
     }
+  }
+
+  /** Allocate next available GID — RHEL §1 GID auto-increment. */
+  async #nextGid(): Promise<Gid> {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const entry = await this.atomic.get<number>(GID_COUNTER_KEY);
+      const next = entry?.value ?? GID_MIN;
+      const ver = await this.atomic.set(GID_COUNTER_KEY, next + 1, entry?.version ?? null);
+      if (ver) return createGid(next);
+    }
+    throw new AppError(409, 'CONFLICT', 'Failed to allocate GID after retries');
+  }
+
+  async getByGid(gid: Gid): Promise<SysGroup | null> {
+    const idEntry = await this.atomic.get<string>(GID_INDEX_PREFIX + gid);
+    if (!idEntry) return null;
+    return this.get(idEntry.value);
   }
 }

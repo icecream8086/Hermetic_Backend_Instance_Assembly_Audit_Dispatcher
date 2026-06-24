@@ -1,10 +1,16 @@
-// ─── User brand types ───
+// ─── Brand types ───
 
 declare const USER_ID_BRAND: unique symbol;
 declare const SESSION_TOKEN_BRAND: unique symbol;
+declare const UID_BRAND: unique symbol;
+declare const GID_BRAND: unique symbol;
 
 export type UserId = string & { readonly [USER_ID_BRAND]: true };
 export type SessionToken = string & { readonly [SESSION_TOKEN_BRAND]: true };
+/** Numeric user ID — RHEL §1 UID, allocated from 1000+. */
+export type Uid = number & { readonly [UID_BRAND]: true };
+/** Numeric group ID — RHEL §1 GID, allocated from 1000+. */
+export type Gid = number & { readonly [GID_BRAND]: true };
 
 const UUID_V4_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 
@@ -26,6 +32,25 @@ export function generateSessionToken(): SessionToken {
   return `sess_${crypto.randomUUID()}` as SessionToken;
 }
 
+export function createUid(n: number): Uid {
+  if (!Number.isSafeInteger(n) || n < 0) throw new TypeError(`Invalid UID: ${n}`);
+  return n as Uid;
+}
+
+export function createGid(n: number): Gid {
+  if (!Number.isSafeInteger(n) || n < 0) throw new TypeError(`Invalid GID: ${n}`);
+  return n as Gid;
+}
+
+/** First allocatable UID — RHEL convention: <1000 reserved for system. */
+export const UID_MIN = 1000;
+/** First allocatable GID. */
+export const GID_MIN = 1000;
+
+/** Default /etc/passwd values. */
+export const DEFAULT_SHELL = '/bin/bash';
+export const DEFAULT_HOME_PREFIX = '/home/';
+
 // ─── Enums ───
 
 export enum UserRole {
@@ -41,6 +66,7 @@ export interface User {
   id: UserId;
   email: string;
   passwordHash: string;
+  /** Display name — RHEL /etc/passwd GECOS field. */
   name: string;
   role: UserRole;
   loginPolicy?: LoginPolicy;
@@ -48,6 +74,19 @@ export interface User {
    *  The private key is NEVER stored server-side — it is generated on the
    *  client and only returned once in the registration response. */
   publicKeyEd25519?: string;
+  // ── RHEL /etc/passwd 7-field model ──
+  /** Numeric user ID — RHEL §1 passwd UID. */
+  uid: Uid;
+  /** Primary group ID — RHEL §1 passwd GID. */
+  gid: Gid;
+  /** GECOS comment field (full name / notes). */
+  gecos: string;
+  /** Home directory. */
+  directory: string;
+  /** Login shell. */
+  shell: string;
+  /** Supplementary group IDs — RHEL §1 supp_groups. */
+  supplementaryGids: Gid[];
   createdAt: number;
   updatedAt: number;
 }
@@ -123,6 +162,11 @@ export interface UpdateUserInput {
   role: UserRole | undefined;
   loginPolicy: LoginPolicy | undefined;
   publicKeyEd25519: string | undefined;
+  gecos: string | undefined;
+  directory: string | undefined;
+  shell: string | undefined;
+  /** Replace supplementary groups entirely (not merge). */
+  supplementaryGids: number[] | undefined;
 }
 
 export interface NoPasswordLoginInput {

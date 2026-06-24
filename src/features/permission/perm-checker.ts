@@ -126,10 +126,19 @@ export class PermissionChecker {
     const ownEntry = await this.atomic.get<CapabilityValue>(USER_CAP_KEY + userId);
     const own = ownEntry?.value ?? 0;
 
-    // Load group-inherited caps via DAG
+    // Load group-inherited caps via DAG (UserGroup memberIds)
     let inherited = 0;
     const allGroups = await this.#cachedUserGroupList();
-    const groupIds = resolveDagGroupIds(allGroups, userId);
+    const groupIds = new Set(resolveDagGroupIds(allGroups, userId));
+
+    // Also resolve via supplementary GIDs (RHEL §1 supp_groups)
+    const userEntry = await this.atomic.get<any>('user:' + userId);
+    if (userEntry?.value?.supplementaryGids) {
+      for (const gid of userEntry.value.supplementaryGids) {
+        const sgEntry = await this.atomic.get<string>('sysgroup:gid:' + gid);
+        if (sgEntry?.value) groupIds.add(sgEntry.value);
+      }
+    }
 
     for (const gid of groupIds) {
       const gCapEntry = await this.atomic.get<CapabilityValue>(GROUP_CAP_KEY + gid);

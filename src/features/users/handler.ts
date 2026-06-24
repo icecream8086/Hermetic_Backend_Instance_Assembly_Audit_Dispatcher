@@ -5,7 +5,7 @@ import type { IUserService } from './service.ts';
 import type { RouteMeta } from '../../core/http-docs/types.ts';
 import { RegisterUserSchema, LoginUserSchema, UpdateUserSchema, UserResponseSchema, LoginResponseSchema, LoginPolicySchema, NoPasswordLoginSchema, PublicKeySchema } from './schema.ts';
 import type { UserResponse } from './schema.ts';
-import { createUserId, createSessionToken, UserRole } from './types.ts';
+import { createUserId, createSessionToken, createGid, UserRole } from './types.ts';
 import { ok, fail } from '../../core/response.ts';
 
 // ─── Avatar constants ───
@@ -27,12 +27,18 @@ function detectImageType(buf: Uint8Array): string | null {
 
 // ─── Response helpers ───
 
-function userToResponse(user: { id: string; email: string; name: string; role: UserRole; createdAt: number; updatedAt: number }): UserResponse {
+function userToResponse(user: { id: string; email: string; name: string; role: UserRole; uid?: number; gid?: number; gecos?: string; directory?: string; shell?: string; supplementaryGids?: number[]; createdAt: number; updatedAt: number }): UserResponse {
   return UserResponseSchema.parse({
     id: user.id,
     email: user.email,
     name: user.name,
     role: user.role,
+    uid: (user as any).uid ?? 1000,
+    gid: (user as any).gid ?? 1000,
+    gecos: (user as any).gecos ?? user.name,
+    directory: (user as any).directory ?? `/home/${user.email}`,
+    shell: (user as any).shell ?? '/bin/bash',
+    supplementaryGids: (user as any).supplementaryGids ?? [],
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   });
@@ -140,6 +146,10 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
       role: data.role,
       loginPolicy: data.loginPolicy,
       publicKeyEd25519: data.publicKeyEd25519,
+      gecos: data.gecos,
+      directory: data.directory,
+      shell: data.shell,
+      supplementaryGids: data.supplementaryGids,
     }, actorId);
     return c.json(ok(userToResponse(user)));
   });
@@ -214,6 +224,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
       name: undefined, password: undefined, role: undefined,
       loginPolicy: parsed.data,
       publicKeyEd25519: undefined,
+      gecos: undefined, directory: undefined, shell: undefined, supplementaryGids: undefined,
     });
     return c.json(ok(user.loginPolicy ?? null));
   });
@@ -245,6 +256,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
     const user = await userService.update(id, {
       name: undefined, password: undefined, role: undefined,
       loginPolicy: undefined, publicKeyEd25519: parsed.data.publicKey,
+      gecos: undefined, directory: undefined, shell: undefined, supplementaryGids: undefined,
     });
     return c.json(ok(user.publicKeyEd25519 ?? null));
   });
@@ -373,6 +385,34 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
     const token = createSessionToken(c.req.param('token'));
     await userService.revokeSession(token, user.id);
     return c.json(ok(null));
+  });
+
+  // ─── Supplementary groups (RHEL §1 supp_groups) ───
+
+  router.get('/:id/supplementary-groups', async (c) => {
+    const id = createUserId(c.req.param('id'));
+    const gids = await userService.listSupplementaryGroups(id);
+    return c.json(ok(gids));
+  });
+
+  router.put('/:id/supplementary-groups/:gid', async (c) => {
+    const id = createUserId(c.req.param('id'));
+    const gid = parseInt(c.req.param('gid'));
+    if (isNaN(gid) || gid < 0) return c.json(fail('VALIDATION_ERROR', 'Invalid GID'), 400);
+    { const r = await requirePerm(c, permissionChecker, 'update', 'user', id as string); if (r) return r; }
+    const actorId = (c as any).var?.currentUser?.id;
+    const user = await userService.addSupplementaryGroup(id, createGid(gid), actorId);
+    return c.json(ok(userToResponse(user)));
+  });
+
+  router.delete('/:id/supplementary-groups/:gid', async (c) => {
+    const id = createUserId(c.req.param('id'));
+    const gid = parseInt(c.req.param('gid'));
+    if (isNaN(gid) || gid < 0) return c.json(fail('VALIDATION_ERROR', 'Invalid GID'), 400);
+    { const r = await requirePerm(c, permissionChecker, 'update', 'user', id as string); if (r) return r; }
+    const actorId = (c as any).var?.currentUser?.id;
+    const user = await userService.removeSupplementaryGroup(id, createGid(gid), actorId);
+    return c.json(ok(userToResponse(user)));
   });
 
   // ─── No-password login ───
@@ -528,5 +568,23 @@ export const userRouteMeta: RouteMeta[] = [
     path: '/search',
     description: '按邮箱或 UID 查询用户（最终一致性，?q=email 或 ?q=userId）',
     responseDescription: 'User | null',
+  },
+  {
+    method: 'GET',
+    path: '/:id/supplementary-groups',
+    description: '列出用户的辅助组 GID 列表（RHEL §1 supp_groups）',
+    responseDescription: 'number[] — GID 列表',
+  },
+  {
+    method: 'PUT',
+    path: '/:id/supplementary-groups/:gid',
+    description: '添加辅助组到用户（RHEL §1 supp_groups）',
+    responseDescription: 'UserResponse',
+  },
+  {
+    method: 'DELETE',
+    path: '/:id/supplementary-groups/:gid',
+    description: '从用户移除辅助组',
+    responseDescription: 'UserResponse',
   },
 ];

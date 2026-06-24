@@ -6,8 +6,8 @@ import { measure, lastPerf } from '../../core/perf.ts';
 import { AppError } from '../../core/types.ts';
 import type { IAuditWriter } from '../../core/audit/types.ts';
 import { KernLevel } from '../../core/audit/kern-level.ts';
-import type { User, UserId, Session, SessionToken, RegisterInput, LoginInput, LoginContext, NoPasswordLoginInput, UpdateUserInput, LoginInfo } from './types.ts';
-import { generateUserId, generateSessionToken, createUserId, createSessionToken, UserRole } from './types.ts';
+import type { User, UserId, Session, SessionToken, RegisterInput, LoginInput, LoginContext, NoPasswordLoginInput, UpdateUserInput, LoginInfo, Uid, Gid } from './types.ts';
+import { generateUserId, generateSessionToken, createUserId, createSessionToken, UserRole, createUid, createGid, UID_MIN, GID_MIN, DEFAULT_SHELL, DEFAULT_HOME_PREFIX } from './types.ts';
 
 const FACILITY = createFacility('user-service');
 const USER_PREFIX = 'user:';
@@ -21,6 +21,19 @@ const USER_SESSIONS_PREFIX = 'user:sessions:';
 const USER_IDS_SHARDS = 16;
 const USER_IDS_SHARD_PREFIX = 'user:idx:';
 const USER_COUNT_KEY = 'user:count';
+const UID_COUNTER_KEY = '_sys:uid_counter';
+const UID_INDEX_PREFIX = 'user:uid:';
+
+/** Normalise a stored user that may be missing RHEL passwd fields added in Phase 5.1. */
+function normalizeUser(user: User): User {
+  if (!user.uid) (user as any).uid = createUid(UID_MIN);
+  if (!user.gid) (user as any).gid = createGid(GID_MIN);
+  if (user.gecos === undefined) (user as any).gecos = user.name ?? '';
+  if (!user.directory) (user as any).directory = `${DEFAULT_HOME_PREFIX}${user.email}`;
+  if (!user.shell) (user as any).shell = DEFAULT_SHELL;
+  if (!user.supplementaryGids) (user as any).supplementaryGids = [];
+  return user;
+}
 
 /** Deterministic shard assignment from a UserId (UUID v4). */
 function shardIndex(id: UserId): number {
@@ -176,6 +189,7 @@ export interface IUserService {
   login(input: LoginInput, ctx?: LoginContext): Promise<{ user: User; token: SessionToken }>;
   loginNoPassword(input: NoPasswordLoginInput, ctx?: LoginContext): Promise<{ user: User; token: SessionToken }>;
   getById(id: UserId): Promise<User | null>;
+  getByUid(uid: Uid): Promise<User | null>;
   update(id: UserId, input: UpdateUserInput, actorId?: string): Promise<User>;
   delete(id: UserId, actorId?: string): Promise<void>;
   list(): Promise<User[]>;
@@ -192,6 +206,11 @@ export interface IUserService {
 
   /** Revoke a specific session token. No-op if already revoked. */
   revokeSession(token: SessionToken, actorId?: string): Promise<void>;
+
+  /** Supplementary group management — RHEL §1 supp_groups. */
+  addSupplementaryGroup(userId: UserId, gid: Gid, actorId?: string): Promise<User>;
+  removeSupplementaryGroup(userId: UserId, gid: Gid, actorId?: string): Promise<User>;
+  listSupplementaryGroups(userId: UserId): Promise<Gid[]>;
 }
 
 export class UserService implements IUserService {
@@ -215,6 +234,7 @@ export class UserService implements IUserService {
 
   async register(input: RegisterInput): Promise<{ user: User; token: SessionToken }> {
     const id = generateUserId();
+    const uid = await this.#nextUid();
     const passwordHash = await hashPassword(input.password);
     this.logger.write({ facility: FACILITY, level: KernLevel.INFO, message: `PBKDF2 hash: ${lastPerf().toFixed(1)}ms`, metadata: { operation: 'hash', duration: lastPerf() } });
     const now = Date.now();
@@ -225,11 +245,17 @@ export class UserService implements IUserService {
       passwordHash,
       name: input.name,
       role: input.role,
+      uid,
+      gid: createGid(GID_MIN), // default primary group = "users"
+      gecos: input.name,
+      directory: `${DEFAULT_HOME_PREFIX}${input.email}`,
+      shell: DEFAULT_SHELL,
+      supplementaryGids: [],
       createdAt: now,
       updatedAt: now,
     };
 
-    // Atomically: write user + email index (uniqueness) + user ID index
+    // Atomically: write user + email index (uniqueness) + user ID index + UID index
     await this.#transactWithRetry(async (txn) => {
       const emailEntry = await txn.get<any>(EMAIL_INDEX_PREFIX + input.email);
       if (emailEntry) throw new AppError(409, 'EMAIL_EXISTS', 'Email already registered');
@@ -238,6 +264,7 @@ export class UserService implements IUserService {
       txn.set(shardKey, [...(idx ?? []), id]);
       txn.set(USER_PREFIX + id, user);
       txn.set(EMAIL_INDEX_PREFIX + input.email, user);
+      txn.set(UID_INDEX_PREFIX + uid, id);
     });
 
     // Best-effort counter update (outside transaction to avoid cross-shard contention)
@@ -259,13 +286,13 @@ export class UserService implements IUserService {
       facility: FACILITY,
       level: KernLevel.INFO,
       message: 'User registered',
-      metadata: { userId: id as string, email: input.email, role: input.role },
+      metadata: { userId: id as string, email: input.email, role: input.role, uid },
     });
 
     await this.audit?.write({
       level: KernLevel.NOTICE,
       facility: FACILITY,
-      message: `User registered — ${input.email} (role=${input.role})`,
+      message: `User registered — ${input.email} (role=${input.role}, uid=${uid})`,
     });
 
     return { user, token };
@@ -450,7 +477,14 @@ export class UserService implements IUserService {
 
   async getById(id: UserId): Promise<User | null> {
     const entry = await this.atomic.get<User>(USER_PREFIX + id);
-    return entry?.value ?? null;
+    if (!entry) return null;
+    return normalizeUser(entry.value);
+  }
+
+  async getByUid(uid: Uid): Promise<User | null> {
+    const idEntry = await this.atomic.get<string>(UID_INDEX_PREFIX + uid);
+    if (!idEntry) return null;
+    return this.getById(createUserId(idEntry.value));
   }
 
   async refresh(id: UserId): Promise<User | null> {
@@ -462,14 +496,19 @@ export class UserService implements IUserService {
   async update(id: UserId, input: UpdateUserInput, actorId?: string): Promise<User> {
     const entry = await this.atomic.get<User>(USER_PREFIX + id);
     if (!entry) throw new AppError(404, 'USER_NOT_FOUND', 'User not found');
+    const existing = normalizeUser(entry.value);
 
     const updated: User = {
-      ...entry.value,
+      ...existing,
       ...(input.name !== undefined ? { name: input.name } : {}),
       ...(input.role !== undefined ? { role: input.role } : {}),
       ...(input.password !== undefined ? { passwordHash: await hashPassword(input.password) } : {}),
       ...(input.loginPolicy !== undefined ? { loginPolicy: input.loginPolicy } : {}),
       ...(input.publicKeyEd25519 !== undefined ? { publicKeyEd25519: input.publicKeyEd25519 } : {}),
+      ...(input.gecos !== undefined ? { gecos: input.gecos } : {}),
+      ...(input.directory !== undefined ? { directory: input.directory } : {}),
+      ...(input.shell !== undefined ? { shell: input.shell } : {}),
+      ...(input.supplementaryGids !== undefined ? { supplementaryGids: input.supplementaryGids.map(n => createGid(n)) } : {}),
       updatedAt: Date.now(),
     };
 
@@ -570,7 +609,7 @@ export class UserService implements IUserService {
     if (ids.length === 0) return [];
 
     const users = await Promise.all(ids.map(id => this.atomic.get<User>(USER_PREFIX + id)));
-    return users.filter((u): u is NonNullable<typeof u> => u !== null).map(u => u.value);
+    return users.filter((u): u is NonNullable<typeof u> => u !== null).map(u => normalizeUser(u.value));
   }
 
   async listPaginated(page = 1, limit = 50): Promise<{ items: User[]; total: number }> {
@@ -606,7 +645,7 @@ export class UserService implements IUserService {
     if (pageIds.length === 0) return { items: [], total };
 
     const users = await Promise.all(pageIds.map(id => this.atomic.get<User>(USER_PREFIX + id)));
-    const items = users.filter((u): u is NonNullable<typeof u> => u !== null).map(u => u.value);
+    const items = users.filter((u): u is NonNullable<typeof u> => u !== null).map(u => normalizeUser(u.value));
     return { items, total };
   }
 
@@ -682,7 +721,8 @@ export class UserService implements IUserService {
     const expiresAt = entry.value.expiresAt ?? entry.value.createdAt + SESSION_TTL_MS;
     if (Date.now() >= expiresAt) return null;
     const userId = createUserId(entry.value.userId);
-    return this.getById(userId);
+    const user = await this.getById(userId);
+    return user ? normalizeUser(user) : null;
   }
 
   private async createSession(userId: UserId): Promise<SessionToken> {
@@ -770,6 +810,71 @@ export class UserService implements IUserService {
       message: `Session revoked for user ${userId}`,
       metadata: { eventType: 'user.session.revoked', userId: userId as string, tokenHint: (token as string).slice(-4), actorId },
     });
+  }
+
+  /** Allocate next available UID — RHEL §1 UID auto-increment from 1000. */
+  async #nextUid(): Promise<Uid> {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const entry = await this.atomic.get<number>(UID_COUNTER_KEY);
+      const next = entry?.value ?? UID_MIN;
+      const ver = await this.atomic.set(UID_COUNTER_KEY, next + 1, entry?.version ?? null);
+      if (ver) return createUid(next);
+    }
+    throw new AppError(409, 'CONFLICT', 'Failed to allocate UID after retries');
+  }
+
+  // ─── Supplementary group management (RHEL §1 supp_groups) ───
+
+  async addSupplementaryGroup(userId: UserId, gid: Gid, actorId?: string): Promise<User> {
+    const entry = await this.atomic.get<User>(USER_PREFIX + userId);
+    if (!entry) throw new AppError(404, 'USER_NOT_FOUND', 'User not found');
+    const existing = normalizeUser(entry.value);
+    if (existing.supplementaryGids.includes(gid)) return existing;
+
+    const updated: User = {
+      ...existing,
+      supplementaryGids: [...existing.supplementaryGids, gid],
+      updatedAt: Date.now(),
+    };
+    const ver = await this.atomic.set(USER_PREFIX + userId, updated, entry.version);
+    if (!ver) throw new AppError(409, 'CONFLICT', 'Concurrent modification detected');
+
+    await this.audit?.write({
+      level: KernLevel.INFO,
+      facility: FACILITY,
+      message: `Supplementary group added — user ${userId} → gid ${gid}`,
+      metadata: { eventType: 'user.suppGroup.added', userId: userId as string, gid, actorId },
+    });
+    return updated;
+  }
+
+  async removeSupplementaryGroup(userId: UserId, gid: Gid, actorId?: string): Promise<User> {
+    const entry = await this.atomic.get<User>(USER_PREFIX + userId);
+    if (!entry) throw new AppError(404, 'USER_NOT_FOUND', 'User not found');
+    const existing = normalizeUser(entry.value);
+    if (!existing.supplementaryGids.includes(gid)) return existing;
+
+    const updated: User = {
+      ...existing,
+      supplementaryGids: existing.supplementaryGids.filter(g => g !== gid),
+      updatedAt: Date.now(),
+    };
+    const ver = await this.atomic.set(USER_PREFIX + userId, updated, entry.version);
+    if (!ver) throw new AppError(409, 'CONFLICT', 'Concurrent modification detected');
+
+    await this.audit?.write({
+      level: KernLevel.INFO,
+      facility: FACILITY,
+      message: `Supplementary group removed — user ${userId} → gid ${gid}`,
+      metadata: { eventType: 'user.suppGroup.removed', userId: userId as string, gid, actorId },
+    });
+    return updated;
+  }
+
+  async listSupplementaryGroups(userId: UserId): Promise<Gid[]> {
+    const user = await this.getById(userId);
+    if (!user) throw new AppError(404, 'USER_NOT_FOUND', 'User not found');
+    return user.supplementaryGids;
   }
 
   /** Auto-join "users" group on registration (Linux-style). */

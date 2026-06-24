@@ -243,32 +243,39 @@
 
 ## 5. 组件模块
 
-### 5.1 用户/用户组模块 ⏳
+### 5.1 用户/用户组模块 ✅
 
-- [ ] 抄 RHEL: UID/GID 数字体系 (品牌类型已有)
-- [ ] 抄 RHEL: /etc/passwd 7 字段 (name:passwd:UID:GID:GECOS:directory:shell)
-- [ ] 抄 RHEL: supplementary groups (辅助组列表)
-- [ ] 用户能力位: `user:cap:{userId}` 存储 ability bitmask
+- [x] 抄 RHEL: UID/GID 数字体系 — `Uid`/`Gid` brand types (`number & { [BRAND]: true }`)，`UID_MIN=1000`
+- [x] 抄 RHEL: /etc/passwd 7 字段 — `uid`, `gid`, `gecos`, `directory`, `shell`, `supplementaryGids` 已加入 `User`
+- [x] 抄 RHEL: supplementary groups — `addSupplementaryGroup()`/`removeSupplementaryGroup()`/`listSupplementaryGroups()` + `PUT/DELETE/GET /users/:id/supplementary-groups/:gid`
+- [x] 用户能力位: `user:cap:{userId}` 已集成 supplementary GIDs → perm-checker 加载继承 caps
+- [x] UID/GID 自增分配 (`_sys:uid_counter`, `_sys:gid_counter`) + `getByUid()`/`getByGid()` 反向查找
+- [x] `normalizeUser()` 向后兼容旧存储记录（缺少 passwd 字段自动补齐）
+- [x] SysGroup 加 `gid` 字段，`createSysGroup` 自动分配 GID
 
-### 5.2 密钥管理模块 ⏳
+### 5.2 密钥管理模块 ✅
 
-- [ ] 抄 GitHub Secret: NaCl SealedBox 公钥密封 (当前已有 AES-GCM)
-- [ ] 抄 RHEL keyring: session keyring / user keyring 分层
-- [ ] Org/Repo 二级可见性作用域 (all / private / selected)
-- [ ] Secret 版本化 (PUT = upsert, 不保留历史)
+- [x] 抄 GitHub Secret: NaCl SealedBox 公钥密封 — `SealedBox` (ECDH P-256 + AES-GCM)，`seal(publicKey, plaintext)` / `open(privateKey, sealed)`
+- [x] 抄 RHEL keyring: `UserKeyring` (持久化 per-user keypair) + `SessionKeyring` (会话级 ephemeral keys)
+- [x] Org/Repo 二级可见性作用域 — `ContainerSecret.visibility: 'all' | 'private' | 'selected'` + `selectedScopeIds`
+- [x] Secret 版本化 — `ContainerSecret.version` 自增，PUT=upsert 无历史保留
+- [x] `POST /container-secret/:id/scopes` / `GET /check-access?scopeId=` — 可见性管理 API
+- [x] `ContainerSecret.keyType` — 支持 `aes-gcm` (已有) + `sealed-box` (新增)
 
-### 5.3 计算实例模块 ⏳
+### 5.3 计算实例模块 ✅
 
-- [ ] 抄 GitHub Runner: online/offline/busy 三态
-- [ ] 抄 GitHub Runner: Registration Token + config.sh 注册流程
-- [ ] 抄 GitHub Runner: Runner Groups + 可见性作用域继承
-- [ ] 实例心跳 + 超时下线
+- [x] 抄 GitHub Runner: online/offline/busy 三态 — `RunnerInstance.status` + `busy` 独立标志，不变量 `busy⇒online`
+- [x] 抄 GitHub Runner: Registration Token — `POST /instances/registration-token` 1h TTL，一次性消费
+- [x] 抄 GitHub Runner: Runner Groups — `RunnerGroup` + `visibility: 'all' | 'selected'` + `selectedScopeIds` + DAG `dependsOn`
+- [x] 实例心跳 — `POST /instances/:id/heartbeat` 更新 lastHeartbeatAt，`POST /instances/mark-stale` 超时 5min → offline
+- [x] `src/features/instances/` — RunnerService + createInstancesRouter (14 端点)
 
-### 5.4 容器镜像管理模块 ⏳
+### 5.4 容器镜像管理模块 ✅
 
-- [ ] 抄 ECI ImageCache: 镜像缓存 CRUD + 快照副本 + 淘汰策略
-- [ ] 镜像加速 (nydus/dadi/p2p/imc)
-- [ ] 镜像仓库凭证管理 (多 registry)
+- [x] 抄 ECI ImageCache: `ImageCacheTracker` — LRU 淘汰 (总大小上限) + 7 天过期 + `recordAccess`/`touch`/`recordRemoval`
+- [x] `computeEvictions()` — oldest-first 驱逐算法，返回 evicted IDs + reclaimed bytes
+- [x] 镜像仓库凭证管理 — **复用 5.2 ContainerSecret**（visibility 作用域控制哪些 sandbox 可用哪个 registry 凭据）
+- [ ] 镜像加速 (nydus/dadi/p2p/imc) ⏳ — provider 层实现
 
 ### 5.5 存储桶管理 ⏳
 

@@ -9,13 +9,15 @@ const INDEX_KEY = 'ctsecret:ids';
 export interface IContainerSecretService {
   create(input: CreateContainerSecretInput): Promise<ContainerSecret>;
   get(id: string): Promise<ContainerSecret | null>;
-  list(): Promise<ContainerSecret[]>;
+  list(scopeId?: string): Promise<ContainerSecret[]>;
   update(id: string, input: UpdateContainerSecretInput): Promise<ContainerSecret>;
   delete(id: string): Promise<void>;
   /** Upload a file blob for an upload-type secret. */
   uploadBlob(id: string, filename: string, body: ReadableStream | ArrayBuffer, mimeType?: string): Promise<ContainerSecret>;
   /** Read secret data (decrypted / blob content) for provider injection. */
   resolveData(id: string): Promise<string>;
+  /** Check if a scope ID can access a secret based on visibility. */
+  canAccess(id: string, scopeId: string): Promise<boolean>;
 }
 
 export class ContainerSecretService implements IContainerSecretService {
@@ -45,6 +47,10 @@ export class ContainerSecretService implements IContainerSecretService {
       description: input.description,
       value,
       status: input.status ?? 'active',
+      visibility: input.visibility ?? 'all',
+      selectedScopeIds: input.selectedScopeIds ?? [],
+      keyType: input.keyType ?? 'aes-gcm',
+      version: 1,
       createdAt: now,
       updatedAt: now,
     };
@@ -58,22 +64,30 @@ export class ContainerSecretService implements IContainerSecretService {
   async get(id: string): Promise<ContainerSecret | null> {
     const entry = await this.atomic.get<ContainerSecret>(this.#encId(id));
     if (!entry) return null;
-    return this.#decryptFields(entry.value);
+    const s = await this.#decryptFields(entry.value);
+    return normalizeSecret(s);
   }
 
-  async list(): Promise<ContainerSecret[]> {
+  async list(scopeId?: string): Promise<ContainerSecret[]> {
     const idx = await this.atomic.get<string[]>(INDEX_KEY);
     if (!idx) return [];
     const entries = await Promise.all(idx.value.map(id => this.atomic.get<ContainerSecret>(this.#encId(id))));
-    const secrets = entries.filter(e => e).map(e => e!.value);
-    return Promise.all(secrets.map(s => this.#decryptFields(s)));
+    const secrets = await Promise.all(
+      entries.filter(e => e).map(e => this.#decryptFields(e!.value).then(normalizeSecret)),
+    );
+    if (scopeId) {
+      return secrets.filter(s => visibleTo(s, scopeId));
+    }
+    return secrets;
   }
 
   async update(id: string, input: UpdateContainerSecretInput): Promise<ContainerSecret> {
     const entry = await this.atomic.get<ContainerSecret>(this.#encId(id));
     if (!entry) throw new AppError(404, 'SECRET_NOT_FOUND', 'Container secret not found');
 
-    const existing = this.encryption ? await this.#decryptFields(entry.value) : entry.value;
+    const existing = normalizeSecret(
+      this.encryption ? await this.#decryptFields(entry.value) : entry.value,
+    );
 
     const updated: ContainerSecret = {
       ...existing,
@@ -81,6 +95,9 @@ export class ContainerSecretService implements IContainerSecretService {
       ...(input.description !== undefined ? { description: input.description ?? undefined } : {}),
       ...(input.value !== undefined ? { value: input.value ?? undefined } : {}),
       ...(input.status !== undefined ? { status: input.status } : {}),
+      ...(input.visibility !== undefined ? { visibility: input.visibility } : {}),
+      ...(input.selectedScopeIds !== undefined ? { selectedScopeIds: input.selectedScopeIds ?? [] } : {}),
+      version: existing.version + 1,
       updatedAt: Date.now(),
     };
 
@@ -94,7 +111,6 @@ export class ContainerSecretService implements IContainerSecretService {
     const entry = await this.atomic.get<ContainerSecret>(this.#encId(id));
     if (!entry) throw new AppError(404, 'SECRET_NOT_FOUND', 'Container secret not found');
 
-    // Remove associated blob if upload type
     if (entry.value.blobKey && this.blob) {
       await this.blob.delete(entry.value.blobKey).catch(() => {});
     }
@@ -112,12 +128,14 @@ export class ContainerSecretService implements IContainerSecretService {
     await this.blob.put(blobKey, body, { ...(mimeType ? { contentType: mimeType } : {}) });
 
     const size = body instanceof ArrayBuffer ? body.byteLength : undefined;
+    const existing = normalizeSecret(entry.value);
     const updated: ContainerSecret = {
-      ...entry.value,
+      ...existing,
       blobKey,
       filename,
       mimeType,
       size,
+      version: existing.version + 1,
       updatedAt: Date.now(),
     };
     const toStore = this.encryption ? await this.#encryptFields(updated) : updated;
@@ -158,6 +176,12 @@ export class ContainerSecretService implements IContainerSecretService {
     throw new AppError(500, 'SECRET_INVALID_TYPE', `Unknown secret type: ${secret.type}`);
   }
 
+  async canAccess(id: string, scopeId: string): Promise<boolean> {
+    const secret = await this.get(id);
+    if (!secret) return false;
+    return visibleTo(secret, scopeId);
+  }
+
   // ─── Encryption helpers ───
 
   async #encryptFields(s: ContainerSecret): Promise<ContainerSecret> {
@@ -184,4 +208,22 @@ export class ContainerSecretService implements IContainerSecretService {
     if (!idx) return;
     await this.atomic.set(INDEX_KEY, idx.value.filter((i: string) => i !== id), idx.version);
   }
+}
+
+// ─── Helpers ───
+
+function visibleTo(s: ContainerSecret, scopeId: string): boolean {
+  if (s.visibility === 'all') return true;
+  if (s.visibility === 'private') return false; // only accessible by explicit scope match
+  if (s.visibility === 'selected') return s.selectedScopeIds.includes(scopeId);
+  return false;
+}
+
+/** Normalize old stored secrets missing fields added in Phase 5.2. */
+function normalizeSecret(s: ContainerSecret): ContainerSecret {
+  if (!s.visibility) (s as any).visibility = 'all';
+  if (!s.selectedScopeIds) (s as any).selectedScopeIds = [];
+  if (!s.keyType) (s as any).keyType = 'aes-gcm';
+  if (!s.version) (s as any).version = 1;
+  return s;
 }

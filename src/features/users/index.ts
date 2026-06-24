@@ -5,8 +5,8 @@ import { UserService } from './service.ts';
 import { createUserRouter } from './handler.ts';
 
 export type { IUserService } from './service.ts';
-export type { User, UserId, SessionToken, RegisterInput, LoginInput, UpdateUserInput } from './types.ts';
-export { UserRole, generateUserId } from './types.ts';
+export type { User, UserId, SessionToken, RegisterInput, LoginInput, UpdateUserInput, Uid, Gid } from './types.ts';
+export { UserRole, generateUserId, createUid, createGid, UID_MIN, GID_MIN, DEFAULT_SHELL, DEFAULT_HOME_PREFIX } from './types.ts';
 export { RegisterUserSchema, LoginUserSchema, UpdateUserSchema, UserResponseSchema } from './schema.ts';
 
 export function createRouter(deps: FeatureDeps): Hono<any> {

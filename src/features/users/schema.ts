@@ -40,6 +40,10 @@ export const UpdateUserSchema = z.object({
   role: z.nativeEnum(UserRole).optional(),
   loginPolicy: LoginPolicySchema.optional(),
   publicKeyEd25519: PublicKeySchema.optional(),
+  gecos: z.string().max(200).optional(),
+  directory: z.string().max(500).optional(),
+  shell: z.string().max(200).optional(),
+  supplementaryGids: z.array(z.number().int().min(0)).optional(),
 });
 
 // ─── Response schemas ───
@@ -49,6 +53,12 @@ export const UserResponseSchema = z.object({
   email: z.string(),
   name: z.string(),
   role: z.nativeEnum(UserRole),
+  uid: z.number().int().min(0),
+  gid: z.number().int().min(0),
+  gecos: z.string(),
+  directory: z.string(),
+  shell: z.string(),
+  supplementaryGids: z.array(z.number().int().min(0)),
   createdAt: z.number(),
   updatedAt: z.number(),
 });

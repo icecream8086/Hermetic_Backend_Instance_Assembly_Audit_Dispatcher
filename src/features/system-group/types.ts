@@ -1,3 +1,5 @@
+import type { Gid } from '../users/types.ts';
+
 declare const SYSGROUP_ID_BRAND: unique symbol;
 export type SysGroupId = string & { readonly [SYSGROUP_ID_BRAND]: true };
 
@@ -14,6 +16,8 @@ export interface PermissionRule {
 
 export interface SysGroup {
   id: SysGroupId;
+  /** Numeric group ID — RHEL §1 GID. */
+  gid: Gid;
   name: string;
   description?: string | undefined;
   rules: PermissionRule[];
