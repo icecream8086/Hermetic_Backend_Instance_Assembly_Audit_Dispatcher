@@ -225,6 +225,8 @@ export class PermissionService implements IPermissionService {
   async checkRouteAccess(method: string, path: string, userId: string): Promise<boolean> {
     const userEntry = await this.atomic.get<any>('user:' + userId);
     if (!userEntry) return false;
+    // Root role bypasses all route ACLs (capability model still applies at permission gate)
+    if (userEntry.value.role === 'root') return true;
     const allGroups = await this.#groupMgr.listUserGroups();
     const groupIds = allGroups.filter(g => g.memberIds?.includes(userId)).map(g => g.id);
     return this.#routeAclMgr.checkAccess(method, path, userId, groupIds);

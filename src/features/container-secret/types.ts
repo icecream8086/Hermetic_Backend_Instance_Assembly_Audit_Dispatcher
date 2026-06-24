@@ -24,6 +24,8 @@ export interface ContainerSecret {
   readonly selectedScopeIds: string[];
   /** Encryption key type used for this secret's value. */
   readonly keyType: SecretKeyType;
+  /** When keyType='sealed-box', the userId whose public key was used to seal. */
+  readonly sealedForUserId?: string | undefined;
   /** Monotonic version counter — increments on each update. */
   readonly version: number;
   readonly createdAt: number;
@@ -40,6 +42,8 @@ export interface CreateContainerSecretInput {
   readonly visibility?: SecretVisibility | undefined;
   readonly selectedScopeIds?: string[] | undefined;
   readonly keyType?: SecretKeyType | undefined;
+  /** When keyType='sealed-box', seal for this userId's public key. */
+  readonly sealForUserId?: string | undefined;
 }
 
 export interface UpdateContainerSecretInput {

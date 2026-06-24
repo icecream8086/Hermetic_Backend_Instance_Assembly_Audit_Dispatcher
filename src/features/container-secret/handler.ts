@@ -70,6 +70,14 @@ export function createContainerSecretRouter(svc: IContainerSecretService): Hono<
     return c.body(data, 200, { 'Content-Type': 'application/octet-stream' });
   });
 
+  // ─── Public key for SealedBox encryption (GitHub Secret model) ───
+
+  router.get('/public-key/:userId', async (c) => {
+    const pk = await svc.getPublicKey(c.req.param('userId'));
+    if (!pk) return c.json(fail('PUBLIC_KEY_NOT_FOUND', 'No SealedBox keypair for this user. Generate one first.'), 404);
+    return c.json(ok({ userId: c.req.param('userId'), publicKey: pk, keyType: 'sealed-box' }));
+  });
+
   // ─── Visibility: selected scope management (GitHub Secret model) ───
 
   router.get('/:id/scopes', async (c) => {
@@ -117,4 +125,5 @@ export const containerSecretRouteMeta: RouteMeta[] = [
   { method: 'GET', path: '/:id/scopes', description: '获取 secret 的 selectedScopeIds', responseDescription: 'string[]' },
   { method: 'PUT', path: '/:id/scopes', description: '设置 secret 的 selectedScopeIds', requestBody: ['scope_1', 'scope_2'], responseDescription: 'ContainerSecret' },
   { method: 'GET', path: '/:id/check-access', description: '检查 scopeId 是否有权访问此 secret（?scopeId=）', responseDescription: '{ allowed: boolean }' },
+  { method: 'GET', path: '/public-key/:userId', description: '获取用户的 SealedBox 公钥（用于客户端侧加密 secret）', responseDescription: '{ userId, publicKey, keyType }' },
 ];

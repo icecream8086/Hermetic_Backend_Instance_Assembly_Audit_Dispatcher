@@ -25,6 +25,7 @@ import { createVolumeRouter, volumeRouteMeta } from '../src/features/volume/hand
 import { createImagesRouter, imagesRouteMeta } from '../src/features/images/handler.ts';
 import { createActionsRouter, actionRouteMeta } from '../src/features/actions/handler.ts';
 import { createContainerSecretRouter, containerSecretRouteMeta } from '../src/features/container-secret/handler.ts';
+import { createInstancesRouter, instancesRouteMeta } from '../src/features/instances/handler.ts';
 import type { RouteMeta } from '../src/core/http-docs/types.ts';
 import { createAuditRouter } from '../src/core/audit/audit-router.ts';
 import { WorkersAuditLogger } from '../src/core/audit/workers-audit-logger.ts';
@@ -212,6 +213,23 @@ const stubContainerSecretSvc: any = {
   resolveData: async () => '',
 };
 collect('Container Secrets', '/api/container-secrets', createContainerSecretRouter(stubContainerSecretSvc), containerSecretRouteMeta);
+
+const stubInstancesSvc: any = {
+  register: async () => ({ runner: {}, token: '' }),
+  list: async () => [],
+  get: async () => null,
+  update: async () => ({}),
+  delete: async () => {},
+  heartbeat: async () => ({}),
+  markStaleOffline: async () => 0,
+  createRegistrationToken: async () => ({}),
+  validateRegistrationToken: async () => ({ valid: true }),
+  createGroup: async () => ({}),
+  listGroups: async () => [],
+  getGroup: async () => null,
+  deleteGroup: async () => {},
+};
+collect('Instances', '/api/instances', createInstancesRouter(stubInstancesSvc), instancesRouteMeta);
 
 const stubActionDeps2: any = {
   stores: { atomic: null as any, blob: null as any, query: null as any, metrics: null as any },

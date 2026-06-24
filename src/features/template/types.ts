@@ -40,7 +40,7 @@ export interface ContainerDef {
   readonly ports?: readonly { containerPort: number; protocol?: string }[] | undefined;
   readonly resources?: {
     readonly requests?: { readonly cpu?: number; readonly memory?: number };
-    readonly limits?: { readonly cpu?: number; readonly memory?: number; readonly gpu?: number };
+    readonly limits?: { readonly cpu?: number; readonly memory?: number; readonly gpu?: number; readonly gpuType?: string };
   } | undefined;
 }
 

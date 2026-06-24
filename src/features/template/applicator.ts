@@ -31,6 +31,7 @@ export async function applyTemplate(
   const cpu = containers.reduce((s, c) => s + (c.resources?.limits?.cpu ?? c.resources?.requests?.cpu ?? 1), 0);
   const memory = containers.reduce((s, c) => s + (c.resources?.limits?.memory ?? c.resources?.requests?.memory ?? 2048), 0);
   const gpu = Math.max(...containers.map(c => c.resources?.limits?.gpu ?? 0));
+  const gpuType = containers.find(c => (c.resources?.limits?.gpu ?? 0) > 0)?.resources?.limits?.gpuType;
 
   const ext = tpl.extensions;
   const { volumes, volumeMounts, configMapEnv, bucketMounts } = await mapStorage(ext?.storage, resolveVolume, resolveBucket);
@@ -53,7 +54,7 @@ export async function applyTemplate(
   return {
     name: name ?? tpl.name,
     region: (region ?? container.region) as any,
-    resourceSpec: { cpu, memory, ...(gpu > 0 ? { gpu } : {}) },
+    resourceSpec: { cpu, memory, ...(gpu > 0 ? { gpu, ...(gpuType ? { gpuType } : {}) } : {}) },
     spotStrategy: (ext?.spotStrategy ?? 'None') as SpotStrategy,
     restartPolicy: (container.restartPolicy ?? 'Always') as any,
     containers: containers.map((c: ContainerDef, i: number) => ({
@@ -65,7 +66,7 @@ export async function applyTemplate(
       ...(c.resources ? {
         resources: {
           ...(c.resources.requests ? { requests: { cpu: c.resources.requests.cpu ?? 0, memory: c.resources.requests.memory ?? 0 } } : {}),
-          ...(c.resources.limits ? { limits: { cpu: c.resources.limits.cpu ?? 0, memory: c.resources.limits.memory ?? 0, gpu: c.resources.limits.gpu } } : {}),
+          ...(c.resources.limits ? { limits: { cpu: c.resources.limits.cpu ?? 0, memory: c.resources.limits.memory ?? 0, ...(c.resources.limits.gpu !== undefined ? { gpu: c.resources.limits.gpu } : {}), ...(c.resources.limits.gpuType !== undefined ? { gpuType: c.resources.limits.gpuType } : {}) } } : {}),
         },
       } : {}),
       ...(c.ports ? { ports: c.ports.map(p => ({
@@ -90,7 +91,7 @@ export async function applyTemplate(
         ...(c.resources ? {
           resources: {
             ...(c.resources.requests ? { requests: { cpu: c.resources.requests.cpu ?? 0, memory: c.resources.requests.memory ?? 0 } } : {}),
-            ...(c.resources.limits ? { limits: { cpu: c.resources.limits.cpu ?? 0, memory: c.resources.limits.memory ?? 0, gpu: c.resources.limits.gpu } } : {}),
+            ...(c.resources.limits ? { limits: { cpu: c.resources.limits.cpu ?? 0, memory: c.resources.limits.memory ?? 0, ...(c.resources.limits.gpu !== undefined ? { gpu: c.resources.limits.gpu } : {}), ...(c.resources.limits.gpuType !== undefined ? { gpuType: c.resources.limits.gpuType } : {}) } } : {}),
           },
         } : {}),
         ...(probeMap.get(`init:${c.name}`) || {}),

@@ -182,7 +182,7 @@ export interface EnvVar {
 
 export interface ResourceRequirements {
   readonly requests?: { readonly cpu: number; readonly memory: number; readonly gpu?: number } | undefined;
-  readonly limits?: { readonly cpu: number; readonly memory: number; readonly gpu?: number } | undefined;
+  readonly limits?: { readonly cpu: number; readonly memory: number; readonly gpu?: number; readonly gpuType?: string } | undefined;
 }
 
 // ─── Probe ───

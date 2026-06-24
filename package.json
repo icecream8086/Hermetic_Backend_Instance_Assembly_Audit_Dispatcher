@@ -35,7 +35,8 @@
       "volume": "/api/volumes",
       "container-secret": "/api/container-secrets",
       "images": "/api/images",
-      "actions": "/api/actions"
+      "actions": "/api/actions",
+      "instances": "/api/instances"
     }
   },
   "dependencies": {

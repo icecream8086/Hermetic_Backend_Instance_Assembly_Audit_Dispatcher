@@ -10,8 +10,9 @@
  */
 
 import type { IAtomicStore } from './store/interfaces.ts';
+import { Cap, GROUP_CAP_KEY } from './permission/capability.ts';
 
-async function seedPolicyLibrary(atomic: IAtomicStore): Promise<void> {
+export async function seedPolicyLibrary(atomic: IAtomicStore): Promise<void> {
   const KEY = '_init:policy-lib';
   const entry = await atomic.get<any>(KEY);
   if (entry !== null) return; // already seeded
@@ -54,6 +55,18 @@ async function seedPolicyLibrary(atomic: IAtomicStore): Promise<void> {
     await atomic.set('usergroup:' + id, { id, name: g.name, description: g.desc, memberIds: [], dependsOn: [], createdAt: now, updatedAt: now }, null);
     const ugIdx = await atomic.get<string[]>('usergroup:ids');
     await atomic.set('usergroup:ids', [...(ugIdx?.value ?? []), id], ugIdx?.version ?? null);
+    count++;
+  }
+
+  // Set capability bits on wheel and root groups (new capability model)
+  const wheelGid = userGroupIds['wheel'];
+  const rootGid = userGroupIds['root'];
+  if (wheelGid) {
+    await atomic.set(GROUP_CAP_KEY + wheelGid, Cap.ALL, null);
+    count++;
+  }
+  if (rootGid) {
+    await atomic.set(GROUP_CAP_KEY + rootGid, Cap.SANDBOX_FULL | Cap.IMAGE_FULL | Cap.VOLUME_FULL | Cap.NETWORK_FULL | Cap.USER_FULL, null);
     count++;
   }
 
@@ -182,118 +195,6 @@ async function seedDefaultInstance(atomic: IAtomicStore): Promise<string | undef
   }
 }
 
-async function seedSandboxTemplates(atomic: IAtomicStore, defaultInstanceId?: string): Promise<void> {
-  const KEY = '_init:sandbox-tpls';
-  const entry = await atomic.get<any>(KEY);
-  if (entry !== null) return;
-
-  const now = Date.now();
-  const ids: Record<string, string> = {};
-  const cid = defaultInstanceId;
-
-  // Layer 0: base templates
-  const baseAlpineId = `tpl_${crypto.randomUUID()}`; ids.base_alpine = baseAlpineId;
-  const nginxId = `tpl_${crypto.randomUUID()}`; ids.nginx = nginxId;
-  const fedoraId = `tpl_${crypto.randomUUID()}`; ids.fedora = fedoraId;
-  const minioId = `tpl_${crypto.randomUUID()}`; ids.minio = minioId;
-
-  // Layer 1: inherits from base-alpine
-  const customAlpineId = `tpl_${crypto.randomUUID()}`; ids.custom_alpine = customAlpineId;
-
-  // Layer 2: inherits from custom-alpine + nginx
-  const fullStackId = `tpl_${crypto.randomUUID()}`; ids.full_stack = fullStackId;
-
-  const nginxArgId = `tpl_${crypto.randomUUID()}`; ids.nginx_arg = nginxArgId;
-  const demoPodId = `tpl_${crypto.randomUUID()}`; ids.demo_pod = demoPodId;
-  const gpuInferenceId = `tpl_${crypto.randomUUID()}`; ids.gpu_inference = gpuInferenceId;
-
-  const tpls: any[] = [
-    {
-      id: baseAlpineId, name: 'base-alpine',
-      description: 'Base Alpine Linux — minimal OS layer, 256MB RAM, sleep 3600',
-      apiVersion: 'hbi-aad/v1', kind: 'Container',
-      dependsOn: [],
-      container: {
-        region: 'local', instanceId: cid,
-        containers: [{ name: 'alpine', image: 'docker.io/library/alpine:latest', command: ['sleep', '3600'], resources: { limits: { cpu: 0.25, memory: 256 } } }],
-        restartPolicy: 'Never',
-      },
-      network: { publicIp: { allocate: false } },
-      createdAt: now, updatedAt: now,
-    },
-    {
-      id: nginxId, name: 'nginx',
-      description: 'Nginx web server — ports 80, readiness check',
-      apiVersion: 'hbi-aad/v1', kind: 'Container',
-      dependsOn: [], singleton: true,
-      container: {
-        region: 'local', instanceId: cid,
-        containers: [{ name: 'nginx', image: 'docker.io/library/nginx:latest', command: ['nginx'], args: ['-g', 'daemon off;'], ports: [{ containerPort: 80, protocol: 'TCP' }], resources: { limits: { cpu: 0.5, memory: 128 } } }],
-        restartPolicy: 'Always',
-      },
-      healthChecks: [
-        { name: 'nginx-alive', target: 'container:nginx', type: 'liveness', probe: { httpGet: { path: '/', port: 80 } }, periodSeconds: 10, initialDelaySeconds: 5 },
-        { name: 'nginx-ready', target: 'container:nginx', type: 'readiness', probe: { tcpSocket: { port: 80 } }, periodSeconds: 5, initialDelaySeconds: 2 },
-      ],
-      network: { publicIp: { allocate: false } },
-      createdAt: now, updatedAt: now,
-    },
-    {
-      id: fedoraId, name: 'fedora',
-      description: 'Fedora Linux — minimal OS layer, 256MB RAM, sleep 3600',
-      apiVersion: 'hbi-aad/v1', kind: 'Container',
-      dependsOn: [],
-      container: {
-        region: 'local', instanceId: cid,
-        containers: [{ name: 'fedora', image: 'registry.fedoraproject.org/fedora:latest', command: ['sleep', '3600'], resources: { limits: { cpu: 0.25, memory: 256 } } }],
-        restartPolicy: 'Never',
-      },
-      healthChecks: [{ name: 'fedora-alive', target: 'container:fedora', type: 'liveness', probe: { exec: { command: ['sh', '-c', 'kill -0 1'] } }, periodSeconds: 15, initialDelaySeconds: 5, failureThreshold: 3 }],
-      network: { publicIp: { allocate: false } },
-      createdAt: now, updatedAt: now,
-    },
-    {
-      id: gpuInferenceId, name: 'gpu-inference',
-      description: 'GPU inference server — requires NVIDIA GPU (nvidia.com/gpu)',
-      apiVersion: 'hbi-aad/v1', kind: 'Container',
-      dependsOn: [],
-      container: {
-        region: 'local', instanceId: cid,
-        containers: [{ name: 'inference', image: 'nvidia/cuda:12.2-runtime', command: ['python', '-m', 'my_inference_server'], resources: { limits: { cpu: 4, memory: 8192, gpu: 1 } }, ports: [{ containerPort: 8080, protocol: 'TCP' }] }],
-        restartPolicy: 'Always',
-      },
-      network: { publicIp: { allocate: true } },
-      createdAt: now, updatedAt: now,
-    },
-    {
-      id: minioId, name: 'minio-server',
-      description: 'MinIO S3-compatible object storage — ports 9000 (API) / 9001 (console)',
-      apiVersion: 'hbi-aad/v1', kind: 'Container',
-      dependsOn: [], singleton: true,
-      container: {
-        region: 'local', instanceId: cid,
-        containers: [{ name: 'minio', image: 'quay.io/minio/minio:latest', command: ['server', '/data', '--console-address', ':9001'], ports: [{ containerPort: 9000, protocol: 'TCP' }, { containerPort: 9001, protocol: 'TCP' }], env: [{ name: 'MINIO_ROOT_USER', value: 'minioadmin' }, { name: 'MINIO_ROOT_PASSWORD', value: 'minioadmin' }], resources: { limits: { cpu: 0.5, memory: 512 } } }],
-        restartPolicy: 'Always',
-      },
-      healthChecks: [{ name: 'minio-ready', target: 'container:minio', type: 'readiness', probe: { tcpSocket: { port: 9000 } }, periodSeconds: 5, initialDelaySeconds: 5 }],
-      network: { publicIp: { allocate: true } },
-      createdAt: now, updatedAt: now,
-    },
-    { id: customAlpineId, name: 'custom-alpine', description: 'Custom Alpine — inherits base-alpine, adds curl + env vars', apiVersion: 'hbi-aad/v1', kind: 'Container', dependsOn: [baseAlpineId], container: { region: 'local', instanceId: cid, containers: [{ name: 'alpine', command: ['sh', '-c', 'while true; do echo "Hello from DAG"; curl -s http://localhost/health 2>/dev/null || echo "nginx not ready"; sleep 10; done'], env: [{ name: 'APP_ENV', value: 'development' }, { name: 'LOG_LEVEL', value: 'debug' }] }], restartPolicy: 'Never' }, createdAt: now, updatedAt: now },
-    { id: fullStackId, name: 'full-stack', description: 'Full stack — merges custom-alpine + nginx with app container', apiVersion: 'hbi-aad/v1', kind: 'Container', dependsOn: [customAlpineId, nginxId], container: { region: 'local', instanceId: cid, containers: [{ name: 'alpine', env: [{ name: 'NGINX_HOST', value: 'localhost' }, { name: 'DB_URL', value: 'sqlite:///data/app.db' }] }] }, network: { publicIp: { allocate: true } }, createdAt: now, updatedAt: now },
-    { id: nginxArgId, name: 'nginx-arg', description: 'Nginx with explicit command+args — 验证模板参数穿透到容器', apiVersion: 'hbi-aad/v1', kind: 'Container', dependsOn: [], singleton: true, container: { region: 'local', instanceId: cid, containers: [{ name: 'nginx-arg', image: 'docker.io/library/nginx:latest', command: ['nginx'], args: ['-g', 'daemon off;'], ports: [{ containerPort: 80, protocol: 'TCP' }], resources: { limits: { cpu: 0.5, memory: 128 } } }], restartPolicy: 'Always' }, healthChecks: [{ name: 'nginx-arg-alive', target: 'container:nginx-arg', type: 'liveness', probe: { httpGet: { path: '/', port: 80 } }, periodSeconds: 10, initialDelaySeconds: 5 }], network: { publicIp: { allocate: false } }, createdAt: now, updatedAt: now },
-    { id: demoPodId, name: 'demo-pod', description: 'v2 容器组 — nginx + alpine 共享网络 (docker-compose 风格)', apiVersion: 'hbi-aad/v2', kind: 'ContainerGroup', dependsOn: [], podSpec: { name: 'demo-pod', region: 'local', resources: { cpu: '1.0', memory: '512Mi' }, services: { web: { image: 'docker.io/library/nginx:latest', command: ['nginx', '-g', 'daemon off;'], ports: [{ containerPort: 80, protocol: 'TCP' }], resources: { cpu: '0.5', memory: '128Mi' } }, sidecar: { image: 'docker.io/library/alpine:latest', command: ['sh', '-c', 'while true; do echo "sidecar alive"; sleep 30; done'], dependsOn: ['web'], resources: { cpu: '0.25', memory: '64Mi' } } } }, createdAt: now, updatedAt: now },
-  ];
-
-  const allIds = [baseAlpineId, nginxId, nginxArgId, customAlpineId, fullStackId, fedoraId, minioId, demoPodId, gpuInferenceId];
-  for (const t of tpls) {
-    await atomic.set('sandbox-tpl:' + t.id, t, null);
-  }
-  await atomic.set('sandbox-tpl:ids', allIds, null);
-  await atomic.set(KEY, { seededAt: now }, null);
-  console.log(`[${new Date().toISOString()}] INFO: [seed] Sandbox templates seeded: ${tpls.length} (${tpls.map((t: any) => t.name).join(', ')})`);
-}
-
 /** Seed MAC rules if absent. Returns the rules array for in-memory loading. */
 export async function ensureMacRules(atomic: IAtomicStore): Promise<readonly any[]> {
   const KEY = '_init:mac-policy';
@@ -383,7 +284,6 @@ async function seedVolumes(atomic: IAtomicStore, defaultInstanceId: string): Pro
 export async function seedIfNeeded(atomic: IAtomicStore): Promise<void> {
   await seedPolicyLibrary(atomic);
   const instanceId = await seedDefaultInstance(atomic);
-  await seedSandboxTemplates(atomic, instanceId);
   if (instanceId) await seedVolumes(atomic, instanceId);
   await seedLogPolicy(atomic);
 }

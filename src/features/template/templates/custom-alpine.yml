@@ -1,0 +1,24 @@
+# category: os
+# tags: alpine, custom, dag
+name: "custom-alpine"
+description: "Custom Alpine — inherits base-alpine, adds curl + env vars"
+apiVersion: "hbi-aad/v1"
+kind: "Container"
+region: "local"
+restartPolicy: "Never"
+dependsOn:
+  - "base-alpine"
+containers:
+  - name: "alpine"
+    command:
+      - "sh"
+      - "-c"
+      - "while true; do echo \"Hello from DAG\"; curl -s http://localhost/health 2>/dev/null || echo \"nginx not ready\"; sleep 10; done"
+    env:
+      - name: "APP_ENV"
+        value: "development"
+      - name: "LOG_LEVEL"
+        value: "debug"
+network:
+  publicIp:
+    allocate: false

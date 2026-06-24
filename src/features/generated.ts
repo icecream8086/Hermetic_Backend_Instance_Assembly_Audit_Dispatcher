@@ -15,6 +15,7 @@ import { createRouter as volumeRouter } from './volume/index.ts';
 import { createRouter as container_secretRouter } from './container-secret/index.ts';
 import { createRouter as imagesRouter } from './images/index.ts';
 import { createRouter as actionsRouter } from './actions/index.ts';
+import { createRouter as instancesRouter } from './instances/index.ts';
 
 import type { FeatureDeps } from '../core/app.ts';
 import type { Hono } from 'hono';
@@ -39,5 +40,6 @@ export function getFeatures(): RegisteredFeature[] {
   { path: '/api/volumes', mount: (deps) => volumeRouter(deps) },
   { path: '/api/container-secrets', mount: (deps) => container_secretRouter(deps) },
   { path: '/api/images', mount: (deps) => imagesRouter(deps) },
-  { path: '/api/actions', mount: (deps) => actionsRouter(deps) },  ];
+  { path: '/api/actions', mount: (deps) => actionsRouter(deps) },
+  { path: '/api/instances', mount: (deps) => instancesRouter(deps) },  ];
 }

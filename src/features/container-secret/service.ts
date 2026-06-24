@@ -1,6 +1,8 @@
 import type { IAtomicStore, IBlobStore } from '../../core/store/interfaces.ts';
 import { AppError } from '../../core/types.ts';
 import { SecretEncryption } from '../../core/auth/secret-encryption.ts';
+import { UserKeyring } from '../../core/auth/keyring.ts';
+import { SealedBox } from '../../core/auth/sealed-box.ts';
 import type { ContainerSecret, CreateContainerSecretInput, UpdateContainerSecretInput } from './types.ts';
 
 const PREFIX = 'ctsecret:';
@@ -18,6 +20,8 @@ export interface IContainerSecretService {
   resolveData(id: string): Promise<string>;
   /** Check if a scope ID can access a secret based on visibility. */
   canAccess(id: string, scopeId: string): Promise<boolean>;
+  /** Get the SealedBox public key for a user. Returns null if not yet generated. */
+  getPublicKey(userId: string): Promise<string | null>;
 }
 
 export class ContainerSecretService implements IContainerSecretService {
@@ -25,6 +29,7 @@ export class ContainerSecretService implements IContainerSecretService {
     private readonly atomic: IAtomicStore,
     private readonly blob?: IBlobStore,
     private readonly encryption?: SecretEncryption,
+    private readonly keyring?: UserKeyring,
   ) {}
 
   #encId(id: string): string { return PREFIX + id; }
@@ -33,11 +38,19 @@ export class ContainerSecretService implements IContainerSecretService {
     const id = `ctsec_${crypto.randomUUID()}`;
     const now = Date.now();
 
+    const keyType = input.keyType ?? 'aes-gcm';
+    const sealForUserId = input.sealForUserId;
     let value: string | undefined;
+
     if (input.type === 'inline' && input.value) {
-      value = this.encryption
-        ? await this.encryption.encrypt(input.value)
-        : input.value;
+      if (keyType === 'sealed-box' && sealForUserId && this.keyring) {
+        const pk = await this.keyring.ensureSealedBox(sealForUserId);
+        value = await SealedBox.seal(pk.publicKey, input.value);
+      } else if (this.encryption) {
+        value = await this.encryption.encrypt(input.value);
+      } else {
+        value = input.value;
+      }
     }
 
     const secret: ContainerSecret = {
@@ -49,7 +62,8 @@ export class ContainerSecretService implements IContainerSecretService {
       status: input.status ?? 'active',
       visibility: input.visibility ?? 'all',
       selectedScopeIds: input.selectedScopeIds ?? [],
-      keyType: input.keyType ?? 'aes-gcm',
+      keyType: keyType === 'sealed-box' && sealForUserId ? 'sealed-box' : 'aes-gcm',
+      ...(keyType === 'sealed-box' && sealForUserId ? { sealedForUserId: sealForUserId } : {}),
       version: 1,
       createdAt: now,
       updatedAt: now,
@@ -182,15 +196,26 @@ export class ContainerSecretService implements IContainerSecretService {
     return visibleTo(secret, scopeId);
   }
 
+  async getPublicKey(userId: string): Promise<string | null> {
+    if (!this.keyring) return null;
+    return this.keyring.getPublicKey(userId);
+  }
+
   // ─── Encryption helpers ───
 
   async #encryptFields(s: ContainerSecret): Promise<ContainerSecret> {
+    if (s.keyType === 'sealed-box') return s; // already sealed
     const enc = this.encryption;
     if (!enc || !s.value) return s;
     return { ...s, value: await enc.encrypt(s.value) };
   }
 
   async #decryptFields(s: ContainerSecret): Promise<ContainerSecret> {
+    if (s.keyType === 'sealed-box' && s.sealedForUserId && this.keyring) {
+      const kp = await this.keyring.ensureSealedBox(s.sealedForUserId);
+      const opened = await SealedBox.open(kp.privateKey, s.value!);
+      return { ...s, value: opened };
+    }
     const enc = this.encryption;
     if (!enc || !s.value) return s;
     return { ...s, value: await enc.decrypt(s.value) };

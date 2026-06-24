@@ -30,7 +30,7 @@ import { PermissionService } from '../features/permission/service.ts';
 import { ConsoleLogger, setPanicHandler } from './audit/console-logger.ts';
 import { DoBridge } from './event-bus/do-bridge.ts';
 import { createWsRouter } from './ws/router.ts';
-import { seedIfNeeded, ensureMacRules } from './seed.ts';
+import { seedIfNeeded, ensureMacRules, seedPolicyLibrary } from './seed.ts';
 import { RequestCachedAtomicStore } from './store/request-cache.ts';
 import { formatDmesgLine } from './utils/dmesg.ts';
 import { createMessageQueue } from '../queue/producer.ts';
@@ -158,10 +158,11 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
     new DoBridge(eventBus, notifDONamespace);
   }
 
-  // 6. Deferred background seeding — policy lib, default instance, templates.
-  // Shipping seeds to ctx.waitUntil() so first request isn't blocked.
-  // MAC rules are the only seed data that must exist before auth runs.
+  // 6. Seed critical data synchronously — auth & permission groups must exist
+  // before the first request can register a user, otherwise the first Root user
+  // gets orphaned (no group membership → no capability bits → all 403).
   await ensureMacRules(stores.atomic);
+  await seedPolicyLibrary(stores.atomic);
 
   // 7. Build Hono app
 

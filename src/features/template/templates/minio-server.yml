@@ -1,0 +1,43 @@
+# category: service
+# tags: minio, s3, storage, singleton
+name: "minio-server"
+description: "MinIO S3-compatible object storage — ports 9000 (API) / 9001 (console)"
+apiVersion: "hbi-aad/v1"
+kind: "Container"
+region: "local"
+restartPolicy: "Always"
+singleton: true
+containers:
+  - name: "minio"
+    image: "quay.io/minio/minio:latest"
+    command:
+      - "server"
+      - "/data"
+      - "--console-address"
+      - ":9001"
+    ports:
+      - containerPort: 9000
+        protocol: "TCP"
+      - containerPort: 9001
+        protocol: "TCP"
+    env:
+      - name: "MINIO_ROOT_USER"
+        value: "minioadmin"
+      - name: "MINIO_ROOT_PASSWORD"
+        value: "minioadmin"
+    resources:
+      limits:
+        cpu: 0.5
+        memory: 512
+healthChecks:
+  - name: "minio-ready"
+    target: "container:minio"
+    type: "readiness"
+    probe:
+      tcpSocket:
+        port: 9000
+    periodSeconds: 5
+    initialDelaySeconds: 5
+network:
+  publicIp:
+    allocate: true

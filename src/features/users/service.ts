@@ -8,6 +8,7 @@ import type { IAuditWriter } from '../../core/audit/types.ts';
 import { KernLevel } from '../../core/audit/kern-level.ts';
 import type { User, UserId, Session, SessionToken, RegisterInput, LoginInput, LoginContext, NoPasswordLoginInput, UpdateUserInput, LoginInfo, Uid, Gid } from './types.ts';
 import { generateUserId, generateSessionToken, createUserId, createSessionToken, UserRole, createUid, createGid, UID_MIN, GID_MIN, DEFAULT_SHELL, DEFAULT_HOME_PREFIX } from './types.ts';
+import { Cap, USER_CAP_KEY } from '../../core/permission/capability.ts';
 
 const FACILITY = createFacility('user-service');
 const USER_PREFIX = 'user:';
@@ -280,6 +281,8 @@ export class UserService implements IUserService {
     if (input.role === UserRole.Root) {
       await this.#joinNamedGroup(id, 'root');
       await this.#joinNamedGroup(id, 'wheel');
+      // Belt-and-suspenders: direct capability bits in case group caps are stale
+      await this.atomic.set(USER_CAP_KEY + id, Cap.ALL, null);
     }
 
     await this.logger.write({

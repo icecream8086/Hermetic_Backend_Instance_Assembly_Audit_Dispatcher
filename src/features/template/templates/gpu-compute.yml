@@ -1,0 +1,68 @@
+# category: compute
+# tags: gpu, cuda, nvidia, inference, spot
+name: "gpu-compute"
+description: "GPU compute instance — NVIDIA CUDA 12.0 runtime, T4 GPU (ecs.gn6v), spot instance"
+apiVersion: "hbi-aad/v1"
+kind: "Container"
+region: "cn-hangzhou"
+containers:
+  - name: "gpu-worker"
+    image: "docker.io/nvidia/cuda:12.0-runtime-ubuntu22.04"
+    command:
+      - "nvidia-smi"
+    ports:
+      - containerPort: 8888
+        protocol: "TCP"
+    env:
+      - name: "NVIDIA_VISIBLE_DEVICES"
+        value: "all"
+      - name: "CUDA_VISIBLE_DEVICES"
+        value: "0"
+    resources:
+      limits:
+        cpu: 8
+        memory: 32768
+        gpu: 1
+        gpuType: "nvidia.com/gpu"
+    livenessProbe:
+      tcpSocket:
+        port: 8888
+      periodSeconds: 30
+      initialDelaySeconds: 60
+    readinessProbe:
+      exec:
+        command:
+          - "nvidia-smi"
+      periodSeconds: 30
+      initialDelaySeconds: 30
+    imagePullPolicy: "IfNotPresent"
+    stdin: true
+    tty: true
+extensions:
+  spotStrategy: "SpotAsPriceGo"
+  healthMaxRetries: 3
+  providerOverrides:
+    alibaba:
+      # ecs.gn6v-c8g1.2xlarge = 1× NVIDIA T4, 8 vCPU, 32 GB
+      # ecs.gn7i-c32g1.8xlarge = 1× NVIDIA A10, 32 vCPU, 128 GB
+      # ecs.gn6e-c12g1.3xlarge = 1× NVIDIA V100, 12 vCPU, 92 GB
+      instanceType: "ecs.gn6v-c8g1.2xlarge"
+      ingressBandwidth: 100
+      egressBandwidth: 100
+      autoCreateEip: true
+      eipBandwidth: 50
+      autoMatchImageCache: true
+      cpuArchitecture: "AMD64"
+network:
+  mode: "vpc"
+  publicIp:
+    allocate: true
+    bandwidth: 50
+  vpc:
+    securityGroupId: "sg-bp16o5urk39itwcqmdzj"
+    subnetIds:
+      - "vsw-bp1xx36ys1jou7o1bsdpp"
+      - "vsw-bp1grwzlgy2739dxnskbz"
+      - "vsw-bp1rv5m61jx4kmld0cc12"
+      - "vsw-bp1wfyusfye82wm3d3zew"
+restartPolicy: "OnFailure"

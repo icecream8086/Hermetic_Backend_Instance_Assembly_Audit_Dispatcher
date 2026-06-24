@@ -9,6 +9,7 @@ export const CreateContainerSecretSchema = z.object({
   visibility: z.enum(['all', 'private', 'selected']).optional().default('all'),
   selectedScopeIds: z.array(z.string()).optional().default([]),
   keyType: z.enum(['aes-gcm', 'sealed-box']).optional().default('aes-gcm'),
+  sealForUserId: z.string().optional(),
 }).refine(data => {
   if (data.type === 'inline' && !data.value) return false;
   return true;

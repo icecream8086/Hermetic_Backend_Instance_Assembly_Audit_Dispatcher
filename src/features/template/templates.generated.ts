@@ -77,6 +77,40 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
     }
   },
   {
+    "id": "base-alpine",
+    "name": "base-alpine",
+    "description": "Base Alpine Linux — minimal OS layer, 256MB RAM, sleep 3600",
+    "category": "",
+    "tags": [],
+    "spec": {
+      "apiVersion": "hbi-aad/v1",
+      "kind": "Container",
+      "region": "local",
+      "restartPolicy": "Never",
+      "containers": [
+        {
+          "name": "alpine",
+          "image": "docker.io/library/alpine:latest",
+          "command": [
+            "sleep",
+            "3600"
+          ],
+          "resources": {
+            "limits": {
+              "cpu": 0.25,
+              "memory": 256
+            }
+          }
+        }
+      ],
+      "network": {
+        "publicIp": {
+          "allocate": false
+        }
+      }
+    }
+  },
+  {
     "id": "base-network",
     "name": "base-network",
     "description": "基础网络层 — VPC + 安全组 + 子网，被其他服务模板继承",
@@ -98,6 +132,530 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
       "providerOverrides": {
         "alibaba": {
           "instanceType": "ecs.g7.xlarge"
+        }
+      }
+    }
+  },
+  {
+    "id": "custom-alpine",
+    "name": "custom-alpine",
+    "description": "Custom Alpine — inherits base-alpine, adds curl + env vars",
+    "category": "",
+    "tags": [],
+    "spec": {
+      "apiVersion": "hbi-aad/v1",
+      "kind": "Container",
+      "region": "local",
+      "restartPolicy": "Never",
+      "dependsOn": [
+        "base-alpine"
+      ],
+      "containers": [
+        {
+          "name": "alpine",
+          "command": [
+            "sh",
+            "-c",
+            "while true; do echo \"Hello from DAG\"; curl -s http://localhost/health 2>/dev/null || echo \"nginx not ready\"; sleep 10; done"
+          ],
+          "env": [
+            {
+              "name": "APP_ENV",
+              "value": "development"
+            },
+            {
+              "name": "LOG_LEVEL",
+              "value": "debug"
+            }
+          ]
+        }
+      ],
+      "network": {
+        "publicIp": {
+          "allocate": false
+        }
+      }
+    }
+  },
+  {
+    "id": "demo-pod",
+    "name": "demo-pod",
+    "description": "v2 容器组 — nginx + alpine 共享网络 (docker-compose 风格)",
+    "category": "",
+    "tags": [],
+    "spec": {
+      "apiVersion": "hbi-aad/v2",
+      "kind": "ContainerGroup",
+      "region": "local",
+      "podSpec": {
+        "name": "demo-pod",
+        "region": "local",
+        "resources": {
+          "cpu": "1.0",
+          "memory": "512Mi"
+        },
+        "services": {
+          "web": {
+            "image": "docker.io/library/nginx:latest",
+            "command": [
+              "nginx",
+              "-g",
+              "daemon off;"
+            ],
+            "ports": [
+              {
+                "containerPort": 80,
+                "protocol": "TCP"
+              }
+            ],
+            "resources": {
+              "cpu": "0.5",
+              "memory": "128Mi"
+            }
+          },
+          "sidecar": {
+            "image": "docker.io/library/alpine:latest",
+            "command": [
+              "sh",
+              "-c",
+              "while true; do echo \"sidecar alive\"; sleep 30; done"
+            ],
+            "dependsOn": [
+              "web"
+            ],
+            "resources": {
+              "cpu": "0.25",
+              "memory": "64Mi"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "fedora",
+    "name": "fedora",
+    "description": "Fedora Linux — minimal OS layer, 256MB RAM, sleep 3600",
+    "category": "",
+    "tags": [],
+    "spec": {
+      "apiVersion": "hbi-aad/v1",
+      "kind": "Container",
+      "region": "local",
+      "restartPolicy": "Never",
+      "containers": [
+        {
+          "name": "fedora",
+          "image": "registry.fedoraproject.org/fedora:latest",
+          "command": [
+            "sleep",
+            "3600"
+          ],
+          "resources": {
+            "limits": {
+              "cpu": 0.25,
+              "memory": 256
+            }
+          }
+        }
+      ],
+      "healthChecks": [
+        {
+          "name": "fedora-alive",
+          "target": "container:fedora",
+          "type": "liveness",
+          "probe": {
+            "exec": {
+              "command": [
+                "sh",
+                "-c",
+                "kill -0 1"
+              ]
+            }
+          },
+          "periodSeconds": 15,
+          "initialDelaySeconds": 5,
+          "failureThreshold": 3
+        }
+      ],
+      "network": {
+        "publicIp": {
+          "allocate": false
+        }
+      }
+    }
+  },
+  {
+    "id": "full-stack",
+    "name": "full-stack",
+    "description": "Full stack — merges custom-alpine + nginx with app container",
+    "category": "",
+    "tags": [],
+    "spec": {
+      "apiVersion": "hbi-aad/v1",
+      "kind": "Container",
+      "region": "local",
+      "dependsOn": [
+        "custom-alpine",
+        "nginx"
+      ],
+      "containers": [
+        {
+          "name": "alpine",
+          "env": [
+            {
+              "name": "NGINX_HOST",
+              "value": "localhost"
+            },
+            {
+              "name": "DB_URL",
+              "value": "sqlite:///data/app.db"
+            }
+          ]
+        }
+      ],
+      "network": {
+        "publicIp": {
+          "allocate": true
+        }
+      }
+    }
+  },
+  {
+    "id": "gpu-compute",
+    "name": "gpu-compute",
+    "description": "GPU compute instance — NVIDIA CUDA 12.0 runtime, T4 GPU (ecs.gn6v), spot instance",
+    "category": "",
+    "tags": [],
+    "spec": {
+      "apiVersion": "hbi-aad/v1",
+      "kind": "Container",
+      "region": "cn-hangzhou",
+      "containers": [
+        {
+          "name": "gpu-worker",
+          "image": "docker.io/nvidia/cuda:12.0-runtime-ubuntu22.04",
+          "command": [
+            "nvidia-smi"
+          ],
+          "ports": [
+            {
+              "containerPort": 8888,
+              "protocol": "TCP"
+            }
+          ],
+          "env": [
+            {
+              "name": "NVIDIA_VISIBLE_DEVICES",
+              "value": "all"
+            },
+            {
+              "name": "CUDA_VISIBLE_DEVICES",
+              "value": "0"
+            }
+          ],
+          "resources": {
+            "limits": {
+              "cpu": 8,
+              "memory": 32768,
+              "gpu": 1,
+              "gpuType": "nvidia.com/gpu"
+            }
+          },
+          "livenessProbe": {
+            "tcpSocket": {
+              "port": 8888
+            },
+            "periodSeconds": 30,
+            "initialDelaySeconds": 60
+          },
+          "readinessProbe": {
+            "exec": {
+              "command": [
+                "nvidia-smi"
+              ]
+            },
+            "periodSeconds": 30,
+            "initialDelaySeconds": 30
+          },
+          "imagePullPolicy": "IfNotPresent",
+          "stdin": true,
+          "tty": true
+        }
+      ],
+      "extensions": {
+        "spotStrategy": "SpotAsPriceGo",
+        "healthMaxRetries": 3,
+        "providerOverrides": {
+          "alibaba": {
+            "instanceType": "ecs.gn6v-c8g1.2xlarge",
+            "ingressBandwidth": 100,
+            "egressBandwidth": 100,
+            "autoCreateEip": true,
+            "eipBandwidth": 50,
+            "autoMatchImageCache": true,
+            "cpuArchitecture": "AMD64"
+          }
+        }
+      },
+      "network": {
+        "mode": "vpc",
+        "publicIp": {
+          "allocate": true,
+          "bandwidth": 50
+        },
+        "vpc": {
+          "securityGroupId": "sg-bp16o5urk39itwcqmdzj",
+          "subnetIds": [
+            "vsw-bp1xx36ys1jou7o1bsdpp",
+            "vsw-bp1grwzlgy2739dxnskbz",
+            "vsw-bp1rv5m61jx4kmld0cc12",
+            "vsw-bp1wfyusfye82wm3d3zew"
+          ]
+        }
+      },
+      "restartPolicy": "OnFailure"
+    }
+  },
+  {
+    "id": "gpu-inference",
+    "name": "gpu-inference",
+    "description": "GPU inference server — requires NVIDIA GPU (nvidia.com/gpu)",
+    "category": "",
+    "tags": [],
+    "spec": {
+      "apiVersion": "hbi-aad/v1",
+      "kind": "Container",
+      "region": "local",
+      "restartPolicy": "Always",
+      "containers": [
+        {
+          "name": "inference",
+          "image": "docker.io/nvidia/cuda:12.2-runtime",
+          "command": [
+            "python",
+            "-m",
+            "my_inference_server"
+          ],
+          "ports": [
+            {
+              "containerPort": 8080,
+              "protocol": "TCP"
+            }
+          ],
+          "resources": {
+            "limits": {
+              "cpu": 4,
+              "memory": 8192,
+              "gpu": 1
+            }
+          }
+        }
+      ],
+      "network": {
+        "publicIp": {
+          "allocate": true
+        }
+      }
+    }
+  },
+  {
+    "id": "minio-server",
+    "name": "minio-server",
+    "description": "MinIO S3-compatible object storage — ports 9000 (API) / 9001 (console)",
+    "category": "",
+    "tags": [],
+    "spec": {
+      "apiVersion": "hbi-aad/v1",
+      "kind": "Container",
+      "region": "local",
+      "restartPolicy": "Always",
+      "singleton": true,
+      "containers": [
+        {
+          "name": "minio",
+          "image": "quay.io/minio/minio:latest",
+          "command": [
+            "server",
+            "/data",
+            "--console-address",
+            ":9001"
+          ],
+          "ports": [
+            {
+              "containerPort": 9000,
+              "protocol": "TCP"
+            },
+            {
+              "containerPort": 9001,
+              "protocol": "TCP"
+            }
+          ],
+          "env": [
+            {
+              "name": "MINIO_ROOT_USER",
+              "value": "minioadmin"
+            },
+            {
+              "name": "MINIO_ROOT_PASSWORD",
+              "value": "minioadmin"
+            }
+          ],
+          "resources": {
+            "limits": {
+              "cpu": 0.5,
+              "memory": 512
+            }
+          }
+        }
+      ],
+      "healthChecks": [
+        {
+          "name": "minio-ready",
+          "target": "container:minio",
+          "type": "readiness",
+          "probe": {
+            "tcpSocket": {
+              "port": 9000
+            }
+          },
+          "periodSeconds": 5,
+          "initialDelaySeconds": 5
+        }
+      ],
+      "network": {
+        "publicIp": {
+          "allocate": true
+        }
+      }
+    }
+  },
+  {
+    "id": "nginx-arg",
+    "name": "nginx-arg",
+    "description": "Nginx with explicit command+args — 验证模板参数穿透到容器",
+    "category": "",
+    "tags": [],
+    "spec": {
+      "apiVersion": "hbi-aad/v1",
+      "kind": "Container",
+      "region": "local",
+      "restartPolicy": "Always",
+      "singleton": true,
+      "containers": [
+        {
+          "name": "nginx-arg",
+          "image": "docker.io/library/nginx:latest",
+          "command": [
+            "nginx"
+          ],
+          "args": [
+            "-g",
+            "daemon off;"
+          ],
+          "ports": [
+            {
+              "containerPort": 80,
+              "protocol": "TCP"
+            }
+          ],
+          "resources": {
+            "limits": {
+              "cpu": 0.5,
+              "memory": 128
+            }
+          }
+        }
+      ],
+      "healthChecks": [
+        {
+          "name": "nginx-arg-alive",
+          "target": "container:nginx-arg",
+          "type": "liveness",
+          "probe": {
+            "httpGet": {
+              "path": "/",
+              "port": 80
+            }
+          },
+          "periodSeconds": 10,
+          "initialDelaySeconds": 5
+        }
+      ],
+      "network": {
+        "publicIp": {
+          "allocate": false
+        }
+      }
+    }
+  },
+  {
+    "id": "nginx",
+    "name": "nginx",
+    "description": "Nginx web server — ports 80, readiness check, singleton",
+    "category": "",
+    "tags": [],
+    "spec": {
+      "apiVersion": "hbi-aad/v1",
+      "kind": "Container",
+      "region": "local",
+      "restartPolicy": "Always",
+      "singleton": true,
+      "containers": [
+        {
+          "name": "nginx",
+          "image": "docker.io/library/nginx:latest",
+          "command": [
+            "nginx"
+          ],
+          "args": [
+            "-g",
+            "daemon off;"
+          ],
+          "ports": [
+            {
+              "containerPort": 80,
+              "protocol": "TCP"
+            }
+          ],
+          "resources": {
+            "limits": {
+              "cpu": 0.5,
+              "memory": 128
+            }
+          }
+        }
+      ],
+      "healthChecks": [
+        {
+          "name": "nginx-alive",
+          "target": "container:nginx",
+          "type": "liveness",
+          "probe": {
+            "httpGet": {
+              "path": "/",
+              "port": 80
+            }
+          },
+          "periodSeconds": 10,
+          "initialDelaySeconds": 5
+        },
+        {
+          "name": "nginx-ready",
+          "target": "container:nginx",
+          "type": "readiness",
+          "probe": {
+            "tcpSocket": {
+              "port": 80
+            }
+          },
+          "periodSeconds": 5,
+          "initialDelaySeconds": 2
+        }
+      ],
+      "network": {
+        "publicIp": {
+          "allocate": false
         }
       }
     }
@@ -472,9 +1030,79 @@ export const INSTANCE_TEMPLATE_METAS: InstanceTemplateMeta[] = [
     "tags": []
   },
   {
+    "id": "base-alpine",
+    "name": "base-alpine",
+    "description": "Base Alpine Linux — minimal OS layer, 256MB RAM, sleep 3600",
+    "category": "",
+    "tags": []
+  },
+  {
     "id": "base-network",
     "name": "base-network",
     "description": "基础网络层 — VPC + 安全组 + 子网，被其他服务模板继承",
+    "category": "",
+    "tags": []
+  },
+  {
+    "id": "custom-alpine",
+    "name": "custom-alpine",
+    "description": "Custom Alpine — inherits base-alpine, adds curl + env vars",
+    "category": "",
+    "tags": []
+  },
+  {
+    "id": "demo-pod",
+    "name": "demo-pod",
+    "description": "v2 容器组 — nginx + alpine 共享网络 (docker-compose 风格)",
+    "category": "",
+    "tags": []
+  },
+  {
+    "id": "fedora",
+    "name": "fedora",
+    "description": "Fedora Linux — minimal OS layer, 256MB RAM, sleep 3600",
+    "category": "",
+    "tags": []
+  },
+  {
+    "id": "full-stack",
+    "name": "full-stack",
+    "description": "Full stack — merges custom-alpine + nginx with app container",
+    "category": "",
+    "tags": []
+  },
+  {
+    "id": "gpu-compute",
+    "name": "gpu-compute",
+    "description": "GPU compute instance — NVIDIA CUDA 12.0 runtime, T4 GPU (ecs.gn6v), spot instance",
+    "category": "",
+    "tags": []
+  },
+  {
+    "id": "gpu-inference",
+    "name": "gpu-inference",
+    "description": "GPU inference server — requires NVIDIA GPU (nvidia.com/gpu)",
+    "category": "",
+    "tags": []
+  },
+  {
+    "id": "minio-server",
+    "name": "minio-server",
+    "description": "MinIO S3-compatible object storage — ports 9000 (API) / 9001 (console)",
+    "category": "",
+    "tags": []
+  },
+  {
+    "id": "nginx-arg",
+    "name": "nginx-arg",
+    "description": "Nginx with explicit command+args — 验证模板参数穿透到容器",
+    "category": "",
+    "tags": []
+  },
+  {
+    "id": "nginx",
+    "name": "nginx",
+    "description": "Nginx web server — ports 80, readiness check, singleton",
     "category": "",
     "tags": []
   },

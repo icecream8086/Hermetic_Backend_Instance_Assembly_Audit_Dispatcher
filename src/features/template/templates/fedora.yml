@@ -1,0 +1,34 @@
+# category: os
+# tags: fedora, base, minimal
+name: "fedora"
+description: "Fedora Linux — minimal OS layer, 256MB RAM, sleep 3600"
+apiVersion: "hbi-aad/v1"
+kind: "Container"
+region: "local"
+restartPolicy: "Never"
+containers:
+  - name: "fedora"
+    image: "registry.fedoraproject.org/fedora:latest"
+    command:
+      - "sleep"
+      - "3600"
+    resources:
+      limits:
+        cpu: 0.25
+        memory: 256
+healthChecks:
+  - name: "fedora-alive"
+    target: "container:fedora"
+    type: "liveness"
+    probe:
+      exec:
+        command:
+          - "sh"
+          - "-c"
+          - "kill -0 1"
+    periodSeconds: 15
+    initialDelaySeconds: 5
+    failureThreshold: 3
+network:
+  publicIp:
+    allocate: false

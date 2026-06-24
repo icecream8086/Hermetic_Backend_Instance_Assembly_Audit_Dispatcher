@@ -1,0 +1,26 @@
+# category: compute
+# tags: gpu, cuda, nvidia, inference
+name: "gpu-inference"
+description: "GPU inference server — requires NVIDIA GPU (nvidia.com/gpu)"
+apiVersion: "hbi-aad/v1"
+kind: "Container"
+region: "local"
+restartPolicy: "Always"
+containers:
+  - name: "inference"
+    image: "docker.io/nvidia/cuda:12.2-runtime"
+    command:
+      - "python"
+      - "-m"
+      - "my_inference_server"
+    ports:
+      - containerPort: 8080
+        protocol: "TCP"
+    resources:
+      limits:
+        cpu: 4
+        memory: 8192
+        gpu: 1
+network:
+  publicIp:
+    allocate: true

@@ -1,0 +1,20 @@
+# category: demo
+# tags: full-stack, dag, multi-layer
+name: "full-stack"
+description: "Full stack — merges custom-alpine + nginx with app container"
+apiVersion: "hbi-aad/v1"
+kind: "Container"
+region: "local"
+dependsOn:
+  - "custom-alpine"
+  - "nginx"
+containers:
+  - name: "alpine"
+    env:
+      - name: "NGINX_HOST"
+        value: "localhost"
+      - name: "DB_URL"
+        value: "sqlite:///data/app.db"
+network:
+  publicIp:
+    allocate: true

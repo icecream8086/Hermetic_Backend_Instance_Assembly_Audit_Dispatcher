@@ -1,0 +1,45 @@
+# category: service
+# tags: nginx, web, singleton
+name: "nginx"
+description: "Nginx web server — ports 80, readiness check, singleton"
+apiVersion: "hbi-aad/v1"
+kind: "Container"
+region: "local"
+restartPolicy: "Always"
+singleton: true
+containers:
+  - name: "nginx"
+    image: "docker.io/library/nginx:latest"
+    command:
+      - "nginx"
+    args:
+      - "-g"
+      - "daemon off;"
+    ports:
+      - containerPort: 80
+        protocol: "TCP"
+    resources:
+      limits:
+        cpu: 0.5
+        memory: 128
+healthChecks:
+  - name: "nginx-alive"
+    target: "container:nginx"
+    type: "liveness"
+    probe:
+      httpGet:
+        path: "/"
+        port: 80
+    periodSeconds: 10
+    initialDelaySeconds: 5
+  - name: "nginx-ready"
+    target: "container:nginx"
+    type: "readiness"
+    probe:
+      tcpSocket:
+        port: 80
+    periodSeconds: 5
+    initialDelaySeconds: 2
+network:
+  publicIp:
+    allocate: false

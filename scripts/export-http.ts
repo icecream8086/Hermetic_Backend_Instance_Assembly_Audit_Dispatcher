@@ -14,6 +14,7 @@ import { createSubnetRouter, subnetRouteMeta } from '../src/features/subnet/hand
 import { createVolumeRouter, volumeRouteMeta } from '../src/features/volume/handler.ts';
 import { createImagesRouter, imagesRouteMeta } from '../src/features/images/handler.ts';
 import { createContainerSecretRouter, containerSecretRouteMeta } from '../src/features/container-secret/handler.ts';
+import { createInstancesRouter, instancesRouteMeta } from '../src/features/instances/handler.ts';
 import { createActionsRouter, actionRouteMeta } from '../src/features/actions/handler.ts';
 import type { RouteMeta } from '../src/core/http-docs/types.ts';
 import { createAuditRouter } from '../src/core/audit/audit-router.ts';
@@ -149,6 +150,23 @@ const stubContainerSecretSvc: any = {
 };
 collect('secret', 'Secret', '/api/container-secrets', createContainerSecretRouter(stubContainerSecretSvc), () => true, containerSecretRouteMeta);
 
+const stubInstancesSvc: any = {
+  register: async () => ({ runner: {}, token: '' }),
+  list: async () => [],
+  get: async () => null,
+  update: async () => ({}),
+  delete: async () => {},
+  heartbeat: async () => ({}),
+  markStaleOffline: async () => 0,
+  createRegistrationToken: async () => ({}),
+  validateRegistrationToken: async () => ({ valid: true }),
+  createGroup: async () => ({}),
+  listGroups: async () => [],
+  getGroup: async () => null,
+  deleteGroup: async () => {},
+};
+collect('instances', 'Instances', '/api/instances', createInstancesRouter(stubInstancesSvc), () => true, instancesRouteMeta);
+
 const stubActionDeps: any = {
   stores: { atomic: null as any, blob: null as any, query: null as any, metrics: null as any },
   providers: { container: {} as any, dns: {} as any, resolveContainer: async () => ({} as any) },
@@ -210,7 +228,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const httpDir = resolve(__dirname, '..', 'http');
 mkdirSync(httpDir, { recursive: true });
 
-const fileTagOrder = ['info', 'auth', 'secret', 'sysgrp', 'tpl', 'sbx', 'vol', 'plf', 'net', 'perm', 'audit', 'users', 'events', 'topo', 'sub', 'img', 'action'];
+const fileTagOrder = ['info', 'auth', 'secret', 'sysgrp', 'tpl', 'sbx', 'vol', 'plf', 'net', 'perm', 'audit', 'users', 'events', 'topo', 'sub', 'img', 'instances', 'action'];
 const fileTagTitle: Record<string, string> = {
   info: 'Info',
   auth: 'Auth',
@@ -228,6 +246,7 @@ const fileTagTitle: Record<string, string> = {
   topo: 'Topo',
   sub: 'Sub',
   img: 'Images',
+  instances: 'Instances',
   action: 'Actions',
 };
 

@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import type { IRunnerService } from './service.ts';
+import { CreateRunnerSchema, UpdateRunnerSchema, CreateRunnerGroupSchema, ValidateTokenSchema } from './schema.ts';
 import { ok, fail } from '../../core/response.ts';
 import type { RouteMeta } from '../../core/http-docs/types.ts';
 
@@ -17,15 +18,10 @@ export function createInstancesRouter(svc: IRunnerService): Hono<any> {
   // ─── Runner CRUD ───
 
   router.post('/', async (c) => {
-    const body = await c.req.json() as any;
-    if (!body.name) return c.json(fail('VALIDATION_ERROR', 'name is required'), 400);
-    const { runner, token } = await svc.register({
-      name: body.name,
-      os: body.os,
-      labels: body.labels,
-      providerInstanceId: body.providerInstanceId,
-      groupIds: body.groupIds,
-    });
+    const body: unknown = await c.req.json();
+    const parsed = CreateRunnerSchema.safeParse(body);
+    if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
+    const { runner, token } = await svc.register(parsed.data);
     return c.json(ok({ runner, token }), 201);
   });
 
@@ -43,8 +39,10 @@ export function createInstancesRouter(svc: IRunnerService): Hono<any> {
 
   router.put('/:id', async (c) => {
     const r = requireRoot(c); if (r) return r;
-    const body = await c.req.json() as any;
-    const updated = await svc.update(c.req.param('id') as any, body, c.var?.currentUser?.id);
+    const body: unknown = await c.req.json();
+    const parsed = UpdateRunnerSchema.safeParse(body);
+    if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
+    const updated = await svc.update(c.req.param('id') as any, parsed.data, c.var?.currentUser?.id);
     return c.json(ok(updated));
   });
 
@@ -76,9 +74,10 @@ export function createInstancesRouter(svc: IRunnerService): Hono<any> {
   });
 
   router.post('/validate-token', async (c) => {
-    const { token } = await c.req.json() as any;
-    if (!token) return c.json(fail('VALIDATION_ERROR', 'token is required'), 400);
-    const valid = await svc.validateRegistrationToken(token);
+    const body: unknown = await c.req.json();
+    const parsed = ValidateTokenSchema.safeParse(body);
+    if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
+    const valid = await svc.validateRegistrationToken(parsed.data.token);
     return c.json(ok({ valid }));
   });
 
@@ -86,9 +85,10 @@ export function createInstancesRouter(svc: IRunnerService): Hono<any> {
 
   router.post('/groups', async (c) => {
     const r = requireRoot(c); if (r) return r;
-    const body = await c.req.json() as any;
-    if (!body.name) return c.json(fail('VALIDATION_ERROR', 'name is required'), 400);
-    const group = await svc.createGroup(body, c.var?.currentUser?.id);
+    const body: unknown = await c.req.json();
+    const parsed = CreateRunnerGroupSchema.safeParse(body);
+    if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
+    const group = await svc.createGroup(parsed.data, c.var?.currentUser?.id);
     return c.json(ok(group), 201);
   });
 

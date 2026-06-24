@@ -1,0 +1,37 @@
+# category: service
+# tags: nginx, arg, test, singleton
+name: "nginx-arg"
+description: "Nginx with explicit command+args — 验证模板参数穿透到容器"
+apiVersion: "hbi-aad/v1"
+kind: "Container"
+region: "local"
+restartPolicy: "Always"
+singleton: true
+containers:
+  - name: "nginx-arg"
+    image: "docker.io/library/nginx:latest"
+    command:
+      - "nginx"
+    args:
+      - "-g"
+      - "daemon off;"
+    ports:
+      - containerPort: 80
+        protocol: "TCP"
+    resources:
+      limits:
+        cpu: 0.5
+        memory: 128
+healthChecks:
+  - name: "nginx-arg-alive"
+    target: "container:nginx-arg"
+    type: "liveness"
+    probe:
+      httpGet:
+        path: "/"
+        port: 80
+    periodSeconds: 10
+    initialDelaySeconds: 5
+network:
+  publicIp:
+    allocate: false
