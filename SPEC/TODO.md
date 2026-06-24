@@ -68,49 +68,69 @@
 
 ## 1. 容器实例抽象
 
-### 1.1 Sandbox 状态机升级 ⏳
+### 1.1 Sandbox 状态机升级 ✅
+- [x] `features/sandbox/types.ts` — SandboxStatus 从 7 态扩展到 11 态 (对齐 ECI)
+- [x] `features/sandbox/types.ts` — `VALID_TRANSITIONS` 完整 18 规则 ECI 转移矩阵
+- [x] `features/sandbox/types.ts` — `TERMINAL_STATES` / `DELETABLE_STATES` / `isTerminal()`
+- [x] `features/sandbox/types.ts` — `ContainerStatus` enum + `ContainerState` exitCode/reason/signal
+- [x] `core/provider/container-lifecycle.ts` — `toSandboxStatus` / `fromSandboxStatus` 更新
+- [x] `core/events/health-check.ts` — Stopped→Succeeded, Terminated→Terminating
+- [x] `features/sandbox/sandbox.service.ts` — stop/start/provider mapping 更新
+- [x] 全部受影响测试更新 (types, state-machine-properties, container-lifecycle, health-check-decision-table, logs-integration)
 
-- [ ] `features/sandbox/types.ts` — SandboxStatus 从 7 态扩展到 11 态 (对齐 ECI)
-      `Scheduling → ScheduleFailed → Pending → Running → Succeeded/Failed`
-      `+ Restarting + Updating + Terminating + Expired + Deleted`
-- [ ] `features/sandbox/types.ts` — 新增 `SandboxConditions` (PodScheduled/Initialized/ContainersReady/Ready)
-- [ ] 健康检查 GC 路径: stopped-gc / provider-gone / exited-gc / unhealthy-gc / manual / whitelist (6 条)
-- [ ] `core/events/health-check.ts` — 健康检查消费 audit event, 记录 `MESSAGE_IDS.HEALTH_CHECK_*`
+### 1.2 Container 子状态 ✅
+- [x] `ContainerStatus` enum: Waiting / Running / Terminated (K8s 对齐)
+- [x] `ContainerState` 新增 `finishedTime`, `exitCode`, `reason`, `signal` 字段
+- [x] `runtime-mapper.ts` — `ociStatusToContainerState` 返回 `ContainerStatus`
+- [ ] InitContainer + Sidecar 生命周期 (restartPolicy: Always) ⏳
 
-### 1.2 Container 子状态 ⏳
+### 1.3 RestartPolicy 完善 ✅
+- [x] `core/scheduler/backoff.ts` — 指数退避: 10s → 20s → 40s → ... → 300s cap, 10 分钟重置
+- [x] `ContainerRestartPolicy` + `RestartPolicyRule` — 每容器 exit-code-based 规则 (K8s KEP-5307)
+- [x] `ContainerConfig.containerRestartPolicy` — 每容器可独立覆盖 pod 级重启策略
+- [x] `tests/core/scheduler/backoff.test.ts` — 8 个测试覆盖
 
-- [ ] 每容器 `Waiting → Running → Terminated` 三态 + exitCode/reason/signal 字段
-- [ ] InitContainer 串行依赖 + Sidecar 生命周期 (restartPolicy: Always)
-
-### 1.3 RestartPolicy 完善 ⏳
-
-- [ ] 抄 K8s: Always / OnFailure / Never + 每容器 restartPolicyRules (v1.34 Alpha)
-- [ ] 退避算法: 10s → 20s → 40s → ... → 300s cap, 10 分钟健康运行后重置
-
-### 1.4 Probe 健康检查 ⏳
-
-- [ ] 抄 K8s: livenessProbe / readinessProbe / startupProbe
-- [ ] Handler 类型: exec / httpGet / tcpSocket / gRPC
-- [ ] readinessProbe 失败 = 从 Service endpoint 移除, 不重启容器
+### 1.4 Probe 健康检查 ✅
+- [x] `core/scheduler/probe-runner.ts` — kubelet 式探针评估引擎
+- [x] 三种探针: livenessProbe/readinessProbe/startupProbe
+- [x] 参数: failureThreshold/successThreshold/periodSeconds/timeoutSeconds/initialDelaySeconds
+- [x] Handler: exec/httpGet/tcpSocket + Promise.race 超时
+- [x] readinessProbe 失败 → shouldRemoveEndpoint (不重启)
+- [x] startupProbe 未完成时 gating liveness/readiness
+- [x] `tests/core/scheduler/probe-runner.test.ts` — 8 个测试覆盖
 
 ---
 
-## 2. DAG 调度器
+## 2. 统一 DAG 调度器 (GitHub Actions × Airflow 合并)
 
-### 2.1 核心调度循环 ⏳
+> 架构：`core/dag/` 提供泛型 DAG + Kahn (已有) → `core/scheduler/` 提供 Airflow 调度引擎
+> → `features/actions/` 退化为 Operator 实现 + HTTP API 层，调度逻辑全部下沉到 core
+
+### 2.1 Task 泛型类型 + TaskInstance 统一状态机 ⏳
+
+- [ ] `core/dag/types.ts` (重写) — 统一 `Task` (operator) + `DagRun` (运行实例) + `TaskInstanceState` 合并 Airflow 13 态 + GHA 6 态
+- [ ] `core/scheduler/task-instance.ts` (新) — TaskInstance 状态机:
+      NONE → SCHEDULED → QUEUED → RUNNING → SUCCESS / FAILED / UP_FOR_RETRY → (回到 QUEUED)
+      + SKIPPED + UPSTREAM_FAILED + DEFERRED + RESTARTING + REMOVED
+      `VALID_TRANSITIONS` 映射 + `transition(from, to)`
+- [ ] Task 定义: id / operatorType / config / dependsOn / triggerRule / retries / timeout
+- [ ] DagRun 定义: id / dagId / status / triggeredAt / taskInstances
+
+### 2.2 TriggerRule 引擎 ⏳
+
+- [ ] `core/dag/trigger-rule.ts` (新) — 抄 Airflow 9 种触发规则:
+      all_success / all_failed / all_done / one_success / one_failed
+      / none_failed / none_skipped / none_failed_min_one_success / always
+- [ ] `evaluateTriggerRule(rule, upstreamStatuses[])` 纯函数
+
+### 2.3 主调度循环 ⏳
 
 - [ ] `core/scheduler/dag-scheduler.ts` (新) — 抄 Airflow `SchedulerJobRunner._execute()`
       schedule → process → heartbeat → sleep 主循环
-- [ ] `core/dag/kahn.ts` (新) — Kahn 拓扑排序 O(V+E)
 - [ ] 调度器状态: idle / running / paused
+- [ ] 可插拔定时器 (复用 core/scheduler 现有抽象)
 
-### 2.2 TaskInstance 状态机 ⏳
-
-- [ ] `core/scheduler/task-instance.ts` (新) — 抄 Airflow 13 态:
-      NONE → SCHEDULED → QUEUED → RUNNING → SUCCESS/FAILED/SKIPPED/UP_FOR_RETRY
-      + UPSTREAM_FAILED + REMOVED + DEFERRED + RESTARTING + UP_FOR_RESCHEDULE
-
-### 2.3 5 步过滤管线 ⏳
+### 2.4 5 步过滤管线 + ConcurrencyMap ⏳
 
 - [ ] `core/scheduler/filter.ts` (新) — 抄 Airflow `_executable_task_instances_to_queued()`
       1. Pool slot 检查 → starved_pools
@@ -118,26 +138,25 @@
       3. Task 并发 (max_active_tis_per_dag) → starved_tasks
       4. DagRun 并发 (max_active_tis_per_dagrun) → starved_task_dagruns
       5. Executor slot (parallelism)
-
-### 2.4 ConcurrencyMap ⏳
-
-- [ ] `core/scheduler/concurrency-map.ts` (新) — 一次 SQL 查询, O(1) 并发检查
+- [ ] `core/scheduler/concurrency-map.ts` (新) — 一次查询, O(1) 并发检查
       dag_run_active_tasks_map / task_concurrency_map / task_dagrun_concurrency_map
 
 ### 2.5 Pool 信号量 ⏳
 
 - [ ] `core/scheduler/pool.ts` (新) — 抄 Airflow Pool 模型
-      name / slots / open_slots
+      name / slots / open_slots / occupied_slots
 
-### 2.6 TriggerRule 引擎 ⏳
-
-- [ ] `core/dag/trigger-rule.ts` (新) — 抄 Airflow 9 种触发规则
-      all_success / all_failed / all_done / one_success / one_failed
-      / none_failed / none_skipped / none_failed_min_one_success / always
-
-### 2.7 Backfill 引擎 ⏳
+### 2.6 Backfill 引擎 ⏳
 
 - [ ] `core/scheduler/backfill.ts` (新) — catchup 历史时间段
+
+### 2.7 对接 features/actions — Operator 实现 + API 层 ⏳
+
+- [ ] `features/actions/runner.ts` — 重构: 解析 WorkflowDef → Dag<Task> → 提交调度器
+- [ ] Operator 注册表: `run:` → BashOperator / `uses:` → ContainerOperator / `dns:` → DnsOperator
+- [ ] `features/actions/handler.ts` — API 层不变，底层执行委托给调度器
+- [ ] 去掉 WorkflowRunner 内联的依赖检查(enqueueReadyJobs)，改用 TriggerRule 引擎
+- [ ] Step 执行结果写回 TaskInstance 状态
 
 ---
 

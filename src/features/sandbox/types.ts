@@ -5,6 +5,7 @@ import type {
   Tag,
 } from './base.ts';
 import type { EnvVar, ProbeSpec, ResourceRequirements } from '../../core/provider/types.ts';
+import type { ContainerRestartPolicy } from '../../core/scheduler/backoff.ts';
 import type { RegionId } from '../../core/region/types.ts';
 import type { NetworkId } from '../../core/network/types.ts';
 import type { InstanceId } from '../../core/region/instance.ts';
@@ -190,6 +191,8 @@ export interface ContainerConfig {
   readonly livenessProbe?: ProbeSpec | undefined;
   readonly readinessProbe?: ProbeSpec | undefined;
   readonly startupProbe?: ProbeSpec | undefined;
+  /** Per-container restart rules (K8s v1.34 Alpha). Overwrites pod-level restartPolicy. */
+  readonly containerRestartPolicy?: ContainerRestartPolicy;
   /** Network mode: 'bridge' | 'host' | 'none' | 'container:<name|id>'. */
   readonly networkMode?: string | undefined;
   readonly providerOverrides?: Record<string, unknown>;
