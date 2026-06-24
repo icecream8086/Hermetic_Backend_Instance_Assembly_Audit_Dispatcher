@@ -37,7 +37,7 @@ function jId(): JobRunId { return createJobRunId(`jr_${crypto.randomUUID()}`); }
 
 export interface WorkflowRunnerDeps {
   stores: { atomic: IAtomicStore; blob: IBlobStore };
-  providers: Pick<IProviderRegistry, 'container' | 'dns' | 'resolveContainer'>;
+  providers: Pick<IProviderRegistry, 'resolveContainer' | 'dns'>;
   audit: IAuditWriter;
   queueProducer?: IMessageQueue;
   eventBus?: EventBus;
@@ -396,9 +396,10 @@ export class WorkflowRunner {
   ): Promise<string> {
     // Resolve provider by instance — mirrors SandboxService.#resolveProvider()
     const instanceId = jobDef.instanceId as any;
-    const provider = instanceId
-      ? await this.deps.providers.resolveContainer?.(instanceId) ?? this.deps.providers.container
-      : this.deps.providers.container;
+    if (!instanceId || !this.deps.providers.resolveContainer) {
+      throw new Error('Workflow job requires an instanceId to resolve a container provider');
+    }
+    const provider = await this.deps.providers.resolveContainer(instanceId);
     const region = jobDef.region ?? 'local';
     const mergedEnv = { ...env, ...jobDef.env };
 
@@ -455,7 +456,7 @@ export class WorkflowRunner {
     jobRunId: string,
   ): Promise<StepRun[]> {
     const stepRuns: StepRun[] = [];
-    const provider = this.deps.providers.container as any;
+    const provider = await this.deps.providers.resolveContainer?.(undefined) as any;
 
     for (const step of steps) {
       const name = step.name ?? (('run' in step) ? step.run.slice(0, 60) : ('dns' in step) ? `dns:${step.dns.name}` : step.uses ?? 'unknown');

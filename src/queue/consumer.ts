@@ -166,9 +166,9 @@ async function handleSandboxGc(
     // Never fall back to default for a specific instance: sending an ECI delete to
     // Podman (or vice-versa) would silently orphan the cloud resource.
     try {
-      const provider = instanceId
-        ? await providers.resolveContainer!(instanceId as any)
-        : providers.container;
+      // Must have instanceId to resolve the right provider — no global default.
+      if (!instanceId || !providers.resolveContainer) return { success: true };
+      const provider = await providers.resolveContainer!(instanceId as any);
       await Promise.race([
         provider.delete({ region: region as any, providerId }),
         new Promise((_, reject) => setTimeout(() => reject(new Error('GC delete timeout after 10s')), 10_000)),
@@ -294,7 +294,6 @@ async function handleWorkflowJobRun(
     const runner = new WorkflowRunner({
       stores,
       providers: {
-        container: providers.container,
         dns: providers.dns,
         resolveContainer: providers.resolveContainer?.bind(providers),
       },

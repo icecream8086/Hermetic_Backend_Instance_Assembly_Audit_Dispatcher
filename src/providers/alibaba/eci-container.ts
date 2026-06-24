@@ -7,6 +7,7 @@
 
 import type {
   IContainerProvider,
+  ContainerLifecycle,
   DescribeContainerGroupsInput,
   DescribeContainerGroupsResult,
   DeleteContainerGroupInput,
@@ -25,6 +26,7 @@ import { applyExtensionOverrides } from '../../core/provider/extension-schema.ts
 import './eci-schema.ts'; // register Alibaba ECI extension fields
 
 export class AlibabaEciContainerProvider implements IContainerProvider {
+  readonly lifecycle: ContainerLifecycle = { stopIsDelete: true, startable: false, healthProbes: false, asyncInit: true };
   private readonly region: string;
 
   constructor(

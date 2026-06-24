@@ -1,9 +1,9 @@
 import { Hono } from 'hono';
 import type { ISandboxService } from './interfaces.ts';
-import type { PodResolver } from './assembly/pod-resolver.ts';
+import { PodResolver } from './assembly/pod-resolver.ts';
 import { createSandboxId } from './types.ts';
 import type { PodSpec } from './assembly/types.ts';
-import type { IContainerGroupProvider } from '../../core/provider/interfaces.ts';
+import type { IContainerGroupProvider, IProviderRegistry } from '../../core/provider/interfaces.ts';
 import type { RouteMeta } from '../../core/http-docs/types.ts';
 import type { AppContext } from '../../core/deps.ts';
 import { ok, fail } from '../../core/response.ts';
@@ -26,11 +26,15 @@ async function requirePerm(c: any, checker: PermissionCheckFn | undefined, actio
   return null;
 }
 
+/** Resolve the right container group provider — never falls back to a global default. */
+async function resolvePodProvider(providers: IProviderRegistry, _region?: string, instanceId?: string): Promise<IContainerGroupProvider | undefined> {
+  return providers.resolveGroup(instanceId as any);
+}
+
 export function createSandboxRouter(
   svc: ISandboxService,
-  podResolver?: PodResolver,
+  providers: IProviderRegistry,
   permissionChecker?: PermissionCheckFn,
-  podGroupProvider?: IContainerGroupProvider,
 ): Hono<{ Variables: AppContext }> {
   const router = new Hono<{ Variables: AppContext }>();
 
@@ -39,14 +43,17 @@ export function createSandboxRouter(
   // POST /pod — create a pod from PodSpec
   router.post('/pod', async (c) => {
     { const r = await requirePerm(c, permissionChecker, 'create', 'sandbox'); if (r) return r; }
-    if (!podResolver) {
-      return c.json(fail('NOT_CONFIGURED', 'Container group provider not available'), 501);
-    }
     try {
       const spec = await c.req.json<PodSpec>();
       if (!spec.name || !spec.services) {
         return c.json(fail('VALIDATION_ERROR', 'PodSpec requires name and services'), 400);
       }
+      // Resolve the right group provider for the target region/instance — no global default.
+      const groupProvider = await resolvePodProvider(providers, spec.region, spec.instanceId as any);
+      if (!groupProvider) {
+        return c.json(fail('NOT_CONFIGURED', `No container group provider available for region=${spec.region ?? '(unspecified)'}. Register an instance with group capability or use a different region.`), 501);
+      }
+      const podResolver = new PodResolver(groupProvider);
       const result = await podResolver.apply(spec);
       return c.json(ok({ providerId: result.providerId, podName: spec.name }), 201);
     } catch (e: any) {
@@ -54,14 +61,15 @@ export function createSandboxRouter(
     }
   });
 
-  // GET /pod — list all pods
+  // GET /pod — list all pods (picks first online group-capable instance)
   router.get('/pod', async (c) => {
     { const r = await requirePerm(c, permissionChecker, 'read', 'sandbox'); if (r) return r; }
-    if (!podGroupProvider) {
-      return c.json(fail('NOT_CONFIGURED', 'Container group provider not available'), 501);
-    }
     try {
-      const result = await podGroupProvider.describeGroups({ region: 'local' as any });
+      const groupProvider = await resolvePodProvider(providers);
+      if (!groupProvider) {
+        return c.json(fail('NOT_CONFIGURED', 'No container group provider available. Register an instance with group capability.'), 501);
+      }
+      const result = await groupProvider.describeGroups({ region: 'local' as any });
       return c.json(ok(result));
     } catch (e: any) {
       return c.json(fail('POD_LIST_FAILED', e.message), 500);
@@ -71,12 +79,11 @@ export function createSandboxRouter(
   // GET /pod/:providerId — get a single pod's status
   router.get('/pod/:providerId', async (c) => {
     { const r = await requirePerm(c, permissionChecker, 'read', 'sandbox'); if (r) return r; }
-    if (!podGroupProvider) {
-      return c.json(fail('NOT_CONFIGURED', 'Container group provider not available'), 501);
-    }
     try {
+      const groupProvider = await resolvePodProvider(providers);
+      if (!groupProvider) return c.json(fail('NOT_CONFIGURED', 'No container group provider available'), 501);
       const providerId = c.req.param('providerId');
-      const status = await podGroupProvider.getGroupStatus(providerId);
+      const status = await groupProvider.getGroupStatus(providerId);
       if (!status) return c.json(fail('POD_NOT_FOUND', 'Pod not found'), 404);
       return c.json(ok(status));
     } catch (e: any) {
@@ -87,12 +94,11 @@ export function createSandboxRouter(
   // POST /pod/:providerId/stop — stop a pod (ECI: terminal, Podman: reversible)
   router.post('/pod/:providerId/stop', async (c) => {
     { const r = await requirePerm(c, permissionChecker, 'update', 'sandbox'); if (r) return r; }
-    if (!podGroupProvider) {
-      return c.json(fail('NOT_CONFIGURED', 'Container group provider not available'), 501);
-    }
     try {
+      const groupProvider = await resolvePodProvider(providers);
+      if (!groupProvider) return c.json(fail('NOT_CONFIGURED', 'No container group provider available'), 501);
       const providerId = c.req.param('providerId');
-      await podGroupProvider.stopGroup(providerId);
+      await groupProvider.stopGroup(providerId);
       return c.json(ok(null));
     } catch (e: any) {
       return c.json(fail('POD_STOP_FAILED', e.message), 500);
@@ -102,12 +108,11 @@ export function createSandboxRouter(
   // DELETE /pod/:providerId — delete a pod (terminal)
   router.delete('/pod/:providerId', async (c) => {
     { const r = await requirePerm(c, permissionChecker, 'delete', 'sandbox'); if (r) return r; }
-    if (!podGroupProvider) {
-      return c.json(fail('NOT_CONFIGURED', 'Container group provider not available'), 501);
-    }
     try {
+      const groupProvider = await resolvePodProvider(providers);
+      if (!groupProvider) return c.json(fail('NOT_CONFIGURED', 'No container group provider available'), 501);
       const providerId = c.req.param('providerId');
-      await podGroupProvider.deleteGroup(providerId);
+      await groupProvider.deleteGroup(providerId);
       return c.json(ok(null));
     } catch (e: any) {
       return c.json(fail('POD_DELETE_FAILED', e.message), 500);

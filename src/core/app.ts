@@ -122,7 +122,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
   // 5b. 健康检查事件 — 委托到 src/core/events/health-check.ts
   registerHealthCheck({
     stores: { atomic: stores.atomic },
-    providers: { container: providers.container, resolveContainer: providers.resolveContainer.bind(providers) },
+    providers: { resolveContainer: providers.resolveContainer.bind(providers) },
     eventBus,
     eventLoop,
     audit,
@@ -380,9 +380,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
     const since = c.req.query('since') ? parseInt(c.req.query('since')!) : undefined;
 
     try {
-      const logProvider = sandbox.config.instanceId
-        ? await providers.resolveContainer(sandbox.config.instanceId as any)
-        : providers.container;
+      const logProvider = await providers.resolveContainer(sandbox.config.instanceId as any);
       const logResult = await logProvider.getLogs({
         region: sandbox.config.region as any,
         providerId: sandbox.providerId,

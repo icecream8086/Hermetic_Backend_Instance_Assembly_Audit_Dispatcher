@@ -1,5 +1,6 @@
 import type {
   IContainerProvider,
+  ContainerLifecycle,
   DescribeContainerGroupsInput,
   DescribeContainerGroupsResult,
   DeleteContainerGroupInput,
@@ -20,6 +21,7 @@ import type { OciCreateSpec } from '../../features/ociruntime/types.ts';
 
 /** In-memory stub for local development. State is lost on restart. */
 export class StubContainerProvider implements IContainerProvider {
+  readonly lifecycle: ContainerLifecycle = { stopIsDelete: false, startable: true, healthProbes: false, asyncInit: false };
   #runtimes = new Map<string, ContainerGroupRuntime>();
   #oci = new StubOciRuntime();
   #nameToOciId = new Map<string, ContainerId>();

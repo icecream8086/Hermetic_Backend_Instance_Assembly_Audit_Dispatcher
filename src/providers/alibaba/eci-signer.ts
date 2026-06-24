@@ -39,10 +39,24 @@ export async function rpcCall(
 
   const { url: signedUrl } = await aksk.sign({ method: 'POST', url: baseUrl, headers: {} });
   if (!signedUrl) throw new Error('AkSkProvider did not produce a signed URL');
+
   const resp = await fetch(signedUrl, { method: 'POST' });
-  const body = await resp.json() as any;
-  if (body.Code) {
-    throw new Error(`Alibaba ECI ${action} failed: ${body.Code} — ${body.Message ?? ''}`);
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '<unreadable>');
+    throw new Error(`Alibaba ECI ${action} HTTP ${resp.status}: ${text.slice(0, 500)}`);
+  }
+
+  let body: any;
+  try {
+    body = await resp.json();
+  } catch {
+    const text = await resp.text().catch(() => '<unreadable>');
+    throw new Error(`Alibaba ECI ${action} returned non-JSON response: ${text.slice(0, 500)}`);
+  }
+
+  if (body?.Code) {
+    const requestId = body.RequestId ?? 'unknown';
+    throw new Error(`Alibaba ECI ${action} failed [${requestId}]: ${body.Code} — ${body.Message ?? '(no message)'}`);
   }
   return body;
 }

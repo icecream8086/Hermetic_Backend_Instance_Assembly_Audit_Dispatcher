@@ -20,11 +20,10 @@ describe('LazyProviderRegistry no silent fallback', () => {
         .rejects.toThrow('InstanceProviderResolver not available');
     });
 
-    it('returns default container when instanceId is not set', async () => {
+    it('throws when instanceId is not set and no resolver (no auto-pick possible)', async () => {
       const reg = registryWithoutStore();
-      const provider = await reg.resolveContainer(undefined);
-      expect(provider).toBeDefined();
-      expect(typeof provider.create).toBe('function');
+      await expect(reg.resolveContainer(undefined))
+        .rejects.toThrow('InstanceProviderResolver not available');
     });
   });
 
@@ -35,11 +34,10 @@ describe('LazyProviderRegistry no silent fallback', () => {
         .rejects.toThrow('InstanceProviderResolver not available');
     });
 
-    it('returns default image when instanceId is not set', async () => {
+    it('throws when instanceId is not set and no resolver', async () => {
       const reg = registryWithoutStore();
-      const provider = await reg.resolveImage(undefined);
-      expect(provider).toBeDefined();
-      expect(typeof provider.pull).toBe('function');
+      await expect(reg.resolveImage(undefined))
+        .rejects.toThrow('InstanceProviderResolver not available');
     });
   });
 
@@ -50,11 +48,10 @@ describe('LazyProviderRegistry no silent fallback', () => {
         .rejects.toThrow('InstanceProviderResolver not available');
     });
 
-    it('returns default groupContainer when instanceId is not set', async () => {
+    it('throws when instanceId is not set and no resolver', async () => {
       const reg = registryWithoutStore();
-      const provider = await reg.resolveGroup(undefined);
-      // stub config has no group support → undefined
-      expect(provider).toBeUndefined();
+      await expect(reg.resolveGroup(undefined))
+        .rejects.toThrow('InstanceProviderResolver not available');
     });
   });
 });

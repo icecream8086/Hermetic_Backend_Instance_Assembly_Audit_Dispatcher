@@ -26,7 +26,6 @@ import type { IAtomicStore } from '../store/interfaces.ts';
 import type { InstanceId } from '../region/instance.ts';
 import type { InstanceProviderResolver } from './instance-resolver.ts';
 import type { SecretEncryption } from '../auth/secret-encryption.ts';
-import { debugLog } from '../logger/log-policy.ts';
 import { StubContainerProvider } from '../../providers/stub/container.ts';
 import { StubImageProvider } from '../../providers/stub/image.ts';
 import { StubDnsProvider } from '../../providers/stub/dns.ts';
@@ -51,7 +50,6 @@ import { CloudflareDnsProvider } from '../../providers/cloudflare/dns.ts';
 // `new XxxProvider()` calls are deferred until first use.
 
 class LazyProviderRegistry implements IProviderRegistry {
-  private _defaultContainer?: IContainerProvider;
   private _defaultImage?: IImageProvider;
   private _networkPolicy: INetworkPolicyProvider | undefined;
   private _dns?: IDnsProvider;
@@ -70,8 +68,16 @@ class LazyProviderRegistry implements IProviderRegistry {
     private readonly s3Config: S3Config | undefined,
     private readonly atomicStore: IAtomicStore | undefined,
     private readonly secretEncryption?: SecretEncryption,
-  ) {
-    debugLog('system', 'provider config: container="%s"', config.container);
+  ) {}
+
+  /** Emit a one-time warning when the global default provider is accessed.
+   *  In production, all provider operations should route through resolveContainer(instanceId). */
+  #warnedDefault = false;
+  #warnDefault(): void {
+    if (!this.#warnedDefault) {
+      this.#warnedDefault = true;
+      console.warn(`[provider] Using global default container="${this.config.container}" as fallback. Per-instance resolution (resolveContainer) is preferred for production.`);
+    }
   }
 
   /** Number of Alibaba accounts with valid credentials. */
@@ -79,15 +85,17 @@ class LazyProviderRegistry implements IProviderRegistry {
     return this.config.accounts.some(a => !!(a.accessKeyId && a.accessKeySecret));
   }
 
+  /** @deprecated Global default is disabled — use resolveContainer(instanceId) instead. */
   get container(): IContainerProvider {
-    if (!this._defaultContainer) {
-      this._defaultContainer = this._resolveDefaultEntry().container;
-    }
-    return this._defaultContainer;
+    throw new Error(
+      'Global default provider is disabled. Use resolveContainer(instanceId) to route to a specific instance, ' +
+      'or resolveContainer(undefined) to auto-pick the first online container-capable instance.'
+    );
   }
 
   get image(): IImageProvider {
     if (!this._defaultImage) {
+      this.#warnDefault();
       this._defaultImage = this._resolveDefaultEntry().image;
     }
     return this._defaultImage;
@@ -218,36 +226,27 @@ class LazyProviderRegistry implements IProviderRegistry {
   }
 
   async resolveContainer(instanceId?: InstanceId): Promise<IContainerProvider> {
-    if (instanceId) {
-      await this._ensureResolver();
-      if (!this._instanceResolver) {
-        throw new Error('InstanceProviderResolver not available — atomicStore is required for per-instance provider resolution');
-      }
+    await this._ensureResolver();
+    if (this._instanceResolver) {
       return this._instanceResolver.resolveContainer(instanceId);
     }
-    return this.container;
+    throw new Error('InstanceProviderResolver not available — atomicStore is required for provider resolution');
   }
 
   async resolveImage(instanceId?: InstanceId): Promise<IImageProvider> {
-    if (instanceId) {
-      await this._ensureResolver();
-      if (!this._instanceResolver) {
-        throw new Error('InstanceProviderResolver not available — atomicStore is required for per-instance provider resolution');
-      }
+    await this._ensureResolver();
+    if (this._instanceResolver) {
       return this._instanceResolver.resolveImage(instanceId);
     }
-    return this.image;
+    throw new Error('InstanceProviderResolver not available — atomicStore is required for provider resolution');
   }
 
   async resolveGroup(instanceId?: InstanceId): Promise<IContainerGroupProvider | undefined> {
-    if (instanceId) {
-      await this._ensureResolver();
-      if (!this._instanceResolver) {
-        throw new Error('InstanceProviderResolver not available — atomicStore is required for per-instance provider resolution');
-      }
-      return this._instanceResolver.resolveGroup(instanceId);
+    await this._ensureResolver();
+    if (!this._instanceResolver) {
+      throw new Error('InstanceProviderResolver not available — atomicStore is required for provider resolution');
     }
-    return this.groupContainer;
+    return this._instanceResolver.resolveGroup(instanceId);
   }
 
   async resolveRawEciApi(instanceId?: InstanceId): Promise<any | undefined> {

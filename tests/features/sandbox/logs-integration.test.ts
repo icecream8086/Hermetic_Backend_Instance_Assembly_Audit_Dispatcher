@@ -7,6 +7,7 @@ import { StubContainerProvider } from '../../../src/providers/stub/container.ts'
 import { SandboxStatus, SpotStrategy, createSandboxId } from '../../../src/features/sandbox/types.ts';
 import type { CreateSandboxInput, Sandbox } from '../../../src/features/sandbox/types.ts';
 import type { RegionId } from '../../../src/core/region/types.ts';
+import type { IContainerProvider, IProviderRegistry } from '../../../src/core/provider/interfaces.ts';
 
 function atomic() { return new FileKVAtomicStore(join(tmpdir(), 'hbi-logtest-' + crypto.randomUUID().slice(0, 8))); }
 
@@ -14,6 +15,7 @@ function baseInput(overrides?: Partial<CreateSandboxInput>): CreateSandboxInput 
   return {
     name: 'log-test',
     region: 'local' as unknown as RegionId,
+    instanceId: 'inst_test' as any,
     resourceSpec: { cpu: 1, memory: 512 },
     spotStrategy: SpotStrategy.None,
     restartPolicy: 'Never',
@@ -23,6 +25,14 @@ function baseInput(overrides?: Partial<CreateSandboxInput>): CreateSandboxInput 
   };
 }
 
+function mockRegistry(provider: IContainerProvider): IProviderRegistry {
+  return {
+    resolveContainer: async () => provider,
+    resolveImage: async () => ({ pull: async () => ({ id: 'img', tags: [] }) } as any),
+    resolveGroup: async () => undefined,
+  } as any;
+}
+
 describe('SandboxService lifecycle', () => {
   let svc: SandboxService;
   let store: ReturnType<typeof atomic>;
@@ -30,7 +40,8 @@ describe('SandboxService lifecycle', () => {
 
   beforeEach(async () => {
     store = atomic();
-    svc = new SandboxService(store, new ConsoleLogger(), new StubContainerProvider());
+    const stub = new StubContainerProvider();
+    svc = new SandboxService(store, new ConsoleLogger(), null!, mockRegistry(stub));
     sandbox = await svc.provision(baseInput());
   });
 

@@ -60,7 +60,8 @@ export function registerLogFetchHandler(deps: LogFetchDeps): void {
       const resolved = payload.instanceId
         ? await providers.resolveContainer?.(payload.instanceId as any)
         : undefined;
-      const containerProvider = resolved ?? providers.container;
+      if (!resolved) return;
+      const containerProvider = resolved;
       if (!containerProvider.getLogs) return;
 
       const result = await containerProvider.getLogs({

@@ -3,21 +3,16 @@ import { ConsoleLogger } from '../../core/logger/console-logger.ts';
 import type { FeatureDeps } from '../../core/deps.ts';
 import { SandboxService } from './sandbox.service.ts';
 import { createSandboxRouter } from './handler.ts';
-import { PodResolver } from './assembly/pod-resolver.ts';
 import { createAtomicNetworkResolver } from '../../core/network/resolver.ts';
 import { InstanceService } from '../../core/region/instance.ts';
 
 export function createRouter(deps: FeatureDeps): Hono<any> {
   const resolveNetwork = createAtomicNetworkResolver(deps.stores.atomic);
   const instanceService = new InstanceService(deps.stores.atomic);
-  const svc = new SandboxService(deps.stores.atomic, new ConsoleLogger(), deps.providers.container, deps.providers, deps.eventBus, deps.audit, resolveNetwork, instanceService, deps.queueProducer);
+  // No global default — all provider resolution goes through per-instance resolveContainer(instanceId)
+  const svc = new SandboxService(deps.stores.atomic, new ConsoleLogger(), null!, deps.providers, deps.eventBus, deps.audit, resolveNetwork, instanceService, deps.queueProducer);
 
-  // Resolve container group provider from registry (platform-agnostic).
-  // Falls back to Podman for local dev if no group provider is registered.
-  const groupProvider = deps.providers.groupContainer;
-  const podResolver = groupProvider ? new PodResolver(groupProvider) : undefined;
-
-  return createSandboxRouter(svc, podResolver, deps.permissionChecker, groupProvider);
+  return createSandboxRouter(svc, deps.providers, deps.permissionChecker);
 }
 
 // Base type hierarchy

@@ -57,7 +57,23 @@ export interface ContainerLogResult {
   readonly timestamp?: string;
 }
 
+/** Provider lifecycle model — declared by each provider at construction.
+ *  Callers MUST query this before making lifecycle decisions (stop/start/GC). */
+export interface ContainerLifecycle {
+  /** stop() is terminal (same as delete). ECI: true, Podman: false. */
+  readonly stopIsDelete: boolean;
+  /** Can a stopped sandbox be restarted? ECI: false, Podman: true. */
+  readonly startable: boolean;
+  /** Can the provider report per-container health probe results? ECI: false, Podman: true. */
+  readonly healthProbes: boolean;
+  /** Does create() return before the sandbox is actually Running? ECI: true, Podman/Stub: false. */
+  readonly asyncInit: boolean;
+}
+
 export interface IContainerProvider {
+  /** Provider lifecycle semantics — callers query this before stop/start/GC. */
+  readonly lifecycle: ContainerLifecycle;
+
   /**
    * Create a container (or container group, depending on provider).
    *

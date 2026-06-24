@@ -14,7 +14,7 @@ function makeApp(overrides?: any) {
   return {
     stores: { atomic, query: {} as any, blob: {} as any, metrics: {} as any },
     providers: {
-      container: { delete: async () => {} },
+      resolveContainer: async () => ({ create: async () => ({ providerId: 'p1' }), describe: async () => ({ sandboxes: [] }), delete: async () => {}, getLogs: async () => ({ containerName: 'c1', content: '' }) }),
       resolveImage: async () => ({ pull: async () => ({ id: 'img1', tags: ['latest'] }) }),
       image: { pull: async () => ({ id: 'img1', tags: ['latest'] }) },
     },
@@ -54,11 +54,11 @@ describe('processTaskBatch (white-box)', () => {
   describe('sandbox:gc', () => {
     it('deletes provider resource and updates sandbox state to Deleted', async () => {
       let deleted = false;
-      app.providers.container.delete = async () => { deleted = true; };
+      app.providers.resolveContainer = async () => ({ create: async () => ({ providerId: 'x' }), describe: async () => ({ sandboxes: [] }), delete: async () => { deleted = true; }, getLogs: async () => ({ containerName: 'c', content: '' }) } as any);
       await app.stores.atomic.set('sandbox:ids', ['sb_gc'], null);
-      await app.stores.atomic.set('sandbox:sb_gc', { status: SandboxStatus.Running, providerId: 'p1', config: { region: 'local' }, name: 'to-delete', containers: [{ name: 'c1' }], createdAt: 1, updatedAt: Date.now() }, null);
+      await app.stores.atomic.set('sandbox:sb_gc', { status: SandboxStatus.Running, providerId: 'p1', config: { region: 'local', instanceId: 'inst_1' }, name: 'to-delete', containers: [{ name: 'c1' }], createdAt: 1, updatedAt: Date.now() }, null);
 
-      const msg = makeMsg('sandbox:gc', { sandboxId: 'sb_gc', reason: 'manual', providerId: 'p1', region: 'local', containerCount: 1, sandboxName: 'to-delete', createdAt: 1 });
+      const msg = makeMsg('sandbox:gc', { sandboxId: 'sb_gc', reason: 'manual', providerId: 'p1', region: 'local', instanceId: 'inst_1', containerCount: 1, sandboxName: 'to-delete', createdAt: 1 });
       let acked = false;
       const batchMsg = { body: msg, id: msg.id, timestamp: new Date(), ack: () => { acked = true; }, retry: () => {} };
       await processTaskBatch({ messages: [batchMsg as any], queue: 't', ackAll: () => {}, retryAll: () => {} } as any, async () => app);
@@ -71,9 +71,9 @@ describe('processTaskBatch (white-box)', () => {
 
     it('removes sandbox from index on GC', async () => {
       await app.stores.atomic.set('sandbox:ids', ['sb_idx'], null);
-      await app.stores.atomic.set('sandbox:sb_idx', { status: SandboxStatus.Running, providerId: 'p1', config: { region: 'local' }, name: 'idx-test', containers: [{ name: 'c1' }], createdAt: 1, updatedAt: Date.now() }, null);
+      await app.stores.atomic.set('sandbox:sb_idx', { status: SandboxStatus.Running, providerId: 'p1', config: { region: 'local', instanceId: 'inst_1' }, name: 'idx-test', containers: [{ name: 'c1' }], createdAt: 1, updatedAt: Date.now() }, null);
 
-      const msg = makeMsg('sandbox:gc', { sandboxId: 'sb_idx', reason: 'manual', providerId: 'p1', region: 'local', containerCount: 1, sandboxName: 'idx-test', createdAt: 1 });
+      const msg = makeMsg('sandbox:gc', { sandboxId: 'sb_idx', reason: 'manual', providerId: 'p1', region: 'local', instanceId: 'inst_1', containerCount: 1, sandboxName: 'idx-test', createdAt: 1 });
       await processTaskBatch(makeBatch([msg]), async () => app);
 
       const idx = await app.stores.atomic.get<string[]>('sandbox:ids');
@@ -88,17 +88,14 @@ describe('processTaskBatch (white-box)', () => {
       expect(acked).toBe(true);
     });
 
-    it('uses resolveContainer when instanceId is set (no fallback to providers.container)', async () => {
-      let defaultDeleteCalled = false;
+    it('uses resolveContainer when instanceId is set', async () => {
       let resolvedDeleteCalled = false;
-
-      app.providers.container.delete = async () => { defaultDeleteCalled = true; };
       const resolvedProvider: IContainerProvider = {
         create: async () => ({ providerId: 'p_resolved' }),
         describe: async () => ({ sandboxes: [] }),
         delete: async () => { resolvedDeleteCalled = true; },
         getLogs: async () => ({ containerName: 'c1', content: '' }),
-      };
+      } as any;
       app.providers.resolveContainer = async (_id: any) => resolvedProvider;
 
       await app.stores.atomic.set('sandbox:ids', ['sb_eci'], null);
@@ -117,17 +114,12 @@ describe('processTaskBatch (white-box)', () => {
       const batchMsg = { body: msg, id: msg.id, timestamp: new Date(), ack: () => { acked = true; }, retry: () => {} };
       await processTaskBatch({ messages: [batchMsg as any], queue: 't', ackAll: () => {}, retryAll: () => {} } as any, async () => app);
 
-      // Must use resolveContainer result, NOT the default container
       expect(resolvedDeleteCalled).toBe(true);
-      expect(defaultDeleteCalled).toBe(false);
       expect(acked).toBe(true);
     });
 
-    it('falls back to providers.container when instanceId is NOT set', async () => {
-      let defaultDeleteCalled = false;
+    it('skips provider delete when no instanceId (must have instanceId)', async () => {
       let resolveCalled = false;
-
-      app.providers.container.delete = async () => { defaultDeleteCalled = true; };
       app.providers.resolveContainer = async (_id: any) => { resolveCalled = true; return null as any; };
 
       await app.stores.atomic.set('sandbox:ids', ['sb_local'], null);
@@ -137,34 +129,32 @@ describe('processTaskBatch (white-box)', () => {
         name: 'local-sandbox', containers: [{ name: 'c1' }], createdAt: 1, updatedAt: Date.now(),
       }, null);
 
+      // No instanceId → GC consumer skips provider delete (must have instanceId)
       const msg = makeMsg('sandbox:gc', {
         sandboxId: 'sb_local', reason: 'manual', providerId: 'p_local',
         region: 'local', containerCount: 1, sandboxName: 'local-sandbox', createdAt: 1,
-        // No instanceId → uses providers.container
       });
       let acked = false;
       const batchMsg = { body: msg, id: msg.id, timestamp: new Date(), ack: () => { acked = true; }, retry: () => {} };
       await processTaskBatch({ messages: [batchMsg as any], queue: 't', ackAll: () => {}, retryAll: () => {} } as any, async () => app);
 
-      expect(defaultDeleteCalled).toBe(true);
-      // resolveContainer should not be called when no instanceId
-      expect(resolveCalled).toBe(false);
+      expect(resolveCalled).toBe(false); // not called — no instanceId
       expect(acked).toBe(true);
     });
 
     it('still acks GC when provider delete fails (best-effort)', async () => {
-      app.providers.container.delete = async () => { throw new Error('ECI API unreachable'); };
+      app.providers.resolveContainer = async () => ({ delete: async () => { throw new Error('ECI API unreachable'); }, create: async () => ({ providerId: 'x' }), describe: async () => ({ sandboxes: [] }), getLogs: async () => ({ containerName: 'c', content: '' }) } as any);
 
       await app.stores.atomic.set('sandbox:ids', ['sb_fail'], null);
       await app.stores.atomic.set('sandbox:sb_fail', {
         status: SandboxStatus.Running, providerId: 'p_fail',
-        config: { region: 'cn-hangzhou' },
+        config: { region: 'cn-hangzhou', instanceId: 'inst_1' },
         name: 'fail-sandbox', containers: [{ name: 'c1' }], createdAt: 1, updatedAt: Date.now(),
       }, null);
 
       const msg = makeMsg('sandbox:gc', {
         sandboxId: 'sb_fail', reason: 'manual', providerId: 'p_fail',
-        region: 'cn-hangzhou', containerCount: 1, sandboxName: 'fail-sandbox', createdAt: 1,
+        region: 'cn-hangzhou', instanceId: 'inst_1', containerCount: 1, sandboxName: 'fail-sandbox', createdAt: 1,
       });
       let acked = false;
       const batchMsg = { body: msg, id: msg.id, timestamp: new Date(), ack: () => { acked = true; }, retry: () => {} };

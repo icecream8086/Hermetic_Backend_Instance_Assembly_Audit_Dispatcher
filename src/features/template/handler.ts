@@ -74,7 +74,7 @@ function resolveDag(tpls: SandboxTemplate[], seedIds: string[]): SandboxTemplate
 }
 
 /** Deep-merge two plain objects — child values override parents. */
-function deepMerge(parent: any, child: any): any {
+export function deepMerge(parent: any, child: any): any {
   if (!parent) return child ?? {};
   if (!child) return parent;
   const out = { ...parent };
@@ -475,7 +475,10 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
         const volEntry = await atomic.get<Record<string, unknown>>('volume:' + volumeId);
         return volEntry?.value ?? null;
       });
-      const input = resolvedInstanceId && !explicitInstanceId
+      // Always inject instanceId when resolved — provision needs it to persist ProviderIdentity.
+      // The !explicitInstanceId guard was wrong: applyTemplate does NOT pass instanceId through,
+      // so even when the template specifies instanceId, we must add it to the input.
+      const input = resolvedInstanceId
         ? { ...baseInput, instanceId: resolvedInstanceId as any }
         : baseInput;
 
@@ -514,6 +517,8 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
       return c.json(fail('VALIDATION_ERROR', 'singleton and instanceLimit are mutually exclusive'), 400);
     }
 
+    // Deep-merge nested objects so partial updates don't lose existing fields.
+    // Shallow merge at top level; deep merge for extensions, network, container, healthChecks.
     const updated: SandboxTemplate = {
       ...entry.value,
       ...(body.name !== undefined ? { name: body.name } : {}),
@@ -522,10 +527,10 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
       ...(body.singleton !== undefined ? { singleton: body.singleton } : {}),
       ...(body.instanceLimit !== undefined ? { instanceLimit: body.instanceLimit ?? undefined } : {}),
       ...(body.resourceBinding !== undefined ? { resourceBinding: body.resourceBinding ?? undefined } : {}),
-      ...(body.container !== undefined ? { container: body.container } : {}),
+      ...(body.container !== undefined ? { container: deepMerge(entry.value.container ?? {}, body.container) } : {}),
       ...(body.healthChecks !== undefined ? { healthChecks: body.healthChecks } : {}),
-      ...(body.network !== undefined ? { network: body.network } : {}),
-      ...(body.extensions !== undefined ? { extensions: body.extensions } : {}),
+      ...(body.network !== undefined ? { network: deepMerge(entry.value.network ?? {}, body.network) } : {}),
+      ...(body.extensions !== undefined ? { extensions: deepMerge(entry.value.extensions ?? {}, body.extensions) } : {}),
       ...(body.dependsOn !== undefined ? { dependsOn: body.dependsOn ?? [] } : {}),
       ...(body.podSpec !== undefined ? { podSpec: body.podSpec ?? undefined } : {}),
       updatedAt: Date.now(),

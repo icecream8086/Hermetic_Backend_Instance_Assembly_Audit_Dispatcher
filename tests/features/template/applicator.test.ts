@@ -486,3 +486,36 @@ describe('applyTemplate edge cases', async () => {
     expect(r.containers[0]!.livenessProbe).toBeUndefined();
   });
 });
+
+import { deepMerge } from '../../../src/features/template/handler.ts';
+
+describe('deepMerge (template partial update)', () => {
+  it('preserves top-level extension fields not in the update', () => {
+    const existing = { spotStrategy: 'SpotAsPriceGo', healthMaxRetries: 3, providerOverrides: { alibaba: { eipBandwidth: 10 } } };
+    const update = { providerOverrides: { alibaba: { eipBandwidth: 50 } } };
+    const result = deepMerge(existing, update);
+    expect(result.spotStrategy).toBe('SpotAsPriceGo');
+    expect(result.healthMaxRetries).toBe(3);
+    expect(result.providerOverrides.alibaba.eipBandwidth).toBe(50);
+  });
+
+  it('preserves sibling provider override fields not in the update', () => {
+    const existing = { providerOverrides: { alibaba: { ingressBandwidth: 100, egressBandwidth: 100, autoCreateEip: true, eipBandwidth: 10, autoMatchImageCache: true } } };
+    const update = { providerOverrides: { alibaba: { eipBandwidth: 50 } } };
+    const result = deepMerge(existing, update);
+    expect(result.providerOverrides.alibaba.ingressBandwidth).toBe(100);
+    expect(result.providerOverrides.alibaba.egressBandwidth).toBe(100);
+    expect(result.providerOverrides.alibaba.autoCreateEip).toBe(true);
+    expect(result.providerOverrides.alibaba.autoMatchImageCache).toBe(true);
+    expect(result.providerOverrides.alibaba.eipBandwidth).toBe(50);
+  });
+
+  it('adds new top-level fields from update', () => {
+    const existing = { spotStrategy: 'SpotAsPriceGo' };
+    const update = { autoStart: true, webTerminal: false };
+    const result = deepMerge(existing, update);
+    expect(result.spotStrategy).toBe('SpotAsPriceGo');
+    expect(result.autoStart).toBe(true);
+    expect(result.webTerminal).toBe(false);
+  });
+});

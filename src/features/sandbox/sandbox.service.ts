@@ -58,7 +58,7 @@ export class SandboxService implements ISandboxService {
   constructor(
     private readonly atomic: IAtomicStore,
     private readonly logger: ILogWriter,
-    private readonly containerProvider: IContainerProvider,
+    _containerProvider: IContainerProvider, // deprecated — retained for constructor signature compat, unused
     private readonly providerRegistry?: IProviderRegistry | undefined,
     private readonly eventBus?: EventBus,
     private readonly audit?: IAuditWriter,
@@ -90,7 +90,7 @@ export class SandboxService implements ISandboxService {
     if (instanceId) {
       if (!this.providerRegistry?.resolveContainer) {
         throw new ProviderResolutionError(
-          `Cannot resolve provider for instance "${instanceId}" — SandboxService was constructed without a providerRegistry. This is a wiring bug.`,
+          `Cannot resolve provider for instance "${instanceId}" — SandboxService was constructed without a providerRegistry.`,
           instanceId,
         );
       }
@@ -101,7 +101,14 @@ export class SandboxService implements ISandboxService {
         instanceId,
       );
     }
-    return this.containerProvider;
+    // No instanceId and no global default — pick first online instance
+    if (this.providerRegistry?.resolveContainer) {
+      const p = await this.providerRegistry.resolveContainer(undefined);
+      if (p) return p;
+    }
+    throw new ProviderResolutionError(
+      'Cannot resolve provider: no instanceId specified and no global default configured. Pass an explicit instanceId or ensure an online container-capable instance is registered.',
+    );
   }
 
   async provision(input: CreateSandboxInput, idempotencyKey?: string): Promise<Sandbox> {
@@ -231,17 +238,21 @@ export class SandboxService implements ISandboxService {
       throw translateProviderError(e, input.name);
     }
 
-    // 3. Transition to Running with provider details (no redundant re-read: we just
-    //    wrote `initial` with OCC create-only at line 71, so it's the current state).
-    const running: Sandbox = {
+    // 3. Transition to Running (sync providers) or Scheduling (async providers like ECI).
+    //    ECI returns before containers are actually Running — health check needs the
+    //    Scheduling status to apply a grace period before GC.
+    const createdStatus = containerProvider.lifecycle.asyncInit
+      ? SandboxStatus.Scheduling
+      : SandboxStatus.Running;
+    const provisioned: Sandbox = {
       ...initial,
-      status: SandboxStatus.Running,
+      status: createdStatus,
       providerId,
       updatedAt: Date.now(),
       version: generateVersionId(),
     } as Sandbox;
 
-    const updated = await this.atomic.set(`${KEY_PREFIX}${id}`, running, created);
+    const updated = await this.atomic.set(`${KEY_PREFIX}${id}`, provisioned, created);
     if (!updated) throw new AppError(409, 'CONFLICT', 'Concurrent modification during provision');
 
     // Record quota usage
@@ -251,7 +262,7 @@ export class SandboxService implements ISandboxService {
     }
 
     if (idempotencyKey) {
-      await this.atomic.set(`${KEY_PREFIX}idem:${idempotencyKey}`, running, null);
+      await this.atomic.set(`${KEY_PREFIX}idem:${idempotencyKey}`, provisioned, null);
     }
 
     await this.logger.logAsync({
@@ -279,7 +290,7 @@ export class SandboxService implements ISandboxService {
       providerId,
     }));
 
-    return running;
+    return provisioned;
   }
 
   async getById(id: SandboxId): Promise<Sandbox | null> {
@@ -295,8 +306,16 @@ export class SandboxService implements ISandboxService {
     if (!sandbox) throw new AppError(404, 'SANDBOX_NOT_FOUND', `Sandbox ${id} not found`);
 
     // Tell the provider to stop the container (best-effort)
+    const provider = await this.#resolveProvider(sandbox.config.instanceId);
+    if (provider.lifecycle.stopIsDelete) {
+      // ECI: stop() = delete() — resource is destroyed immediately.
+      // Transition directly to Terminated so GC can clean up, rather than
+      // going through Stopped which implies the resource still exists.
+      try { await provider.stop?.(sandbox.providerId ?? String(id)); } catch { /* best-effort */ }
+      return this.transition(id, SandboxStatus.Terminated, 'user requested stop (ECI stop = delete)');
+    }
+
     try {
-      const provider = await this.#resolveProvider(sandbox.config.instanceId);
       await provider.stop?.(sandbox.providerId ?? String(id));
     } catch {
       // Provider may be unreachable or container already stopped — proceed.
@@ -311,9 +330,12 @@ export class SandboxService implements ISandboxService {
 
     try {
       const provider = await this.#resolveProvider(sandbox.config.instanceId);
+      if (!provider.lifecycle.startable) {
+        throw new AppError(400, 'START_NOT_SUPPORTED', `Provider "${provider.lifecycle.stopIsDelete ? 'ECI' : 'unknown'}" does not support start — sandboxes are ephemeral`);
+      }
       await provider.start?.(sandbox.providerId ?? String(id));
     } catch {
-      // Provider unreachable — proceed with local state
+      // Provider unreachable or start not supported — proceed with local state
     }
 
     return this.transition(id, SandboxStatus.Running, 'user requested start');
@@ -341,7 +363,7 @@ export class SandboxService implements ISandboxService {
         const provider = await this.#resolveProvider(sandbox.config.instanceId);
         await provider.delete({ region: sandbox.config.region, providerId: sandbox.providerId });
       } catch (e) {
-        console.error(`[sandbox] terminate: provider delete failed for ${id} (${sandbox.providerId}), enqueuing GC — ${e instanceof Error ? e.message : String(e)}`);
+        console.error(`[sandbox] terminate: provider delete failed name=${sandbox.name} id=${id} provider=${sandbox.providerId} instance=${sandbox.config.instanceId ?? '(none)'} — ${e instanceof Error ? e.message : String(e)}`);
         this.#enqueueGcRetry(id as string, sandbox);
       }
     } else {
@@ -415,9 +437,13 @@ export class SandboxService implements ISandboxService {
       }));
     }
 
+    const provider = await this.#resolveProvider(target.config.instanceId);
     return target.containers.map(c => ({
       containerName: c.name,
-      status: c.health?.status ?? (c.state.state === 'Running' ? 'running' : c.state.state === 'Waiting' ? 'starting' : 'none'),
+      status: c.health?.status
+        ?? ((c.state.state === 'Running' && !provider.lifecycle.healthProbes) ? 'provider'
+          : c.state.state === 'Running' ? 'running'
+          : c.state.state === 'Waiting' ? 'starting' : 'none'),
       ready: c.state.ready,
       startedAt: c.state.startTime,
       message: c.health?.message ?? c.state.message,
@@ -455,9 +481,14 @@ export class SandboxService implements ISandboxService {
     }
 
     const mapped = mapProviderStatus(runtime.status);
-    const finalStatus = mapped && mapped !== sandbox.status && isValidTransition(sandbox.status, mapped)
+    let finalStatus = mapped && mapped !== sandbox.status && isValidTransition(sandbox.status, mapped)
       ? mapped
       : sandbox.status;
+
+    // asyncInit providers (ECI): Scheduling → Running when provider confirms Running
+    if (sandbox.status === SandboxStatus.Scheduling && runtime.status === 'Running') {
+      finalStatus = SandboxStatus.Running;
+    }
 
     // Persist clusterId from runtime if provider reported it back
     const runtimeInstanceId = runtime.instanceId ?? sandbox.config.instanceId;

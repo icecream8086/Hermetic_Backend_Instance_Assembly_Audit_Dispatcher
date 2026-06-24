@@ -18,11 +18,11 @@ function makeDeps(overrides?: Partial<HealthCheckDeps>): HealthCheckDeps {
   return {
     stores: { atomic },
     providers: {
-      container: {
+      resolveContainer: async () => ({
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         getStatus: async (_id: string) => null as any,
         delete: async () => {},
-      } as any,
+      } as any),
     },
     eventBus: bus,
     eventLoop: loop,
@@ -43,7 +43,7 @@ describe('health check (white-box)', () => {
     it('skips Deleted sandbox', async () => {
       const deps = makeDeps();
       await deps.stores.atomic.set('sandbox:ids', ['sb_del'], null);
-      await deps.stores.atomic.set('sandbox:sb_del', { status: SandboxStatus.Deleted, providerId: 'p1', config: { region: 'local' }, name: 't', containers: [], createdAt: 1, updatedAt: 1 }, null);
+      await deps.stores.atomic.set('sandbox:sb_del', { status: SandboxStatus.Deleted, providerId: 'p1', config: { region: 'local', instanceId: 'inst_test' }, name: 't', containers: [], createdAt: 1, updatedAt: 1 }, null);
       registerHealthCheck(deps);
       await triggerTick(deps);
       const entry = await deps.stores.atomic.get('sandbox:sb_del');
@@ -53,7 +53,7 @@ describe('health check (white-box)', () => {
     it('skips Stopped sandbox within 60s grace period', async () => {
       const deps = makeDeps();
       await deps.stores.atomic.set('sandbox:ids', ['sb_stop'], null);
-      await deps.stores.atomic.set('sandbox:sb_stop', { status: SandboxStatus.Stopped, providerId: 'p1', config: { region: 'local' }, name: 't', containers: [], createdAt: 1, updatedAt: Date.now() - 30_000 }, null);
+      await deps.stores.atomic.set('sandbox:sb_stop', { status: SandboxStatus.Stopped, providerId: 'p1', config: { region: 'local', instanceId: 'inst_test' }, name: 't', containers: [], createdAt: 1, updatedAt: Date.now() - 30_000 }, null);
       registerHealthCheck(deps);
       await triggerTick(deps);
       const entry = await deps.stores.atomic.get('sandbox:sb_stop');
@@ -65,7 +65,7 @@ describe('health check (white-box)', () => {
       const deps = makeDeps();
       const now = Date.now();
       await deps.stores.atomic.set('sandbox:ids', ['sb_old'], null);
-      await deps.stores.atomic.set('sandbox:sb_old', { status: SandboxStatus.Stopped, providerId: 'p1', config: { region: 'local' }, name: 'old', containers: [{ name: 'c1' }], createdAt: 1, updatedAt: now - 61_000 }, null);
+      await deps.stores.atomic.set('sandbox:sb_old', { status: SandboxStatus.Stopped, providerId: 'p1', config: { region: 'local', instanceId: 'inst_test' }, name: 'old', containers: [{ name: 'c1' }], createdAt: 1, updatedAt: now - 61_000 }, null);
       registerHealthCheck(deps);
       await triggerTick(deps);
       // Give inline GC a moment
@@ -79,15 +79,15 @@ describe('health check (white-box)', () => {
     it('GCs provider-gone sandbox (getStatus returns null)', async () => {
       const deps = makeDeps({
         providers: {
-          container: {
+          resolveContainer: async () => ({
             getStatus: async () => null, // provider gone
             delete: async () => {},
-          } as any,
+          } as any),
         },
       });
       const now = Date.now();
       await deps.stores.atomic.set('sandbox:ids', ['sb_gone'], null);
-      await deps.stores.atomic.set('sandbox:sb_gone', { status: SandboxStatus.Running, providerId: 'p1', config: { region: 'local', healthMaxRetries: 3 }, name: 'gone', containers: [{ name: 'c1' }], createdAt: 1, updatedAt: now }, null);
+      await deps.stores.atomic.set('sandbox:sb_gone', { status: SandboxStatus.Running, providerId: 'p1', config: { region: 'local', instanceId: 'inst_test', healthMaxRetries: 3 }, name: 'gone', containers: [{ name: 'c1' }], createdAt: 1, updatedAt: now }, null);
       registerHealthCheck(deps);
       await triggerTick(deps);
       await new Promise(r => setTimeout(r, 10));
@@ -99,14 +99,14 @@ describe('health check (white-box)', () => {
     it('resets fail counter when all containers healthy', async () => {
       const deps = makeDeps({
         providers: {
-          container: {
+          resolveContainer: async () => ({
             getStatus: async () => ({ containers: [{ alive: true, health: { status: 'healthy' } }] }),
             delete: async () => {},
-          } as any,
+          } as any),
         },
       });
       await deps.stores.atomic.set('sandbox:ids', ['sb_ok'], null);
-      await deps.stores.atomic.set('sandbox:sb_ok', { status: SandboxStatus.Running, providerId: 'p1', config: { region: 'local', healthMaxRetries: 3 }, name: 'ok', containers: [{ name: 'c1' }], createdAt: 1, updatedAt: Date.now() }, null);
+      await deps.stores.atomic.set('sandbox:sb_ok', { status: SandboxStatus.Running, providerId: 'p1', config: { region: 'local', instanceId: 'inst_test', healthMaxRetries: 3 }, name: 'ok', containers: [{ name: 'c1' }], createdAt: 1, updatedAt: Date.now() }, null);
       // Set non-zero fail counter
       await deps.stores.atomic.set('health:fails:sb_ok', 2, null);
       registerHealthCheck(deps);
@@ -118,14 +118,14 @@ describe('health check (white-box)', () => {
     it('increments fail counter when some containers are not alive', async () => {
       const deps = makeDeps({
         providers: {
-          container: {
+          resolveContainer: async () => ({
             getStatus: async () => ({ containers: [{ alive: true }, { alive: false }] }),
             delete: async () => {},
-          } as any,
+          } as any),
         },
       });
       await deps.stores.atomic.set('sandbox:ids', ['sb_bad'], null);
-      await deps.stores.atomic.set('sandbox:sb_bad', { status: SandboxStatus.Running, providerId: 'p1', config: { region: 'local', healthMaxRetries: 3 }, name: 'bad', containers: [{ name: 'c1' }, { name: 'c2' }], createdAt: 1, updatedAt: Date.now() }, null);
+      await deps.stores.atomic.set('sandbox:sb_bad', { status: SandboxStatus.Running, providerId: 'p1', config: { region: 'local', instanceId: 'inst_test', healthMaxRetries: 3 }, name: 'bad', containers: [{ name: 'c1' }, { name: 'c2' }], createdAt: 1, updatedAt: Date.now() }, null);
       registerHealthCheck(deps);
       await triggerTick(deps);
       const fail = await deps.stores.atomic.get<number>('health:fails:sb_bad');
@@ -136,14 +136,14 @@ describe('health check (white-box)', () => {
       let getStatusCalled = false;
       const deps = makeDeps({
         providers: {
-          container: {
+          resolveContainer: async () => ({
             getStatus: async () => { getStatusCalled = true; return { containers: [] } as any; },
             delete: async () => {},
-          } as any,
+          } as any),
         },
       });
       await deps.stores.atomic.set('sandbox:ids', ['sb_wl'], null);
-      await deps.stores.atomic.set('sandbox:sb_wl', { status: SandboxStatus.Running, providerId: 'p1', config: { region: 'local', healthMaxRetries: -1 }, name: 'wl', containers: [{ name: 'c1' }], createdAt: 1, updatedAt: Date.now() }, null);
+      await deps.stores.atomic.set('sandbox:sb_wl', { status: SandboxStatus.Running, providerId: 'p1', config: { region: 'local', instanceId: 'inst_test', healthMaxRetries: -1 }, name: 'wl', containers: [{ name: 'c1' }], createdAt: 1, updatedAt: Date.now() }, null);
       registerHealthCheck(deps);
       await triggerTick(deps);
       expect(getStatusCalled).toBe(false);
@@ -153,14 +153,14 @@ describe('health check (white-box)', () => {
       let getStatusCalled = false;
       const deps = makeDeps({
         providers: {
-          container: {
+          resolveContainer: async () => ({
             getStatus: async () => { getStatusCalled = true; return { containers: [] } as any; },
             delete: async () => {},
-          } as any,
+          } as any),
         },
       });
       await deps.stores.atomic.set('sandbox:ids', ['sb_pending'], null);
-      await deps.stores.atomic.set('sandbox:sb_pending', { status: SandboxStatus.Pending, providerId: 'p1', config: { region: 'local' }, name: 'p', containers: [], createdAt: 1, updatedAt: Date.now() }, null);
+      await deps.stores.atomic.set('sandbox:sb_pending', { status: SandboxStatus.Pending, providerId: 'p1', config: { region: 'local', instanceId: 'inst_test' }, name: 'p', containers: [], createdAt: 1, updatedAt: Date.now() }, null);
       registerHealthCheck(deps);
       await triggerTick(deps);
       expect(getStatusCalled).toBe(false);

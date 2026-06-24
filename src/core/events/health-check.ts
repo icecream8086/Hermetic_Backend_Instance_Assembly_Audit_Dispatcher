@@ -10,7 +10,7 @@ import { formatDmesgLine } from '../utils/dmesg.ts';
 
 export interface HealthCheckDeps {
   stores: { atomic: IAtomicStore };
-  providers: Pick<IProviderRegistry, 'container' | 'resolveContainer'>;
+  providers: Pick<IProviderRegistry, 'resolveContainer'>;
   eventBus: EventBus;
   eventLoop: EventLoop;
   audit: IAuditWriter;
@@ -85,6 +85,24 @@ export function registerHealthCheck(deps: HealthCheckDeps): void {
             continue;
           }
 
+          // Scheduling → check if provider has transitioned to Running (asyncInit providers like ECI)
+          if (entry.value.status === SandboxStatus.Scheduling) {
+            const resolvedInstanceId = instanceId ?? (entry.value.config as any).providerIdentity?.instanceId;
+            if (!resolvedInstanceId) continue;
+            try {
+              const p = await providers.resolveContainer?.(resolvedInstanceId as any);
+              if (!p?.getStatus) continue;
+              const rt = await p.getStatus(entry.value.providerId ?? sid);
+              if (rt?.status === 'Running') {
+                const latest = await stores.atomic.get<Sandbox>(`sandbox:${sid}`);
+                if (latest && latest.value.status === SandboxStatus.Scheduling) {
+                  await stores.atomic.set(`sandbox:${sid}`, { ...latest.value, status: SandboxStatus.Running, updatedAt: Date.now() }, latest.version);
+                }
+              }
+            } catch { /* retry next tick */ }
+            continue;
+          }
+
           if (entry.value.status !== SandboxStatus.Running) continue;
 
           const maxRetries = entry.value.config.healthMaxRetries ?? 3;
@@ -94,11 +112,9 @@ export function registerHealthCheck(deps: HealthCheckDeps): void {
           const lastStableAt = stableSince.get(sid);
           if (lastStableAt !== undefined && entry.value.updatedAt <= lastStableAt) continue;
 
-          const containerProvider = instanceId
-            ? await providers.resolveContainer?.(instanceId as any)
-            : undefined;
-          const provider = containerProvider ?? providers.container;
-          if (!provider.getStatus) continue;
+          if (!instanceId || !providers.resolveContainer) continue;
+          const provider = await providers.resolveContainer(instanceId as any);
+          if (!provider?.getStatus) continue;
 
           const runtime = await provider.getStatus(entry.value.providerId ?? sid);
           if (!runtime) {
@@ -119,15 +135,22 @@ export function registerHealthCheck(deps: HealthCheckDeps): void {
           const failKey = `health:fails:${sid}`;
 
           if (!anyRunning) {
+            // Use fail counter — only GC after maxRetries consecutive failures.
+            // This gives asyncInit providers (ECI) time to start containers.
             stableSince.delete(sid);
-            await dispatchGc(stores.atomic, queueProducer, providers, audit, {
-              sandboxId: sid, reason: 'exited-gc',
-              providerId: entry.value.providerId ?? sid,
-              region: entry.value.config.region,
-              ...(instanceId ? { instanceId } : {}),
-              containerCount: entry.value.containers.length,
-              sandboxName: entry.value.name, createdAt: entry.value.createdAt,
-            });
+            const failEntry = await stores.atomic.get<number>(failKey);
+            const fails = (failEntry?.value ?? 0) + 1;
+            await stores.atomic.set(failKey, fails, failEntry?.version ?? null);
+            if (fails >= maxRetries) {
+              await dispatchGc(stores.atomic, queueProducer, providers, audit, {
+                sandboxId: sid, reason: 'exited-gc',
+                providerId: entry.value.providerId ?? sid,
+                region: entry.value.config.region,
+                ...(instanceId ? { instanceId } : {}),
+                containerCount: entry.value.containers.length,
+                sandboxName: entry.value.name, createdAt: entry.value.createdAt,
+              });
+            }
             continue;
           }
 
@@ -226,7 +249,7 @@ interface GcParams {
 async function dispatchGc(
   atomic: IAtomicStore,
   queueProducer: IMessageQueue,
-  providers: Pick<IProviderRegistry, 'container' | 'resolveContainer'>,
+  providers: Pick<IProviderRegistry, 'resolveContainer'>,
   audit: IAuditWriter | undefined,
   params: GcParams,
 ): Promise<void> {
@@ -256,14 +279,12 @@ async function dispatchGc(
   if (qSent) return; // Queue accepted — consumer will process
 
   // 4. Queue unavailable — inline fallback. Resolve per-instance provider.
-  let containerProvider = providers.container;
-  if (params.instanceId) {
-    const resolved = await providers.resolveContainer?.(params.instanceId as any);
-    if (resolved) containerProvider = resolved;
+  if (params.instanceId && providers.resolveContainer) {
+    try {
+      const resolved = await providers.resolveContainer(params.instanceId as any);
+      await resolved.delete({ region: params.region as any, providerId: params.providerId });
+    } catch { /* best-effort */ }
   }
-  try {
-    await containerProvider.delete({ region: params.region as any, providerId: params.providerId });
-  } catch { /* best-effort */ }
 
   await gcUpdateState(atomic, audit, params.sandboxId, params.reason,
     params.sandboxName, params.providerId, params.containerCount, params.createdAt);

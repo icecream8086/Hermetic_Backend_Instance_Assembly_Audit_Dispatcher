@@ -39,7 +39,6 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
   const runner = new WorkflowRunner({
     stores: { atomic: deps.stores.atomic, blob: deps.stores.blob },
     providers: {
-      container: deps.providers.container,
       dns: deps.providers.dns,
       resolveContainer: deps.providers.resolveContainer?.bind(deps.providers),
     },

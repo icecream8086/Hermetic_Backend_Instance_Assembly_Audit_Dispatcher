@@ -47,7 +47,6 @@ function makeDeps(providerOverride?: MockProvider): HealthCheckDeps {
   return {
     stores: { atomic },
     providers: {
-      container: containerProvider,
       resolveContainer: async () => containerProvider,
     },
     eventBus: bus,
@@ -141,12 +140,24 @@ const decisionTable: DecisionTableRow[] = [
     expectDeleteCalled: true, // dispatchGc inline fallback calls provider.delete
   },
 
-  // ── Row 6: Running, anyRunning=false → exited-gc ──
+  // ── Row 6: Running, anyRunning=false → increment fail counter, don't GC yet ──
   {
-    name: 'Row 6: Running, anyRunning=false → exited-gc',
+    name: 'Row 6: Running, anyRunning=false (first failure) → fail++',
     S: SandboxStatus.Running,
     durationMs: 0,
     M: 3,
+    R: { containers: [{ alive: false }] },
+    expectedStatus: SandboxStatus.Running, // not deleted yet — fail counter < maxRetries
+    expectedFailCounter: 1,
+    expectDeleteCalled: false,
+  },
+
+  // ── Row 6b: Running, anyRunning=false, fail≥maxRetries → exited-gc ──
+  {
+    name: 'Row 6b: Running, anyRunning=false (fail ≥ maxRetries) → exited-gc',
+    S: SandboxStatus.Running,
+    durationMs: 0,
+    M: 1, // maxRetries = 1 → first failure triggers GC
     R: { containers: [{ alive: false }] },
     expectedStatus: 'deleted',
     expectDeleteCalled: true,
@@ -275,6 +286,7 @@ describe('Health check decision table (exhaustive)', () => {
         providerId: sandboxId,
         config: {
           region: 'local',
+          instanceId: 'inst_test',
           ...(row.M !== undefined ? { healthMaxRetries: row.M } : {}),
         },
         name: `sandbox-${row.S}`,

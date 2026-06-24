@@ -62,15 +62,15 @@ describe('SandboxService provider identity persistence', () => {
   });
 
   describe('provision without instanceId', () => {
-    it('does NOT persist providerIdentity when no instance is resolved', async () => {
-      const svc = new SandboxService(store, new ConsoleLogger(), new StubContainerProvider());
-      const sandbox = await svc.provision(baseInput());
-      expect((sandbox.config as any).providerIdentity).toBeUndefined();
+    it('throws ProviderResolutionError when no instanceId and no registry (no global default)', async () => {
+      const svc = new SandboxService(store, new ConsoleLogger(), null!);
+      await expect(svc.provision(baseInput())).rejects.toThrow(ProviderResolutionError);
     });
 
-    it('creates sandbox successfully with stub provider', async () => {
-      const svc = new SandboxService(store, new ConsoleLogger(), new StubContainerProvider());
-      const sandbox = await svc.provision(baseInput());
+    it('creates sandbox successfully with stub provider via mockRegistry', async () => {
+      const stub = new StubContainerProvider();
+      const svc = new SandboxService(store, new ConsoleLogger(), null!, mockRegistry(stub));
+      const sandbox = await svc.provision(baseInput({ instanceId: 'inst_test' as any }));
       expect(sandbox.status).toBe(SandboxStatus.Running);
       expect(sandbox.providerId).toMatch(/^stub-eci-/);
     });
@@ -181,10 +181,9 @@ describe('SandboxService provider identity persistence', () => {
         .rejects.toThrow(ProviderResolutionError);
     });
 
-    it('does NOT throw when no instanceId is set (uses default containerProvider)', async () => {
-      const svc = new SandboxService(store, new ConsoleLogger(), new StubContainerProvider());
-      const sandbox = await svc.provision(baseInput()); // no instanceId
-      expect(sandbox.status).toBe(SandboxStatus.Running);
+    it('throws when no instanceId and no providerRegistry (global default disabled)', async () => {
+      const svc = new SandboxService(store, new ConsoleLogger(), null!);
+      await expect(svc.provision(baseInput())).rejects.toThrow(ProviderResolutionError);
     });
   });
 });
@@ -195,8 +194,9 @@ describe('SandboxService error handling consistency', () => {
   beforeEach(() => { store = atomic(); });
 
   it('syncRuntime works for stub provider sandboxes', async () => {
-    const svc = new SandboxService(store, new ConsoleLogger(), new StubContainerProvider());
-    const sandbox = await svc.provision(baseInput());
+    const stub = new StubContainerProvider();
+    const svc = new SandboxService(store, new ConsoleLogger(), null!, mockRegistry(stub));
+    const sandbox = await svc.provision(baseInput({ instanceId: 'inst_test' as any }));
     const runtime = await svc.syncRuntime(sandbox.id);
     expect(runtime).toBeDefined();
     expect(runtime.name).toBeDefined();
@@ -209,11 +209,12 @@ describe('SandboxService error handling consistency', () => {
   });
 
   it('terminate completes local cleanup even when provider delete fails', async () => {
+    const stub = new StubContainerProvider();
     const failingProvider = new StubContainerProvider();
     failingProvider.delete = async () => { throw new Error('ECI unavailable'); };
 
-    const svc = new SandboxService(store, new ConsoleLogger(), failingProvider);
-    const sandbox = await svc.provision(baseInput());
+    const svc = new SandboxService(store, new ConsoleLogger(), null!, mockRegistry(failingProvider));
+    const sandbox = await svc.provision(baseInput({ instanceId: 'inst_test' as any }));
     await svc.terminate(sandbox.id, 'actor1');
 
     const entry = await store.get<Sandbox>('sandbox:' + sandbox.id);

@@ -181,6 +181,6 @@ describe('ProviderRegistry dispatch', () => {
       { backend: 'none', region: 'auto', accounts: [], defaultAccount: 'default' },
     );
     expect(typeof reg.resolveContainer).toBe('function');
-    expect(typeof reg.container).toBe('object');
+    expect(() => reg.container).toThrow('Global default provider is disabled');
   });
 });
