@@ -95,6 +95,47 @@
 
 ---
 
+## 新发现的 BUG（本轮测试发现）
+
+### BUG #1: 幂等中间件 corrupted 存储数据导致 500 `idempotency.ts:27`
+
+`const cached = JSON.parse(existing.value)` — 无 try/catch。如果存储中的数据被损坏，`JSON.parse` 抛出未处理的 `SyntaxError`，返回 500 而非优雅降级。
+
+**测试**: `tests/core/middleware/idempotency.test.ts` — `BUG: corrupted stored value causes 500`
+
+### BUG #2: 幂等中间件非 JSON 响应体崩溃 `idempotency.ts:34`
+
+`c.res.clone().json()` — 始终假设响应是 JSON。如果响应体是纯文本、二进制或空，`clone().json()` 抛出，中间件崩溃。
+
+**测试**: `tests/core/middleware/idempotency.test.ts` — `BUG: non-JSON response body throws`
+
+### BUG #3: request-cache 事务失败时缓存被清空 `request-cache.ts:39-40`
+
+```typescript
+async transact<T>(action) {
+    this.#cache.clear();  // ← 先清缓存
+    return this.#inner.transact(action);  // ← 如果这里抛异常，缓存已丢失
+}
+```
+
+应改为先执行 inner.transact，成功后再 clear。
+
+**测试**: `tests/core/store/request-cache.test.ts` — `BUG: transact() clears cache before inner`
+
+### BUG #4: Route ACL 无唯一性约束 `route-acl-manager.ts`
+
+创建 ACL 时不做去重检查。相同的 (method, pathPrefix, effect, userId) 可以重复创建多次。多条重复规则导致不可预测的优先级行为。
+
+**测试**: `tests/features/permission/route-acl-manager.test.ts` — `BUG: creating duplicate ACLs`
+
+### BUG #5: applyUpdate 原型污染 `apply-update.ts:17`
+
+`key in entity` 匹配原型链上的属性（toString, valueOf, constructor 等）。恶意输入 `{"toString": "evil"}` 会覆盖实体对象的原型方法。
+
+**测试**: `tests/core/utils/apply-update.test.ts` — `BUG: key in entity matches inherited properties`
+
+---
+
 ## 测试亮点
 
 | 项目 | 说明 |
@@ -104,6 +145,23 @@
 | 0 个 `test.only` | 无遗留调试代码 |
 | 模块化 setup | `RESTfulApi/helper.ts` 提供一致的 `startTestServer()` / `stopTestServer()` |
 | 错误路径覆盖 | `errors.test.ts`、`resolution.test.ts`、`durable-object.test.ts`、`rate-limit.test.ts` 系统性测试异常 |
+
+---
+
+## 已修复 (2026-06-24)
+
+### HIGH 占位测试 → 真实测试
+- `tests/features/sandbox/logs-integration.test.ts` — 6 个 `expect(true).toBe(true)` → 9 个真实 SandboxService 生命周期测试（stop/start/terminate/list/syncRuntime/getById）
+
+### P0 新增测试
+- `tests/features/permission/route-acl-manager.test.ts` — 16 个测试：checkAccess 匹配逻辑（allow/deny/user/group/exact/prefix） + 版本缓存一致性 + CRUD 分页
+- `tests/features/permission/perm-checker.test.ts` — 9 个测试：用户不存在、空规则 deny、全局策略 allow、MAC deny-override、用户组匹配、$self 展开、缓存 TTL 行为、跨实例 cache invalidation
+
+### 发现的生产 Bug
+
+**RouteAclManager.checkAccess 匹配逻辑缺陷**：当 ACL 仅设置 `userGroupId` 而不设置 `userId` 时，`matchesUser = !acl.userId` 恒为 `true`，导致 `if (!matchesUser && !matchesGroup) continue` 无法正确过滤。group 限制被绕过——预期行为是"用户必须属于该 group"，实际行为是"任意用户都能匹配"。
+
+**修复方向**：将 OR 逻辑改为 AND——`if (!matchesUser || !matchesGroup) continue`（两者都必须满足，当设置时）。
 
 ---
 

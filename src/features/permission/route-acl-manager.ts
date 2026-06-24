@@ -45,6 +45,17 @@ export class RouteAclManager {
   }
 
   async create(input: CreateRouteAclInput, actor?: AuditActor): Promise<RouteAcl> {
+    // Check for exact duplicates
+    const existing = await this.store.list();
+    const dup = existing.find(a =>
+      a.method === input.method &&
+      a.pathPrefix === input.pathPrefix &&
+      a.matchType === input.matchType &&
+      a.userId === input.userId &&
+      a.userGroupId === input.userGroupId
+    );
+    if (dup) throw new AppError(409, 'ROUTEACL_DUPLICATE', `Route ACL already exists for ${input.method} ${input.pathPrefix}`);
+
     const id = generateRouteAclId();
     const acl: RouteAcl = {
       id, method: input.method, pathPrefix: input.pathPrefix,

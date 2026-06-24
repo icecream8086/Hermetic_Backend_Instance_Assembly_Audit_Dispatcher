@@ -14,7 +14,7 @@ export function applyUpdate<T extends object>(
 ): T {
   const updates: Record<string, unknown> = {};
   for (const key of Object.keys(input)) {
-    if (key in entity && input[key] !== undefined) {
+    if (Object.hasOwn(entity, key) && input[key] !== undefined) {
       updates[key] = input[key];
     }
   }

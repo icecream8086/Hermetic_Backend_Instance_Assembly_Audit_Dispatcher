@@ -1,86 +1,98 @@
-import { describe, it, expect } from 'vitest';
+import { join } from 'node:path'; import { tmpdir } from 'node:os';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { FileKVAtomicStore } from '../../../src/core/store/adapters/file-kv.ts';
+import { SandboxService } from '../../../src/features/sandbox/sandbox.service.ts';
+import { ConsoleLogger } from '../../../src/core/logger/console-logger.ts';
+import { StubContainerProvider } from '../../../src/providers/stub/container.ts';
+import { SandboxStatus, SpotStrategy, createSandboxId } from '../../../src/features/sandbox/types.ts';
+import type { CreateSandboxInput, Sandbox } from '../../../src/features/sandbox/types.ts';
+import type { RegionId } from '../../../src/core/region/types.ts';
 
-/**
- * Log stream 集成测试。
- *
- * 注意: WebSocket + DO 功能只能在 wrangler dev 下测试。
- * 这些测试验证请求处理和数据流逻辑，不依赖 DO 运行时。
- */
+function atomic() { return new FileKVAtomicStore(join(tmpdir(), 'hbi-logtest-' + crypto.randomUUID().slice(0, 8))); }
 
-describe('沙箱日志 API', () => {
+function baseInput(overrides?: Partial<CreateSandboxInput>): CreateSandboxInput {
+  return {
+    name: 'log-test',
+    region: 'local' as unknown as RegionId,
+    resourceSpec: { cpu: 1, memory: 512 },
+    spotStrategy: SpotStrategy.None,
+    restartPolicy: 'Never',
+    containers: [{ name: 'app', image: 'nginx:latest' }],
+    network: { allocatePublicIp: false },
+    ...overrides,
+  };
+}
 
-  it('start 不存在的沙箱返回错误', () => {
-    // SandboxService.start() 在 getById 返回 null 时抛 AppError(404)
-    // handler 捕获后返回 START_FAILED
-    expect(true).toBe(true); // placeholder — 真实场景需要 mock SandboxService
+describe('SandboxService lifecycle', () => {
+  let svc: SandboxService;
+  let store: ReturnType<typeof atomic>;
+  let sandbox: Sandbox;
+
+  beforeEach(async () => {
+    store = atomic();
+    svc = new SandboxService(store, new ConsoleLogger(), new StubContainerProvider());
+    sandbox = await svc.provision(baseInput());
   });
 
-  it('log 路由需要 DO namespace', () => {
-    // app.ts: if (logStreamNs) { app.get('/api/sandboxes/:id/logs', ...) }
-    // 没有 DO binding 时路由不注册
-    const hasLogStreamNs = !!process.env['LOG_STREAM_DO'];
-    // 在 vitest 环境没有 DO binding
-    expect(hasLogStreamNs).toBe(false);
+  it('stop transitions Running → Stopped', async () => {
+    const stopped = await svc.stop(sandbox.id);
+    expect(stopped.status).toBe(SandboxStatus.Stopped);
   });
 
-  it('log 路由需要权限检查', () => {
-    // app.ts handler 中调 permService.check({ action: 'read', resource: 'sandbox' })
-    // 未授权用户收到 403
-    const user = { id: 'user1' };
-    const permResult = { allowed: false, reason: 'Access denied' };
-    expect(permResult.allowed).toBe(false);
-    expect(permResult.reason).toBe('Access denied');
+  it('start transitions Stopped → Running', async () => {
+    await svc.stop(sandbox.id);
+    const started = await svc.start(sandbox.id);
+    expect(started.status).toBe(SandboxStatus.Running);
   });
 
-  it('需要 providerId 才能流式拉取', () => {
-    // 无 providerId 的沙箱返回 400 NO_PROVIDER
-    const sandbox = { providerId: undefined };
-    expect(sandbox.providerId).toBeUndefined();
+  it('terminate deletes sandbox and removes from index', async () => {
+    await svc.terminate(sandbox.id, 'actor1');
+    const entry = await store.get<Sandbox>('sandbox:' + sandbox.id);
+    expect(entry!.value.status).toBe(SandboxStatus.Deleted);
+    const idx = await store.get<string[]>('sandbox:ids');
+    expect(idx?.value).not.toContain(sandbox.id as string);
   });
 
-  it('构建正确的 DO URL', () => {
-    const sandboxId = 'sbx_123';
-    const providerId = 'cont_abc';
-    const endpoint = 'http://192.168.1.1:8080/v1.24';
-    const provider = 'podman';
-    const tail = '200';
-
-    const qs = new URLSearchParams({ providerId, endpoint, provider });
-    if (tail) qs.set('tail', tail);
-    const doUrl = `/logs?${qs.toString()}`;
-    const parsed = new URL(doUrl, 'https://do/');
-
-    expect(parsed.searchParams.get('providerId')).toBe(providerId);
-    expect(parsed.searchParams.get('endpoint')).toBe(endpoint);
-    expect(parsed.searchParams.get('tail')).toBe(tail);
-    expect(parsed.searchParams.get('since')).toBeNull();
-  });
-});
-
-describe('沙箱 Start API', () => {
-
-  it('start 调 provider.start?() 和 transition(Running)', () => {
-    // SandboxService.start():
-    //   1. getById(id) → sandbox
-    //   2. containerProvider.start?.(providerId)
-    //   3. transition(id, Running)
-    const providerStart = async (id: string) => { /* Podman POST /containers/{id}/start */ };
-    const transition = (id: string, to: string) => ({ id, status: to });
-
-    expect(typeof providerStart).toBe('function');
-    expect(transition('s1', 'Running').status).toBe('Running');
+  it('getById returns null for non-existent sandbox', async () => {
+    const result = await svc.getById(createSandboxId('nonexistent'));
+    expect(result).toBeNull();
   });
 
-  it('provider.start 失败时本地状态仍可切换', () => {
-    // catch 吞异常: provider 不可达时至少本地状态能改
-    let threw = false;
+  it('getById returns sandbox after provision', async () => {
+    const found = await svc.getById(sandbox.id);
+    expect(found).not.toBeNull();
+    expect(found!.name).toBe('log-test');
+    expect(found!.status).toBe(SandboxStatus.Running);
+  });
+
+  it('list returns provisioned sandboxes', async () => {
+    const result = await svc.list();
+    expect(result.items.length).toBeGreaterThanOrEqual(1);
+    expect(result.items.some(s => s.id === sandbox.id)).toBe(true);
+  });
+
+  it('list filters by status', async () => {
+    await svc.stop(sandbox.id);
+    const running = await svc.list(SandboxStatus.Running);
+    expect(running.items.every(s => s.status === SandboxStatus.Running)).toBe(true);
+    expect(running.items.some(s => s.id === sandbox.id)).toBe(false); // stopped
+    const stopped = await svc.list(SandboxStatus.Stopped);
+    expect(stopped.items.some(s => s.id === sandbox.id)).toBe(true);
+  });
+
+  it('syncRuntime updates sandbox runtime from provider', async () => {
+    const runtime = await svc.syncRuntime(sandbox.id);
+    expect(runtime).toBeDefined();
+    expect(runtime.name).toBeDefined();
+  });
+
+  it('terminate throws error for non-existent sandbox', async () => {
     try {
-      // 模拟 provider start 失败
-      const result = 'Running'; // 继续执行 transition
-      expect(result).toBe('Running');
-    } catch {
-      threw = true;
+      await svc.terminate(createSandboxId('nonexistent'));
+      expect.fail('should have thrown');
+    } catch (e: unknown) {
+      expect(e).toBeDefined();
+      expect((e as any).statusCode ?? (e as any).status).toBe(404);
     }
-    expect(threw).toBe(false);
   });
 });

@@ -37,8 +37,9 @@ export class RequestCachedAtomicStore implements IAtomicStore {
   }
 
   async transact<T>(action: (txn: IStoreTransaction) => Promise<T>): Promise<T> {
+    const result = await this.#inner.transact(action);
     this.#cache.clear();
-    return this.#inner.transact(action);
+    return result;
   }
 
   invalidateCache(key: string): Promise<void> {

@@ -24,19 +24,23 @@ export function idempotency(): MiddlewareHandler<IdempotencyEnv> {
 
     const existing = await stores.get<string>(storageKey);
     if (existing) {
-      const cached = JSON.parse(existing.value) as { status: number; body: unknown };
-      return c.json(cached.body, cached.status as ContentfulStatusCode);
+      try {
+        const cached = JSON.parse(existing.value) as { status: number; body: unknown };
+        return c.json(cached.body, cached.status as ContentfulStatusCode);
+      } catch { /* corrupted data — fall through to re-execute */ }
     }
 
     await next();
 
     if (c.res.status >= 200 && c.res.status < 500) {
-      const clone = (await c.res.clone().json()) as unknown;
-      await stores.set(
-        storageKey,
-        JSON.stringify({ status: c.res.status, body: clone }),
-        null,
-      );
+      try {
+        const clone = (await c.res.clone().json()) as unknown;
+        await stores.set(
+          storageKey,
+          JSON.stringify({ status: c.res.status, body: clone }),
+          null,
+        );
+      } catch { /* non-JSON response — skip caching */ }
     }
   };
 }
