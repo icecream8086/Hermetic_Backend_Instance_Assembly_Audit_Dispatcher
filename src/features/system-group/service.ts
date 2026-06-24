@@ -1,7 +1,7 @@
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
-import type { ILogWriter } from '../../core/logger/interfaces.ts';
+import type { ILogWriter } from '../../core/audit/types.ts';
 import { createFacility } from '../../core/brand.ts';
-import { LogLevel, AppError } from '../../core/types.ts';
+import { AppError } from '../../core/types.ts';
 import type { IAuditWriter } from '../../core/audit/types.ts';
 import { KernLevel } from '../../core/audit/kern-level.ts';
 import type { SysGroup, CreateSysGroupInput, UpdateSysGroupInput } from './types.ts';
@@ -46,7 +46,7 @@ export class SysGroupService implements ISysGroupService {
     await this.atomic.set(PREFIX + id, group, null);
     await this.#addToIndex(id);
     await this.#incrCounter().catch(() => {});
-    await this.logger.logAsync({ facility: FACILITY, level: LogLevel.INFO, message: `SysGroup created: ${input.name}`, metadata: { actorId: _actorId, groupId: id, priority: group.priority } });
+    await this.logger.write({ facility: FACILITY, level: KernLevel.INFO, message: `SysGroup created: ${input.name}`, metadata: { actorId: _actorId, groupId: id, priority: group.priority } });
     this.audit?.write({
       level: KernLevel.NOTICE,
       facility: FACILITY,
@@ -140,7 +140,7 @@ export class SysGroupService implements ISysGroupService {
     await this.atomic.set(PREFIX + id, null, entry.version);
     await this.#removeFromIndex(id);
     await this.#decrCounter().catch(() => {});
-    await this.logger.logAsync({ facility: FACILITY, level: LogLevel.WARN, message: `SysGroup deleted: ${entry.value.name}`, metadata: { actorId: _actorId, groupId: id } });
+    await this.logger.write({ facility: FACILITY, level: KernLevel.WARNING, message: `SysGroup deleted: ${entry.value.name}`, metadata: { actorId: _actorId, groupId: id } });
     this.audit?.write({
       level: KernLevel.WARNING,
       facility: FACILITY,

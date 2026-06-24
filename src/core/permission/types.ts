@@ -38,6 +38,79 @@ export enum PermissionAction {
   ADMIN = 'admin',
 }
 
+// ═══════════════════════════════════════════════════════════
+// Capability bitfield — decomposes superuser into named capabilities
+// ═══════════════════════════════════════════════════════════
+
+export const Capability = {
+  NONE:                    0,
+  // Sandbox
+  SANDBOX_CREATE:          1 << 0,   // 1
+  SANDBOX_DELETE:          1 << 1,   // 2
+  SANDBOX_UPDATE:          1 << 2,   // 4
+  SANDBOX_EXEC:            1 << 3,   // 8
+  SANDBOX_ADMIN:           1 << 4,   // 16
+  // Image
+  IMAGE_PULL:              1 << 5,   // 32
+  IMAGE_DELETE:            1 << 6,   // 64
+  IMAGE_COMMIT:            1 << 7,   // 128
+  // Volume
+  VOLUME_MOUNT:            1 << 8,   // 256
+  VOLUME_CREATE:           1 << 9,   // 512
+  VOLUME_DELETE:           1 << 10,  // 1024
+  // Network
+  NETWORK_BIND:            1 << 11,  // 2048
+  NETWORK_ADMIN:           1 << 12,  // 4096
+  // User management
+  USER_CREATE:             1 << 13,  // 8192
+  USER_DELETE:             1 << 14,  // 16384
+  USER_ADMIN:              1 << 15,  // 32768
+  // System
+  SYS_AUDIT_READ:          1 << 16,  // 65536
+  SYS_AUDIT_WRITE:         1 << 17,  // 131072
+  SYS_CONFIG:              1 << 18,  // 262144
+  // Composite sets
+  SANDBOX_CRUD:            (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3),  // 15
+  IMAGE_CRUD:              (1 << 5) | (1 << 6) | (1 << 7),              // 224
+  VOLUME_CRUD:             (1 << 8) | (1 << 9) | (1 << 10),             // 1792
+  USER_CRUD:               (1 << 13) | (1 << 14),                        // 24576
+  ALL:                      0x7FFFF,  // All 19 capabilities
+} as const;
+
+export type CapabilityValue = number;
+
+/** Map an action string to the required capability bit. */
+export function actionToCapability(action: string): CapabilityValue {
+  switch (action) {
+    case PermissionAction.CREATE: return Capability.SANDBOX_CREATE;
+    case PermissionAction.DELETE: return Capability.SANDBOX_DELETE;
+    case PermissionAction.UPDATE: return Capability.SANDBOX_UPDATE;
+    default: return Capability.NONE;
+  }
+}
+
+/** Check if a capability set contains the required capabilities. */
+export function hasCapability(caps: CapabilityValue, required: CapabilityValue): boolean {
+  return (caps & required) === required;
+}
+
+// ═══════════════════════════════════════════════════════════
+// 3-layer denial tracking — DAC / Capability / MAC
+// ═══════════════════════════════════════════════════════════
+
+export const enum DenialLayer {
+  DAC = 'dac',
+  CAPABILITY = 'cap',
+  MAC = 'mac',
+}
+
+/** Audit record type per denial layer — mirrors Linux audit types. */
+export const DENIAL_AUDIT_TYPE: Record<DenialLayer, string> = {
+  [DenialLayer.DAC]:        'SYSCALL',
+  [DenialLayer.CAPABILITY]: 'CAPABILITIES',
+  [DenialLayer.MAC]:        'AVC',
+};
+
 export interface PermissionCheck {
   readonly actor: string;
   /** Action string — accepts PermissionAction enum values or arbitrary strings for pattern matching. */
@@ -50,6 +123,10 @@ export interface PermissionCheck {
 export interface PermissionResult {
   readonly allowed: boolean;
   readonly reason: string;
+  /** Which layer denied the request. Undefined if allowed. */
+  readonly layer?: DenialLayer;
+  /** Audit type for the denial event. Maps to 'SYSCALL' | 'CAPABILITIES' | 'AVC'. */
+  readonly auditType?: string;
 }
 
 /**

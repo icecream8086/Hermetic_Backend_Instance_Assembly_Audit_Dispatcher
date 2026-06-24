@@ -2,7 +2,7 @@ import { join } from 'node:path'; import { tmpdir } from 'node:os';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { FileKVAtomicStore } from '../../../src/core/store/adapters/file-kv.ts';
 import { SandboxService } from '../../../src/features/sandbox/sandbox.service.ts';
-import { ConsoleLogger } from '../../../src/core/logger/console-logger.ts';
+import { ConsoleLogger } from '../../../src/core/audit/console-logger.ts';
 import { StubContainerProvider } from '../../../src/providers/stub/container.ts';
 import { InstanceService } from '../../../src/core/region/instance.ts';
 import type { ComputeInstance } from '../../../src/core/region/instance.ts';

@@ -2,7 +2,7 @@ import { join } from 'node:path'; import { tmpdir } from 'node:os';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { FileKVAtomicStore } from '../../../src/core/store/adapters/file-kv.ts';
 import { PermissionChecker } from '../../../src/features/permission/perm-checker.ts';
-import { ConsoleLogger } from '../../../src/core/logger/console-logger.ts';
+import { ConsoleLogger } from '../../../src/core/audit/console-logger.ts';
 import type { PermissionRule } from '../../../src/features/permission/types.ts';
 
 function store() { return new FileKVAtomicStore(join(tmpdir(), 'hbi-perm-' + crypto.randomUUID().slice(0, 8))); }

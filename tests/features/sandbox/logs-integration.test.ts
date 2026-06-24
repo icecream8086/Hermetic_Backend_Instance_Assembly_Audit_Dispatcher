@@ -2,7 +2,7 @@ import { join } from 'node:path'; import { tmpdir } from 'node:os';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { FileKVAtomicStore } from '../../../src/core/store/adapters/file-kv.ts';
 import { SandboxService } from '../../../src/features/sandbox/sandbox.service.ts';
-import { ConsoleLogger } from '../../../src/core/logger/console-logger.ts';
+import { ConsoleLogger } from '../../../src/core/audit/console-logger.ts';
 import { StubContainerProvider } from '../../../src/providers/stub/container.ts';
 import { SandboxStatus, SpotStrategy, createSandboxId } from '../../../src/features/sandbox/types.ts';
 import type { CreateSandboxInput, Sandbox } from '../../../src/features/sandbox/types.ts';
@@ -45,12 +45,12 @@ describe('SandboxService lifecycle', () => {
     sandbox = await svc.provision(baseInput());
   });
 
-  it('stop transitions Running → Stopped', async () => {
+  it('stop transitions Running → Succeeded', async () => {
     const stopped = await svc.stop(sandbox.id);
-    expect(stopped.status).toBe(SandboxStatus.Stopped);
+    expect(stopped.status).toBe(SandboxStatus.Succeeded);
   });
 
-  it('start transitions Stopped → Running', async () => {
+  it('start transitions Succeeded → Running', async () => {
     await svc.stop(sandbox.id);
     const started = await svc.start(sandbox.id);
     expect(started.status).toBe(SandboxStatus.Running);
@@ -87,7 +87,7 @@ describe('SandboxService lifecycle', () => {
     const running = await svc.list(SandboxStatus.Running);
     expect(running.items.every(s => s.status === SandboxStatus.Running)).toBe(true);
     expect(running.items.some(s => s.id === sandbox.id)).toBe(false); // stopped
-    const stopped = await svc.list(SandboxStatus.Stopped);
+    const stopped = await svc.list(SandboxStatus.Succeeded);
     expect(stopped.items.some(s => s.id === sandbox.id)).toBe(true);
   });
 

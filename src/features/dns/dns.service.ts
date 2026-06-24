@@ -3,12 +3,11 @@
 // Independent from sandbox — works with any resource that needs DNS.
 
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
-import type { ILogWriter } from '../../core/logger/interfaces.ts';
+import type { ILogWriter } from '../../core/audit/types.ts';
 import type { IDnsProvider } from '../../core/provider/interfaces.ts';
 import type { IDnsService } from './interfaces.ts';
 import type { DnsRecordId, DnsRecord, DnsSyncInput } from './types.ts';
 import { DnsRecordStatus } from './types.ts';
-import { LogLevel } from '../../core/types.ts';
 import { createFacility } from '../../core/brand.ts';
 import { AppError } from '../../core/types.ts';
 import type { IAuditWriter } from '../../core/audit/types.ts';
@@ -61,9 +60,9 @@ export class DnsService implements IDnsService {
 
     await this.atomic.set(`${KEY_PREFIX}${id}`, record, existingEntry?.version ?? null);
 
-    await this.logger.logAsync({
+    await this.logger.write({
       facility: FACILITY,
-      level: LogLevel.INFO,
+      level: KernLevel.INFO,
       message: `DNS record ${type} ${domain} → ${value}`,
       actorId,
       metadata: { dnsRecordId: id as string, domain, type, value },
@@ -91,9 +90,9 @@ export class DnsService implements IDnsService {
 
     await this.atomic.set(`${KEY_PREFIX}${id}`, { ...entry.value, status: DnsRecordStatus.Stale }, entry.version);
 
-    await this.logger.logAsync({
+    await this.logger.write({
       facility: FACILITY,
-      level: LogLevel.INFO,
+      level: KernLevel.INFO,
       message: `DNS record deleted ${entry.value.domain}`,
       actorId,
       metadata: { dnsRecordId: id as string, domain: entry.value.domain },

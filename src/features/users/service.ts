@@ -1,9 +1,9 @@
 import type { IAtomicStore, IStoreTransaction } from '../../core/store/interfaces.ts';
 import { TransactConflictError } from '../../core/store/interfaces.ts';
-import type { ILogWriter } from '../../core/logger/interfaces.ts';
+import type { ILogWriter } from '../../core/audit/types.ts';
 import { createFacility } from '../../core/brand.ts';
 import { measure, lastPerf } from '../../core/perf.ts';
-import { LogLevel, AppError } from '../../core/types.ts';
+import { AppError } from '../../core/types.ts';
 import type { IAuditWriter } from '../../core/audit/types.ts';
 import { KernLevel } from '../../core/audit/kern-level.ts';
 import type { User, UserId, Session, SessionToken, RegisterInput, LoginInput, LoginContext, NoPasswordLoginInput, UpdateUserInput, LoginInfo } from './types.ts';
@@ -216,7 +216,7 @@ export class UserService implements IUserService {
   async register(input: RegisterInput): Promise<{ user: User; token: SessionToken }> {
     const id = generateUserId();
     const passwordHash = await hashPassword(input.password);
-    this.logger.logAsync({ facility: FACILITY, level: LogLevel.INFO, message: `PBKDF2 hash: ${lastPerf().toFixed(1)}ms`, metadata: { operation: 'hash', duration: lastPerf() } });
+    this.logger.write({ facility: FACILITY, level: KernLevel.INFO, message: `PBKDF2 hash: ${lastPerf().toFixed(1)}ms`, metadata: { operation: 'hash', duration: lastPerf() } });
     const now = Date.now();
 
     const user: User = {
@@ -255,9 +255,9 @@ export class UserService implements IUserService {
       await this.#joinNamedGroup(id, 'wheel');
     }
 
-    await this.logger.logAsync({
+    await this.logger.write({
       facility: FACILITY,
-      level: LogLevel.INFO,
+      level: KernLevel.INFO,
       message: 'User registered',
       metadata: { userId: id as string, email: input.email, role: input.role },
     });
@@ -287,7 +287,7 @@ export class UserService implements IUserService {
 
     const user = entry.value;
     const valid = await serialisedHash(() => verifyPassword(input.password, user.passwordHash));
-    this.logger.logAsync({ facility: FACILITY, level: LogLevel.INFO, message: `PBKDF2 verify: ${lastPerf().toFixed(1)}ms`, metadata: { operation: 'verify', duration: lastPerf() } });
+    this.logger.write({ facility: FACILITY, level: KernLevel.INFO, message: `PBKDF2 verify: ${lastPerf().toFixed(1)}ms`, metadata: { operation: 'verify', duration: lastPerf() } });
     if (!valid) {
       await recordAttempt(this.atomic, email, false, ip);
       throw new AppError(401, 'INVALID_CREDENTIALS', 'Invalid email or password');
@@ -328,9 +328,9 @@ export class UserService implements IUserService {
     const token = await this.createSession(user.id);
     await recordAttempt(this.atomic, email, true, ip);
 
-    await this.logger.logAsync({
+    await this.logger.write({
       facility: FACILITY,
-      level: LogLevel.INFO,
+      level: KernLevel.INFO,
       message: 'User logged in',
       metadata: { userId: user.id, email, ip },
     });
@@ -432,9 +432,9 @@ export class UserService implements IUserService {
     const token = await this.createSession(user.id);
     await recordAttempt(this.atomic, input.email, true, ctx?.ip);
 
-    await this.logger.logAsync({
+    await this.logger.write({
       facility: FACILITY,
-      level: LogLevel.INFO,
+      level: KernLevel.INFO,
       message: 'User logged in (no-password)',
       metadata: { userId: user.id, email: user.email, ip: ctx?.ip },
     });
@@ -474,7 +474,7 @@ export class UserService implements IUserService {
     };
 
     if (input.password !== undefined) {
-      this.logger.logAsync({ facility: FACILITY, level: LogLevel.INFO, message: `PBKDF2 hash: ${lastPerf().toFixed(1)}ms`, metadata: { operation: 'hash', duration: lastPerf() } });
+      this.logger.write({ facility: FACILITY, level: KernLevel.INFO, message: `PBKDF2 hash: ${lastPerf().toFixed(1)}ms`, metadata: { operation: 'hash', duration: lastPerf() } });
     }
 
     const newVersion = await this.atomic.set(USER_PREFIX + id, updated, entry.version);
@@ -486,9 +486,9 @@ export class UserService implements IUserService {
       await this.atomic.set(EMAIL_INDEX_PREFIX + updated.email, updated, emailEntry.version);
     }
 
-    await this.logger.logAsync({
+    await this.logger.write({
       facility: FACILITY,
-      level: LogLevel.INFO,
+      level: KernLevel.INFO,
       message: 'User updated',
       metadata: { userId: id as string },
     });
@@ -524,9 +524,9 @@ export class UserService implements IUserService {
     // Best-effort counter update
     await this.#decrCounter().catch(() => {});
 
-    await this.logger.logAsync({
+    await this.logger.write({
       facility: FACILITY,
-      level: LogLevel.INFO,
+      level: KernLevel.INFO,
       message: 'User deleted',
       metadata: { userId: id as string, email },
     });

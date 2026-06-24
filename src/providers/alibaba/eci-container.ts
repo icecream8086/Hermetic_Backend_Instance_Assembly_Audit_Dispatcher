@@ -372,7 +372,7 @@ function statusToAlibaba(status: ContainerGroupStatus): string {
   }
 }
 
-function parseContainerGroup(item: any): ContainerGroupRuntime {
+export function parseContainerGroup(item: any): ContainerGroupRuntime {
   const containers: any[] = item.Containers ?? [];
   return {
     providerId: item.ContainerGroupId ?? '',
@@ -389,7 +389,7 @@ function parseContainerGroup(item: any): ContainerGroupRuntime {
     memory: item.Memory ?? 0,
     discount: item.Discount,
     network: {
-      privateIp: item.PrivateIp,
+      privateIp: item.IntranetIp ?? item.PrivateIp,
       vpcId: item.VpcId,
       subnetId: item.VSwitchId,
       securityGroupId: item.SecurityGroupId,

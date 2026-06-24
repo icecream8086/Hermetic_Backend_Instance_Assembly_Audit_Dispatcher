@@ -17,7 +17,7 @@ import type {
   ContainerLogResult,
 } from '../../core/provider/interfaces.ts';
 import type { CreateContainerGroupInput, ContainerGroupRuntime } from '../../core/provider/types.ts';
-import { debugLog } from '../../core/logger/log-policy.ts';
+import { debugLog } from '../../core/audit/log-policy.ts';
 
 interface PodmanContainer {
   Id: string;

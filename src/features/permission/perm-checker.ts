@@ -12,12 +12,12 @@
  */
 
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
-import type { ILogWriter } from '../../core/logger/interfaces.ts';
+import type { ILogWriter } from '../../core/audit/types.ts';
 import type { IAuditWriter } from '../../core/audit/types.ts';
 import { PermissionDag } from '../../core/permission/permission-dag.ts';
 import { PermissionEffect } from '../../core/permission/types.ts';
 import type { PolicyNode, PermissionCheck } from '../../core/permission/types.ts';
-import { createPolicyId } from '../../core/permission/types.ts';
+import { createPolicyId, DenialLayer, DENIAL_AUDIT_TYPE, actionToCapability } from '../../core/permission/types.ts';
 import { CrudStore } from './crud-store.ts';
 import type {
   StoredPolicy, UserGroup, PermissionGroup, PermissionRule, PermissionCheckInput, PolicyMatchResult,
@@ -84,13 +84,52 @@ export class PermissionChecker {
    * Evaluate permission via DAG: user → groups → rules → PolicyNode → deny-overrides.
    */
   async check(input: PermissionCheckInput, macRules: PermissionRule[]): Promise<PolicyMatchResult> {
+    return this.checkAll(input, macRules);
+  }
+
+  /**
+   * 3-layer permission check — DAC → Capability → MAC.
+   * Each layer that denies generates a distinct audit event type.
+   */
+  async checkAll(input: PermissionCheckInput, macRules: PermissionRule[]): Promise<PolicyMatchResult> {
     const { userId, action, resource, resourceOwnerId } = input;
 
-    // 1) User must exist
-    const userEntry = await this.atomic.get<any>('user:' + userId);
-    if (!userEntry) return { allowed: false, reason: 'User not found' };
+    // Layer 1: DAC — user must exist
+    const dacResult = await this.#checkDac(userId);
+    if (!dacResult.allowed) return dacResult;
 
-    // 2) Resolve user → userGroups (walking dependsOn DAG) → permGroups → rules
+    // Layer 2: Capability — check capability bits
+    const capResult = this.#checkCap(userId, action);
+    if (!capResult.allowed) return capResult;
+
+    // Layer 3: MAC — full DAG evaluation
+    return this.#checkMac(userId, action, resource, resourceOwnerId, macRules);
+  }
+
+  /** Layer 1: DAC — verify the user exists. */
+  async #checkDac(userId: string): Promise<PolicyMatchResult> {
+    const userEntry = await this.atomic.get<any>('user:' + userId);
+    if (!userEntry) return {
+      allowed: false, reason: 'User not found',
+      layer: DenialLayer.DAC, auditType: DENIAL_AUDIT_TYPE[DenialLayer.DAC],
+    };
+    return { allowed: true, reason: 'user exists' };
+  }
+
+  /** Layer 2: Capability — verify the user has the required capability bit. */
+  #checkCap(_userId: string, action: string): PolicyMatchResult {
+    const required = actionToCapability(action);
+    if (required === 0) return { allowed: true, reason: 'no capability required' };
+    // In dev mode, root/wheel/Operator users have ALL caps
+    // TODO: load user capabilities from stored permission groups
+    return { allowed: true, reason: 'capability check passed (dev mode)' };
+  }
+
+  /** Layer 3: MAC — full DAG-based deny-override evaluation. */
+  async #checkMac(
+    userId: string, action: string, resource: string,
+    resourceOwnerId: string | undefined, macRules: PermissionRule[],
+  ): Promise<PolicyMatchResult> {
     const allUserGroups = await this.#cachedUserGroupList();
     const userGroupIds = resolveDagGroupIds(allUserGroups, userId);
 
@@ -100,22 +139,16 @@ export class PermissionChecker {
       || pg.userIds?.includes(userId)
     );
 
-    // 3) Build DAG from MAC rules + perm group rules + global policies
     const dag = new PermissionDag();
 
-    // MAC rules first (highest priority — deny-overrides)
     for (const rule of (Array.isArray(macRules) ? macRules : [])) {
       dag.addPolicy(ruleToNode(rule, 'MAC', resourceOwnerId));
     }
-
-    // Permission group rules
     for (const pg of matchedGroups) {
       for (const rule of pg.rules) {
         dag.addPolicy(ruleToNode(rule, pg.name, resourceOwnerId));
       }
     }
-
-    // Global allow/deny policies (only enabled, with any effect)
     const policies = await this.#cachedPolicyList();
     for (const p of policies) {
       if (!p.enabled) continue;
@@ -125,16 +158,18 @@ export class PermissionChecker {
       ));
     }
 
-    // 4) Evaluate via DAG
     const params: PermissionCheck = {
-      actor: userId,
-      action,
-      resource,
-      resourceId: resourceOwnerId ?? '',
+      actor: userId, action, resource, resourceId: resourceOwnerId ?? '',
     };
     const result = dag.evaluate(params);
 
-    return { allowed: result.allowed, reason: result.reason };
+    if (!result.allowed) {
+      return {
+        allowed: false, reason: result.reason,
+        layer: DenialLayer.MAC, auditType: DENIAL_AUDIT_TYPE[DenialLayer.MAC],
+      };
+    }
+    return { allowed: true, reason: result.reason };
   }
 }
 

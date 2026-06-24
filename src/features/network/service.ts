@@ -1,9 +1,9 @@
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
-import type { ILogWriter } from '../../core/logger/interfaces.ts';
+import type { ILogWriter } from '../../core/audit/types.ts';
 import type { IAuditWriter } from '../../core/audit/types.ts';
 import type { INetworkPolicyProvider } from '../../core/provider/interfaces.ts';
 import { createFacility } from '../../core/brand.ts';
-import { LogLevel, AppError } from '../../core/types.ts';
+import { AppError } from '../../core/types.ts';
 import { KernLevel } from '../../core/audit/kern-level.ts';
 import { InstanceService } from '../../core/region/instance.ts';
 import type {
@@ -68,7 +68,7 @@ export class SecurityGroupService implements ISecurityGroupService {
     await this.atomic.set(PREFIX + id, sg, null);
     await this.#addToIndex(id);
 
-    await this.logger.logAsync({ facility: FACILITY, level: LogLevel.INFO, message: `Security group created: ${input.name}`, actorId });
+    await this.logger.write({ facility: FACILITY, level: KernLevel.INFO, message: `Security group created: ${input.name}`, actorId });
     this.audit?.write({ level: KernLevel.NOTICE, facility: FACILITY, message: `Security group created — ${input.name}`, actorId, metadata: { eventType: 'secgroup.created' } });
     return sg;
   }
@@ -107,7 +107,7 @@ export class SecurityGroupService implements ISecurityGroupService {
 
     if (input.rules !== undefined && updated.providerNetworkId && this.networkPolicy?.applyRules) {
       await this.networkPolicy.applyRules(updated.providerNetworkId, updated.rules ?? []).catch(e => {
-        this.logger.logAsync({ facility: FACILITY, level: LogLevel.WARN, message: `Failed to apply rules: ${e.message}`, actorId });
+        this.logger.write({ facility: FACILITY, level: KernLevel.WARNING, message: `Failed to apply rules: ${e.message}`, actorId });
       });
     }
     return updated;

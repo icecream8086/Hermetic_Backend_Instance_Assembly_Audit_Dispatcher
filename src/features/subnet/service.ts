@@ -1,8 +1,8 @@
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
-import type { ILogWriter } from '../../core/logger/interfaces.ts';
+import type { ILogWriter } from '../../core/audit/types.ts';
 import type { IAuditWriter } from '../../core/audit/types.ts';
 import { createFacility } from '../../core/brand.ts';
-import { LogLevel, AppError } from '../../core/types.ts';
+import { AppError } from '../../core/types.ts';
 import { KernLevel } from '../../core/audit/kern-level.ts';
 import { parseCidr } from '../../core/network/cidr.ts';
 import { InstanceService } from '../../core/region/instance.ts';
@@ -50,7 +50,7 @@ export class SubnetService implements ISubnetService {
     await this.atomic.set(PREFIX + id, subnet, null);
     await this.#addToIndex(id);
 
-    await this.logger.logAsync({ facility: FACILITY, level: LogLevel.INFO, message: `Subnet created: ${input.name} (${input.cidr})`, actorId: actorId });
+    await this.logger.write({ facility: FACILITY, level: KernLevel.INFO, message: `Subnet created: ${input.name} (${input.cidr})`, actorId: actorId });
     this.audit?.write({ level: KernLevel.NOTICE, facility: FACILITY, message: `Subnet created — ${input.name} (${input.cidr})`, actorId, metadata: { eventType: 'subnet.created' } });
 
     return subnet;

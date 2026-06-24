@@ -1,5 +1,5 @@
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
-import type { ILogWriter } from '../../core/logger/interfaces.ts';
+import type { ILogWriter } from '../../core/audit/types.ts';
 import type { IAuditWriter } from '../../core/audit/types.ts';
 import type { Volume } from '../sandbox/types.ts';
 import { VolumeStatus, createVolumeId } from '../sandbox/types.ts';
@@ -78,7 +78,7 @@ export class VolumeService implements IVolumeService {
       }
     }
 
-    this.logger.logAsync({ facility: 'app' as any, level: 'INFO' as any, message: `[volume] Created ${input.type}: ${id} (${input.name})` });
+    this.logger.write({ facility: 'app' as any, level: 'INFO' as any, message: `[volume] Created ${input.type}: ${id} (${input.name})` });
     return volume as unknown as Volume;
   }
 
@@ -146,7 +146,7 @@ export class VolumeService implements IVolumeService {
           (txn as any).set(PREFIX + id, merged);
           updated = merged as unknown as Volume;
         });
-        this.logger.logAsync({ facility: 'app' as any, level: 'INFO' as any, message: `[volume] Updated ${id}` });
+        this.logger.write({ facility: 'app' as any, level: 'INFO' as any, message: `[volume] Updated ${id}` });
         return updated!;
       } catch (err) {
         if (err instanceof TransactConflictError && attempt < 2) continue;
@@ -172,6 +172,6 @@ export class VolumeService implements IVolumeService {
         throw err;
       }
     }
-    this.logger.logAsync({ facility: 'app' as any, level: 'INFO' as any, message: `[volume] Deleted ${id}` });
+    this.logger.write({ facility: 'app' as any, level: 'INFO' as any, message: `[volume] Deleted ${id}` });
   }
 }

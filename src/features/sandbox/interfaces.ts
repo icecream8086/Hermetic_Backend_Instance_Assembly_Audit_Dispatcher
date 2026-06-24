@@ -1,5 +1,5 @@
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
-import type { ILogWriter } from '../../core/logger/interfaces.ts';
+import type { ILogWriter } from '../../core/audit/types.ts';
 import type {
   IContainerProvider,
   IMetricsProvider,

@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { FeatureDeps } from '../../core/deps.ts';
 import { SandboxService } from '../sandbox/sandbox.service.ts';
-import { ConsoleLogger } from '../../core/logger/console-logger.ts';
+import { ConsoleLogger } from '../../core/audit/console-logger.ts';
 import { createTemplateRouter } from './handler.ts';
 import type { IProviderRegistry } from '../../core/provider/interfaces.ts';
 import { createAtomicNetworkResolver } from '../../core/network/resolver.ts';

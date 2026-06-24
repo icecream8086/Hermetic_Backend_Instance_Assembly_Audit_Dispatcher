@@ -1,15 +1,14 @@
-import type { IAuditWriter, IAuditReader, AuditEntry, AuditFilter, AuditQueryResult } from './types.ts';
+import type { IAuditWriter, IAuditReader, AuditEntry, StoredAuditEntry, LogQuery } from './types.ts';
+import type { LogId } from '../brand.ts';
+import { generateLogId } from '../brand.ts';
 
-/**
- * No-op audit logger — disables audit logging entirely.
- * Useful for testing or when audit is not needed.
- */
 export class NoopAuditLogger implements IAuditWriter, IAuditReader {
-  async write(_entry: AuditEntry): Promise<void> {
-    // no-op
+  async write(_entry: AuditEntry): Promise<void> { /* no-op */ }
+  async writeSync(_entry: AuditEntry): Promise<LogId> {
+    return generateLogId(); // no-op, but return a valid id
   }
-
-  query(_filter?: AuditFilter): AuditQueryResult {
-    return { lines: [], total: 0, page: 1, limit: 20, totalPages: 0 };
+  async query(_params?: LogQuery): Promise<{ entries: StoredAuditEntry[]; nextCursor?: string; total?: number }> {
+    return { entries: [], total: 0 };
   }
+  async getById(_id: LogId): Promise<StoredAuditEntry | null> { return null; }
 }

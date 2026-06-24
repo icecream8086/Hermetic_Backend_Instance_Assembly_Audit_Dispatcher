@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { ConsoleLogger } from '../../core/logger/console-logger.ts';
+import { ConsoleLogger } from '../../core/audit/console-logger.ts';
 import type { FeatureDeps } from '../../core/deps.ts';
 import { SandboxService } from './sandbox.service.ts';
 import { createSandboxRouter } from './handler.ts';

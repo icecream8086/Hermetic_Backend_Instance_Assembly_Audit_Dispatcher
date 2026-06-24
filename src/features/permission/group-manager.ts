@@ -2,11 +2,11 @@
  * UserGroup + PermGroup CRUD — extracted from PermissionService
  */
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
-import type { ILogWriter } from '../../core/logger/interfaces.ts';
+import type { ILogWriter } from '../../core/audit/types.ts';
 import type { IAuditWriter } from '../../core/audit/types.ts';
 import { KernLevel } from '../../core/audit/kern-level.ts';
 import { createFacility } from '../../core/brand.ts';
-import { LogLevel, AppError } from '../../core/types.ts';
+import { AppError } from '../../core/types.ts';
 import { applyUpdate } from '../../core/utils/apply-update.ts';
 import { permLogAudit } from './audit.ts';
 import type { AuditActor } from './audit.ts';
@@ -51,8 +51,8 @@ export class GroupManager {
       createdAt: Date.now(), updatedAt: Date.now(),
     };
     await this.ugStore.insert(group);
-    this.logger.logAsync({
-      facility: FACILITY, level: LogLevel.INFO, message: 'User group created',
+    this.logger.write({
+      facility: FACILITY, level: KernLevel.INFO, message: 'User group created',
       metadata: { groupId: id, name: input.name, memberCount: input.memberIds?.length },
     });
     permLogAudit(this.logger, this.audit, 'perm.userGroup.created', actor, { entityType: 'userGroup', entityId: id, newValue: group }, KernLevel.INFO);
@@ -101,8 +101,8 @@ export class GroupManager {
       createdAt: Date.now(), updatedAt: Date.now(),
     };
     await this.pgStore.insert(group);
-    this.logger.logAsync({
-      facility: FACILITY, level: LogLevel.INFO, message: 'Permission group created',
+    this.logger.write({
+      facility: FACILITY, level: KernLevel.INFO, message: 'Permission group created',
       metadata: { groupId: id, name: input.name, ruleCount: input.rules.length },
     });
     permLogAudit(this.logger, this.audit, 'perm.permissionGroup.created', actor, { entityType: 'permissionGroup', entityId: id, newValue: group }, KernLevel.INFO);

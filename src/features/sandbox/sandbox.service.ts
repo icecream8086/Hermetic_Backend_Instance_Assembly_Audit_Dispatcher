@@ -1,12 +1,11 @@
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
-import type { ILogWriter } from '../../core/logger/interfaces.ts';
+import type { ILogWriter } from '../../core/audit/types.ts';
 import type {
   IContainerProvider,
   IMetricsProvider,
   IProviderRegistry,
   MetricSnapshot,
   ContainerGroupRuntime,
-  OciContainerStatus,
   CreateContainerGroupInput,
 } from '../../core/provider/index.ts';
 import {
@@ -31,7 +30,7 @@ import type {
   MetricTimeRange,
 } from './interfaces.ts';
 import type { ContainerLogResult } from '../../core/provider/interfaces.ts';
-import { LogLevel } from '../../core/types.ts';
+import { KernLevel } from '../../core/audit/kern-level.ts';
 import { createFacility, generateVersionId } from '../../core/brand.ts';
 import type { RegionId } from '../../core/region/types.ts';
 import { createRegionId } from '../../core/region/types.ts';
@@ -40,13 +39,13 @@ import { ProviderResolutionError, ProviderOperationError } from '../../core/prov
 import type { EventBus } from '../../core/event-bus/bus.ts';
 import { createEvent } from '../../core/event-bus/types.ts';
 import type { IAuditWriter } from '../../core/audit/types.ts';
-import { KernLevel } from '../../core/audit/kern-level.ts';
 import type { NetworkResolverFn } from '../../core/network/types.ts';
 import type { InstanceService } from '../../core/region/instance.ts';
 import type { IMessageQueue } from '../../queue/interfaces.ts';
 import { mapEnvVars, mapPorts, mapVolumeMounts, mapVolumes, mapTags, mapNetwork } from '../../core/provider/mapper.ts';
 import { QuotaService } from './quota.ts';
 import { SandboxStore } from './sandbox-store.ts';
+import { runtimeToNetwork, runtimeToContainers, runtimeToEvents } from './runtime-mapper.ts';
 
 const FACILITY = createFacility('sandbox-service');
 const KEY_PREFIX = 'sandbox:';
@@ -265,9 +264,9 @@ export class SandboxService implements ISandboxService {
       await this.atomic.set(`${KEY_PREFIX}idem:${idempotencyKey}`, provisioned, null);
     }
 
-    await this.logger.logAsync({
+    await this.logger.write({
       facility: FACILITY,
-      level: LogLevel.NOTICE,
+      level: KernLevel.NOTICE,
       message: 'Sandbox provisioned',
       actorId: input.creatorId,
       metadata: { sandboxId: id as string, providerId, name: input.name },
@@ -312,7 +311,7 @@ export class SandboxService implements ISandboxService {
       // Transition directly to Terminated so GC can clean up, rather than
       // going through Stopped which implies the resource still exists.
       try { await provider.stop?.(sandbox.providerId ?? String(id)); } catch { /* best-effort */ }
-      return this.transition(id, SandboxStatus.Terminated, 'user requested stop (ECI stop = delete)');
+      return this.transition(id, SandboxStatus.Terminating, 'user requested stop (ECI stop = delete)');
     }
 
     try {
@@ -321,7 +320,7 @@ export class SandboxService implements ISandboxService {
       // Provider may be unreachable or container already stopped — proceed.
     }
 
-    return this.transition(id, SandboxStatus.Stopped, 'user requested stop');
+    return this.transition(id, SandboxStatus.Succeeded, 'user requested stop');
   }
 
   async start(id: SandboxId): Promise<Sandbox> {
@@ -375,9 +374,9 @@ export class SandboxService implements ISandboxService {
     // Remove from sandbox ID index
     await this.store.removeFromIndex(id as string);
 
-    await this.logger.logAsync({
+    await this.logger.write({
       facility: FACILITY,
-      level: LogLevel.NOTICE,
+      level: KernLevel.NOTICE,
       message: 'Sandbox terminated',
       actorId,
       metadata: { sandboxId: id as string },
@@ -507,9 +506,9 @@ export class SandboxService implements ISandboxService {
     const newVersion = await this.atomic.set(`${KEY_PREFIX}${id}`, updated, entry.version);
     if (!newVersion) throw new AppError(409, 'CONFLICT', 'Concurrent modification during syncRuntime');
 
-    await this.logger.logAsync({
+    await this.logger.write({
       facility: FACILITY,
-      level: LogLevel.DEBUG,
+      level: KernLevel.DEBUG,
       message: `Sandbox runtime synced (${runtime.status})`,
       metadata: { sandboxId: id as string, providerStatus: runtime.status, containers: runtime.containers.length },
     });
@@ -539,8 +538,8 @@ export class SandboxService implements ISandboxService {
       uptimeMs: uptime,
       actorId: actorId ?? '',
     };
-    await this.logger.logAsync({
-      facility: FACILITY, level: LogLevel.NOTICE,
+    await this.logger.write({
+      facility: FACILITY, level: KernLevel.NOTICE,
       message: `sandbox ${fromStatus}→${to} name=${sandbox.name} provider=${sandbox.providerId ?? ''} containers=${sandbox.containers.length} uptime=${uptime}ms reason=${reason}`,
       actorId,
       metadata: meta,
@@ -665,83 +664,14 @@ export function toContainerGroupInput(input: CreateSandboxInput): CreateContaine
   };
 }
 
-// ─── Runtime mapping helpers ───
-
-function eipFromResources(resources: ContainerGroupRuntime['associatedResources']): string | undefined {
-  const eip = resources.find(r => r.type === 'eip');
-  return eip?.ip;
-}
-
-function runtimeToNetwork(
-  network: ContainerGroupRuntime['network'],
-  associatedResources: ContainerGroupRuntime['associatedResources'],
-): NetworkInfo {
-  const publicIp = eipFromResources(associatedResources);
-  return {
-    ...(publicIp !== undefined ? { publicIp } : {}),
-    ...(network.privateIp !== undefined ? { privateIp: network.privateIp } : {}),
-    ...(network.vpcId !== undefined ? { vpcId: network.vpcId } : {}),
-    ...(network.subnetId !== undefined ? { subnetId: network.subnetId } : {}),
-    ...(network.securityGroupId !== undefined ? { securityGroupId: network.securityGroupId } : {}),
-    ...(network.eniId !== undefined ? { eniId: network.eniId } : {}),
-  };
-}
-
-function runtimeToContainers(r: ContainerGroupRuntime): ContainerRuntime[] {
-  return r.containers.map(c => ({
-    name: c.name,
-    image: c.image,
-    cpu: c.resources?.cpu ?? 0,
-    memory: c.resources?.memory ?? 0,
-    state: {
-      state: ociStatusToContainerState(c.status),
-      ready: c.health.status === 'healthy' || (c.health.status === 'none' && c.status === 'running'),
-      restartCount: 0,
-      ...(c.startedAt ? { startTime: c.startedAt } : {}),
-    },
-    volumeMounts: c.mounts.map(m => ({
-      volumeId: undefined as never,
-      mountPath: m.destination,
-      readOnly: false,
-      ...(m.options?.includes('ro') ? { readOnly: true } : {}),
-    })),
-    health: { status: c.health.status, lastCheckedAt: c.health.lastCheckedAt, message: c.health.message },
-  }));
-}
-
-/** Map OCI container status to the sandbox entity's ContainerState. */
-function ociStatusToContainerState(s: OciContainerStatus): 'Running' | 'Waiting' | 'Terminated' {
-  switch (s) {
-    case 'running': return 'Running';
-    case 'paused': return 'Running';
-    case 'stopped':
-    case 'error':
-    case 'deleted': return 'Terminated';
-    case 'creating':
-    case 'created':
-    default: return 'Waiting';
-  }
-}
-
-function runtimeToEvents(r: ContainerGroupRuntime): ContainerEvent[] {
-  return r.events.map(e => ({
-    _brand: 'ValueObject' as const,
-    reason: e.reason,
-    type: e.type,
-    message: e.message,
-    count: e.count,
-    ...(e.lastTimestamp !== undefined ? { lastTimestamp: e.lastTimestamp } : {}),
-  }));
-}
-
 function mapProviderStatus(providerStatus: ContainerGroupRuntime['status']): SandboxStatus | null {
   switch (providerStatus) {
     case 'Running': return null;
     case 'Failed':
     case 'ScheduleFailed': return SandboxStatus.Failed;
     case 'Expired':
-    case 'Expiring': return SandboxStatus.Terminated;
-    case 'Succeeded': return SandboxStatus.Stopped;
+    case 'Expiring': return SandboxStatus.Expired;
+    case 'Succeeded': return SandboxStatus.Succeeded;
     case 'Restarting': return SandboxStatus.Pending;
     case 'Pending':
     case 'Scheduling':

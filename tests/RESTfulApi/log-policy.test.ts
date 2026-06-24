@@ -3,7 +3,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spec, request } from 'pactum';
 import { startTestServer } from './helper.ts';
-import { shouldLog, shouldLogAudit, setActivePolicy } from '../../src/core/logger/log-policy.ts';
+import { shouldLog, shouldLogAudit, setActivePolicy } from '../../src/core/audit/log-policy.ts';
 import { KernLevel } from '../../src/core/audit/kern-level.ts';
 
 let baseUrl: string;
@@ -68,7 +68,7 @@ describe('LogPolicy API', () => {
       .withJson({
         defaultLevel: 'info',
         facilities: [
-          { facility: TEST_FACILITY, level: 'error' },
+          { facility: TEST_FACILITY, level: 'err' },
           { facility: 'perm', level: 'debug' },
         ],
       })
@@ -96,7 +96,7 @@ describe('LogPolicy filtering', () => {
       defaultLevel: 'info',
       auditLevel: 'notice',
       facilities: [
-        { facility: TEST_FACILITY, level: 'error' },
+        { facility: TEST_FACILITY, level: 'err' },
         { facility: 'perm', level: 'debug' },
       ],
       updatedAt: Date.now(),
@@ -105,46 +105,46 @@ describe('LogPolicy filtering', () => {
 
   it('shouldLog blocks INFO for facility with level=error', () => {
     // user-service is set to 'error', so INFO should be blocked
-    expect(shouldLog(TEST_FACILITY, 'info')).toBe(false);
-    // but ERROR should pass
-    expect(shouldLog(TEST_FACILITY, 'error')).toBe(true);
-    // and FATAL should pass
-    expect(shouldLog(TEST_FACILITY, 'fatal')).toBe(true);
+    expect(shouldLog(TEST_FACILITY, KernLevel.INFO)).toBe(false);
+    // but ERR should pass
+    expect(shouldLog(TEST_FACILITY, KernLevel.ERR)).toBe(true);
+    // and CRIT should pass (CRIT <= ERR)
+    expect(shouldLog(TEST_FACILITY, KernLevel.CRIT)).toBe(true);
   });
 
   it('shouldLog passes DEBUG for facility with level=debug', () => {
-    expect(shouldLog('perm', 'debug')).toBe(true);
-    expect(shouldLog('perm', 'info')).toBe(true);
+    expect(shouldLog('perm', KernLevel.DEBUG)).toBe(true);
+    expect(shouldLog('perm', KernLevel.INFO)).toBe(true);
   });
 
   it('shouldLog uses defaultLevel for unmatched facilities', () => {
     // 'unknown-facility' has no specific rule → falls back to 'info'
-    expect(shouldLog('unknown-facility', 'info')).toBe(true);
-    expect(shouldLog('unknown-facility', 'debug')).toBe(false);
+    expect(shouldLog('unknown-facility', KernLevel.INFO)).toBe(true);
+    expect(shouldLog('unknown-facility', KernLevel.DEBUG)).toBe(false);
   });
 
-  it('shouldLog never blocks ERR or FATAL', () => {
+  it('shouldLog never blocks ERR and below', () => {
     setActivePolicy({
-      defaultLevel: 'fatal',
-      auditLevel: 'fatal',
-      facilities: [{ facility: 'test', level: 'fatal' }],
+      defaultLevel: 'crit',
+      auditLevel: 'crit',
+      facilities: [{ facility: 'test', level: 'crit' }],
       updatedAt: Date.now(),
     });
-    // ERR (4) and FATAL (5) are always allowed regardless of policy
-    expect(shouldLog('test', 'error')).toBe(true);
-    expect(shouldLog('test', 'fatal')).toBe(true);
-    // INFO (1) is blocked when threshold is fatal (5)
-    expect(shouldLog('test', 'info')).toBe(false);
+    // ERR (3) and below are always allowed regardless of policy
+    expect(shouldLog('test', KernLevel.ERR)).toBe(true);
+    expect(shouldLog('test', KernLevel.CRIT)).toBe(true);
+    // INFO (6) is blocked when threshold is crit
+    expect(shouldLog('test', KernLevel.INFO)).toBe(false);
   });
 
-  it('shouldLogAudit maps KernLevel correctly', () => {
+  it('shouldLogAudit uses KernLevel directly', () => {
     setActivePolicy({
       defaultLevel: 'info',
       auditLevel: 'notice',
       facilities: [{ facility: 'authz', level: 'warning' }],
       updatedAt: Date.now(),
     });
-    // authz is warning, so NOTICE (5) should be blocked
+    // authz is warning, so INFO+NOTICE blocked
     expect(shouldLogAudit('authz', KernLevel.INFO)).toBe(false);
     expect(shouldLogAudit('authz', KernLevel.NOTICE)).toBe(false);
     expect(shouldLogAudit('authz', KernLevel.WARNING)).toBe(true);
@@ -158,7 +158,6 @@ describe('LogPolicy filtering', () => {
       facilities: [],
       updatedAt: Date.now(),
     });
-    // default is notice, so INFO (6) should be blocked
     expect(shouldLogAudit('no-rule', KernLevel.INFO)).toBe(false);
     expect(shouldLogAudit('no-rule', KernLevel.NOTICE)).toBe(true);
   });

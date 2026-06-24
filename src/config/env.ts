@@ -1,5 +1,5 @@
 import type { StorageConfig } from '../core/store/config.ts';
-import { AuditTier } from '../core/logger/interfaces.ts';
+import { AuditTier } from '../core/audit/types.ts';
 import type { SchedulerBackendType } from '../core/scheduler/interfaces.ts';
 import type { AppConfig, Credential, LogConfig, ProviderConfig, S3Config, SchedulerAppConfig } from './types.ts';
 import { createRegionId } from '../core/region/types.ts';

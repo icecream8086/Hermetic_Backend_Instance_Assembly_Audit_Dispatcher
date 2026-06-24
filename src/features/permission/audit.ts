@@ -1,7 +1,6 @@
 import { KernLevel } from '../../core/audit/kern-level.ts';
 import type { IAuditWriter } from '../../core/audit/types.ts';
-import type { ILogWriter } from '../../core/logger/interfaces.ts';
-import { LogLevel } from '../../core/types.ts';
+import type { ILogWriter } from '../../core/audit/types.ts';
 import { createFacility } from '../../core/brand.ts';
 
 const FACILITY = createFacility('perm-audit');
@@ -46,13 +45,9 @@ export function permLog(
   message?: string,
 ) {
   const entry = permEvent(eventType, actor, fields, level, message);
-  // Map KernLevel → LogLevel for the writer interface
-  const logLevel = level <= KernLevel.ERR ? LogLevel.ERROR
-    : level === KernLevel.WARNING ? LogLevel.WARN
-    : LogLevel.INFO;
-  return logger.logAsync({
+  return logger.write({
     facility: FACILITY,
-    level: logLevel,
+    level,
     message: entry.message,
     metadata: entry.metadata,
   });

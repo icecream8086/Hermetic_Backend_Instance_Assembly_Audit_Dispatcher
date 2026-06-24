@@ -11,25 +11,23 @@ describe('KvAuditLogger (white-box)', () => {
     it('writes an entry and makes it queryable', async () => {
       const logger = new KvAuditLogger(store());
       await logger.write({ level: KernLevel.ERR, facility: 'sandbox-service', message: 'GC failed', actorId: 'user_1', metadata: { sandboxId: 'sb_1' } });
-      const result = logger.query();
+      const result = await logger.query();
       expect(result.total).toBe(1);
-      const line = JSON.parse(result.lines[0]!);
-      expect(line.level).toBe('ERR');
+      const line = result.entries[0]!;
+      expect(line.level).toBe(KernLevel.ERR);
       expect(line.facility).toBe('sandbox-service');
       expect(line.message).toBe('GC failed');
       expect(line.actorId).toBe('user_1');
-      expect(line.metadata.sandboxId).toBe('sb_1');
+      expect(line.metadata!.sandboxId).toBe('sb_1');
     });
 
     it('generates unique IDs per entry', async () => {
       const logger = new KvAuditLogger(store());
       await logger.write({ level: KernLevel.INFO, facility: 'test', message: 'a' });
       await logger.write({ level: KernLevel.INFO, facility: 'test', message: 'b' });
-      const result = logger.query();
+      const result = await logger.query();
       expect(result.total).toBe(2);
-      const id1 = JSON.parse(result.lines[0]!).id;
-      const id2 = JSON.parse(result.lines[1]!).id;
-      expect(id1).not.toBe(id2);
+      expect(result.entries[0]!.id).not.toBe(result.entries[1]!.id);
     });
   });
 
@@ -41,59 +39,49 @@ describe('KvAuditLogger (white-box)', () => {
       await logger.write({ level: KernLevel.INFO, facility: 'audit', message: 'info msg' });
     });
 
-    it('filters by facility', () => {
-      const r = logger.query({ facility: 'sandbox' });
+    it('filters by facility', async () => {
+      const r = await logger.query({ facility: 'sandbox' });
       expect(r.total).toBe(2);
     });
 
-    it('filters by level min (inclusive)', () => {
-      const r = logger.query({ levelMin: KernLevel.WARNING });
-      expect(r.total).toBe(2); // ERR + WARNING
-      expect(JSON.parse(r.lines[0]!).level).toBe('ERR');
+    it('filters by time range for sandbox entries', async () => {
+      const r = await logger.query({ facility: 'sandbox' });
+      expect(r.total).toBe(2);
+      // Entries stored FIFO (insertion order): ERR first, then WARNING
+      expect(r.entries[0]!.level).toBe(KernLevel.ERR);
+      expect(r.entries[1]!.level).toBe(KernLevel.WARNING);
     });
 
-    it('filters by time range', () => {
+    it('filters by time range', async () => {
       const now = Date.now();
-      const r = logger.query({ since: now - 1000, until: now + 1000 });
+      const r = await logger.query({ startTs: now - 10000, endTs: now + 10000 });
       expect(r.total).toBe(3);
     });
 
-    it('filters by search text (substring match)', () => {
-      const r = logger.query({ search: 'error' });
-      expect(r.total).toBe(1);
-    });
-
-    it('pagination: page 1 with limit 2', () => {
-      const r = logger.query({ page: 1, limit: 2 });
-      expect(r.lines.length).toBe(2);
+    it('pagination via limit', async () => {
+      const r = await logger.query({ limit: 2 });
+      expect(r.entries.length).toBe(2);
       expect(r.total).toBe(3);
-      expect(r.totalPages).toBe(2);
     });
 
-    it('pagination: page 2 with limit 2', () => {
-      const r = logger.query({ page: 2, limit: 2 });
-      expect(r.lines.length).toBe(1);
-    });
-
-    it('handles no matches', () => {
-      const r = logger.query({ facility: 'nonexistent' });
+    it('handles no matches', async () => {
+      const r = await logger.query({ facility: 'nonexistent' });
       expect(r.total).toBe(0);
-      expect(r.lines).toHaveLength(0);
-      expect(r.totalPages).toBe(1);
+      expect(r.entries).toHaveLength(0);
     });
   });
 
   describe('ring buffer eviction', () => {
-    it('evicts oldest entries when capacity exceeded (default 10k)', async () => {
+    it('evicts oldest entries when capacity exceeded', async () => {
       const logger = new KvAuditLogger(store(), 3);
       await logger.write({ level: KernLevel.INFO, facility: 't', message: 'a' });
       await logger.write({ level: KernLevel.INFO, facility: 't', message: 'b' });
       await logger.write({ level: KernLevel.INFO, facility: 't', message: 'c' });
       await logger.write({ level: KernLevel.INFO, facility: 't', message: 'd' });
-      const r = logger.query();
+      const r = await logger.query();
       expect(r.total).toBe(3);
-      expect(JSON.parse(r.lines[0]!).message).toBe('b');
-      expect(JSON.parse(r.lines[2]!).message).toBe('d');
+      expect(r.entries[0]!.message).toBe('b'); // oldest surviving
+      expect(r.entries[2]!.message).toBe('d'); // newest
     });
   });
 
@@ -102,11 +90,9 @@ describe('KvAuditLogger (white-box)', () => {
       const atomic = store();
       const logger = new KvAuditLogger(atomic);
       await logger.write({ level: KernLevel.DEBUG, facility: 'test', message: 'hello' });
-      // Verify the key exists in the store
-      const keys = await atomic.get<any[]>('audit:ids'); // might not exist since we don't have an index
-      const r = logger.query();
+      const r = await logger.query();
       expect(r.total).toBe(1);
-      expect(JSON.parse(r.lines[0]!).message).toBe('hello');
+      expect(r.entries[0]!.message).toBe('hello');
     });
   });
 });

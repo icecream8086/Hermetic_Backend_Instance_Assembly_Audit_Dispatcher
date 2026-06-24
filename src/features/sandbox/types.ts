@@ -22,30 +22,80 @@ export function createSandboxId(raw: string): SandboxId { if (!raw) throw new Ty
 export function createVolumeId(raw: string): VolumeId { if (!raw) throw new TypeError('VolumeId must not be empty'); return raw as VolumeId; }
 export function createMetricSnapshotId(raw: string): MetricSnapshotId { if (!raw) throw new TypeError('MetricSnapshotId must not be empty'); return raw as MetricSnapshotId; }
 
-// ─── Sandbox state machine ───
+// ─── Sandbox state machine (ECI-aligned 11 states) ───
 
 export enum SandboxStatus {
-  Pending = 'Pending',
+  /** Creating — being scheduled to underlying compute resources. */
   Scheduling = 'Scheduling',
+  /** Scheduling failed — insufficient resources, invalid params, zone unavailable. */
+  ScheduleFailed = 'ScheduleFailed',
+  /** Starting — pulling images, initializing init/sidecar containers. */
+  Pending = 'Pending',
+  /** Running normally. */
   Running = 'Running',
-  Stopped = 'Stopped',
-  Terminated = 'Terminated',
+  /** All containers exited successfully (exit 0) and will not be restarted. */
+  Succeeded = 'Succeeded',
+  /** All containers terminated, at least one failed. */
   Failed = 'Failed',
+  /** Being restarted via RestartContainerGroup. */
+  Restarting = 'Restarting',
+  /** Being updated via UpdateContainerGroup. */
+  Updating = 'Updating',
+  /** Being stopped/deleted via DeleteContainerGroup. */
+  Terminating = 'Terminating',
+  /** Expired — spot instance reclaimed or ActiveDeadlineSeconds exceeded. */
+  Expired = 'Expired',
+  /** Resource removed from the system. Terminal sink state. */
   Deleted = 'Deleted',
 }
 
+/** Hard terminal states — truly irreversible. Succeeded is a soft terminal (can be restarted). */
+export const TERMINAL_STATES: ReadonlySet<SandboxStatus> = new Set([
+  SandboxStatus.ScheduleFailed,
+  SandboxStatus.Failed,
+  SandboxStatus.Expired,
+  SandboxStatus.Deleted,
+]);
+
+/** States that can be deleted (DeleteContainerGroup valid). */
+export const DELETABLE_STATES: ReadonlySet<SandboxStatus> = new Set([
+  SandboxStatus.Running,
+  SandboxStatus.Pending,
+  SandboxStatus.Restarting,
+  SandboxStatus.Updating,
+]);
+
 export const VALID_TRANSITIONS: Readonly<Record<SandboxStatus, readonly SandboxStatus[]>> = {
-  [SandboxStatus.Pending]: [SandboxStatus.Scheduling, SandboxStatus.Running, SandboxStatus.Failed, SandboxStatus.Deleted],
-  [SandboxStatus.Scheduling]: [SandboxStatus.Running, SandboxStatus.Stopped, SandboxStatus.Failed, SandboxStatus.Deleted],
-  [SandboxStatus.Running]: [SandboxStatus.Stopped, SandboxStatus.Failed, SandboxStatus.Terminated, SandboxStatus.Deleted],
-  [SandboxStatus.Stopped]: [SandboxStatus.Running, SandboxStatus.Terminated, SandboxStatus.Deleted],
-  [SandboxStatus.Terminated]: [SandboxStatus.Deleted],
+  // T1-T2: Scheduling outcomes
+  [SandboxStatus.Scheduling]: [SandboxStatus.Pending, SandboxStatus.ScheduleFailed],
+  // T3-T4: Pending outcomes
+  [SandboxStatus.Pending]: [SandboxStatus.Running, SandboxStatus.Failed, SandboxStatus.Terminating, SandboxStatus.Deleted],
+  // T5-T10: Running outcomes
+  [SandboxStatus.Running]: [
+    SandboxStatus.Succeeded, SandboxStatus.Failed, SandboxStatus.Expired,
+    SandboxStatus.Restarting, SandboxStatus.Updating, SandboxStatus.Terminating,
+    SandboxStatus.Deleted,
+  ],
+  // T11-T12: Restarting outcomes
+  [SandboxStatus.Restarting]: [SandboxStatus.Pending, SandboxStatus.Failed, SandboxStatus.Terminating, SandboxStatus.Deleted],
+  // T13-T14: Updating outcomes
+  [SandboxStatus.Updating]: [SandboxStatus.Running, SandboxStatus.Terminating, SandboxStatus.Deleted],
+  // T15: Terminating outcome
+  [SandboxStatus.Terminating]: [SandboxStatus.Deleted],
+  // Terminal states — only reachable transition is Deleted (cleanup)
+  [SandboxStatus.ScheduleFailed]: [SandboxStatus.Deleted],
+  [SandboxStatus.Succeeded]: [SandboxStatus.Running, SandboxStatus.Deleted],
   [SandboxStatus.Failed]: [SandboxStatus.Deleted],
+  [SandboxStatus.Expired]: [SandboxStatus.Deleted],
   [SandboxStatus.Deleted]: [],
 };
 
 export function isValidTransition(from: SandboxStatus, to: SandboxStatus): boolean {
   return VALID_TRANSITIONS[from]?.includes(to) ?? false;
+}
+
+export function isTerminal(status: SandboxStatus): boolean {
+  return TERMINAL_STATES.has(status);
 }
 
 // ─── Volume state machine ───
@@ -150,12 +200,26 @@ export interface InitContainerConfig extends ContainerConfig {
   readonly restartPolicy?: 'Always' | 'OnFailure' | 'Never';
 }
 
+/** Container-level status — mirrors K8s container states. */
+export enum ContainerStatus {
+  Waiting = 'Waiting',
+  Running = 'Running',
+  Terminated = 'Terminated',
+}
+
 export interface ContainerState {
-  readonly state: 'Running' | 'Waiting' | 'Terminated';
+  readonly state: ContainerStatus;
   readonly startTime?: string;
+  readonly finishedTime?: string;
   readonly ready: boolean;
   readonly restartCount: number;
   readonly message?: string;
+  /** Set when state=Terminated */
+  readonly exitCode?: number;
+  /** Set when state=Terminated — Completed | Error | OOMKilled | ... */
+  readonly reason?: string;
+  /** Set when state=Terminated — signal number if killed by signal */
+  readonly signal?: number;
 }
 
 export interface ContainerRuntime {

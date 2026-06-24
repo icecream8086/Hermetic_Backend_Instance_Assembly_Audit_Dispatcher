@@ -1,0 +1,38 @@
+/**
+ * MESSAGE_ID constants — UUIDs for structured event type identification.
+ *
+ * Inspired by systemd journald's MESSAGE_ID field.
+ * Same MESSAGE_ID = same event type, across different machines and locales.
+ * Enables structured alerting: monitor for specific MESSAGE_ID instead of grep.
+ */
+
+export const MESSAGE_IDS = {
+  // ─── Sandbox lifecycle ───
+  SANDBOX_CREATED:    'a1b2c3d4-1111-4000-8000-000000000001',
+  SANDBOX_DELETED:    'a1b2c3d4-1111-4000-8000-000000000002',
+  SANDBOX_STOPPED:    'a1b2c3d4-1111-4000-8000-000000000003',
+  SANDBOX_RESTARTED:  'a1b2c3d4-1111-4000-8000-000000000004',
+  SANDBOX_FAILED:     'a1b2c3d4-1111-4000-8000-000000000005',
+  SANDBOX_EXPIRED:    'a1b2c3d4-1111-4000-8000-000000000006',
+
+  // ─── Health check ───
+  HEALTH_CHECK_FAILED: 'f001e001-2222-4000-8000-000000000001',
+  HEALTH_CHECK_PASSED: 'f001e001-2222-4000-8000-000000000002',
+
+  // ─── Permission ───
+  PERM_DAC_DENIED:    'c001d001-3333-4000-8000-000000000001',
+  PERM_CAP_DENIED:    'c002d002-3333-4000-8000-000000000002',
+  PERM_MAC_DENIED:    'c003d003-3333-4000-8000-000000000003',
+  PERM_ALLOWED:       'c000d000-3333-4000-8000-000000000000',
+
+  // ─── Authentication ───
+  AUTH_LOGIN_SUCCESS: 'b001e001-4444-4000-8000-000000000001',
+  AUTH_LOGIN_FAILED:  'b001e001-4444-4000-8000-000000000002',
+  AUTH_TOKEN_INVALID: 'b001e001-4444-4000-8000-000000000003',
+
+  // ─── Provider ───
+  PROVIDER_ERROR:     'e001f001-5555-4000-8000-000000000001',
+  PROVIDER_TIMEOUT:   'e001f001-5555-4000-8000-000000000002',
+} as const;
+
+export type MessageId = typeof MESSAGE_IDS[keyof typeof MESSAGE_IDS];

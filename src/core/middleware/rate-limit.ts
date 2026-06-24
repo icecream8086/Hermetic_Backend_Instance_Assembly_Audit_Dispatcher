@@ -1,33 +1,44 @@
+/**
+ * Token bucket rate limiter (inspired by Linux printk_ratelimit).
+ *
+ * burst + interval model: allows `burst` requests initially, then
+ * replenishes at rate of 1 token per `intervalMs / burst`.
+ * This replaces the old windowMs+maxRequests sliding window with
+ * a more predictable token bucket algorithm.
+ */
 import type { MiddlewareHandler } from 'hono';
 import { AppError } from '../types.ts';
 
 export interface RateLimitConfig {
-  windowMs: number;
-  maxRequests: number;
-  /** Master kill switch — when false, all requests bypass rate limiting. Default: true. */
+  /** Maximum tokens in the bucket (initial burst capacity). Default 10. */
+  burst: number;
+  /** Interval in ms over which tokens replenish. Default 5000 (5s). */
+  intervalMs: number;
+  /** Master kill switch. Default: true. */
   enabled?: boolean;
-  /** IPs or CIDRs exempt from rate limiting. Default: undefined (no bypass). */
+  /** IPs or CIDRs exempt from rate limiting. */
   bypassIps?: readonly string[];
-  /** Shared secret for header-based bypass. Client sends `X-RateLimit-Bypass: <token>`. */
+  /** Shared secret for header-based bypass. */
   bypassToken?: string;
 }
 
-// ─── CIDR matching (zero-dependency, supports IPv4 and IPv6) ───
+interface TokenBucket {
+  tokens: number;
+  lastRefill: number;
+}
 
-/** Check if `ip` is within the CIDR range `cidr` (e.g. "192.168.1.5" in "192.168.1.0/24"). */
+function resolveIp(c: any): string {
+  return c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown';
+}
+
 function ipMatchesCidr(ip: string, cidr: string): boolean {
-  if (ip === cidr) return true; // exact match shortcut
-
+  if (ip === cidr) return true;
   const slashIdx = cidr.indexOf('/');
-  if (slashIdx === -1) return ip === cidr; // no prefix → exact match only
-
+  if (slashIdx === -1) return ip === cidr;
   const prefixBits = parseInt(cidr.slice(slashIdx + 1), 10);
   if (isNaN(prefixBits)) return false;
-
   const baseIp = cidr.slice(0, slashIdx);
-  if (ip.includes(':')) {
-    return ipv6InCidr(ip, baseIp, prefixBits);
-  }
+  if (ip.includes(':')) return ipv6InCidr(ip, baseIp, prefixBits);
   return ipv4InCidr(ip, baseIp, prefixBits);
 }
 
@@ -55,7 +66,6 @@ function ipv6InCidr(ip: string, base: string, bits: number): boolean {
   const ipBytes = ipv6ToBytes(ip);
   const baseBytes = ipv6ToBytes(base);
   if (!ipBytes || !baseBytes) return false;
-
   const fullBytes = Math.min(Math.ceil(bits / 8), 16);
   for (let i = 0; i < fullBytes; i++) {
     const byteBits = (i < Math.floor(bits / 8)) ? 8 : bits % 8;
@@ -68,7 +78,6 @@ function ipv6InCidr(ip: string, base: string, bits: number): boolean {
 
 function ipv6ToBytes(ip: string): Uint8Array | null {
   const norm = ip.toLowerCase();
-  // Expand :: shorthand
   const parts = norm.split('::');
   if (parts.length > 2) return null;
   const left = parts[0] ? parts[0].split(':') : [];
@@ -76,7 +85,6 @@ function ipv6ToBytes(ip: string): Uint8Array | null {
   if (left.length + right.length > 7) return null;
   const missing = 8 - left.length - right.length;
   const groups = [...left, ...Array<string>(missing).fill('0'), ...right];
-
   const bytes = new Uint8Array(16);
   for (let i = 0; i < 8; i++) {
     const val = parseInt(groups[i] || '0', 16);
@@ -87,73 +95,53 @@ function ipv6ToBytes(ip: string): Uint8Array | null {
   return bytes;
 }
 
-// ─── Middleware ───
-
-function resolveIp(c: any): string {
-  return c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown';
-}
-
-/**
- * Simple in-memory sliding-window rate limiter.
- *
- * Bypass strategy (checked in order, first match wins):
- *   1. `enabled: false`         → master kill switch
- *   2. Client IP in `bypassIps` → trusted network
- *   3. `X-RateLimit-Bypass` header matches `bypassToken` → shared secret
- *
- * Expired entries are purged lazily on each request — no background timer.
- */
+/** Token bucket rate limiter — burst + interval replenishment. */
 export function rateLimit(config: RateLimitConfig): MiddlewareHandler {
-  const enabled = config.enabled !== false; // default true
+  const enabled = config.enabled !== false;
   const bypassIps = config.bypassIps ?? [];
   const bypassToken = config.bypassToken;
-  const hits = new Map<string, number[]>();
+  const burst = config.burst ?? 10;
+  const intervalMs = config.intervalMs ?? 5000;
+  const buckets = new Map<string, TokenBucket>();
 
-  // Warmup: validate CIDRs at construction so bad config fails fast
   for (const cidr of bypassIps) {
     const slashIdx = cidr.indexOf('/');
     if (slashIdx !== -1 && isNaN(parseInt(cidr.slice(slashIdx + 1), 10))) {
-      throw new AppError(500, 'BAD_RATE_LIMIT_CONFIG', `Invalid CIDR prefix in RATE_LIMIT_BYPASS_IPS: "${cidr}"`);
+      throw new AppError(500, 'BAD_RATE_LIMIT_CONFIG', `Invalid CIDR prefix: "${cidr}"`);
     }
   }
 
   return async (c, next) => {
-    // ── Bypass checks ──
     if (!enabled) return next();
 
     const ip = resolveIp(c);
-
     if (bypassIps.length > 0) {
       for (const cidr of bypassIps) {
         if (ipMatchesCidr(ip, cidr)) return next();
       }
     }
-
     if (bypassToken) {
       const headerToken = c.req.header('x-ratelimit-bypass');
       if (headerToken && headerToken === bypassToken) return next();
     }
 
-    // ── Rate limit enforcement ──
     const now = Date.now();
-    const cutoff = now - config.windowMs;
-
-    // Lazy cleanup: purge fully-expired IPs from the map
-    for (const [key, timestamps] of hits) {
-      const valid = timestamps.filter((t) => t > cutoff);
-      if (valid.length === 0) hits.delete(key);
-      else if (valid.length < timestamps.length) hits.set(key, valid);
+    let bucket = buckets.get(ip);
+    if (!bucket) {
+      bucket = { tokens: burst, lastRefill: now };
+      buckets.set(ip, bucket);
     }
 
-    const timestamps = hits.get(ip) ?? [];
-    const valid = timestamps.filter((t) => t > cutoff);
+    // Replenish: tokens += (elapsed / intervalMs) * burst
+    const elapsed = now - bucket.lastRefill;
+    bucket.tokens = Math.min(burst, bucket.tokens + (elapsed / intervalMs) * burst);
+    bucket.lastRefill = now;
 
-    if (valid.length >= config.maxRequests) {
-      throw new AppError(429, 'RATE_LIMITED', `Too many requests. Max ${config.maxRequests} per ${config.windowMs}ms`);
+    if (bucket.tokens < 1) {
+      throw new AppError(429, 'RATE_LIMITED', `Rate limit exceeded — ${burst} req / ${intervalMs}ms`);
     }
 
-    valid.push(now);
-    hits.set(ip, valid);
+    bucket.tokens -= 1;
     await next();
   };
 }

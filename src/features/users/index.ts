@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { FeatureDeps } from '../../core/deps.ts';
-import { ConsoleLogger } from '../../core/logger/console-logger.ts';
+import { ConsoleLogger } from '../../core/audit/console-logger.ts';
 import { UserService } from './service.ts';
 import { createUserRouter } from './handler.ts';
 

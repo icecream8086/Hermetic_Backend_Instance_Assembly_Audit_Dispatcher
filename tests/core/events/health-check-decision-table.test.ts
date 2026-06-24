@@ -99,18 +99,18 @@ const decisionTable: DecisionTableRow[] = [
   // ── Row 2: Stopped, duration ≤ 60s → skip ──
   {
     name: 'Row 2: Stopped < 60s → skip',
-    S: SandboxStatus.Stopped,
+    S: SandboxStatus.Succeeded,
     durationMs: 30_000,
     M: undefined,
     R: null,
-    expectedStatus: SandboxStatus.Stopped,
+    expectedStatus: SandboxStatus.Succeeded,
     expectDeleteCalled: false,
   },
 
   // ── Row 3: Stopped, duration > 60s → GC ──
   {
     name: 'Row 3: Stopped > 60s → stopped-gc',
-    S: SandboxStatus.Stopped,
+    S: SandboxStatus.Succeeded,
     durationMs: 61_000,
     M: undefined,
     R: null,
@@ -245,7 +245,7 @@ const decisionTable: DecisionTableRow[] = [
   // ── Additional: Terminated > 60s → GC ──
   {
     name: 'Extra: Terminated > 60s → terminated-gc',
-    S: SandboxStatus.Terminated,
+    S: SandboxStatus.Terminating,
     durationMs: 61_000,
     M: undefined,
     R: null,
@@ -256,11 +256,11 @@ const decisionTable: DecisionTableRow[] = [
   // ── Additional: Terminated ≤ 60s → skip ──
   {
     name: 'Extra: Terminated ≤ 60s → skip',
-    S: SandboxStatus.Terminated,
+    S: SandboxStatus.Terminating,
     durationMs: 30_000,
     M: undefined,
     R: null,
-    expectedStatus: SandboxStatus.Terminated,
+    expectedStatus: SandboxStatus.Terminating,
     expectDeleteCalled: false,
   },
 ];

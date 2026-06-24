@@ -2,7 +2,7 @@ import { join } from 'node:path'; import { tmpdir } from 'node:os';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { FileKVAtomicStore } from '../../../src/core/store/adapters/file-kv.ts';
 import { RouteAclManager } from '../../../src/features/permission/route-acl-manager.ts';
-import { ConsoleLogger } from '../../../src/core/logger/console-logger.ts';
+import { ConsoleLogger } from '../../../src/core/audit/console-logger.ts';
 
 function store() { return new FileKVAtomicStore(join(tmpdir(), 'hbi-acl-' + crypto.randomUUID().slice(0, 8))); }
 

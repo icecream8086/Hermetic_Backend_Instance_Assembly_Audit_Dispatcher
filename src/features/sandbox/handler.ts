@@ -189,9 +189,14 @@ export function createSandboxRouter(
   router.post('/:id/sync', async (c) => {
     { const r = await requirePerm(c, permissionChecker, 'update', 'sandbox'); if (r) return r; }
     const id = createSandboxId(c.req.param('id'));
-    // Fire async, return immediately — frontend polls GET /:id for result
-    svc.syncRuntime(id).catch(e => console.error(`[sandbox] async sync failed ${id}: ${e instanceof Error ? e.message : String(e)}`));
-    return c.json(ok({ status: 'syncing', message: 'Sync dispatched. Poll GET /api/sandboxes/:id for updated status.' }), 202);
+    try {
+      const runtime = await svc.syncRuntime(id);
+      const updated = await svc.getById(id);
+      return c.json(ok({ runtime, sandbox: updated }), 200);
+    } catch (e: any) {
+      const { code, status } = errorStatus(e, 'SYNC_FAILED', 502);
+      return c.json(fail(code, e.message), status);
+    }
   });
 
   // GET /:id/health — container health status

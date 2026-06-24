@@ -19,15 +19,15 @@ import type { IAuditWriter, IAuditReader } from './audit/types.ts';
 import type { Sandbox } from '../features/sandbox/types.ts';
 import { createSandboxId } from '../features/sandbox/types.ts';
 import type { ComputeInstance } from '../core/region/instance.ts';
-import { WorkersAuditLogger, KvAuditLogger, HybridAuditLogger, createAuditRouter } from './audit/index.ts';
+import { WorkersAuditLogger, KvAuditLogger, HybridAuditLogger, createAuditRouter, setBootId } from './audit/index.ts';
 import { LocalAuditLogger } from './audit/local-audit-logger.ts';
 import { NoopAuditLogger } from './audit/noop-audit-logger.ts';
 import { authz } from './middleware/auth.ts';
 import { jsonDepthLimit } from './middleware/security.ts';
 import { idempotency } from './middleware/idempotency.ts';
-import { setActivePolicy } from './logger/log-policy.ts';
+import { setActivePolicy } from './audit/log-policy.ts';
 import { PermissionService } from '../features/permission/service.ts';
-import { ConsoleLogger, setPanicHandler } from './logger/console-logger.ts';
+import { ConsoleLogger, setPanicHandler } from './audit/console-logger.ts';
 import { DoBridge } from './event-bus/do-bridge.ts';
 import { createWsRouter } from './ws/router.ts';
 import { seedIfNeeded, ensureMacRules } from './seed.ts';
@@ -47,6 +47,7 @@ export type { AppContext, FeatureDeps, AppInstance } from './deps.ts';
 export async function createApp(config: AppConfig, platformBindings?: Record<string, unknown>): Promise<AppInstance> {
   // 0. Configure global panic handler — FATAL logs trigger isolate restart
   setPanicHandler((msg) => { throw new Error('KERNEL PANIC: ' + msg); });
+  setBootId(crypto.randomUUID());
 
   // 1. Create storage adapters (KV, file, etc.)
   const stores = await createStores(config.storage, platformBindings);
@@ -200,8 +201,8 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
   app.use('*', bodyLimit({ maxSize: 5 * 1024 * 1024 }));  // 5 MB
   app.use('*', jsonDepthLimit(10));                   // max JSON nesting
   app.use('*', rateLimit({
-    windowMs: config.rateLimit?.windowMs ?? 60_000,
-    maxRequests: config.rateLimit?.maxRequests ?? 100,
+    burst: config.rateLimit?.burst ?? 100,
+    intervalMs: config.rateLimit?.intervalMs ?? 60_000,
     ...(config.rateLimit?.enabled !== undefined ? { enabled: config.rateLimit.enabled } : {}),
     ...(config.rateLimit?.bypassIps ? { bypassIps: config.rateLimit.bypassIps } : {}),
     ...(config.rateLimit?.bypassToken ? { bypassToken: config.rateLimit.bypassToken } : {}),

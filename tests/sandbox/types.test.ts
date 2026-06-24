@@ -1,10 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  SandboxStatus,
-  isValidTransition,
-  createSandboxId,
-  createVolumeId,
-  createMetricSnapshotId,
+  SandboxStatus, isValidTransition, isTerminal, TERMINAL_STATES,
+  createSandboxId, createVolumeId, createMetricSnapshotId, ContainerStatus,
 } from '../../src/features/sandbox/types.ts';
 import { createDnsRecordId } from '../../src/features/dns/types.ts';
 
@@ -31,95 +28,116 @@ describe('brand types', () => {
   });
 });
 
-describe('SandboxStatus state machine', () => {
+describe('SandboxStatus state machine (ECI 11-state)', () => {
   describe('valid transitions', () => {
-    it('allows Pending → Scheduling', () => {
-      expect(isValidTransition(SandboxStatus.Pending, SandboxStatus.Scheduling)).toBe(true);
+    it('Scheduling → Pending (schedule success)', () => {
+      expect(isValidTransition(SandboxStatus.Scheduling, SandboxStatus.Pending)).toBe(true);
     });
 
-    it('allows Pending → Running', () => {
+    it('Scheduling → ScheduleFailed (schedule failure)', () => {
+      expect(isValidTransition(SandboxStatus.Scheduling, SandboxStatus.ScheduleFailed)).toBe(true);
+    });
+
+    it('Pending → Running (init success)', () => {
       expect(isValidTransition(SandboxStatus.Pending, SandboxStatus.Running)).toBe(true);
     });
 
-    it('allows Pending → Failed', () => {
+    it('Pending → Failed (init failure)', () => {
       expect(isValidTransition(SandboxStatus.Pending, SandboxStatus.Failed)).toBe(true);
     });
 
-    it('allows Scheduling → Running', () => {
-      expect(isValidTransition(SandboxStatus.Scheduling, SandboxStatus.Running)).toBe(true);
+    it('Pending → Terminating (delete during init)', () => {
+      expect(isValidTransition(SandboxStatus.Pending, SandboxStatus.Terminating)).toBe(true);
     });
 
-    it('allows Running → Stopped', () => {
-      expect(isValidTransition(SandboxStatus.Running, SandboxStatus.Stopped)).toBe(true);
+    it('Running → Succeeded (all containers exit 0)', () => {
+      expect(isValidTransition(SandboxStatus.Running, SandboxStatus.Succeeded)).toBe(true);
     });
 
-    it('allows Running → Terminated', () => {
-      expect(isValidTransition(SandboxStatus.Running, SandboxStatus.Terminated)).toBe(true);
+    it('Running → Failed (containers failed)', () => {
+      expect(isValidTransition(SandboxStatus.Running, SandboxStatus.Failed)).toBe(true);
     });
 
-    it('allows Running → Deleted', () => {
-      expect(isValidTransition(SandboxStatus.Running, SandboxStatus.Deleted)).toBe(true);
+    it('Running → Restarting (RestartContainerGroup)', () => {
+      expect(isValidTransition(SandboxStatus.Running, SandboxStatus.Restarting)).toBe(true);
     });
 
-    it('allows Stopped → Running', () => {
-      expect(isValidTransition(SandboxStatus.Stopped, SandboxStatus.Running)).toBe(true);
+    it('Running → Updating (UpdateContainerGroup)', () => {
+      expect(isValidTransition(SandboxStatus.Running, SandboxStatus.Updating)).toBe(true);
     });
 
-    it('allows Stopped → Deleted', () => {
-      expect(isValidTransition(SandboxStatus.Stopped, SandboxStatus.Deleted)).toBe(true);
+    it('Running → Terminating (DeleteContainerGroup)', () => {
+      expect(isValidTransition(SandboxStatus.Running, SandboxStatus.Terminating)).toBe(true);
     });
 
-    it('allows Terminated → Deleted', () => {
-      expect(isValidTransition(SandboxStatus.Terminated, SandboxStatus.Deleted)).toBe(true);
+    it('Running → Expired (spot reclaimed)', () => {
+      expect(isValidTransition(SandboxStatus.Running, SandboxStatus.Expired)).toBe(true);
     });
 
-    it('allows Failed → Deleted', () => {
-      expect(isValidTransition(SandboxStatus.Failed, SandboxStatus.Deleted)).toBe(true);
+    it('Restarting → Pending (restart ok)', () => {
+      expect(isValidTransition(SandboxStatus.Restarting, SandboxStatus.Pending)).toBe(true);
+    });
+
+    it('Updating → Running (update ok)', () => {
+      expect(isValidTransition(SandboxStatus.Updating, SandboxStatus.Running)).toBe(true);
+    });
+
+    it('Terminating → Deleted (cleanup done)', () => {
+      expect(isValidTransition(SandboxStatus.Terminating, SandboxStatus.Deleted)).toBe(true);
     });
   });
 
   describe('invalid transitions', () => {
-    it('rejects Deleted → anything', () => {
-      for (const target of Object.values(SandboxStatus)) {
-        expect(isValidTransition(SandboxStatus.Deleted, target)).toBe(false);
+    it('hard terminal states can only transition to Deleted', () => {
+      for (const state of TERMINAL_STATES) {
+        for (const target of Object.values(SandboxStatus)) {
+          if (target === SandboxStatus.Deleted) continue; // cleanup allowed
+          expect(isValidTransition(state, target)).toBe(false);
+        }
       }
     });
 
-    it('allows Pending → Deleted (cancel before scheduling)', () => {
-      expect(isValidTransition(SandboxStatus.Pending, SandboxStatus.Deleted)).toBe(true);
-    });
-
-    it('allows Stopped → Terminated (explicit termination flow)', () => {
-      expect(isValidTransition(SandboxStatus.Stopped, SandboxStatus.Terminated)).toBe(true);
-    });
-
-    it('rejects Running → Pending (cannot go backwards)', () => {
+    it('rejects Running → Pending (no reverse)', () => {
       expect(isValidTransition(SandboxStatus.Running, SandboxStatus.Pending)).toBe(false);
-    });
-
-    it('rejects Stopped → Pending', () => {
-      expect(isValidTransition(SandboxStatus.Stopped, SandboxStatus.Pending)).toBe(false);
-    });
-
-    it('rejects Terminated → Running', () => {
-      expect(isValidTransition(SandboxStatus.Terminated, SandboxStatus.Running)).toBe(false);
     });
 
     it('rejects Failed → Running (must reprovision)', () => {
       expect(isValidTransition(SandboxStatus.Failed, SandboxStatus.Running)).toBe(false);
     });
 
-    it('rejects Scheduling → Pending', () => {
-      expect(isValidTransition(SandboxStatus.Scheduling, SandboxStatus.Pending)).toBe(false);
+    it('rejects Expired → Running (terminal)', () => {
+      expect(isValidTransition(SandboxStatus.Expired, SandboxStatus.Running)).toBe(false);
+    });
+
+    it('rejects ScheduleFailed → Pending (terminal)', () => {
+      expect(isValidTransition(SandboxStatus.ScheduleFailed, SandboxStatus.Pending)).toBe(false);
     });
   });
 
-  describe('terminal states', () => {
-    it('Deleted has no outgoing transitions', () => {
-      const transitions = Object.values(SandboxStatus).filter(t =>
-        isValidTransition(SandboxStatus.Deleted, t),
-      );
-      expect(transitions).toHaveLength(0);
+  describe('terminal state detection', () => {
+    it('isTerminal returns true for 4 hard terminal states', () => {
+      expect(isTerminal(SandboxStatus.ScheduleFailed)).toBe(true);
+      expect(isTerminal(SandboxStatus.Failed)).toBe(true);
+      expect(isTerminal(SandboxStatus.Expired)).toBe(true);
+      expect(isTerminal(SandboxStatus.Deleted)).toBe(true);
+    });
+
+    it('isTerminal returns false for soft-terminal and non-terminal states', () => {
+      expect(isTerminal(SandboxStatus.Succeeded)).toBe(false); // soft terminal — can be restarted
+      expect(isTerminal(SandboxStatus.Scheduling)).toBe(false);
+      expect(isTerminal(SandboxStatus.Pending)).toBe(false);
+      expect(isTerminal(SandboxStatus.Running)).toBe(false);
+      expect(isTerminal(SandboxStatus.Restarting)).toBe(false);
+      expect(isTerminal(SandboxStatus.Updating)).toBe(false);
+      expect(isTerminal(SandboxStatus.Terminating)).toBe(false);
+    });
+  });
+
+  describe('ContainerStatus enum', () => {
+    it('has three values', () => {
+      expect(ContainerStatus.Waiting).toBe('Waiting');
+      expect(ContainerStatus.Running).toBe('Running');
+      expect(ContainerStatus.Terminated).toBe('Terminated');
     });
   });
 });

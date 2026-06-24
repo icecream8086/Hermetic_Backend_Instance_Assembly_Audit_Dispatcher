@@ -1,25 +1,33 @@
-import type { IAuditWriter, IAuditReader, AuditEntry, AuditFilter, AuditQueryResult } from './types.ts';
-import { KernLevel, kernLevelName } from './kern-level.ts';
-import { shouldLogAudit } from '../logger/log-policy.ts';
+import type { IAuditWriter, IAuditReader, AuditEntry, StoredAuditEntry, LogQuery } from './types.ts';
+import type { LogId } from '../brand.ts';
+import { KernLevel, kernLevelName, resolveFacility, encodePriority } from './kern-level.ts';
+import { shouldLogAudit } from './log-policy.ts';
 
 /**
- * Workers Logs 纯转发审计日志实现。
+ * Workers Logs audit logger.
  *
- * 写入: console.log/warn/error → Workers Logs (Cloudflare 平台采集)
- * 查询: CRUD 转发层接口，直接穿透查询不在本进程存储任何日志。
+ * Write: console.log/warn/error → Workers Logs (Cloudflare platform collection)
+ * Query: forwarding layer — does not store logs locally.
  */
 export class WorkersAuditLogger implements IAuditWriter, IAuditReader {
-  // ─── IAuditWriter ───
+  async write(entry: AuditEntry): Promise<void> {
+    this.#output(entry);
+  }
 
-  write(entry: AuditEntry): Promise<void> {
+  async writeSync(entry: AuditEntry): Promise<LogId> {
+    const id = crypto.randomUUID() as LogId;
+    const facilityCode = resolveFacility(entry.facility);
+    entry.priority = encodePriority(facilityCode, entry.level);
+    this.#output(entry);
+    return id;
+  }
+
+  #output(entry: AuditEntry): void {
     const ts = new Date().toISOString();
     const facility = entry.facility ?? 'audit';
     const levelName = kernLevelName(entry.level);
 
-    // Respect log policy — skip if below configured threshold
-    if (!shouldLogAudit(facility, entry.level)) {
-      return Promise.resolve();
-    }
+    if (!shouldLogAudit(facility, entry.level)) return;
 
     const line = `[${ts}] ${levelName}: [${facility}] ${entry.message}`;
     const meta = entry.metadata ? JSON.stringify(entry.metadata) : undefined;
@@ -31,13 +39,13 @@ export class WorkersAuditLogger implements IAuditWriter, IAuditReader {
     } else {
       meta ? console.log(line, meta) : console.log(line);
     }
-
-    return Promise.resolve();
   }
 
-  // ─── IAuditReader (转发层，待对接 Logpush 后端) ───
+  async query(_params?: LogQuery): Promise<{ entries: StoredAuditEntry[]; nextCursor?: string; total?: number }> {
+    return { entries: [], total: 0 };
+  }
 
-  query(_filter?: AuditFilter): AuditQueryResult {
-    return { lines: [], total: 0, page: 1, limit: 20, totalPages: 0 };
+  async getById(_id: LogId): Promise<StoredAuditEntry | null> {
+    return null;
   }
 }

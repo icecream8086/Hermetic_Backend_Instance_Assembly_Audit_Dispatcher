@@ -20,7 +20,9 @@ import { ok, fail } from '../../core/response.ts';
 import type { AuditActor } from './audit.ts';
 import { z } from 'zod';
 
-const LogLevelEnum = z.enum(['debug', 'info', 'warn', 'warning', 'error', 'none', 'notice', 'fatal']);
+const KernLevelNames = z.enum([
+  'emerg', 'alert', 'crit', 'err', 'warning', 'notice', 'info', 'debug', 'none',
+]);
 
 const KNOWN_FACILITIES = [
   'user-service', 'perm', 'perm-audit', 'authz', 'sysgrp',
@@ -29,11 +31,11 @@ const KNOWN_FACILITIES = [
 ] as const;
 
 const UpdateLogPolicySchema = z.object({
-  defaultLevel: LogLevelEnum.optional(),
-  auditLevel: LogLevelEnum.optional(),
+  defaultLevel: KernLevelNames.optional(),
+  auditLevel: KernLevelNames.optional(),
   facilities: z.array(z.object({
     facility: z.enum(KNOWN_FACILITIES),
-    level: LogLevelEnum,
+    level: KernLevelNames,
   })).optional(),
 });
 

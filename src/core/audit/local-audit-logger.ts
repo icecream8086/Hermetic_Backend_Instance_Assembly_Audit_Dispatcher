@@ -1,27 +1,12 @@
-import type { IAuditWriter, IAuditReader, AuditEntry, AuditFilter, AuditQueryResult, StoredAuditEntry } from './types.ts';
+import type { IAuditWriter, IAuditReader, AuditEntry, StoredAuditEntry, LogQuery } from './types.ts';
+import type { LogId } from '../brand.ts';
 import { generateLogId } from '../brand.ts';
-import { shouldLogAudit } from '../logger/log-policy.ts';
+import { shouldLogAudit } from './log-policy.ts';
+import { resolveFacility, encodePriority } from './kern-level.ts';
 import { formatDmesgLine } from '../utils/dmesg.ts';
 
 const MAX_ENTRIES = 2000;
 
-/** Format a stored entry as JSON string (matching Workers Logs output). */
-function formatEntry(e: StoredAuditEntry): string {
-  const actorId = e.actorId ?? (e.metadata?.actorId as string | undefined);
-  return JSON.stringify({
-    id: e.id, timestamp: e.timestamp, message: e.message,
-    facility: e.facility, level: e.level,
-    ...(actorId ? { actorId } : {}),
-    ...(e.metadata ? { metadata: e.metadata } : {}),
-  });
-}
-
-/**
- * Local dev audit logger — simulates Cloudflare Logs.
- * Stores entries in a ring buffer, serves via audit API in the same
- * format as WorkersAuditLogger, so log filtering/policy management
- * works identically during development.
- */
 export class LocalAuditLogger implements IAuditWriter, IAuditReader {
   readonly #entries: StoredAuditEntry[] = [];
   readonly #capacity: number;
@@ -31,9 +16,19 @@ export class LocalAuditLogger implements IAuditWriter, IAuditReader {
   }
 
   async write(entry: AuditEntry): Promise<void> {
+    await this.#store(entry);
+  }
+
+  async writeSync(entry: AuditEntry): Promise<LogId> {
+    return this.#store(entry);
+  }
+
+  async #store(entry: AuditEntry): Promise<LogId> {
+    const id = generateLogId();
     const now = Date.now();
+    const facilityCode = resolveFacility(entry.facility);
     const stored: StoredAuditEntry = {
-      id: generateLogId(), timestamp: now,
+      id, timestamp: now, priority: encodePriority(facilityCode, entry.level),
       level: entry.level, facility: entry.facility,
       message: entry.message, actorId: entry.actorId,
       ...(entry.metadata ? { metadata: entry.metadata } : {}),
@@ -44,27 +39,24 @@ export class LocalAuditLogger implements IAuditWriter, IAuditReader {
     if (shouldLogAudit(entry.facility, entry.level)) {
       console.log(formatDmesgLine(entry.message, entry.actorId));
     }
+    return id;
   }
 
-  query(filter?: AuditFilter): AuditQueryResult {
-    const page = filter?.page ?? 1;
-    const limit = filter?.limit ?? 50;
+  async query(params?: LogQuery): Promise<{ entries: StoredAuditEntry[]; nextCursor?: string; total?: number }> {
     let f = [...this.#entries];
-    if (filter?.facility) f = f.filter(e => e.facility === filter.facility);
-    if (filter?.levelMin !== undefined) f = f.filter(e => e.level <= filter.levelMin!);
-    if (filter?.levelMax !== undefined) f = f.filter(e => e.level >= filter.levelMax!);
-    if (filter?.since) f = f.filter(e => e.timestamp >= filter.since!);
-    if (filter?.until) f = f.filter(e => e.timestamp <= filter.until!);
-    if (filter?.search) { const q = filter.search.toLowerCase(); f = f.filter(e => e.message.toLowerCase().includes(q)); }
+    if (params?.facility) f = f.filter(e => e.facility === params.facility);
+    if (params?.startTs !== undefined) f = f.filter(e => e.timestamp >= params.startTs!);
+    if (params?.endTs !== undefined) f = f.filter(e => e.timestamp <= params.endTs!);
     const total = f.length;
-    const totalPages = Math.max(1, Math.ceil(total / limit));
-    const offset = (page - 1) * limit;
-    return { lines: f.slice(offset, offset + limit).map(e => formatEntry(e)), total, page, limit, totalPages };
+    if (params?.limit) f = f.slice(0, params.limit);
+    return { entries: f, total };
+  }
+
+  async getById(id: LogId): Promise<StoredAuditEntry | null> {
+    return this.#entries.find(e => e.id === id) ?? null;
   }
 
   stats(): { count: number; capacity: number } {
     return { count: this.#entries.length, capacity: this.#capacity };
   }
-
-  async tail(): Promise<void> { /* no-op in local dev */ }
 }

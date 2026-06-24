@@ -1,5 +1,5 @@
 import type { StorageConfig } from '../core/store/config.ts';
-import type { AuditTier } from '../core/logger/interfaces.ts';
+import type { AuditTier } from '../core/audit/types.ts';
 import type { S3ProviderType } from '../core/provider/s3-types.ts';
 import type { SchedulerBackendType } from '../core/scheduler/interfaces.ts';
 import type { RegionId } from '../core/region/types.ts';
@@ -105,8 +105,8 @@ export interface AppConfig {
   /** Rate limit config (optional overrides for middleware). */
   rateLimit?: {
     enabled?: boolean;
-    windowMs?: number;
-    maxRequests?: number;
+    burst?: number;
+    intervalMs?: number;
     bypassIps?: string[];
     bypassToken?: string;
   };

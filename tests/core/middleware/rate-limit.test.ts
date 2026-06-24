@@ -27,7 +27,7 @@ describe('rateLimit middleware', () => {
   // ─── existing: standard enforcement ───
   describe('standard enforcement', () => {
     it('allows requests within limit', async () => {
-      const mw = rateLimit({ windowMs: 60_000, maxRequests: 5 });
+      const mw = rateLimit({ burst: 5, intervalMs: 60000 });
       for (let i = 0; i < 5; i++) {
         const c = fakeCtx({ ip: '1.2.3.4' });
         let called = false;
@@ -37,15 +37,15 @@ describe('rateLimit middleware', () => {
     });
 
     it('blocks when limit exceeded', async () => {
-      const mw = rateLimit({ windowMs: 60_000, maxRequests: 2 });
+      const mw = rateLimit({ burst: 2, intervalMs: 60000 });
       const c = fakeCtx({ ip: '10.0.0.1' });
       await mw(c, async () => {});
       await mw(c, async () => {});
-      await expect(mw(c, async () => {})).rejects.toThrow('Too many requests');
+      await expect(mw(c, async () => {})).rejects.toThrow('Rate limit exceeded');
     });
 
     it('tracks different IPs separately', async () => {
-      const mw = rateLimit({ windowMs: 60_000, maxRequests: 1 });
+      const mw = rateLimit({ burst: 1, intervalMs: 60000 });
       let called = false;
       await mw(fakeCtx({ ip: 'ip-a' }), async () => {});
       await mw(fakeCtx({ ip: 'ip-b' }), async () => { called = true; });
@@ -53,24 +53,25 @@ describe('rateLimit middleware', () => {
     });
 
     it('falls back to x-forwarded-for when cf-connecting-ip absent', async () => {
-      const mw = rateLimit({ windowMs: 60_000, maxRequests: 1 });
+      const mw = rateLimit({ burst: 1, intervalMs: 60000 });
       const c = fakeCtx({ headers: { 'x-forwarded-for': 'proxy-ip' } });
       await mw(c, async () => {});
-      await expect(mw(c, async () => {})).rejects.toThrow('Too many requests');
+      await expect(mw(c, async () => {})).rejects.toThrow('Rate limit exceeded');
     });
 
     it('uses "unknown" when no IP headers present', async () => {
-      const mw = rateLimit({ windowMs: 60_000, maxRequests: 1 });
+      const mw = rateLimit({ burst: 1, intervalMs: 60000 });
       const c = { req: { header: () => null } } as any;
       await mw(c, async () => {});
-      await expect(mw(c, async () => {})).rejects.toThrow('Too many requests');
+      await expect(mw(c, async () => {})).rejects.toThrow('Rate limit exceeded');
     });
 
-    it('purges expired entries lazily', async () => {
-      const mw = rateLimit({ windowMs: 1, maxRequests: 1 });
+    it('refills token after interval elapses', async () => {
+      const mw = rateLimit({ burst: 1, intervalMs: 50 });
       const c = fakeCtx({ ip: 'ephemeral-ip' });
       await mw(c, async () => {});
-      await new Promise(r => setTimeout(r, 5));
+      // Wait full refill interval
+      await new Promise(r => setTimeout(r, 60));
       let called = false;
       await mw(c, async () => { called = true; });
       expect(called).toBe(true);
@@ -80,7 +81,7 @@ describe('rateLimit middleware', () => {
   // ─── NEW: kill switch ───
   describe('kill switch (enabled)', () => {
     it('bypasses all when enabled is false', async () => {
-      const mw = rateLimit({ windowMs: 1000, maxRequests: 1, enabled: false });
+      const mw = rateLimit({ burst: 1, intervalMs: 100, enabled: false });
       // Fill quota, should still pass
       for (let i = 0; i < 10; i++) {
         const { nextCalled } = await call(mw);
@@ -89,7 +90,7 @@ describe('rateLimit middleware', () => {
     });
 
     it('enforces when enabled is true (explicit)', async () => {
-      const mw = rateLimit({ windowMs: 60_000, maxRequests: 1, enabled: true });
+      const mw = rateLimit({ burst: 1, intervalMs: 60000, enabled: true });
       await call(mw);
       const { nextCalled, error } = await call(mw);
       expect(nextCalled).toBe(false);
@@ -98,7 +99,7 @@ describe('rateLimit middleware', () => {
     });
 
     it('enforces when enabled is not set (defaults true)', async () => {
-      const mw = rateLimit({ windowMs: 60_000, maxRequests: 1 });
+      const mw = rateLimit({ burst: 1, intervalMs: 60000 });
       await call(mw);
       const { nextCalled } = await call(mw);
       expect(nextCalled).toBe(false);
@@ -108,14 +109,14 @@ describe('rateLimit middleware', () => {
   // ─── NEW: IP allowlist ───
   describe('IP allowlist', () => {
     it('bypasses when client IP exactly matches bypassIps entry', async () => {
-      const mw = rateLimit({ windowMs: 60_000, maxRequests: 1, bypassIps: ['10.0.0.5'] });
+      const mw = rateLimit({ burst: 1, intervalMs: 60000, bypassIps: ['10.0.0.5'] });
       await call(mw, fakeCtx({ ip: 'other' })); // fill quota for other IP
       const { nextCalled } = await call(mw, fakeCtx({ ip: '10.0.0.5' }));
       expect(nextCalled).toBe(true);
     });
 
     it('bypasses when client IP is in CIDR range', async () => {
-      const mw = rateLimit({ windowMs: 60_000, maxRequests: 1, bypassIps: ['192.168.1.0/24'] });
+      const mw = rateLimit({ burst: 1, intervalMs: 60000, bypassIps: ['192.168.1.0/24'] });
       await call(mw, fakeCtx({ ip: 'other' }));
       // 3 IPs all in range — each should bypass via its own fakeCtx call
       for (const ip of ['192.168.1.1', '192.168.1.128', '192.168.1.255']) {
@@ -125,7 +126,7 @@ describe('rateLimit middleware', () => {
     });
 
     it('does NOT bypass when IP is outside CIDR range', async () => {
-      const mw = rateLimit({ windowMs: 60_000, maxRequests: 1, bypassIps: ['10.0.0.0/8'] });
+      const mw = rateLimit({ burst: 1, intervalMs: 60000, bypassIps: ['10.0.0.0/8'] });
       // Fill quota for this specific IP (192.168.1.1 is NOT in 10.0.0.0/8)
       const ctx = fakeCtx({ ip: '192.168.1.1' });
       await call(mw, ctx);
@@ -134,21 +135,21 @@ describe('rateLimit middleware', () => {
     });
 
     it('supports IPv6 loopback bypass', async () => {
-      const mw = rateLimit({ windowMs: 60_000, maxRequests: 1, bypassIps: ['::1'] });
+      const mw = rateLimit({ burst: 1, intervalMs: 60000, bypassIps: ['::1'] });
       await call(mw, fakeCtx({ ip: 'other' }));
       const { nextCalled } = await call(mw, fakeCtx({ ip: '::1' }));
       expect(nextCalled).toBe(true);
     });
 
     it('supports IPv6 CIDR (fe80::/10)', async () => {
-      const mw = rateLimit({ windowMs: 60_000, maxRequests: 1, bypassIps: ['fe80::/10'] });
+      const mw = rateLimit({ burst: 1, intervalMs: 60000, bypassIps: ['fe80::/10'] });
       await call(mw, fakeCtx({ ip: 'other' }));
       const { nextCalled } = await call(mw, fakeCtx({ ip: 'fe80::1' }));
       expect(nextCalled).toBe(true);
     });
 
     it('/32 CIDR is exact IPv4 match', async () => {
-      const mw = rateLimit({ windowMs: 60_000, maxRequests: 1, bypassIps: ['172.16.0.1/32'] });
+      const mw = rateLimit({ burst: 1, intervalMs: 60000, bypassIps: ['172.16.0.1/32'] });
       // 172.16.0.1 matches /32 — always bypasses
       expect((await call(mw, fakeCtx({ ip: '172.16.0.1' }))).nextCalled).toBe(true);
       expect((await call(mw, fakeCtx({ ip: '172.16.0.1' }))).nextCalled).toBe(true);
@@ -162,21 +163,21 @@ describe('rateLimit middleware', () => {
   // ─── NEW: shared token bypass ───
   describe('shared token bypass', () => {
     it('bypasses when X-RateLimit-Bypass header matches bypassToken', async () => {
-      const mw = rateLimit({ windowMs: 60_000, maxRequests: 1, bypassToken: 'secret123' });
+      const mw = rateLimit({ burst: 1, intervalMs: 60000, bypassToken: 'secret123' });
       await call(mw);
       const { nextCalled } = await call(mw, fakeCtx({ headers: { 'x-ratelimit-bypass': 'secret123' } }));
       expect(nextCalled).toBe(true);
     });
 
     it('does NOT bypass when header token is wrong', async () => {
-      const mw = rateLimit({ windowMs: 60_000, maxRequests: 1, bypassToken: 'secret123' });
+      const mw = rateLimit({ burst: 1, intervalMs: 60000, bypassToken: 'secret123' });
       await call(mw);
       const { nextCalled } = await call(mw, fakeCtx({ headers: { 'x-ratelimit-bypass': 'wrong' } }));
       expect(nextCalled).toBe(false);
     });
 
     it('does NOT bypass when bypassToken is not configured', async () => {
-      const mw = rateLimit({ windowMs: 60_000, maxRequests: 1 });
+      const mw = rateLimit({ burst: 1, intervalMs: 60000 });
       await call(mw);
       const { nextCalled } = await call(mw, fakeCtx({ headers: { 'x-ratelimit-bypass': 'anything' } }));
       expect(nextCalled).toBe(false);
@@ -187,7 +188,7 @@ describe('rateLimit middleware', () => {
   describe('bypass priority (kill switch > IP > token)', () => {
     it('kill switch disables everything', async () => {
       const mw = rateLimit({
-        windowMs: 60_000, maxRequests: 1,
+        burst: 1, intervalMs: 60000,
         enabled: false, bypassIps: ['10.0.0.0/8'], bypassToken: 'secret',
       });
       const { nextCalled } = await call(mw, fakeCtx({ ip: '1.2.3.4' }));
@@ -196,7 +197,7 @@ describe('rateLimit middleware', () => {
 
     it('IP bypass works without token when token also configured', async () => {
       const mw = rateLimit({
-        windowMs: 60_000, maxRequests: 1,
+        burst: 1, intervalMs: 60000,
         bypassIps: ['172.16.0.1'], bypassToken: 'secret',
       });
       await call(mw, fakeCtx({ ip: 'other' }));
@@ -209,14 +210,14 @@ describe('rateLimit middleware', () => {
   describe('construction validation', () => {
     it('throws on invalid CIDR prefix', () => {
       expect(() => rateLimit({
-        windowMs: 1000, maxRequests: 10,
+        burst: 1, intervalMs: 100,
         bypassIps: ['192.168.1.0/abc'],
       })).toThrow('Invalid CIDR prefix');
     });
 
     it('accepts valid CIDRs', () => {
       expect(() => rateLimit({
-        windowMs: 1000, maxRequests: 10,
+        burst: 1, intervalMs: 100,
         bypassIps: ['10.0.0.0/8', '::1/128', '127.0.0.1'],
       })).not.toThrow();
     });

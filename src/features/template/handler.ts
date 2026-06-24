@@ -10,7 +10,7 @@ import { TemplateVisibility } from './types.ts';
 import type { IProviderRegistry } from '../../core/provider/interfaces.ts';
 import { applyTemplate } from './applicator.ts';
 import { SandboxService } from '../sandbox/sandbox.service.ts';
-import { ConsoleLogger } from '../../core/logger/console-logger.ts';
+import { ConsoleLogger } from '../../core/audit/console-logger.ts';
 import { SandboxStatus } from '../sandbox/types.ts';
 import { PodResolver } from '../sandbox/assembly/pod-resolver.ts';
 import type { PodSpec } from '../sandbox/assembly/types.ts';
@@ -169,8 +169,8 @@ const LIVE_STATUSES: string[] = [
   SandboxStatus.Pending,
   SandboxStatus.Scheduling,
   SandboxStatus.Running,
-  SandboxStatus.Stopped,       // Stopped can be restarted
-  SandboxStatus.Terminated,    // Terminated still has provider resources
+  SandboxStatus.Succeeded,     // Stopped manually, can be restarted
+  SandboxStatus.Terminating,   // Still has provider resources
 ];
 
 /** Count running sandboxes for a given template name. */

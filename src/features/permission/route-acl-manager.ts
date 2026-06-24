@@ -2,7 +2,7 @@
  * Route ACL CRUD + checkRouteAccess — extracted from PermissionService
  */
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
-import type { ILogWriter } from '../../core/logger/interfaces.ts';
+import type { ILogWriter } from '../../core/audit/types.ts';
 import type { IAuditWriter } from '../../core/audit/types.ts';
 import { KernLevel } from '../../core/audit/kern-level.ts';
 import { AppError } from '../../core/types.ts';

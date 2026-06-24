@@ -306,4 +306,8 @@ export interface PolicyMatchResult {
   reason: string;
   matchedPolicy?: StoredPolicy | undefined;
   matchedGroup?: string | undefined;
+  /** Which denial layer. Undefined if allowed. */
+  layer?: import('../../core/permission/types.ts').DenialLayer;
+  /** Audit type for denial events. */
+  auditType?: string;
 }

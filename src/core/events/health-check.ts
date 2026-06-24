@@ -6,6 +6,7 @@ import type { IAuditWriter } from '../audit/types.ts';
 import type { IMessageQueue } from '../../queue/interfaces.ts';
 import type { Sandbox } from '../../features/sandbox/types.ts';
 import { SandboxStatus } from '../../features/sandbox/types.ts';
+import { runtimeToNetwork, runtimeToContainers, runtimeToEvents } from '../../features/sandbox/runtime-mapper.ts';
 import { formatDmesgLine } from '../utils/dmesg.ts';
 
 export interface HealthCheckDeps {
@@ -54,8 +55,8 @@ export function registerHealthCheck(deps: HealthCheckDeps): void {
 
           const instanceId = entry.value.config.instanceId;
 
-          // Stopped > 60s → GC
-          if (entry.value.status === SandboxStatus.Stopped) {
+          // Succeeded (stopped manually) > 60s → GC
+          if (entry.value.status === SandboxStatus.Succeeded) {
             const stoppedDuration = Date.now() - entry.value.updatedAt;
             if (stoppedDuration > 60_000) {
               await dispatchGc(stores.atomic, queueProducer, providers, audit, {
@@ -69,8 +70,8 @@ export function registerHealthCheck(deps: HealthCheckDeps): void {
             }
             continue;
           }
-          // Failed/Terminated ≥ 60s → GC
-          if (entry.value.status === SandboxStatus.Failed || entry.value.status === SandboxStatus.Terminated) {
+          // Failed/Terminating ≥ 60s → GC
+          if (entry.value.status === SandboxStatus.Failed || entry.value.status === SandboxStatus.Terminating) {
             const duration = Date.now() - entry.value.updatedAt;
             if (duration > 60_000) {
               await dispatchGc(stores.atomic, queueProducer, providers, audit, {
@@ -96,10 +97,20 @@ export function registerHealthCheck(deps: HealthCheckDeps): void {
               if (rt?.status === 'Running') {
                 const latest = await stores.atomic.get<Sandbox>(`sandbox:${sid}`);
                 if (latest && latest.value.status === SandboxStatus.Scheduling) {
-                  await stores.atomic.set(`sandbox:${sid}`, { ...latest.value, status: SandboxStatus.Running, updatedAt: Date.now() }, latest.version);
+                  await stores.atomic.set(`sandbox:${sid}`, {
+                    ...latest.value,
+                    status: SandboxStatus.Running,
+                    network: runtimeToNetwork(rt.network, rt.associatedResources),
+                    containers: runtimeToContainers(rt),
+                    events: runtimeToEvents(rt),
+                    updatedAt: Date.now(),
+                  }, latest.version);
                 }
               }
-            } catch { /* retry next tick */ }
+            } catch (e) {
+              // Log the error so asyncInit providers failing to resolve are debuggable
+              console.error(`[health-check] Scheduling→Running auto-promotion failed for ${sid}: ${e instanceof Error ? e.message : String(e)}`);
+            }
             continue;
           }
 

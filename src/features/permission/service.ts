@@ -3,7 +3,7 @@ import { TransactConflictError } from '../../core/store/interfaces.ts';
 
 // ─── MAC (Mandatory Access Control) — immutable rules, never modifiable via API ───
 const MAC_KEY = '_init:mac-policy';
-import type { ILogWriter } from '../../core/logger/interfaces.ts';
+import type { ILogWriter } from '../../core/audit/types.ts';
 import type { IAuditWriter } from '../../core/audit/types.ts';
 import { createFacility } from '../../core/brand.ts';
 import { AppError } from '../../core/types.ts';
@@ -13,7 +13,7 @@ import type { AuditActor } from './audit.ts';
 import { CrudStore, type PaginatedResult } from './crud-store.ts';
 import type { Invitation, InviteStatus, CreateInviteInput } from './types.ts';
 import { INVITE_PREFIX, INVITE_INDEX_KEY } from './types.ts';
-import { setActivePolicy, DEFAULT_POLICY } from '../../core/logger/log-policy.ts';
+import { setActivePolicy, DEFAULT_POLICY } from '../../core/audit/log-policy.ts';
 import type {
   StoredPolicy, CreatePolicyInput, UpdatePolicyInput,
   PermissionCheckInput, PolicyMatchResult,
