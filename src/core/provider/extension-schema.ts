@@ -90,7 +90,7 @@ export function applyExtensionOverrides(
         out[field.eciParam] = JSON.stringify(val);
         break;
       case 'comma-sep':
-        out[field.eciParam] = (val as string[]).join(',');
+        out[field.eciParam] = Array.isArray(val) ? val.join(',') : String(val);
         break;
       default:
         out[field.eciParam] = String(val);

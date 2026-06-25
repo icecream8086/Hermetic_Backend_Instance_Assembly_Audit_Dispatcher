@@ -195,9 +195,12 @@ export class AlibabaEciContainerProvider implements IContainerProvider {
     // Image cache
     params['AutoMatchImageCache'] = 'true';
 
-    // Extension fields (providerOverrides) — maps Alibaba-specific params via schema
+    // Extension fields (providerOverrides) — maps Alibaba-specific params via schema.
+    // Unwrap provider-namespaced overrides: { alibaba: { instanceType, ... } } → flat keys.
     if (input.providerOverrides) {
-      const ext = applyExtensionOverrides('alibaba', input.providerOverrides);
+      const raw = input.providerOverrides as Record<string, unknown>;
+      const flat = (raw['alibaba'] as Record<string, unknown> | undefined) ?? raw;
+      const ext = applyExtensionOverrides('alibaba', flat);
       for (const [k, v] of Object.entries(ext)) {
         params[k] = v;
       }
@@ -387,6 +390,7 @@ export function parseContainerGroup(item: any): ContainerGroupRuntime {
     spotStrategy: item.SpotStrategy,
     cpu: item.Cpu ?? 0,
     memory: item.Memory ?? 0,
+    gpu: item.Gpu ? Number(item.Gpu) : undefined,
     discount: item.Discount,
     network: {
       privateIp: item.IntranetIp ?? item.PrivateIp,
@@ -413,7 +417,7 @@ export function parseContainerGroup(item: any): ContainerGroupRuntime {
       labels: {},
       annotations: {},
       mounts: [],
-      resources: c.Cpu || c.Memory ? { cpu: c.Cpu ?? 0, memory: c.Memory ?? 0 } : undefined,
+      resources: c.Cpu || c.Memory || c.Gpu ? { cpu: c.Cpu ?? 0, memory: c.Memory ?? 0, ...(c.Gpu ? { gpu: Number(c.Gpu) } : {}) } : undefined,
       health: { status: c.Status === 'Running' ? 'healthy' : 'starting' },
     })),
     volumes: item.Volumes?.map?.((v: any) => ({

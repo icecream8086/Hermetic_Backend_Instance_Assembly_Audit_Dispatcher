@@ -87,6 +87,7 @@ export interface OciContainer {
   readonly resources?: {
     readonly cpu: number;
     readonly memory: number;
+    readonly gpu?: number | undefined;
     readonly cpuUsagePercent?: number;
     readonly memoryUsageBytes?: number;
     readonly memoryLimitBytes?: number;
@@ -214,6 +215,7 @@ export interface ContainerGroupRuntime {
   readonly spotStrategy?: string;
   readonly cpu: number;
   readonly memory: number;
+  readonly gpu?: number | undefined;
   readonly discount?: number;
   /** Private VPC network of the container group's ENI. */
   readonly network: ContainerGroupNetwork;

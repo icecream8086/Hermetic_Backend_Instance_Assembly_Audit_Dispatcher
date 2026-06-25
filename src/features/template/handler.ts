@@ -70,25 +70,53 @@ function fromGeneratedTemplate(def: InstanceTemplateDef, defaultInstanceId?: str
 }
 
 /** Generated templates (YAML source-of-truth) as SandboxTemplate shape. */
-/** Generated templates (YAML source-of-truth) as SandboxTemplate shape. */
 function listGenerated(): SandboxTemplate[] {
   return INSTANCE_TEMPLATES.map(d => fromGeneratedTemplate(d));
 }
 
-/** Check if a generated template has a tombstone in the store (deleted by root). */
-async function isTombstoned(atomic: IAtomicStore, id: string): Promise<boolean> {
-  const entry = await atomic.get<any>(PREFIX + id);
-  return entry?.value?.__deleted === true;
+// ─── systemd-style layered template resolution ───
+//
+//   /usr/lib/systemd/system/  ←  generated (YAML, immutable source-of-truth)
+//   /etc/systemd/system/      ←  store overrides (admin customization)
+//   systemctl mask            ←  tombstone {__deleted:true} (root hides generated)
+//
+// Resolution order: store override > tombstone (404) > generated > 404
+
+interface ResolvedTemplate {
+  source: 'generated' | 'store';
+  template: SandboxTemplate;
 }
 
-/** Filter out generated templates that have been tombstoned. */
-async function listGeneratedLive(atomic: IAtomicStore): Promise<SandboxTemplate[]> {
-  const all = listGenerated();
-  const live: SandboxTemplate[] = [];
-  for (const t of all) {
-    if (!(await isTombstoned(atomic, t.id))) live.push(t);
+/** Resolve a template by ID using systemd-style layering. */
+async function resolveTemplateSource(atomic: IAtomicStore, id: string): Promise<ResolvedTemplate | null> {
+  // 1. Check store
+  const storeEntry = await atomic.get<Record<string, unknown>>(PREFIX + id);
+  if (storeEntry) {
+    if (storeEntry.value.__deleted === true) return null; // tombstone
+    return { source: 'store', template: storeEntry.value as unknown as SandboxTemplate };
   }
-  return live;
+  // 2. Check generated
+  const gen = INSTANCE_TEMPLATES.find(d => d.id === id);
+  if (gen) return { source: 'generated', template: fromGeneratedTemplate(gen) };
+  return null;
+}
+
+/** List all live templates: generated (non-tombstoned) + store overrides/store-only. */
+async function listAllLive(atomic: IAtomicStore): Promise<SandboxTemplate[]> {
+  const generated = listGenerated();
+  const stored = await listStored(atomic);
+  // Build map for dedup: store overrides replace generated
+  const map = new Map<string, SandboxTemplate>();
+  for (const t of generated) map.set(t.id, t);
+  for (const t of stored) map.set(t.id, t);
+  // Filter out tombstones
+  const result: SandboxTemplate[] = [];
+  for (const t of map.values()) {
+    const entry = await atomic.get<any>(PREFIX + t.id);
+    if (entry?.value?.__deleted === true) continue;
+    result.push(t);
+  }
+  return result;
 }
 
 /** Check if the current user has root-level privileges. */
@@ -179,9 +207,7 @@ function mergeHealthChecks(parent: any[] | undefined, child: any[] | undefined):
 }
 
 async function resolveTemplate(atomic: IAtomicStore, id: string): Promise<SandboxTemplate> {
-  const generated = listGenerated();
-  const stored = await listStored(atomic);
-  const allTemplates = [...generated, ...stored];
+  const allTemplates = await listAllLive(atomic);
   const tpl = allTemplates.find(t => t.id === id);
   if (!tpl) throw Object.assign(new Error('Template not found'), { status: 404 });
 
@@ -421,18 +447,14 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
     return c.json(ok(tpl), 201);
   });
 
-  // GET / — list all templates (generated YAML + user-created store, paginated, filtered)
+  // GET / — list all templates (systemd-style: generated + store overrides, tombstones hidden)
   router.get('/', async (c) => {
     const user = (c as any).var?.currentUser as { id: string; role?: string } | undefined;
     const page = parseInt(c.req.query('page') ?? '') || 1;
     const limit = parseInt(c.req.query('limit') ?? '') || 50;
     const name = c.req.query('name');
 
-    // Generated templates (YAML source-of-truth)
-    const generated = INSTANCE_TEMPLATES.map(d => fromGeneratedTemplate(d));
-    // Stored templates (user-created)
-    const stored = await listStored(atomic);
-    let visible = [...generated, ...stored];
+    let visible = await listAllLive(atomic);
     if (user) visible = visible.filter(t => canAccessTemplate(t, user));
     if (name) visible = visible.filter(t => t.name.toLowerCase().includes(name.toLowerCase()));
 
@@ -442,19 +464,15 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
     return c.json(ok({ items, total, page, limit }));
   });
 
-  // GET /:id — get a template (raw, unresolved). Checks generated first, then store.
+  // GET /:id — get a template (systemd-style: store override > generated, tombstone → 404)
   router.get('/:id', async (c) => {
-    const id = c.req.param('id');
-    const generated = INSTANCE_TEMPLATES.find(d => d.id === id);
-    const tpl = generated ? fromGeneratedTemplate(generated) : null;
-    const entry = tpl ? null : await atomic.get<SandboxTemplate>(PREFIX + id);
-    const value = tpl ?? entry?.value;
-    if (!value) return c.json(fail('TEMPLATE_NOT_FOUND', 'Template not found'), 404);
+    const resolved = await resolveTemplateSource(atomic, c.req.param('id'));
+    if (!resolved) return c.json(fail('TEMPLATE_NOT_FOUND', 'Template not found'), 404);
     const user = (c as any).var?.currentUser as { id: string; role?: string } | undefined;
-    if (!canAccessTemplate(value, user)) {
+    if (!canAccessTemplate(resolved.template, user)) {
       return c.json(fail('TEMPLATE_NOT_FOUND', 'Template not found'), 404);
     }
-    return c.json(ok(value));
+    return c.json(ok(resolved.template));
   });
 
   // GET /:id/resolved — get a template with DAG-inherited spec merged
@@ -568,70 +586,112 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
     }
   });
 
-  // PUT /:id — update a template. Rejects generated (YAML) templates.
+  // PUT /:id — update a template (systemd-style: root can override generated, owner can update own)
   router.put('/:id', async (c) => {
-    if (isGeneratedTemplate(c.req.param('id'))) {
-      return c.json(fail('IMMUTABLE', 'Generated templates cannot be modified. Edit the YAML source file instead.'), 405);
-    }
-    const entry = await atomic.get<SandboxTemplate>(PREFIX + c.req.param('id'));
-    if (!entry) return c.json(fail('TEMPLATE_NOT_FOUND', 'Template not found'), 404);
-    { const r = await requirePerm(c, permissionChecker, 'update', 'template', entry.value.creatorId); if (r) return r; }
-    const body: UpdateTemplateInput = await c.req.json();
+    const id = c.req.param('id');
+    const user = (c as any).var?.currentUser as { id: string; role?: string } | undefined;
+    const resolved = await resolveTemplateSource(atomic, id);
+    if (!resolved) return c.json(fail('TEMPLATE_NOT_FOUND', 'Template not found'), 404);
 
-    // Mutex: singleton and instanceLimit cannot both be set
+    // DAC: non-root cannot modify generated templates (no owner)
+    if (resolved.source === 'generated' && !isUserRoot(user)) {
+      return c.json(fail('FORBIDDEN', 'Only root can modify built-in templates'), 403);
+    }
+    // DAC: non-root can only modify own templates
+    if (resolved.source === 'store' && !isUserRoot(user) && resolved.template.creatorId !== user?.id) {
+      return c.json(fail('FORBIDDEN', 'Not your template'), 403);
+    }
+
+    const body: UpdateTemplateInput = await c.req.json();
     if (body.singleton && body.instanceLimit) {
       return c.json(fail('VALIDATION_ERROR', 'singleton and instanceLimit are mutually exclusive'), 400);
     }
 
-    // Deep-merge nested objects so partial updates don't lose existing fields.
-    // Shallow merge at top level; deep merge for extensions, network, container, healthChecks.
+    const base = resolved.template;
     const updated: SandboxTemplate = {
-      ...entry.value,
+      ...base,
       ...(body.name !== undefined ? { name: body.name } : {}),
       ...(body.description !== undefined ? { description: body.description ?? undefined } : {}),
       ...(body.metadata !== undefined ? { metadata: body.metadata } : {}),
       ...(body.singleton !== undefined ? { singleton: body.singleton } : {}),
       ...(body.instanceLimit !== undefined ? { instanceLimit: body.instanceLimit ?? undefined } : {}),
       ...(body.resourceBinding !== undefined ? { resourceBinding: body.resourceBinding ?? undefined } : {}),
-      ...(body.container !== undefined ? { container: deepMerge(entry.value.container ?? {}, body.container) } : {}),
+      ...(body.container !== undefined ? { container: deepMerge(base.container ?? {}, body.container) } : {}),
       ...(body.healthChecks !== undefined ? { healthChecks: body.healthChecks } : {}),
-      ...(body.network !== undefined ? { network: deepMerge(entry.value.network ?? {}, body.network) } : {}),
-      ...(body.extensions !== undefined ? { extensions: deepMerge(entry.value.extensions ?? {}, body.extensions) } : {}),
+      ...(body.network !== undefined ? { network: deepMerge(base.network ?? {}, body.network) } : {}),
+      ...(body.extensions !== undefined ? { extensions: deepMerge(base.extensions ?? {}, body.extensions) } : {}),
       ...(body.dependsOn !== undefined ? { dependsOn: body.dependsOn ?? [] } : {}),
       ...(body.podSpec !== undefined ? { podSpec: body.podSpec ?? undefined } : {}),
       updatedAt: Date.now(),
+      // Preserve __originalGenerated flag so tombstones can reference the source
+      ...(resolved.source === 'generated' ? { __originalGenerated: true } : {}),
     };
-    await atomic.set(PREFIX + updated.id, updated, entry.version);
-    const user = (c as any).var?.currentUser as { id: string; role?: string } | undefined;
+
+    const existingVersion = resolved.source === 'store'
+      ? (await atomic.get<SandboxTemplate>(PREFIX + id))?.version
+      : null;
+    await atomic.set(PREFIX + id, updated, existingVersion ?? null);
+    // Ensure store index includes this ID for new overrides
+    if (resolved.source === 'generated') {
+      const idx = await atomic.get<string[]>(INDEX_KEY);
+      if (!idx?.value?.includes(id)) {
+        await atomic.set(INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
+      }
+    }
     c.var.audit?.write({
       level: KernLevel.INFO,
       facility: 'template',
-      message: `Template updated — ${updated.name}`,
-      metadata: { eventType: 'template.updated', templateId: updated.id, actorId: user?.id },
+      message: `Template ${resolved.source === 'generated' ? 'overridden' : 'updated'} — ${updated.name}`,
+      metadata: { eventType: 'template.updated', templateId: id, source: resolved.source, actorId: user?.id },
     });
     return c.json(ok(updated));
   });
 
-  // DELETE /:id — delete a template. Rejects generated (YAML) templates.
+  // DELETE /:id — delete a template (systemd-style: generated → tombstone, store → actual delete)
   router.delete('/:id', async (c) => {
-    if (isGeneratedTemplate(c.req.param('id'))) {
-      return c.json(fail('IMMUTABLE', 'Generated templates cannot be deleted. Remove the YAML source file instead.'), 405);
+    const id = c.req.param('id');
+    const user = (c as any).var?.currentUser as { id: string; role?: string } | undefined;
+    const resolved = await resolveTemplateSource(atomic, id);
+    if (!resolved) return c.json(fail('TEMPLATE_NOT_FOUND', 'Template not found'), 404);
+
+    // ── Generated template: write tombstone (systemctl mask) ──
+    if (resolved.source === 'generated') {
+      if (!isUserRoot(user)) {
+        return c.json(fail('FORBIDDEN', 'Only root can delete built-in templates'), 403);
+      }
+      const now = Date.now();
+      await atomic.set(PREFIX + id, {
+        __deleted: true,
+        deletedBy: user?.id,
+        deletedAt: now,
+        __originalId: id,
+      }, null);
+      c.var.audit?.write({
+        level: KernLevel.WARNING,
+        facility: 'template',
+        message: `Template masked — ${resolved.template.name} (tombstone)`,
+        metadata: { eventType: 'template.masked', templateId: id, actorId: user?.id },
+      });
+      return c.json(ok({ masked: true, id }));
     }
-    const entry = await atomic.get<SandboxTemplate>(PREFIX + c.req.param('id'));
+
+    // ── Store template: actual delete ──
+    const entry = await atomic.get<SandboxTemplate>(PREFIX + id);
     if (!entry) return c.json(fail('TEMPLATE_NOT_FOUND', 'Template not found'), 404);
     if (!entry.value.creatorId) {
       return c.json(fail('MAC_DENIED', `Cannot delete seed template "${entry.value.name}" — protected by system policy`), 403);
     }
-    { const r = await requirePerm(c, permissionChecker, 'delete', 'template', entry.value.creatorId); if (r) return r; }
-    const user = (c as any).var?.currentUser as { id: string; role?: string } | undefined;
-    await atomic.set(PREFIX + c.req.param('id'), null, entry.version);
+    if (!isUserRoot(user) && entry.value.creatorId !== user?.id) {
+      return c.json(fail('FORBIDDEN', 'Not your template'), 403);
+    }
+    await atomic.set(PREFIX + id, null, entry.version);
     const idx = await atomic.get<string[]>(INDEX_KEY);
-    if (idx) await atomic.set(INDEX_KEY, idx.value.filter((i: string) => i !== c.req.param('id')), idx.version);
+    if (idx) await atomic.set(INDEX_KEY, idx.value.filter((i: string) => i !== id), idx.version);
     c.var.audit?.write({
       level: KernLevel.WARNING,
       facility: 'template',
       message: `Template deleted — ${entry.value.name}`,
-      metadata: { eventType: 'template.deleted', templateId: c.req.param('id'), actorId: user?.id },
+      metadata: { eventType: 'template.deleted', templateId: id, actorId: user?.id },
     });
     return c.json(ok(null));
   });

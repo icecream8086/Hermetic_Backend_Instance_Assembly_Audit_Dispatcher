@@ -956,6 +956,94 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
     }
   },
   {
+    "id": "vsftp_GPU",
+    "name": "vsftp_GPU",
+    "description": "VSFTP with GPU acceleration — T4 GPU (ecs.gn6v), spot instance, auto EIP, multi-zone",
+    "category": "",
+    "tags": [],
+    "spec": {
+      "apiVersion": "hbi-aad/v1",
+      "kind": "Container",
+      "region": "cn-hangzhou",
+      "containers": [
+        {
+          "name": "vsftp",
+          "image": "registry-vpc.cn-hangzhou.aliyuncs.com/minecraft-graalvm/ftp_bp:latest",
+          "ports": [
+            {
+              "containerPort": 22,
+              "protocol": "TCP"
+            }
+          ],
+          "env": [
+            {
+              "name": "SFTP_USERS",
+              "value": "test:test123:::upload"
+            },
+            {
+              "name": "NVIDIA_VISIBLE_DEVICES",
+              "value": "all"
+            },
+            {
+              "name": "CUDA_VISIBLE_DEVICES",
+              "value": "0"
+            }
+          ],
+          "resources": {
+            "limits": {
+              "cpu": 8,
+              "memory": 32768,
+              "gpu": 1,
+              "gpuType": "nvidia.com/gpu"
+            }
+          },
+          "livenessProbe": {
+            "tcpSocket": {
+              "port": 22
+            },
+            "periodSeconds": 30,
+            "initialDelaySeconds": 10
+          },
+          "imagePullPolicy": "Always",
+          "stdin": true,
+          "tty": true
+        }
+      ],
+      "extensions": {
+        "spotStrategy": "SpotAsPriceGo",
+        "healthMaxRetries": 3,
+        "providerOverrides": {
+          "alibaba": {
+            "instanceType": "ecs.gn6v-c8g1.2xlarge",
+            "ingressBandwidth": 100,
+            "egressBandwidth": 100,
+            "autoCreateEip": true,
+            "eipBandwidth": 19,
+            "autoMatchImageCache": true,
+            "cpuArchitecture": "AMD64"
+          }
+        }
+      },
+      "network": {
+        "mode": "vpc",
+        "publicIp": {
+          "allocate": true,
+          "bandwidth": 19
+        },
+        "vpc": {
+          "securityGroupId": "sg-bp16o5urk39itwcqmdzj",
+          "subnetIds": [
+            "vsw-bp1xx36ys1jou7o1bsdpp",
+            "vsw-bp1grwzlgy2739dxnskbz",
+            "vsw-bp1rv5m61jx4kmld0cc12",
+            "vsw-bp1wfyusfye82wm3d3zew"
+          ]
+        }
+      },
+      "restartPolicy": "Always"
+    }
+  },
+  {
     "id": "web-service",
     "name": "web-service",
     "description": "Nginx Web 服务 — 公网可达，HTTP 健康检查，支持 EIP 带宽配置",
@@ -1138,6 +1226,13 @@ export const INSTANCE_TEMPLATE_METAS: InstanceTemplateMeta[] = [
     "id": "vsftp-pub",
     "name": "vsftp_pub",
     "description": "VSFTP public access with EIP — spot instance, auto public IP, multi-zone",
+    "category": "",
+    "tags": []
+  },
+  {
+    "id": "vsftp_GPU",
+    "name": "vsftp_GPU",
+    "description": "VSFTP with GPU acceleration — T4 GPU (ecs.gn6v), spot instance, auto EIP, multi-zone",
     "category": "",
     "tags": []
   },
