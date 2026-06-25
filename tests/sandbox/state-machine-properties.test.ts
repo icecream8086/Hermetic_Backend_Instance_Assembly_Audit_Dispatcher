@@ -62,7 +62,7 @@ describe('SandboxStatus state machine (11-state property-based)', () => {
   });
 
   describe('terminal state invariants', () => {
-    it('all 4 hard terminal states only have Deleted as outgoing edge', () => {
+    it('all hard terminal states only have Deleted as outgoing edge (GHA/K8s Job: 3 hard terminals)', () => {
       for (const state of TERMINAL_STATES) {
         for (const target of Object.values(SandboxStatus)) {
           if (target === SandboxStatus.Deleted) continue; // cleanup always allowed
@@ -89,11 +89,12 @@ describe('SandboxStatus state machine (11-state property-based)', () => {
       expect(isValidTransition(SandboxStatus.Pending, SandboxStatus.Running)).toBe(true);
     });
 
-    it('graph has exactly 3 cycles (restart, update, delete bypass)', () => {
+    it('graph has exactly 4 cycles (restart, update, succeeded ↻, failed ↻)', () => {
       // Running→Restarting→Pending→Running
       // Running→Updating→Running
-      // (Terminating→Deleted is terminal, no cycle)
-      // Count bidirectional edges — Running↔Updating is the only one
+      // Running→Succeeded→Running (GHA soft terminal)
+      // Running→Failed→Running (GHA soft terminal)
+      // Count bidirectional edges
       let bidirectional = 0;
       for (const a of Object.values(SandboxStatus)) {
         for (const b of Object.values(SandboxStatus)) {
@@ -103,8 +104,8 @@ describe('SandboxStatus state machine (11-state property-based)', () => {
           if (aToB && bToA) bidirectional++;
         }
       }
-      // Updating ↔ Running and Succeeded ↔ Running are bidirectional
-      expect(bidirectional).toBe(2);
+      // Updating↔Running, Succeeded↔Running, Failed↔Running are bidirectional (GHA soft terminals)
+      expect(bidirectional).toBe(3);
     });
   });
 

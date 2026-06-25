@@ -34,9 +34,9 @@ export enum SandboxStatus {
   Pending = 'Pending',
   /** Running normally. */
   Running = 'Running',
-  /** All containers exited successfully (exit 0) and will not be restarted. */
+  /** Soft terminal — containers exited successfully (exit 0). Can be restarted (GHA RerunRun analogy). */
   Succeeded = 'Succeeded',
-  /** All containers terminated, at least one failed. */
+  /** Soft terminal — containers failed. Can be restarted (GHA RerunFailedJobs analogy). */
   Failed = 'Failed',
   /** Being restarted via RestartContainerGroup. */
   Restarting = 'Restarting',
@@ -50,20 +50,27 @@ export enum SandboxStatus {
   Deleted = 'Deleted',
 }
 
-/** Hard terminal states — truly irreversible. Succeeded is a soft terminal (can be restarted). */
+/**
+ * Hard terminal states — truly irreversible.
+ * GHA/K8s Job design: Succeeded and Failed are soft terminals (can be restarted,
+ * analogous to GHA's RerunRun/RerunFailedJobs). Only infrastructure-level failures
+ * (ScheduleFailed, Expired) and Deleted are hard terminals.
+ */
 export const TERMINAL_STATES: ReadonlySet<SandboxStatus> = new Set([
   SandboxStatus.ScheduleFailed,
-  SandboxStatus.Failed,
   SandboxStatus.Expired,
   SandboxStatus.Deleted,
 ]);
 
-/** States that can be deleted (DeleteContainerGroup valid). */
+/** States that can be deleted via DeleteContainerGroup.
+ *  GHA/K8s Job design: Succeeded and Failed sandboxes can be deleted (cleanup). */
 export const DELETABLE_STATES: ReadonlySet<SandboxStatus> = new Set([
   SandboxStatus.Running,
   SandboxStatus.Pending,
   SandboxStatus.Restarting,
   SandboxStatus.Updating,
+  SandboxStatus.Succeeded,
+  SandboxStatus.Failed,
 ]);
 
 export const VALID_TRANSITIONS: Readonly<Record<SandboxStatus, readonly SandboxStatus[]>> = {
@@ -83,12 +90,13 @@ export const VALID_TRANSITIONS: Readonly<Record<SandboxStatus, readonly SandboxS
   [SandboxStatus.Updating]: [SandboxStatus.Running, SandboxStatus.Terminating, SandboxStatus.Deleted],
   // T15: Terminating outcome
   [SandboxStatus.Terminating]: [SandboxStatus.Deleted],
-  // Terminal states — only reachable transition is Deleted (cleanup)
+  // Hard terminal states (infrastructure) — only reachable transition is Deleted (cleanup)
   [SandboxStatus.ScheduleFailed]: [SandboxStatus.Deleted],
-  [SandboxStatus.Succeeded]: [SandboxStatus.Running, SandboxStatus.Deleted],
-  [SandboxStatus.Failed]: [SandboxStatus.Deleted],
   [SandboxStatus.Expired]: [SandboxStatus.Deleted],
   [SandboxStatus.Deleted]: [],
+  // Soft terminal states (GHA/K8s Job) — can be restarted (RerunRun / RerunFailedJobs)
+  [SandboxStatus.Succeeded]: [SandboxStatus.Running, SandboxStatus.Deleted],
+  [SandboxStatus.Failed]: [SandboxStatus.Running, SandboxStatus.Deleted],
 };
 
 export function isValidTransition(from: SandboxStatus, to: SandboxStatus): boolean {

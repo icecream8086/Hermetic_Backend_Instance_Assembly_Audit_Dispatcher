@@ -88,7 +88,7 @@ describe('SandboxStatus state machine (ECI 11-state)', () => {
   });
 
   describe('invalid transitions', () => {
-    it('hard terminal states can only transition to Deleted', () => {
+    it('hard terminal states (ScheduleFailed, Expired, Deleted) can only transition to Deleted', () => {
       for (const state of TERMINAL_STATES) {
         for (const target of Object.values(SandboxStatus)) {
           if (target === SandboxStatus.Deleted) continue; // cleanup allowed
@@ -101,29 +101,33 @@ describe('SandboxStatus state machine (ECI 11-state)', () => {
       expect(isValidTransition(SandboxStatus.Running, SandboxStatus.Pending)).toBe(false);
     });
 
-    it('rejects Failed → Running (must reprovision)', () => {
-      expect(isValidTransition(SandboxStatus.Failed, SandboxStatus.Running)).toBe(false);
+    it('allows Failed → Running (GHA RerunFailedJobs)', () => {
+      expect(isValidTransition(SandboxStatus.Failed, SandboxStatus.Running)).toBe(true);
     });
 
-    it('rejects Expired → Running (terminal)', () => {
+    it('allows Succeeded → Running (GHA RerunRun)', () => {
+      expect(isValidTransition(SandboxStatus.Succeeded, SandboxStatus.Running)).toBe(true);
+    });
+
+    it('rejects Expired → Running (hard terminal)', () => {
       expect(isValidTransition(SandboxStatus.Expired, SandboxStatus.Running)).toBe(false);
     });
 
-    it('rejects ScheduleFailed → Pending (terminal)', () => {
+    it('rejects ScheduleFailed → Pending (hard terminal)', () => {
       expect(isValidTransition(SandboxStatus.ScheduleFailed, SandboxStatus.Pending)).toBe(false);
     });
   });
 
   describe('terminal state detection', () => {
-    it('isTerminal returns true for 4 hard terminal states', () => {
+    it('isTerminal returns true for 3 hard terminal states (GHA/K8s Job design)', () => {
       expect(isTerminal(SandboxStatus.ScheduleFailed)).toBe(true);
-      expect(isTerminal(SandboxStatus.Failed)).toBe(true);
       expect(isTerminal(SandboxStatus.Expired)).toBe(true);
       expect(isTerminal(SandboxStatus.Deleted)).toBe(true);
     });
 
     it('isTerminal returns false for soft-terminal and non-terminal states', () => {
-      expect(isTerminal(SandboxStatus.Succeeded)).toBe(false); // soft terminal — can be restarted
+      expect(isTerminal(SandboxStatus.Succeeded)).toBe(false); // soft terminal — GHA RerunRun
+      expect(isTerminal(SandboxStatus.Failed)).toBe(false); // soft terminal — GHA RerunFailedJobs
       expect(isTerminal(SandboxStatus.Scheduling)).toBe(false);
       expect(isTerminal(SandboxStatus.Pending)).toBe(false);
       expect(isTerminal(SandboxStatus.Running)).toBe(false);
