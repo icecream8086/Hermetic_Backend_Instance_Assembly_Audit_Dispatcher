@@ -285,42 +285,49 @@ describe('applyTemplate network', async () => {
     expect((r.network as any).allocatePublicIp).toBe(false);
   });
 
-  it('maps publicIp.allocate', async () => {
+  it('silently drops publicIp.allocate (EIP must come from extensions)', async () => {
     const r = await applyTemplate(minimalTpl({ network: { publicIp: { allocate: true } } }));
-    expect((r.network as any).allocatePublicIp).toBe(true);
+    expect((r.network as any).allocatePublicIp).toBe(false);
   });
 
-  it('maps publicIp.bandwidth', async () => {
+  it('silently drops publicIp.bandwidth', async () => {
     const r = await applyTemplate(minimalTpl({ network: { publicIp: { allocate: true, bandwidth: 100 } } }));
-    expect((r.network as any).publicIpBandwidth).toBe(100);
+    expect((r.network as any).publicIpBandwidth).toBeUndefined();
   });
 
-  it('maps vpc securityGroupId (system UID)', async () => {
+  it('keeps vpc securityGroupId in standard network', async () => {
     const r = await applyTemplate(minimalTpl({ network: { vpc: { securityGroupId: 'sg_xxx' } } }));
     expect((r.network as any).securityGroupId).toBe('sg_xxx');
   });
 
-  it('maps vpc subnetIds', async () => {
+  it('keeps vpc subnetIds in standard network', async () => {
     const r = await applyTemplate(minimalTpl({ network: { vpc: { subnetIds: ['vsw-a', 'vsw-b'] } } }));
     expect((r.network as any).subnetIds).toEqual(['vsw-a', 'vsw-b']);
   });
 
-  it('maps vpc instanceId', async () => {
-    const r = await applyTemplate(minimalTpl({ network: { vpc: { instanceId: 'inst_xxx' as any } } }));
-    expect((r.network as any).instanceId).toBe('inst_xxx');
-  });
-
-  it('combines publicIp and vpc settings', async () => {
+  it('drops publicIp but keeps vpc (EIP silenced, VPC passes through)', async () => {
     const r = await applyTemplate(minimalTpl({
       network: {
         publicIp: { allocate: true, bandwidth: 50 },
         vpc: { securityGroupId: 'sg_abc', subnetIds: ['vsw-1'] },
       },
     }));
-    expect((r.network as any).allocatePublicIp).toBe(true);
-    expect((r.network as any).publicIpBandwidth).toBe(50);
+    // EIP must come from extensions — silently dropped
+    expect((r.network as any).allocatePublicIp).toBe(false);
+    expect((r.network as any).publicIpBandwidth).toBeUndefined();
+    // VPC passes through
     expect((r.network as any).securityGroupId).toBe('sg_abc');
     expect((r.network as any).subnetIds).toEqual(['vsw-1']);
+  });
+
+  it('EIP only works through extensions.providerOverrides.alibaba.autoCreateEip', async () => {
+    const r = await applyTemplate(minimalTpl({
+      extensions: { providerOverrides: { alibaba: { autoCreateEip: true, eipBandwidth: 50 } } },
+    }));
+    // extensions flow through to providerOverrides on sandbox input
+    const ali = ((r as any).providerOverrides as any)?.alibaba;
+    expect(ali.autoCreateEip).toBe(true);
+    expect(ali.eipBandwidth).toBe(50);
   });
 });
 

@@ -16,6 +16,3 @@ containers:
       limits:
         cpu: 0.25
         memory: 256
-network:
-  publicIp:
-    allocate: false

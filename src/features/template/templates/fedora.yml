@@ -29,6 +29,3 @@ healthChecks:
     periodSeconds: 15
     initialDelaySeconds: 5
     failureThreshold: 3
-network:
-  publicIp:
-    allocate: false

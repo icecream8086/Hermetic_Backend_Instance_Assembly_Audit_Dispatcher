@@ -1,0 +1,47 @@
+# busybox lifecycle — 容器组生命周期验证镜像
+# 基于 Docker Hub busybox，自带 nc，~2MB，自包含无外部依赖
+#
+# CI 构建:
+#   docker build -f Dockerfile.lifecycle -t registry-vpc.cn-hangzhou.aliyuncs.com/minecraft-graalvm/ocibox:latest .
+#   docker push registry-vpc.cn-hangzhou.aliyuncs.com/minecraft-graalvm/ocibox:latest
+
+FROM busybox:latest
+
+# Producer — 每秒发 JSON 到 localhost:9999
+RUN mkdir -p /usr/local/bin && \
+    echo '#!/bin/sh'                                  > /usr/local/bin/producer && \
+    echo 'INTERVAL="${1:-1}"'                         >> /usr/local/bin/producer && \
+    echo 'SEQ=0'                                      >> /usr/local/bin/producer && \
+    echo 'echo "[producer] started, target=localhost:9999"' >> /usr/local/bin/producer && \
+    echo 'while true; do'                             >> /usr/local/bin/producer && \
+    echo '  SEQ=$((SEQ+1))'                           >> /usr/local/bin/producer && \
+    echo '  TS=$(date +%s)'                           >> /usr/local/bin/producer && \
+    echo '  MSG="{\"seq\":${SEQ},\"ts\":${TS},\"payload\":\"data_${RANDOM}\"}"' >> /usr/local/bin/producer && \
+    echo '  if echo "${MSG}" | nc -w1 localhost 9999 2>/dev/null; then' >> /usr/local/bin/producer && \
+    echo '    echo "[producer] seq=${SEQ} ts=${TS} ok"' >> /usr/local/bin/producer && \
+    echo '  else'                                     >> /usr/local/bin/producer && \
+    echo '    echo "[producer] seq=${SEQ} ts=${TS} fail"' >> /usr/local/bin/producer && \
+    echo '  fi'                                       >> /usr/local/bin/producer && \
+    echo '  sleep "${INTERVAL}"'                      >> /usr/local/bin/producer && \
+    echo 'done'                                       >> /usr/local/bin/producer && \
+    chmod +x /usr/local/bin/producer
+
+# Consumer — 监听 :9999，追加到 /tmp/received.txt
+RUN mkdir -p /usr/local/bin && \
+    echo '#!/bin/sh'                                  > /usr/local/bin/consumer && \
+    echo 'RECV="${1:-/tmp/received.txt}"'             >> /usr/local/bin/consumer && \
+    echo 'COUNT=0'                                    >> /usr/local/bin/consumer && \
+    echo 'echo "[consumer] listening on :9999, output=${RECV}"' >> /usr/local/bin/consumer && \
+    echo 'trap "echo \"[consumer] stopping, received ${COUNT} msg\"; exit 0" INT TERM' >> /usr/local/bin/consumer && \
+    echo 'while true; do'                             >> /usr/local/bin/consumer && \
+    echo '  if LINE=$(nc -l -p 9999); then'           >> /usr/local/bin/consumer && \
+    echo '    echo "${LINE}" >> "${RECV}"'            >> /usr/local/bin/consumer && \
+    echo '    COUNT=$((COUNT+1))'                     >> /usr/local/bin/consumer && \
+    echo '    echo "[consumer] #${COUNT}: $(echo ${LINE} | head -c 60)"' >> /usr/local/bin/consumer && \
+    echo '  fi'                                       >> /usr/local/bin/consumer && \
+    echo 'done'                                       >> /usr/local/bin/consumer && \
+    chmod +x /usr/local/bin/consumer
+
+RUN which nc && echo "lifecycle image ready"
+
+CMD ["sh"]

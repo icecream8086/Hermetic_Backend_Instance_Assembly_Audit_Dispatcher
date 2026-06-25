@@ -74,29 +74,28 @@ export const DELETABLE_STATES: ReadonlySet<SandboxStatus> = new Set([
 ]);
 
 export const VALID_TRANSITIONS: Readonly<Record<SandboxStatus, readonly SandboxStatus[]>> = {
-  // T1-T2: Scheduling outcomes
-  [SandboxStatus.Scheduling]: [SandboxStatus.Pending, SandboxStatus.ScheduleFailed],
-  // T3-T4: Pending outcomes
-  [SandboxStatus.Pending]: [SandboxStatus.Running, SandboxStatus.Failed, SandboxStatus.Terminating, SandboxStatus.Deleted],
-  // T5-T10: Running outcomes
+  // T1-T2: Scheduling outcomes — can also be deleted (ECI asyncInit: user cancels before Running)
+  [SandboxStatus.Scheduling]: [SandboxStatus.Pending, SandboxStatus.ScheduleFailed, SandboxStatus.Terminating],
+  // T3-T4, T18: Pending outcomes — delete goes through Terminating (async cleanup)
+  [SandboxStatus.Pending]: [SandboxStatus.Running, SandboxStatus.Failed, SandboxStatus.Terminating],
+  // T5-T10: Running outcomes — delete goes through Terminating (async cleanup)
   [SandboxStatus.Running]: [
     SandboxStatus.Succeeded, SandboxStatus.Failed, SandboxStatus.Expired,
     SandboxStatus.Restarting, SandboxStatus.Updating, SandboxStatus.Terminating,
-    SandboxStatus.Deleted,
   ],
-  // T11-T12: Restarting outcomes
-  [SandboxStatus.Restarting]: [SandboxStatus.Pending, SandboxStatus.Failed, SandboxStatus.Terminating, SandboxStatus.Deleted],
-  // T13-T14: Updating outcomes
-  [SandboxStatus.Updating]: [SandboxStatus.Running, SandboxStatus.Terminating, SandboxStatus.Deleted],
-  // T15: Terminating outcome
+  // T11-T12, T16: Restarting outcomes — delete goes through Terminating
+  [SandboxStatus.Restarting]: [SandboxStatus.Pending, SandboxStatus.Failed, SandboxStatus.Terminating],
+  // T13-T14, T17: Updating outcomes — delete goes through Terminating
+  [SandboxStatus.Updating]: [SandboxStatus.Running, SandboxStatus.Terminating],
+  // T15: Terminating outcome — cloud cleanup confirmed, resource released
   [SandboxStatus.Terminating]: [SandboxStatus.Deleted],
-  // Hard terminal states (infrastructure) — only reachable transition is Deleted (cleanup)
+  // Hard terminal states (infrastructure) — no cloud resources, direct cleanup
   [SandboxStatus.ScheduleFailed]: [SandboxStatus.Deleted],
   [SandboxStatus.Expired]: [SandboxStatus.Deleted],
   [SandboxStatus.Deleted]: [],
-  // Soft terminal states (GHA/K8s Job) — can be restarted (RerunRun / RerunFailedJobs)
-  [SandboxStatus.Succeeded]: [SandboxStatus.Running, SandboxStatus.Deleted],
-  [SandboxStatus.Failed]: [SandboxStatus.Running, SandboxStatus.Deleted],
+  // Soft terminal states (GHA/K8s Job) — restartable, deletable via Terminating
+  [SandboxStatus.Succeeded]: [SandboxStatus.Running, SandboxStatus.Terminating],
+  [SandboxStatus.Failed]: [SandboxStatus.Running, SandboxStatus.Terminating],
 };
 
 export function isValidTransition(from: SandboxStatus, to: SandboxStatus): boolean {
@@ -366,6 +365,8 @@ export interface CreateSandboxInput {
   readonly providerOverrides?: Record<string, unknown>;
   /** Template ID that created this sandbox. Used for instance limit tracking (decoupled from sandbox name). */
   readonly templateRef?: string | undefined;
+  /** API version of the template that created this sandbox ("hbi-aad/v1" or "hbi-aad/v2"). */
+  readonly apiVersion?: string | undefined;
 }
 
 /** Full sandbox entity. Extends PersistedEntity for optimistic-concurrency state mutations. */
@@ -377,6 +378,9 @@ export interface Sandbox extends PersistedEntity<SandboxId, SandboxStatus> {
   readonly containers: readonly ContainerRuntime[];
   readonly conditions?: readonly PodCondition[];
   readonly events: readonly ContainerEvent[];
+  /** Ephemeral storage allocated by the cloud provider (GiB).
+   *  ECI provides 30 GiB free. Populated from provider during syncRuntime. */
+  readonly ephemeralStorageGiB?: number | undefined;
 }
 
 // ─── Pod ↔ Sandbox ↔ Provider mapping ───

@@ -102,12 +102,7 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
             }
           }
         }
-      ],
-      "network": {
-        "publicIp": {
-          "allocate": false
-        }
-      }
+      ]
     }
   },
   {
@@ -121,17 +116,21 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
       "kind": "Container",
       "provider": "alibaba",
       "region": "cn-hangzhou",
-      "network": {
-        "securityGroupId": "sg-bp1axxx",
-        "subnetIds": [
-          "vsw-bp1xxx"
-        ],
-        "allocatePublicIp": false
-      },
       "restartPolicy": "Always",
-      "providerOverrides": {
-        "alibaba": {
-          "instanceType": "ecs.g7.xlarge"
+      "network": {
+        "mode": "vpc",
+        "vpc": {
+          "securityGroupId": "sg-bp1axxx",
+          "subnetIds": [
+            "vsw-bp1xxx"
+          ]
+        }
+      },
+      "extensions": {
+        "providerOverrides": {
+          "alibaba": {
+            "instanceType": "ecs.g7.xlarge"
+          }
         }
       }
     }
@@ -169,12 +168,7 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
             }
           ]
         }
-      ],
-      "network": {
-        "publicIp": {
-          "allocate": false
-        }
-      }
+      ]
     }
   },
   {
@@ -277,12 +271,7 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
           "initialDelaySeconds": 5,
           "failureThreshold": 3
         }
-      ],
-      "network": {
-        "publicIp": {
-          "allocate": false
-        }
-      }
+      ]
     }
   },
   {
@@ -314,9 +303,11 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
           ]
         }
       ],
-      "network": {
-        "publicIp": {
-          "allocate": true
+      "extensions": {
+        "providerOverrides": {
+          "alibaba": {
+            "autoCreateEip": true
+          }
         }
       }
     }
@@ -400,10 +391,6 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
       },
       "network": {
         "mode": "vpc",
-        "publicIp": {
-          "allocate": true,
-          "bandwidth": 50
-        },
         "vpc": {
           "securityGroupId": "sg-bp16o5urk39itwcqmdzj",
           "subnetIds": [
@@ -452,9 +439,118 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
           }
         }
       ],
-      "network": {
-        "publicIp": {
-          "allocate": true
+      "extensions": {
+        "providerOverrides": {
+          "alibaba": {
+            "autoCreateEip": true
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "lifecycle-busybox",
+    "name": "lifecycle-busybox",
+    "description": "全生命周期验证 (busybox) — 纯公开镜像，无需推送，开箱即用",
+    "category": "",
+    "tags": [],
+    "spec": {
+      "apiVersion": "hbi-aad/v2",
+      "kind": "ContainerGroup",
+      "region": "cn-hangzhou",
+      "podSpec": {
+        "name": "lifecycle-bb",
+        "region": "cn-hangzhou",
+        "resources": {
+          "cpu": "0.5",
+          "memory": "256Mi"
+        },
+        "services": {
+          "consumer": {
+            "image": "busybox:latest",
+            "command": [
+              "sh",
+              "-c",
+              "nc -l -p 9999 | while read line; do echo \"$line\" >> /tmp/received.txt; done"
+            ],
+            "ports": [
+              {
+                "containerPort": 9999,
+                "protocol": "TCP"
+              }
+            ],
+            "resources": {
+              "cpu": "0.25",
+              "memory": "128Mi"
+            }
+          },
+          "producer": {
+            "image": "busybox:latest",
+            "command": [
+              "sh",
+              "-c",
+              "SEQ=0; while true; do SEQ=$((SEQ+1)); echo \"{\\\"seq\\\":$SEQ,\\\"ts\\\":$(date +%s)}\" | nc -w 1 localhost 9999; echo \"[producer] seq=$SEQ\"; sleep 1; done"
+            ],
+            "dependsOn": [
+              "consumer"
+            ],
+            "resources": {
+              "cpu": "0.25",
+              "memory": "128Mi"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "lifecycle-test",
+    "name": "lifecycle-test",
+    "description": "全生命周期验证 — Producer/Consumer 双容器 localhost:9999 TCP 通信，验证 11 态状态机、重启、更新、删除、GC",
+    "category": "",
+    "tags": [],
+    "spec": {
+      "apiVersion": "hbi-aad/v2",
+      "kind": "ContainerGroup",
+      "region": "cn-hangzhou",
+      "podSpec": {
+        "name": "lifecycle-test",
+        "region": "cn-hangzhou",
+        "resources": {
+          "cpu": "1.0",
+          "memory": "512Mi"
+        },
+        "services": {
+          "consumer": {
+            "image": "registry-vpc.cn-hangzhou.aliyuncs.com/minecraft-graalvm/ocibox:latest",
+            "command": [
+              "/usr/local/bin/consumer"
+            ],
+            "ports": [
+              {
+                "containerPort": 9999,
+                "protocol": "TCP"
+              }
+            ],
+            "resources": {
+              "cpu": "0.5",
+              "memory": "256Mi"
+            }
+          },
+          "producer": {
+            "image": "registry-vpc.cn-hangzhou.aliyuncs.com/minecraft-graalvm/ocibox:latest",
+            "command": [
+              "/usr/local/bin/producer",
+              "1"
+            ],
+            "dependsOn": [
+              "consumer"
+            ],
+            "resources": {
+              "cpu": "0.5",
+              "memory": "256Mi"
+            }
+          }
         }
       }
     }
@@ -523,9 +619,11 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
           "initialDelaySeconds": 5
         }
       ],
-      "network": {
-        "publicIp": {
-          "allocate": true
+      "extensions": {
+        "providerOverrides": {
+          "alibaba": {
+            "autoCreateEip": true
+          }
         }
       }
     }
@@ -581,12 +679,7 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
           "periodSeconds": 10,
           "initialDelaySeconds": 5
         }
-      ],
-      "network": {
-        "publicIp": {
-          "allocate": false
-        }
-      }
+      ]
     }
   },
   {
@@ -652,12 +745,7 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
           "periodSeconds": 5,
           "initialDelaySeconds": 2
         }
-      ],
-      "network": {
-        "publicIp": {
-          "allocate": false
-        }
-      }
+      ]
     }
   },
   {
@@ -857,23 +945,18 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
           }
         }
       ],
-      "extensions": {
-        "healthMaxRetries": 3
-      },
       "network": {
-        "mode": "vpc",
-        "publicIp": {
-          "allocate": true,
-          "bandwidth": 10
-        },
-        "vpc": {
-          "securityGroupId": "sg-bp16o5urk39itwcqmdzj",
-          "subnetIds": [
-            "vsw-bp1xx36ys1jou7o1bsdpp",
-            "vsw-bp1grwzlgy2739dxnskbz",
-            "vsw-bp1rv5m61jx4kmld0cc12",
-            "vsw-bp1wfyusfye82wm3d3zew"
-          ]
+        "mode": "vpc"
+      },
+      "extensions": {
+        "healthMaxRetries": 3,
+        "providerOverrides": {
+          "alibaba": {
+            "autoCreateEip": true,
+            "eipBandwidth": 10,
+            "securityGroupId": "sg-bp16o5urk39itwcqmdzj",
+            "vSwitchId": "vsw-bp1xx36ys1jou7o1bsdpp,vsw-bp1grwzlgy2739dxnskbz,vsw-bp1rv5m61jx4kmld0cc12,vsw-bp1wfyusfye82wm3d3zew"
+          }
         }
       },
       "restartPolicy": "Always"
@@ -938,10 +1021,6 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
       },
       "network": {
         "mode": "vpc",
-        "publicIp": {
-          "allocate": true,
-          "bandwidth": 19
-        },
         "vpc": {
           "securityGroupId": "sg-bp16o5urk39itwcqmdzj",
           "subnetIds": [
@@ -1026,10 +1105,6 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
       },
       "network": {
         "mode": "vpc",
-        "publicIp": {
-          "allocate": true,
-          "bandwidth": 19
-        },
         "vpc": {
           "securityGroupId": "sg-bp16o5urk39itwcqmdzj",
           "subnetIds": [
@@ -1090,19 +1165,16 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
               "path": "/health"
             },
             "periodSeconds": 5
-          },
-          "providerOverrides": {
-            "eipBandwidth": 50
           }
         }
       ],
-      "network": {
-        "allocatePublicIp": true,
-        "publicIpBandwidth": 50
-      },
-      "providerOverrides": {
-        "alibaba": {
-          "spotStrategy": "SpotAsPriceGo"
+      "extensions": {
+        "providerOverrides": {
+          "alibaba": {
+            "autoCreateEip": true,
+            "eipBandwidth": 50,
+            "spotStrategy": "SpotAsPriceGo"
+          }
         }
       }
     }
@@ -1170,6 +1242,20 @@ export const INSTANCE_TEMPLATE_METAS: InstanceTemplateMeta[] = [
     "id": "gpu-inference",
     "name": "gpu-inference",
     "description": "GPU inference server — requires NVIDIA GPU (nvidia.com/gpu)",
+    "category": "",
+    "tags": []
+  },
+  {
+    "id": "lifecycle-busybox",
+    "name": "lifecycle-busybox",
+    "description": "全生命周期验证 (busybox) — 纯公开镜像，无需推送，开箱即用",
+    "category": "",
+    "tags": []
+  },
+  {
+    "id": "lifecycle-test",
+    "name": "lifecycle-test",
+    "description": "全生命周期验证 — Producer/Consumer 双容器 localhost:9999 TCP 通信，验证 11 态状态机、重启、更新、删除、GC",
     "category": "",
     "tags": []
   },

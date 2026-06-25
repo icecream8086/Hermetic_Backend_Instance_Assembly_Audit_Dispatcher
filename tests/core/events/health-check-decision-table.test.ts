@@ -198,26 +198,27 @@ const decisionTable: DecisionTableRow[] = [
     expectDeleteCalled: true,
   },
 
-  // ── Row 10: Pending → skip (non-Running non-Stopped) ──
+  // ── Row 10: Pending / Scheduling with provider-gone ──
+  // R=null means getStatus() returns null → provider resource is gone
+  // → provider-gone GC triggers, sandbox is deleted
   {
-    name: 'Row 10a: Pending → skip',
+    name: 'Row 10a: Pending + provider-gone → deleted',
     S: SandboxStatus.Pending,
     durationMs: 0,
     M: undefined,
     R: null,
-    expectedStatus: SandboxStatus.Pending,
-    expectDeleteCalled: false,
+    expectedStatus: 'deleted',
+    expectDeleteCalled: true,
   },
 
-  // ── Row 10b: Scheduling → skip ──
   {
-    name: 'Row 10b: Scheduling → skip',
+    name: 'Row 10b: Scheduling + provider-gone → deleted',
     S: SandboxStatus.Scheduling,
     durationMs: 0,
     M: undefined,
     R: null,
-    expectedStatus: SandboxStatus.Scheduling,
-    expectDeleteCalled: false,
+    expectedStatus: 'deleted',
+    expectDeleteCalled: true,
   },
 
   // ── Additional: Failed > 60s → GC (code lines 69-83, not in truth table) ──
@@ -261,6 +262,39 @@ const decisionTable: DecisionTableRow[] = [
     M: undefined,
     R: null,
     expectedStatus: SandboxStatus.Terminating,
+    expectDeleteCalled: false,
+  },
+
+  // ── Additional: ScheduleFailed > 24h → expired-gc (prevent index bloat) ──
+  {
+    name: 'Extra: ScheduleFailed > 24h → expired-gc',
+    S: SandboxStatus.ScheduleFailed,
+    durationMs: 25 * 60 * 60 * 1000, // 25 hours
+    M: undefined,
+    R: null,
+    expectedStatus: 'deleted',
+    expectDeleteCalled: true,
+  },
+
+  // ── Additional: Expired > 24h → expired-gc ──
+  {
+    name: 'Extra: Expired > 24h → expired-gc',
+    S: SandboxStatus.Expired,
+    durationMs: 25 * 60 * 60 * 1000, // 25 hours
+    M: undefined,
+    R: null,
+    expectedStatus: 'deleted',
+    expectDeleteCalled: true,
+  },
+
+  // ── Additional: ScheduleFailed < 24h → skip (preserve for audit) ──
+  {
+    name: 'Extra: ScheduleFailed < 24h → skip',
+    S: SandboxStatus.ScheduleFailed,
+    durationMs: 1 * 60 * 60 * 1000, // 1 hour
+    M: undefined,
+    R: null,
+    expectedStatus: SandboxStatus.ScheduleFailed,
     expectDeleteCalled: false,
   },
 ];

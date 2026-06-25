@@ -55,9 +55,6 @@ extensions:
       cpuArchitecture: "AMD64"
 network:
   mode: "vpc"
-  publicIp:
-    allocate: true
-    bandwidth: 50
   vpc:
     securityGroupId: "sg-bp16o5urk39itwcqmdzj"
     subnetIds:

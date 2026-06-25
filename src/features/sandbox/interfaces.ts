@@ -54,6 +54,12 @@ export interface ISandboxService {
 
   /** Get health status for all containers in a sandbox. */
   getHealth(id: SandboxId): Promise<readonly ContainerHealth[]>;
+
+  /** Restart a running sandbox. ECI: RestartContainerGroup. Only valid from Running. */
+  restart(id: SandboxId): Promise<Sandbox>;
+
+  /** Update a running sandbox's specification. ECI: UpdateContainerGroup. Only valid from Running. */
+  update(id: SandboxId, input: Partial<CreateSandboxInput>): Promise<Sandbox>;
 }
 
 export interface ISandboxMetricsService {

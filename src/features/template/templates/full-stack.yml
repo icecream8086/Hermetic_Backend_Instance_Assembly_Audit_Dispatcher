@@ -15,6 +15,7 @@ containers:
         value: "localhost"
       - name: "DB_URL"
         value: "sqlite:///data/app.db"
-network:
-  publicIp:
-    allocate: true
+extensions:
+  providerOverrides:
+    alibaba:
+      autoCreateEip: true

@@ -178,23 +178,20 @@ export class AlibabaEciContainerProvider implements IContainerProvider {
       });
     }
 
-    // Network — multi-zone via comma-separated VSwitchIds
+    // Network — multi-zone via comma-separated VSwitchIds (vpc in standard network)
     params['SecurityGroupId'] = input.network.securityGroupId ?? '';
     if (input.network.subnetIds?.length) {
       params['VSwitchId'] = input.network.subnetIds.join(',');
       params['ScheduleStrategy'] = 'VSwitchRandom';
       delete params['ZoneId'];
     }
-    // Public IP
-    if (input.network.allocatePublicIp) {
-      params['AutoCreateEip'] = 'true';
-      if (input.network.publicIpBandwidth) params['EipBandwidth'] = String(input.network.publicIpBandwidth);
-    }
+
     // Image cache
     params['AutoMatchImageCache'] = 'true';
 
     // Extension fields (providerOverrides) — maps Alibaba-specific params via schema.
-    // Unwrap provider-namespaced overrides: { alibaba: { instanceType, ... } } → flat keys.
+    // EIP (autoCreateEip / eipBandwidth) MUST come through extensions only.
+    // Standard network.publicIp is silently ignored (EIP costs money — never guess).
     if (input.providerOverrides) {
       const raw = input.providerOverrides as Record<string, unknown>;
       const flat = (raw['alibaba'] as Record<string, unknown> | undefined) ?? raw;
@@ -204,16 +201,90 @@ export class AlibabaEciContainerProvider implements IContainerProvider {
       }
     }
 
-    try {
-      const resp = await rpcCall(
-        this.endpoint, this.accessKeyId, this.accessKeySecret,
-        'CreateContainerGroup', params,
-      );
-      return { providerId: resp.ContainerGroupId };
-    } catch (e) {
-      console.error('[eci] CreateContainerGroup params:', JSON.stringify(params, null, 2));
-      throw e;
+    console.log('[eci] CreateContainerGroup params:', JSON.stringify(params, null, 2));
+    const resp = await rpcCall(
+      this.endpoint, this.accessKeyId, this.accessKeySecret,
+      'CreateContainerGroup', params,
+    );
+    return { providerId: resp.ContainerGroupId };
+  }
+
+  /**
+   * Update an existing ECI container group via UpdateContainerGroup API.
+   * Same flat-parameter pattern as create(), but only maps fields present in the input.
+   */
+  async update(providerId: string, input: Partial<CreateContainerGroupInput>): Promise<void> {
+    const params: Record<string, string> = {
+      RegionId: input.region as string ?? this.region,
+      ContainerGroupId: providerId,
+    };
+
+    if (input.name) params.ContainerGroupName = input.name;
+    if (input.restartPolicy) params.RestartPolicy = input.restartPolicy;
+    if (input.cpu !== undefined) params.Cpu = String(input.cpu);
+    if (input.memory !== undefined) params.Memory = String(input.memory);
+
+    if (input.containers?.length) {
+      input.containers.forEach((c, i) => {
+        const idx = `Container.${i + 1}`;
+        params[`${idx}.Name`] = c.name;
+        params[`${idx}.Image`] = c.image;
+        if (c.command?.length) params[`${idx}.Command`] = c.command.join(' ');
+        if (c.args?.length) params[`${idx}.Args`] = c.args.join(' ');
+        if (c.imagePullPolicy) params[`${idx}.ImagePullPolicy`] = c.imagePullPolicy;
+        if (c.env?.length) {
+          c.env.forEach((e, j) => {
+            const eidx = `${idx}.EnvironmentVar.${j + 1}`;
+            params[`${eidx}.Key`] = e.name;
+            if (e.value !== undefined) params[`${eidx}.Value`] = e.value;
+          });
+        }
+        if (c.resources?.limits) {
+          params[`${idx}.Cpu`] = String(c.resources.limits.cpu);
+          params[`${idx}.Memory`] = String(c.resources.limits.memory);
+        }
+        if (c.ports) {
+          c.ports.forEach((p, pi) => {
+            params[`${idx}.Port.${pi + 1}.Port`] = String(p.containerPort);
+            if (p.protocol) params[`${idx}.Port.${pi + 1}.Protocol`] = p.protocol;
+          });
+        }
+      });
     }
+
+    if (input.volumes?.length) {
+      input.volumes.forEach((v, i) => {
+        const vidx = `Volume.${i + 1}`;
+        params[`${vidx}.Name`] = v.id;
+        params[`${vidx}.Type`] = v.type;
+        const volOpts = v.options as Record<string, unknown> | undefined;
+        if (volOpts?.server) {
+          params[`${vidx}.NFSVolume.Server`] = String(volOpts.server);
+          params[`${vidx}.NFSVolume.Path`] = String(volOpts.path ?? '');
+        }
+        if (volOpts?.diskId) {
+          params[`${vidx}.DiskVolume.DiskId`] = String(volOpts.diskId);
+          params[`${vidx}.DiskVolume.FsType`] = String(volOpts.fsType ?? 'ext4');
+        }
+      });
+    }
+
+    if (input.network) {
+      if (input.network.securityGroupId) params.SecurityGroupId = input.network.securityGroupId;
+      if (input.network.subnetIds?.length) params.VSwitchId = input.network.subnetIds.join(',');
+    }
+
+    if (input.providerOverrides) {
+      const raw = input.providerOverrides as Record<string, unknown>;
+      const flat = (raw['alibaba'] as Record<string, unknown> | undefined) ?? raw;
+      const ext = applyExtensionOverrides('alibaba', flat);
+      for (const [k, v] of Object.entries(ext)) {
+        params[k] = v;
+      }
+    }
+
+    await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret,
+      'UpdateContainerGroup', params);
   }
 
   async describe(input: DescribeContainerGroupsInput): Promise<DescribeContainerGroupsResult> {
@@ -451,5 +522,6 @@ export function parseContainerGroup(item: any): ContainerGroupRuntime {
       lastTimestamp: e.LastTimestamp,
     })) ?? [],
     tags: item.Tags?.map?.((t: any) => ({ key: t.Key ?? '', value: t.Value ?? '' })) ?? [],
+    ephemeralStorageGiB: item.EphemeralStorage ? Number(item.EphemeralStorage) : undefined,
   };
 }

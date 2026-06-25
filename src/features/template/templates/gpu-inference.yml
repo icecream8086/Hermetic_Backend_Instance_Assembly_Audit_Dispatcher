@@ -21,6 +21,7 @@ containers:
         cpu: 4
         memory: 8192
         gpu: 1
-network:
-  publicIp:
-    allocate: true
+extensions:
+  providerOverrides:
+    alibaba:
+      autoCreateEip: true

@@ -28,18 +28,14 @@ containers:
         port: 22
       periodSeconds: 10
       initialDelaySeconds: 5
-extensions:
-  healthMaxRetries: 3
 network:
   mode: "vpc"
-  publicIp:
-    allocate: true
-    bandwidth: 10
-  vpc:
-    securityGroupId: "sg-bp16o5urk39itwcqmdzj"
-    subnetIds:
-      - "vsw-bp1xx36ys1jou7o1bsdpp"
-      - "vsw-bp1grwzlgy2739dxnskbz"
-      - "vsw-bp1rv5m61jx4kmld0cc12"
-      - "vsw-bp1wfyusfye82wm3d3zew"
+extensions:
+  healthMaxRetries: 3
+  providerOverrides:
+    alibaba:
+      autoCreateEip: true
+      eipBandwidth: 10
+      securityGroupId: "sg-bp16o5urk39itwcqmdzj"
+      vSwitchId: "vsw-bp1xx36ys1jou7o1bsdpp,vsw-bp1grwzlgy2739dxnskbz,vsw-bp1rv5m61jx4kmld0cc12,vsw-bp1wfyusfye82wm3d3zew"
 restartPolicy: "Always"

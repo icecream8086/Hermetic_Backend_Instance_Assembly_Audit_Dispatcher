@@ -38,6 +38,7 @@ healthChecks:
         port: 9000
     periodSeconds: 5
     initialDelaySeconds: 5
-network:
-  publicIp:
-    allocate: true
+extensions:
+  providerOverrides:
+    alibaba:
+      autoCreateEip: true

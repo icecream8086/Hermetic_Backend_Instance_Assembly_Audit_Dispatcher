@@ -31,6 +31,12 @@ async function resolvePodProvider(providers: IProviderRegistry, _region?: string
   return providers.resolveGroup(instanceId as any);
 }
 
+/** Find a v2 sandbox by providerId. Returns the sandbox or null. */
+async function findV2ByProviderId(svc: ISandboxService, providerId: string): Promise<{ id: any } | null> {
+  const all = await (svc.list?.(undefined, 1000) ?? Promise.resolve({ items: [] }));
+  return all.items.find((s: any) => s.providerId === providerId && s.config?.apiVersion === 'hbi-aad/v2') ?? null;
+}
+
 export function createSandboxRouter(
   svc: ISandboxService,
   providers: IProviderRegistry,
@@ -61,31 +67,41 @@ export function createSandboxRouter(
     }
   });
 
-  // GET /pod — list all pods (picks first online group-capable instance)
+  // GET /pod — list all container groups (v2 sandboxes with apiVersion=hbi-aad/v2)
+  // Falls back to sandbox list when no dedicated group provider is registered.
   router.get('/pod', async (c) => {
     { const r = await requirePerm(c, permissionChecker, 'read', 'sandbox'); if (r) return r; }
     try {
       const groupProvider = await resolvePodProvider(providers);
-      if (!groupProvider) {
-        return c.json(fail('NOT_CONFIGURED', 'No container group provider available. Register an instance with group capability.'), 501);
+      if (groupProvider) {
+        const result = await groupProvider.describeGroups({ region: 'local' as any });
+        return c.json(ok(result));
       }
-      const result = await groupProvider.describeGroups({ region: 'local' as any });
-      return c.json(ok(result));
+      // Fallback: v2 sandboxes managed through lifecycle
+      const result = await svc.list?.(undefined, 100) ?? { items: [] };
+      const v2Items = result.items.filter(s => (s.config as any).apiVersion === 'hbi-aad/v2');
+      return c.json(ok({ items: v2Items }));
     } catch (e: any) {
       return c.json(fail('POD_LIST_FAILED', e.message), 500);
     }
   });
 
-  // GET /pod/:providerId — get a single pod's status
+  // GET /pod/:providerId — get a single pod by providerId (v2 sandbox)
   router.get('/pod/:providerId', async (c) => {
     { const r = await requirePerm(c, permissionChecker, 'read', 'sandbox'); if (r) return r; }
     try {
       const groupProvider = await resolvePodProvider(providers);
-      if (!groupProvider) return c.json(fail('NOT_CONFIGURED', 'No container group provider available'), 501);
       const providerId = c.req.param('providerId');
-      const status = await groupProvider.getGroupStatus(providerId);
-      if (!status) return c.json(fail('POD_NOT_FOUND', 'Pod not found'), 404);
-      return c.json(ok(status));
+      if (groupProvider) {
+        const status = await groupProvider.getGroupStatus(providerId);
+        if (!status) return c.json(fail('POD_NOT_FOUND', 'Pod not found'), 404);
+        return c.json(ok(status));
+      }
+      // Fallback: search v2 sandbox by providerId
+      const all = await svc.list?.(undefined, 1000) ?? { items: [] };
+      const match = all.items.find(s => s.providerId === providerId && (s.config as any).apiVersion === 'hbi-aad/v2');
+      if (!match) return c.json(fail('POD_NOT_FOUND', 'Pod not found'), 404);
+      return c.json(ok(match));
     } catch (e: any) {
       return c.json(fail('POD_GET_FAILED', e.message), 500);
     }
@@ -96,9 +112,15 @@ export function createSandboxRouter(
     { const r = await requirePerm(c, permissionChecker, 'update', 'sandbox'); if (r) return r; }
     try {
       const groupProvider = await resolvePodProvider(providers);
-      if (!groupProvider) return c.json(fail('NOT_CONFIGURED', 'No container group provider available'), 501);
       const providerId = c.req.param('providerId');
-      await groupProvider.stopGroup(providerId);
+      if (groupProvider) {
+        await groupProvider.stopGroup(providerId);
+        return c.json(ok(null));
+      }
+      // Fallback: stop v2 sandbox by providerId
+      const sandbox = await findV2ByProviderId(svc, providerId);
+      if (!sandbox) return c.json(fail('POD_NOT_FOUND', 'Pod not found'), 404);
+      await svc.stop(sandbox.id);
       return c.json(ok(null));
     } catch (e: any) {
       return c.json(fail('POD_STOP_FAILED', e.message), 500);
@@ -110,12 +132,59 @@ export function createSandboxRouter(
     { const r = await requirePerm(c, permissionChecker, 'delete', 'sandbox'); if (r) return r; }
     try {
       const groupProvider = await resolvePodProvider(providers);
-      if (!groupProvider) return c.json(fail('NOT_CONFIGURED', 'No container group provider available'), 501);
       const providerId = c.req.param('providerId');
-      await groupProvider.deleteGroup(providerId);
+      if (groupProvider) {
+        await groupProvider.deleteGroup(providerId);
+        return c.json(ok(null));
+      }
+      const sandbox = await findV2ByProviderId(svc, providerId);
+      if (!sandbox) return c.json(fail('POD_NOT_FOUND', 'Pod not found'), 404);
+      await svc.terminate(sandbox.id);
       return c.json(ok(null));
     } catch (e: any) {
       return c.json(fail('POD_DELETE_FAILED', e.message), 500);
+    }
+  });
+
+  // POST /pod/:providerId/sync — sync pod status from provider
+  router.post('/pod/:providerId/sync', async (c) => {
+    { const r = await requirePerm(c, permissionChecker, 'update', 'sandbox'); if (r) return r; }
+    try {
+      const providerId = c.req.param('providerId');
+      const sandbox = await findV2ByProviderId(svc, providerId);
+      if (!sandbox) return c.json(fail('POD_NOT_FOUND', 'Pod not found'), 404);
+      const runtime = await svc.syncRuntime(sandbox.id);
+      return c.json(ok(runtime));
+    } catch (e: any) {
+      return c.json(fail('SYNC_FAILED', e.message), 502);
+    }
+  });
+
+  // GET /pod/:providerId/health — container health status
+  router.get('/pod/:providerId/health', async (c) => {
+    { const r = await requirePerm(c, permissionChecker, 'read', 'sandbox'); if (r) return r; }
+    try {
+      const providerId = c.req.param('providerId');
+      const sandbox = await findV2ByProviderId(svc, providerId);
+      if (!sandbox) return c.json(fail('POD_NOT_FOUND', 'Pod not found'), 404);
+      const health = await svc.getHealth(sandbox.id);
+      return c.json(ok(health));
+    } catch (e: any) {
+      return c.json(fail('HEALTH_FAILED', e.message), 500);
+    }
+  });
+
+  // POST /pod/:providerId/restart — restart a running pod
+  router.post('/pod/:providerId/restart', async (c) => {
+    { const r = await requirePerm(c, permissionChecker, 'update', 'sandbox'); if (r) return r; }
+    try {
+      const providerId = c.req.param('providerId');
+      const sandbox = await findV2ByProviderId(svc, providerId);
+      if (!sandbox) return c.json(fail('POD_NOT_FOUND', 'Pod not found'), 404);
+      const result = await svc.restart(sandbox.id);
+      return c.json(ok(result));
+    } catch (e: any) {
+      return c.json(fail('RESTART_FAILED', e.message), 409);
     }
   });
 
@@ -123,9 +192,16 @@ export function createSandboxRouter(
   router.get('/', async (c) => {
     { const r = await requirePerm(c, permissionChecker, 'read', 'sandbox'); if (r) return r; }
     const status = c.req.query('status') as any || undefined;
+    const apiVer = c.req.query('apiVersion');
     const limit = parseInt(c.req.query('limit') ?? '50');
     const cursor = c.req.query('cursor');
-    const result = await svc.list?.(status, limit, cursor) ?? { items: [] };
+    let result = await svc.list?.(status, limit, cursor) ?? { items: [] };
+    if (apiVer) {
+      result = { ...result, items: result.items.filter(s => (s.config as any).apiVersion === apiVer) };
+    } else {
+      // Default: exclude v2 container groups (show v1 only)
+      result = { ...result, items: result.items.filter(s => (s.config as any).apiVersion !== 'hbi-aad/v2') };
+    }
     return c.json(ok(result));
   });
 
@@ -211,6 +287,37 @@ export function createSandboxRouter(
     }
   });
 
+  // POST /:id/restart — restart a running sandbox (ECI: RestartContainerGroup)
+  router.post('/:id/restart', async (c) => {
+    const id = createSandboxId(c.req.param('id'));
+    const sandbox = await svc.getById(id);
+    const ownerId = sandbox?.config?.creatorId;
+    { const r = await requirePerm(c, permissionChecker, 'update', 'sandbox', ownerId); if (r) return r; }
+    try {
+      const result = await svc.restart(id);
+      return c.json(ok(result));
+    } catch (e: any) {
+      const { code, status } = errorStatus(e, 'RESTART_FAILED', 409);
+      return c.json(fail(code, e.message), status);
+    }
+  });
+
+  // PATCH /:id — update a running sandbox's specification (ECI: UpdateContainerGroup)
+  router.patch('/:id', async (c) => {
+    const id = createSandboxId(c.req.param('id'));
+    const sandbox = await svc.getById(id);
+    const ownerId = sandbox?.config?.creatorId;
+    { const r = await requirePerm(c, permissionChecker, 'update', 'sandbox', ownerId); if (r) return r; }
+    try {
+      const body = await c.req.json<Partial<import('./types.ts').CreateSandboxInput>>();
+      const result = await svc.update(id, body);
+      return c.json(ok(result));
+    } catch (e: any) {
+      const { code, status } = errorStatus(e, 'UPDATE_FAILED', 409);
+      return c.json(fail(code, e.message), status);
+    }
+  });
+
   return router;
 }
 
@@ -227,5 +334,7 @@ export const sandboxRouteMeta: RouteMeta[] = [
   { method: 'DELETE', path: '/:id', description: '终止并删除沙箱', responseDescription: '{ ok: true }' },
   { method: 'POST', path: '/:id/sync', description: '从 provider 同步最新运行状态', responseDescription: 'ContainerGroupRuntime' },
   { method: 'GET', path: '/:id/health', description: '获取容器健康状态', responseDescription: 'ContainerHealth[]' },
+  { method: 'POST', path: '/:id/restart', description: '重启运行中的沙箱（ECI: RestartContainerGroup）', responseDescription: 'Sandbox' },
+  { method: 'PATCH', path: '/:id', description: '更新运行中沙箱的规格（ECI: UpdateContainerGroup）', requestBody: { resourceSpec: { cpu: 2, memory: 4096 } }, responseDescription: 'Sandbox' },
   { method: 'GET', path: '/:id/logs', description: '实时容器日志流（WebSocket）— 升级为 WebSocket 后持续推送 stdout/stderr。支持标准日志参数: tail=N（最近 N 行后再 follow）, since=ts（UNIX 时间戳后的日志）, follow=1（持续推送，默认）。Podman 走 HTTP streaming，ECI 走 2s 轮询。容器停止时推 {"event":"container_stopped"}，删除时推 {"event":"container_deleted"} 后关闭连接。', responseDescription: 'WebSocket stream — 日志行文本 / JSON 事件' },
 ];

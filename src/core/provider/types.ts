@@ -228,6 +228,9 @@ export interface ContainerGroupRuntime {
   readonly volumes: readonly VolumeRuntimeInfo[];
   readonly events: readonly ContainerGroupRuntimeEvent[];
   readonly tags: readonly { key: string; value: string }[];
+  /** Ephemeral storage allocated by the cloud provider (GiB).
+   *  ECI provides 30 GiB by default at no extra cost. */
+  readonly ephemeralStorageGiB?: number | undefined;
 }
 
 // ─── MetricSnapshot (moved from features/sandbox/types.ts to fix dep direction) ───

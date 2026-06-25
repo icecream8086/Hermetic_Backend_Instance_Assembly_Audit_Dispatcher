@@ -32,6 +32,3 @@ healthChecks:
         port: 80
     periodSeconds: 10
     initialDelaySeconds: 5
-network:
-  publicIp:
-    allocate: false

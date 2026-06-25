@@ -407,7 +407,7 @@ describe('BUG 3: Health check error logging in catch block', () => {
     // BUG 3: the old code had `catch { /* retry next tick */ }` — no logging.
     // After fix: the error should be logged so operators can diagnose.
     expect(consoleSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Scheduling→Running auto-promotion failed'),
+      expect.stringContaining('[health-check] provider check failed'),
     );
 
     // Sandbox must NOT be GC'd (auto-promotion failure ≠ delete)
@@ -537,9 +537,10 @@ describe('BUG 5: Census of remaining silent catch sites', () => {
     // Read a representative file and verify the pattern is detectable
     const sandboxSvc = readFileSync(resolve(SRC, 'features/sandbox/sandbox.service.ts'), 'utf-8');
     const svcCatches = countSilentCatchesIn(sandboxSvc);
-    // sandbox.service.ts should have 6 silent catches:
-    //   line 84 (.catch), line 237 (.catch), line 313, 320, 337, 420
-    expect(svcCatches).toBe(6);
+    // sandbox.service.ts should have 7 silent catches:
+    //   line 84 (.catch), line 237 (.catch), line 313, 320, 337,
+    //   line 370 (terminate idempotent retry catch), line 420
+    expect(svcCatches).toBe(7);
 
     // health-check.ts should have 3:
     //   line 204 (catch), line 228 (catch), line 297 (catch)
@@ -548,16 +549,16 @@ describe('BUG 5: Census of remaining silent catch sites', () => {
     expect(hcCatches).toBe(3);
 
     // Verify that the patched catch blocks ARE logging:
-    // health-check.ts line 110 now has `catch (e) { console.error(...) }` — should NOT match silent pattern
-    expect(hcContent).toContain('Scheduling→Running auto-promotion failed');
+    // health-check.ts transient-state handler has `catch (e) { console.error(...) }` — should NOT match silent pattern
+    expect(hcContent).toContain('[health-check] provider check failed');
   });
 
   it('catches that log or rethrow are NOT counted as silent', () => {
     // The fixed catch blocks explicitly log, so they should not match the silent pattern.
     const hcContent = readFileSync(resolve(SRC, 'core/events/health-check.ts'), 'utf-8');
 
-    // Line 110 catch should have console.error (logged, not silent)
-    const hasLoggedCatch = hcContent.includes('Scheduling→Running auto-promotion failed');
+    // Transient-state catch should have console.error (logged, not silent)
+    const hasLoggedCatch = hcContent.includes('[health-check] provider check failed');
     expect(hasLoggedCatch).toBe(true);
 
     // Line 190 (instance heartbeat) should also log

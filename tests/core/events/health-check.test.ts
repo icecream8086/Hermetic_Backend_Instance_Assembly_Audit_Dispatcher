@@ -149,12 +149,12 @@ describe('health check (white-box)', () => {
       expect(getStatusCalled).toBe(false);
     });
 
-    it('skips non-Running non-Stopped sandboxes (Pending/Scheduling/Failed/Terminated)', async () => {
+    it('checks provider liveness for transient states (Pending/Scheduling/Restarting/Updating)', async () => {
       let getStatusCalled = false;
       const deps = makeDeps({
         providers: {
           resolveContainer: async () => ({
-            getStatus: async () => { getStatusCalled = true; return { containers: [] } as any; },
+            getStatus: async () => { getStatusCalled = true; return { containers: [{ alive: true }] } as any; },
             delete: async () => {},
           } as any),
         },
@@ -163,7 +163,8 @@ describe('health check (white-box)', () => {
       await deps.stores.atomic.set('sandbox:sb_pending', { status: SandboxStatus.Pending, providerId: 'p1', config: { region: 'local', instanceId: 'inst_test' }, name: 'p', containers: [], createdAt: 1, updatedAt: Date.now() }, null);
       registerHealthCheck(deps);
       await triggerTick(deps);
-      expect(getStatusCalled).toBe(false);
+      // Pending is now checked for provider liveness (provider-gone detection)
+      expect(getStatusCalled).toBe(true);
     });
   });
 

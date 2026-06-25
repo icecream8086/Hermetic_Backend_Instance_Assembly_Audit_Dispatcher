@@ -141,13 +141,14 @@ function buildProbeMap(healthChecks: readonly HealthCheckDef[] | undefined): Map
 
 function mapNetwork(network: NetworkSpec | undefined) {
   if (!network) return { allocatePublicIp: false };
+  // allocatePublicIp: NEVER from template network.publicIp — EIP costs money,
+  // must come through extensions.providerOverrides.alibaba.autoCreateEip.
+  // VPC fields (securityGroupId, subnetIds) are cloud-neutral and pass through.
   return {
-    allocatePublicIp: network.publicIp?.allocate ?? false,
-    ...(network.publicIp?.bandwidth !== undefined ? { publicIpBandwidth: network.publicIp.bandwidth } : {}),
+    allocatePublicIp: false,
     ...(network.ipAddress ? { ipAddress: network.ipAddress } : {}),
     ...(network.vpc?.securityGroupId ? { securityGroupId: network.vpc.securityGroupId } : {}),
     ...(network.vpc?.subnetIds ? { subnetIds: [...network.vpc.subnetIds] } : {}),
-    ...(network.vpc?.instanceId ? { instanceId: network.vpc.instanceId } : {}),
   };
 }
 

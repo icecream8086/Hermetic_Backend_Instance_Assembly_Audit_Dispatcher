@@ -158,6 +158,29 @@ registerExtensionSchema({
     },
 
     // ═══════════════════════════════════════════════════════════
+    // Network — VPC / security group / subnet (moved from NetworkSpec)
+    // ═══════════════════════════════════════════════════════════
+
+    {
+      key: 'securityGroupId',
+      type: 'string',
+      label: 'Security Group ID',
+      description: 'VPC security group ID (Alibaba Cloud sg-xxx).',
+      eciParam: 'SecurityGroupId',
+      scope: 'network',
+      category: 'network',
+    },
+    {
+      key: 'vSwitchId',
+      type: 'string',
+      label: 'VSwitch IDs (comma-separated)',
+      description: 'One or more VSwitch IDs for multi-AZ scheduling, comma-separated.',
+      eciParam: 'VSwitchId',
+      scope: 'network',
+      category: 'network',
+    },
+
+    // ═══════════════════════════════════════════════════════════
     // Network — bandwidth & fixed IP
     // ═══════════════════════════════════════════════════════════
 

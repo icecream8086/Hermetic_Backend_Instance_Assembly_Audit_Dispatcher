@@ -29,11 +29,9 @@ containers:
         port: 80
         path: "/health"
       periodSeconds: 5
-    providerOverrides:
+extensions:
+  providerOverrides:
+    alibaba:
+      autoCreateEip: true
       eipBandwidth: 50
-network:
-  allocatePublicIp: true
-  publicIpBandwidth: 50
-providerOverrides:
-  alibaba:
-    spotStrategy: "SpotAsPriceGo"
+      spotStrategy: "SpotAsPriceGo"

@@ -38,9 +38,6 @@ extensions:
       autoMatchImageCache: true
 network:
   mode: "vpc"
-  publicIp:
-    allocate: true
-    bandwidth: 19
   vpc:
     securityGroupId: "sg-bp16o5urk39itwcqmdzj"
     subnetIds:

@@ -12,7 +12,7 @@ import { applyTemplate } from './applicator.ts';
 import { SandboxService } from '../sandbox/sandbox.service.ts';
 import { ConsoleLogger } from '../../core/audit/console-logger.ts';
 import { SandboxStatus } from '../sandbox/types.ts';
-import { PodResolver } from '../sandbox/assembly/pod-resolver.ts';
+import { podSpecToSandboxInput } from '../sandbox/sandbox.service.ts';
 import type { PodSpec } from '../sandbox/assembly/types.ts';
 import { UserRole } from '../users/types.ts';
 import { createAtomicNetworkResolver } from '../../core/network/resolver.ts';
@@ -207,12 +207,18 @@ function mergeHealthChecks(parent: any[] | undefined, child: any[] | undefined):
 }
 
 async function resolveTemplate(atomic: IAtomicStore, id: string): Promise<SandboxTemplate> {
+  const result = await resolveTemplateWithChain(atomic, id);
+  return result.template;
+}
+
+async function resolveTemplateWithChain(atomic: IAtomicStore, id: string): Promise<{ template: SandboxTemplate; chain: readonly string[] }> {
   const allTemplates = await listAllLive(atomic);
   const tpl = allTemplates.find(t => t.id === id);
   if (!tpl) throw Object.assign(new Error('Template not found'), { status: 404 });
 
   // chain = [parent, child, ...] (root first — child overrides parent)
   const chain = resolveDag(allTemplates, [id]).reverse();
+  const chainIds = chain.map(t => t.id);
   let mergedSpec: any = {};
   for (const t of chain) {
     mergedSpec = deepMerge(mergedSpec, {
@@ -223,7 +229,7 @@ async function resolveTemplate(atomic: IAtomicStore, id: string): Promise<Sandbo
       ...(t.podSpec ? { podSpec: t.podSpec } : {}),
     });
   }
-  return { ...tpl, ...mergedSpec } as SandboxTemplate;
+  return { template: { ...tpl, ...mergedSpec } as SandboxTemplate, chain: chainIds };
 }
 
 async function listStored(atomic: IAtomicStore): Promise<SandboxTemplate[]> {
@@ -253,8 +259,10 @@ const LIVE_STATUSES: string[] = [
   SandboxStatus.Pending,
   SandboxStatus.Scheduling,
   SandboxStatus.Running,
-  SandboxStatus.Succeeded,     // Stopped manually, can be restarted
+  SandboxStatus.Succeeded,     // Soft terminal — can be restarted (GHA RerunRun)
   SandboxStatus.Terminating,   // Still has provider resources
+  SandboxStatus.Restarting,    // Cloud resources active during restart
+  SandboxStatus.Updating,      // Cloud resources active during update
 ];
 
 /** Count running sandboxes for a given template ID (matched via templateRef). */
@@ -453,10 +461,12 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
     const page = parseInt(c.req.query('page') ?? '') || 1;
     const limit = parseInt(c.req.query('limit') ?? '') || 50;
     const name = c.req.query('name');
+    const kind = c.req.query('kind');
 
     let visible = await listAllLive(atomic);
     if (user) visible = visible.filter(t => canAccessTemplate(t, user));
     if (name) visible = visible.filter(t => t.name.toLowerCase().includes(name.toLowerCase()));
+    if (kind) visible = visible.filter(t => t.kind === kind);
 
     const total = visible.length;
     const start = (page - 1) * limit;
@@ -475,15 +485,15 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
     return c.json(ok(resolved.template));
   });
 
-  // GET /:id/resolved — get a template with DAG-inherited spec merged
+  // GET /:id/resolved — get a template with DAG-inherited spec merged + dependency chain
   router.get('/:id/resolved', async (c) => {
     try {
-      const resolved = await resolveTemplate(atomic, c.req.param('id'));
+      const { template: resolved, chain } = await resolveTemplateWithChain(atomic, c.req.param('id'));
       const user = (c as any).var?.currentUser as { id: string; role?: string } | undefined;
       if (!canAccessTemplate(resolved, user)) {
         return c.json(fail('TEMPLATE_NOT_FOUND', 'Template not found'), 404);
       }
-      return c.json(ok(resolved));
+      return c.json(ok({ ...resolved, _chain: chain }));
     } catch (e: any) {
       return c.json(fail(e.status === 404 ? 'TEMPLATE_NOT_FOUND' : 'RESOLVE_ERROR', e.message), e.status ?? 500);
     }
@@ -506,19 +516,45 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
       await claimInstanceSlot(atomic, resolved, user?.id ?? 'anonymous');
       await claimResourceBinding(atomic, resolved);
 
-      // v2: ContainerGroup → PodResolver
+      // v2: ContainerGroup — bridge to sandbox lifecycle via PodSpec → CreateSandboxInput
       if (resolved.kind === 'ContainerGroup' && resolved.podSpec) {
-        const groupProvider = providers?.groupContainer;
-        if (!groupProvider) return c.json(fail('NOT_CONFIGURED', 'Container group provider not available'), 501);
-        const resolver = new PodResolver(groupProvider);
-        const result = await resolver.apply(resolved.podSpec as PodSpec);
+        const baseInput = podSpecToSandboxInput(resolved.podSpec as PodSpec);
+        const input = { ...baseInput, apiVersion: 'hbi-aad/v2', templateRef: resolved.id, ...(user?.id ? { creatorId: user.id } : {}) };
+
+        // Resolve provider same as v1
+        const explicitInstanceId = body.instanceId ?? (resolved.podSpec as any).instanceId as (string | undefined);
+        const targetRegion = (body.region ?? (resolved.podSpec as any).region ?? baseInput.region) as (string | undefined);
+        let svc = sandboxService;
+        let resolvedInstanceId: string | undefined;
+
+        if (explicitInstanceId && providers?.resolveContainer) {
+          const instProvider = await providers.resolveContainer(explicitInstanceId as any);
+          svc = new SandboxService(atomic, new ConsoleLogger(), instProvider, providers, undefined, undefined, createAtomicNetworkResolver(atomic), new InstanceService(atomic));
+          resolvedInstanceId = explicitInstanceId as string;
+        } else if (providers && targetRegion) {
+          const instSvc = new InstanceService(atomic);
+          const allInst = await instSvc.resolveByCapability('container');
+          const match = allInst.find(i => i.status === 'online' && i.region === targetRegion);
+          if (match) {
+            const instProvider = await providers.resolveContainer(match.id as any);
+            svc = new SandboxService(atomic, new ConsoleLogger(), instProvider, providers, undefined, undefined, createAtomicNetworkResolver(atomic), instSvc);
+            resolvedInstanceId = match.id as string;
+          }
+        }
+
+        const finalInput = resolvedInstanceId
+          ? { ...input, instanceId: resolvedInstanceId as any }
+          : input;
+
+        if (!svc) return c.json(fail('SERVICE_UNAVAILABLE', 'Sandbox service not available'), 503);
+        const sandbox = await svc.provision(finalInput);
         c.var.audit?.write({
           level: KernLevel.NOTICE,
           facility: 'template',
-          message: `Template applied (v2 pod) — ${resolved.name}`,
-          metadata: { eventType: 'template.applied.v2', templateId: resolved.id, actorId: user?.id },
+          message: `Template applied (v2) — ${resolved.name} → sandbox ${sandbox.id}`,
+          metadata: { eventType: 'template.applied.v2', templateId: resolved.id, sandboxId: sandbox.id, actorId: user?.id },
         });
-        return c.json(ok(result), 201);
+        return c.json(ok(sandbox), 201);
       }
 
       // v1: single-container path — resolve instance dynamically

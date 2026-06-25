@@ -6,12 +6,14 @@ apiVersion: "hbi-aad/v1"
 kind: "Container"
 provider: "alibaba"
 region: "cn-hangzhou"
-network:
-  securityGroupId: "sg-bp1axxx"
-  subnetIds:
-    - "vsw-bp1xxx"
-  allocatePublicIp: false
 restartPolicy: "Always"
-providerOverrides:
-  alibaba:
-    instanceType: "ecs.g7.xlarge"
+network:
+  mode: "vpc"
+  vpc:
+    securityGroupId: "sg-bp1axxx"
+    subnetIds:
+      - "vsw-bp1xxx"
+extensions:
+  providerOverrides:
+    alibaba:
+      instanceType: "ecs.g7.xlarge"

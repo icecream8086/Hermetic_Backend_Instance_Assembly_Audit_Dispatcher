@@ -1,0 +1,37 @@
+# category: experiment
+# tags: lifecycle, producer-consumer, busybox, public-image, v2
+name: "lifecycle-busybox"
+description: "全生命周期验证 (busybox) — 纯公开镜像，无需推送，开箱即用"
+apiVersion: "hbi-aad/v2"
+kind: "ContainerGroup"
+region: "cn-hangzhou"
+podSpec:
+  name: "lifecycle-bb"
+  region: "cn-hangzhou"
+  resources:
+    cpu: "0.5"
+    memory: "256Mi"
+  services:
+    consumer:
+      image: "busybox:latest"
+      command:
+        - "sh"
+        - "-c"
+        - "nc -l -p 9999 | while read line; do echo \"$line\" >> /tmp/received.txt; done"
+      ports:
+        - containerPort: 9999
+          protocol: "TCP"
+      resources:
+        cpu: "0.25"
+        memory: "128Mi"
+    producer:
+      image: "busybox:latest"
+      command:
+        - "sh"
+        - "-c"
+        - "SEQ=0; while true; do SEQ=$((SEQ+1)); echo \"{\\\"seq\\\":$SEQ,\\\"ts\\\":$(date +%s)}\" | nc -w 1 localhost 9999; echo \"[producer] seq=$SEQ\"; sleep 1; done"
+      dependsOn:
+        - "consumer"
+      resources:
+        cpu: "0.25"
+        memory: "128Mi"

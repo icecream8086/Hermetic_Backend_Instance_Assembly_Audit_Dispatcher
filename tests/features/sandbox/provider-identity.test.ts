@@ -207,7 +207,7 @@ describe('SandboxService error handling consistency', () => {
     expect(result).toBeNull();
   });
 
-  it('terminate completes local cleanup even when provider delete fails', async () => {
+  it('terminate keeps sandbox in Terminating when provider delete fails (retry via GC)', async () => {
     const stub = new StubContainerProvider();
     const failingProvider = new StubContainerProvider();
     failingProvider.delete = async () => { throw new Error('ECI unavailable'); };
@@ -217,6 +217,7 @@ describe('SandboxService error handling consistency', () => {
     await svc.terminate(sandbox.id, 'actor1');
 
     const entry = await store.get<Sandbox>('sandbox:' + sandbox.id);
-    expect(entry!.value.status).toBe(SandboxStatus.Deleted);
+    // Provider delete failed — sandbox stays in Terminating for GC retry
+    expect(entry!.value.status).toBe(SandboxStatus.Terminating);
   });
 });

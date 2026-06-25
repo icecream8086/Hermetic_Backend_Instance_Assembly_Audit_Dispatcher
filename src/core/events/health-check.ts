@@ -86,30 +86,94 @@ export function registerHealthCheck(deps: HealthCheckDeps): void {
             continue;
           }
 
-          // Scheduling → check if provider has transitioned to Running (asyncInit providers like ECI)
-          if (entry.value.status === SandboxStatus.Scheduling) {
+          // ── Hard terminal states (no cloud resources) ──
+          // ScheduleFailed and Expired have no provider resources (never
+          // created, or already reclaimed).  Auto-clean after a long window
+          // to prevent index bloat while preserving audit metadata.
+          if (
+            entry.value.status === SandboxStatus.ScheduleFailed ||
+            entry.value.status === SandboxStatus.Expired
+          ) {
+            const TERMINAL_CLEANUP_MS = 24 * 60 * 60 * 1000; // 24h — preserve for audit
+            const duration = Date.now() - entry.value.updatedAt;
+            if (duration > TERMINAL_CLEANUP_MS) {
+              await dispatchGc(stores.atomic, queueProducer, providers, audit, {
+                sandboxId: sid, reason: 'expired-gc',
+                providerId: entry.value.providerId ?? sid,
+                region: entry.value.config.region,
+                ...(instanceId ? { instanceId } : {}),
+                containerCount: entry.value.containers.length,
+                sandboxName: entry.value.name, createdAt: entry.value.createdAt,
+              });
+            }
+            continue;
+          }
+
+          // ── Transient states with cloud resources ──
+          // Scheduling, Pending, Restarting, Updating — the sandbox has a
+          // provider resource that may disappear externally (user deletes ECI
+          // from Alibaba console).  Check provider liveness + timeout fallback
+          // so we don't leak orphaned sandbox records.
+          if (
+            entry.value.status === SandboxStatus.Scheduling ||
+            entry.value.status === SandboxStatus.Pending ||
+            entry.value.status === SandboxStatus.Restarting ||
+            entry.value.status === SandboxStatus.Updating
+          ) {
+            const TRANSIENT_TIMEOUT_MS = 10 * 60 * 1000; // 10 min — generous for ECI scheduling + image pull
+            const duration = Date.now() - entry.value.updatedAt;
             const resolvedInstanceId = instanceId ?? (entry.value.config as any).providerIdentity?.instanceId;
-            if (!resolvedInstanceId) continue;
-            try {
-              const p = await providers.resolveContainer?.(resolvedInstanceId as any);
-              if (!p?.getStatus) continue;
-              const rt = await p.getStatus(entry.value.providerId ?? sid);
-              if (rt?.status === 'Running') {
-                const latest = await stores.atomic.get<Sandbox>(`sandbox:${sid}`);
-                if (latest && latest.value.status === SandboxStatus.Scheduling) {
-                  await stores.atomic.set(`sandbox:${sid}`, {
-                    ...latest.value,
-                    status: SandboxStatus.Running,
-                    network: runtimeToNetwork(rt.network, rt.associatedResources),
-                    containers: runtimeToContainers(rt),
-                    events: runtimeToEvents(rt),
-                    updatedAt: Date.now(),
-                  }, latest.version);
+
+            // Try provider status check (only if we have instance routing info)
+            if (resolvedInstanceId) {
+              try {
+                const p = await providers.resolveContainer?.(resolvedInstanceId as any);
+                if (p?.getStatus) {
+                  const rt = await p.getStatus(entry.value.providerId ?? sid);
+                  if (!rt) {
+                    // Provider resource is gone — cloud resource deleted externally
+                    await dispatchGc(stores.atomic, queueProducer, providers, audit, {
+                      sandboxId: sid, reason: 'provider-gone',
+                      providerId: entry.value.providerId ?? sid,
+                      region: entry.value.config.region,
+                      ...(instanceId ? { instanceId } : {}),
+                      containerCount: entry.value.containers.length,
+                      sandboxName: entry.value.name, createdAt: entry.value.createdAt,
+                    });
+                    continue;
+                  }
+                  // Scheduling auto-promotion: provider says Running → promote locally
+                  if (entry.value.status === SandboxStatus.Scheduling && rt.status === 'Running') {
+                    const latest = await stores.atomic.get<Sandbox>(`sandbox:${sid}`);
+                    if (latest && latest.value.status === SandboxStatus.Scheduling) {
+                      await stores.atomic.set(`sandbox:${sid}`, {
+                        ...latest.value,
+                        status: SandboxStatus.Running,
+                        network: runtimeToNetwork(rt.network, rt.associatedResources),
+                        containers: runtimeToContainers(rt),
+                        events: runtimeToEvents(rt),
+                        updatedAt: Date.now(),
+                      }, latest.version);
+                    }
+                    continue;
+                  }
                 }
+              } catch (e) {
+                console.error(`[health-check] provider check failed for ${sid} (${entry.value.status}): ${e instanceof Error ? e.message : String(e)}`);
               }
-            } catch (e) {
-              // Log the error so asyncInit providers failing to resolve are debuggable
-              console.error(`[health-check] Scheduling→Running auto-promotion failed for ${sid}: ${e instanceof Error ? e.message : String(e)}`);
+            }
+
+            // Timeout fallback — if we can't reach the provider or it's stuck,
+            // GC after the timeout window to prevent permanent orphans.
+            if (duration > TRANSIENT_TIMEOUT_MS) {
+              await dispatchGc(stores.atomic, queueProducer, providers, audit, {
+                sandboxId: sid, reason: 'stuck-gc',
+                providerId: entry.value.providerId ?? sid,
+                region: entry.value.config.region,
+                ...(instanceId ? { instanceId } : {}),
+                containerCount: entry.value.containers.length,
+                sandboxName: entry.value.name, createdAt: entry.value.createdAt,
+              });
             }
             continue;
           }
