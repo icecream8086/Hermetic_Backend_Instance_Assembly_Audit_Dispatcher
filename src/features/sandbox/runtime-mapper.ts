@@ -5,6 +5,7 @@
 import type { ContainerGroupRuntime, OciContainerStatus } from '../../core/provider/types.ts';
 import type { NetworkInfo, ContainerRuntime, ContainerEvent } from './types.ts';
 import { ContainerStatus } from './types.ts';
+import { createVolumeId } from './types.ts';
 
 export function eipFromResources(
   resources: ContainerGroupRuntime['associatedResources'],
@@ -52,14 +53,19 @@ export function runtimeToContainers(r: ContainerGroupRuntime): ContainerRuntime[
       ready: c.health.status === 'healthy' || (c.health.status === 'none' && c.status === 'running'),
       restartCount: 0,
       ...(c.startedAt ? { startTime: c.startedAt } : {}),
+      ...(c.finishedAt ? { finishedTime: c.finishedAt } : {}),
+      ...(c.exitCode !== undefined ? { exitCode: c.exitCode } : {}),
     },
     volumeMounts: c.mounts.map(m => ({
-      volumeId: undefined as never,
+      volumeId: createVolumeId('unknown'), // provider mounts don't reference our internal volume IDs
       mountPath: m.destination,
-      readOnly: false,
-      ...(m.options?.includes('ro') ? { readOnly: true } : {}),
+      readOnly: m.options?.includes('ro') ?? false,
     })),
-    health: { status: c.health.status, lastCheckedAt: c.health.lastCheckedAt, message: c.health.message },
+    health: {
+      status: c.health.status,
+      ...(c.health.lastCheckedAt !== undefined ? { lastCheckedAt: c.health.lastCheckedAt } : {}),
+      ...(c.health.message !== undefined ? { message: c.health.message } : {}),
+    },
   }));
 }
 

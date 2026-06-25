@@ -20,10 +20,10 @@ import type {
   ContainerGroupStatus,
 } from '../../core/provider/types.ts';
 import { rpcCall } from './eci-signer.ts';
-import { createRegionId, createZoneId } from '../../core/region/types.ts';
+import { createRegionId } from '../../core/region/types.ts';
 import { AppError } from '../../core/types.ts';
-import { applyExtensionOverrides } from '../../core/provider/extension-schema.ts';
 import './eci-schema.ts'; // register Alibaba ECI extension fields
+import { buildCreateParams, parseContainerGroup } from './eci-codec.ts';
 
 export class AlibabaEciContainerProvider implements IContainerProvider {
   readonly lifecycle: ContainerLifecycle = { stopIsDelete: true, startable: false, healthProbes: false, asyncInit: true };
@@ -46,161 +46,7 @@ export class AlibabaEciContainerProvider implements IContainerProvider {
    * instance may still be Pending/Scheduling.  Call describe() to poll.
    */
   async create(input: CreateContainerGroupInput): Promise<{ providerId: string }> {
-    const params: Record<string, string> = {
-      RegionId: input.region,
-      ContainerGroupName: input.name,
-      ...(input.zoneId ? { ZoneId: input.zoneId } : {}),
-      RestartPolicy: input.restartPolicy,
-      Cpu: String(input.cpu),
-      Memory: String(input.memory),
-      ...(input.gpu && input.gpu > 0 ? {
-        GpuSpecs: JSON.stringify([{ Count: input.gpu, Type: input.gpuType ?? 'nvidia.com/gpu' }]),
-      } : {}),
-    };
-
-    // Spot strategy is now handled via providerOverrides.alibaba + extension schema.
-    // applyExtensionOverrides maps spotStrategy → SpotStrategy automatically.
-
-    // Containers
-    input.containers.forEach((c, i) => {
-      const idx = `Container.${i + 1}`;
-      params[`${idx}.Name`] = c.name;
-      params[`${idx}.Image`] = c.image;
-      if (c.command?.length) {
-        params[`${idx}.Command`] = c.command.join(' ');
-      }
-      if (c.args?.length) {
-        params[`${idx}.Args`] = c.args.join(' ');
-      }
-      if (c.imagePullPolicy) {
-        params[`${idx}.ImagePullPolicy`] = c.imagePullPolicy;
-      }
-      // Environment
-      if (c.env?.length) {
-        c.env.forEach((e, j) => {
-          const eidx = `${idx}.EnvironmentVar.${j + 1}`;
-          params[`${eidx}.Key`] = e.name;
-          if (e.value !== undefined) {
-            params[`${eidx}.Value`] = e.value;
-          } else if (e.valueFrom?.fieldRef) {
-            params[`${eidx}.FieldRefFieldPath`] = e.valueFrom.fieldRef.fieldPath;
-          }
-        });
-      }
-      // Resources
-      if (c.resources) {
-        if (c.resources.limits) {
-          params[`${idx}.Cpu`] = String(c.resources.limits.cpu);
-          params[`${idx}.Memory`] = String(c.resources.limits.memory);
-        }
-      }
-      // Ports
-      if (c.ports) {
-        c.ports.forEach((p, pi) => {
-          params[`${idx}.Port.${pi + 1}.Port`] = String(p.containerPort);
-          if (p.protocol) params[`${idx}.Port.${pi + 1}.Protocol`] = p.protocol;
-        });
-      }
-      // Liveness probe
-      if (c.livenessProbe) {
-        const lp = c.livenessProbe;
-        if (lp.tcpSocket) {
-          params[`${idx}.LivenessProbe.TcpSocket.Port`] = String(lp.tcpSocket.port);
-        }
-        if (lp.httpGet) {
-          params[`${idx}.LivenessProbe.HttpGet.Path`] = lp.httpGet.path;
-          params[`${idx}.LivenessProbe.HttpGet.Port`] = String(lp.httpGet.port);
-          if (lp.httpGet.scheme) params[`${idx}.LivenessProbe.HttpGet.Scheme`] = lp.httpGet.scheme;
-        }
-        if (lp.exec) {
-          params[`${idx}.LivenessProbe.Exec.Commands`] = lp.exec.command.join(' ');
-        }
-        if (lp.initialDelaySeconds) params[`${idx}.LivenessProbe.InitialDelaySeconds`] = String(lp.initialDelaySeconds);
-        if (lp.periodSeconds) params[`${idx}.LivenessProbe.PeriodSeconds`] = String(lp.periodSeconds);
-        if (lp.timeoutSeconds) params[`${idx}.LivenessProbe.TimeoutSeconds`] = String(lp.timeoutSeconds);
-        if (lp.failureThreshold) params[`${idx}.LivenessProbe.FailureThreshold`] = String(lp.failureThreshold);
-        if (lp.successThreshold) params[`${idx}.LivenessProbe.SuccessThreshold`] = String(lp.successThreshold);
-      }
-    });
-
-    // Volumes — handles NFS, OSS (S3), Disk, ConfigMap, Secret
-    if (input.volumes?.length) {
-      input.volumes.forEach((v, i) => {
-        const vidx = `Volume.${i + 1}`;
-        params[`${vidx}.Name`] = v.id;
-        params[`${vidx}.Type`] = v.type;
-        const volOpts = v.options as Record<string, unknown> | undefined;
-        if (volOpts?.server) {
-          // NFS volume
-          params[`${vidx}.NFSVolume.Server`] = String(volOpts.server);
-          params[`${vidx}.NFSVolume.Path`] = String(volOpts.path ?? '');
-          if (volOpts.readOnly) params[`${vidx}.NFSVolume.ReadOnly`] = 'true';
-        }
-        if (volOpts?.bucket) {
-          // OSS volume (S3-compatible)
-          params[`${vidx}.Type`] = 'OSSVolume';
-          params[`${vidx}.OSSVolume.Bucket`] = String(volOpts.bucket);
-          if (volOpts.path) params[`${vidx}.OSSVolume.Path`] = String(volOpts.path);
-          if (volOpts.readOnly) params[`${vidx}.OSSVolume.ReadOnly`] = 'true';
-          if (volOpts.endpoint) params[`${vidx}.OSSVolume.Endpoint`] = String(volOpts.endpoint);
-        }
-        if (volOpts?.diskId) {
-          // Cloud disk (云盘) — persistent block storage
-          params[`${vidx}.DiskVolume.DiskId`] = String(volOpts.diskId);
-          params[`${vidx}.DiskVolume.FsType`] = String(volOpts.fsType ?? 'ext4');
-          if (volOpts.sizeGiB) params[`${vidx}.DiskVolume.DiskSize`] = String(volOpts.sizeGiB);
-          if (volOpts.diskCategory) params[`${vidx}.DiskVolume.DiskCategory`] = String(volOpts.diskCategory);
-          if (volOpts.readOnly) params[`${vidx}.DiskVolume.ReadOnly`] = 'true';
-          if (volOpts.deleteWithInstance) params[`${vidx}.DiskVolume.DeleteWithInstance`] = 'true';
-        }
-        if (v.type === 'ConfigMapVolume' || volOpts?.configMapName) {
-          // Legacy ConfigMap — replaced by env-var injection, kept for backward compat with existing sandbox status
-          const name = String(volOpts?.configMapName ?? volOpts?.name ?? '');
-          const items = (volOpts?.items as Array<{ key: string; path: string; mode?: number }> | undefined) ?? [];
-          params[`${vidx}.ConfigMapVolume.Name`] = name;
-          items.forEach((item, j) => {
-            params[`${vidx}.ConfigMapVolume.Items.${j + 1}.Key`] = item.key;
-            params[`${vidx}.ConfigMapVolume.Items.${j + 1}.Path`] = item.path;
-            if (item.mode !== undefined) params[`${vidx}.ConfigMapVolume.Items.${j + 1}.Mode`] = String(item.mode);
-          });
-        }
-        if (v.type === 'SecretVolume' || volOpts?.secretName) {
-          // Secret — inject sensitive data as files
-          const name = String(volOpts?.secretName ?? volOpts?.name ?? '');
-          const items = (volOpts?.items as Array<{ key: string; path: string; mode?: number }> | undefined) ?? [];
-          params[`${vidx}.SecretVolume.SecretName`] = name;
-          items.forEach((item, j) => {
-            params[`${vidx}.SecretVolume.Items.${j + 1}.Key`] = item.key;
-            params[`${vidx}.SecretVolume.Items.${j + 1}.Path`] = item.path;
-            if (item.mode !== undefined) params[`${vidx}.SecretVolume.Items.${j + 1}.Mode`] = String(item.mode);
-          });
-        }
-      });
-    }
-
-    // Network — multi-zone via comma-separated VSwitchIds (vpc in standard network)
-    params['SecurityGroupId'] = input.network.securityGroupId ?? '';
-    if (input.network.subnetIds?.length) {
-      params['VSwitchId'] = input.network.subnetIds.join(',');
-      params['ScheduleStrategy'] = 'VSwitchRandom';
-      delete params['ZoneId'];
-    }
-
-    // Image cache
-    params['AutoMatchImageCache'] = 'true';
-
-    // Extension fields (providerOverrides) — maps Alibaba-specific params via schema.
-    // EIP (autoCreateEip / eipBandwidth) MUST come through extensions only.
-    // Standard network.publicIp is silently ignored (EIP costs money — never guess).
-    if (input.providerOverrides) {
-      const raw = input.providerOverrides as Record<string, unknown>;
-      const flat = (raw['alibaba'] as Record<string, unknown> | undefined) ?? raw;
-      const ext = applyExtensionOverrides('alibaba', flat);
-      for (const [k, v] of Object.entries(ext)) {
-        params[k] = v;
-      }
-    }
-
+    const params = buildCreateParams(input);
     console.log('[eci] CreateContainerGroup params:', JSON.stringify(params, null, 2));
     const resp = await rpcCall(
       this.endpoint, this.accessKeyId, this.accessKeySecret,
@@ -214,75 +60,9 @@ export class AlibabaEciContainerProvider implements IContainerProvider {
    * Same flat-parameter pattern as create(), but only maps fields present in the input.
    */
   async update(providerId: string, input: Partial<CreateContainerGroupInput>): Promise<void> {
-    const params: Record<string, string> = {
-      RegionId: input.region as string ?? this.region,
-      ContainerGroupId: providerId,
-    };
-
-    if (input.name) params.ContainerGroupName = input.name;
-    if (input.restartPolicy) params.RestartPolicy = input.restartPolicy;
-    if (input.cpu !== undefined) params.Cpu = String(input.cpu);
-    if (input.memory !== undefined) params.Memory = String(input.memory);
-
-    if (input.containers?.length) {
-      input.containers.forEach((c, i) => {
-        const idx = `Container.${i + 1}`;
-        params[`${idx}.Name`] = c.name;
-        params[`${idx}.Image`] = c.image;
-        if (c.command?.length) params[`${idx}.Command`] = c.command.join(' ');
-        if (c.args?.length) params[`${idx}.Args`] = c.args.join(' ');
-        if (c.imagePullPolicy) params[`${idx}.ImagePullPolicy`] = c.imagePullPolicy;
-        if (c.env?.length) {
-          c.env.forEach((e, j) => {
-            const eidx = `${idx}.EnvironmentVar.${j + 1}`;
-            params[`${eidx}.Key`] = e.name;
-            if (e.value !== undefined) params[`${eidx}.Value`] = e.value;
-          });
-        }
-        if (c.resources?.limits) {
-          params[`${idx}.Cpu`] = String(c.resources.limits.cpu);
-          params[`${idx}.Memory`] = String(c.resources.limits.memory);
-        }
-        if (c.ports) {
-          c.ports.forEach((p, pi) => {
-            params[`${idx}.Port.${pi + 1}.Port`] = String(p.containerPort);
-            if (p.protocol) params[`${idx}.Port.${pi + 1}.Protocol`] = p.protocol;
-          });
-        }
-      });
-    }
-
-    if (input.volumes?.length) {
-      input.volumes.forEach((v, i) => {
-        const vidx = `Volume.${i + 1}`;
-        params[`${vidx}.Name`] = v.id;
-        params[`${vidx}.Type`] = v.type;
-        const volOpts = v.options as Record<string, unknown> | undefined;
-        if (volOpts?.server) {
-          params[`${vidx}.NFSVolume.Server`] = String(volOpts.server);
-          params[`${vidx}.NFSVolume.Path`] = String(volOpts.path ?? '');
-        }
-        if (volOpts?.diskId) {
-          params[`${vidx}.DiskVolume.DiskId`] = String(volOpts.diskId);
-          params[`${vidx}.DiskVolume.FsType`] = String(volOpts.fsType ?? 'ext4');
-        }
-      });
-    }
-
-    if (input.network) {
-      if (input.network.securityGroupId) params.SecurityGroupId = input.network.securityGroupId;
-      if (input.network.subnetIds?.length) params.VSwitchId = input.network.subnetIds.join(',');
-    }
-
-    if (input.providerOverrides) {
-      const raw = input.providerOverrides as Record<string, unknown>;
-      const flat = (raw['alibaba'] as Record<string, unknown> | undefined) ?? raw;
-      const ext = applyExtensionOverrides('alibaba', flat);
-      for (const [k, v] of Object.entries(ext)) {
-        params[k] = v;
-      }
-    }
-
+    const params = buildCreateParams(input as CreateContainerGroupInput, { partial: true });
+    params['RegionId'] = (input.region as string | undefined) ?? this.region;
+    params['ContainerGroupId'] = providerId;
     await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret,
       'UpdateContainerGroup', params);
   }
@@ -427,7 +207,9 @@ export class AlibabaEciContainerProvider implements IContainerProvider {
   }
 }
 
-// ─── Mapping helpers ───
+// ─── Re-exports (codec-driven mapping) ───
+
+export { parseContainerGroup };
 
 function statusToAlibaba(status: ContainerGroupStatus): string {
   switch (status) {
@@ -442,86 +224,4 @@ function statusToAlibaba(status: ContainerGroupStatus): string {
     case 'Restarting': return 'Restarting';
     default: return 'Pending';
   }
-}
-
-/** Map Alibaba ECS GPU instance type prefix to human-readable GPU model. */
-function gpuModelFromInstanceType(instanceType: string | undefined): string | undefined {
-  if (!instanceType) return undefined;
-  const prefix = instanceType.split('.')[0] ?? '';
-  const map: Record<string, string> = {
-    gn5: 'NVIDIA P100',
-    gn5i: 'NVIDIA P4',
-    gn6e: 'NVIDIA V100',
-    gn6v: 'NVIDIA T4',
-    gn7: 'NVIDIA A100',
-    gn7i: 'NVIDIA A10',
-    gn8: 'NVIDIA H100',
-  };
-  for (const [key, model] of Object.entries(map)) {
-    if (prefix === key || prefix.startsWith(key)) return model;
-  }
-  return undefined;
-}
-
-export function parseContainerGroup(item: any): ContainerGroupRuntime {
-  const containers: any[] = item.Containers ?? [];
-  return {
-    providerId: item.ContainerGroupId ?? '',
-    name: item.ContainerGroupName ?? '',
-    status: item.Status ?? 'Pending',
-    regionId: item.RegionId ?? '',
-    instanceId: undefined,
-    zoneId: createZoneId(item.ZoneId ?? 'cn-hangzhou-a', 'alibaba'),
-    creationTime: item.CreationTime,
-    expiredTime: item.ExpiredTime,
-    instanceType: item.InstanceType,
-    spotStrategy: item.SpotStrategy,
-    cpu: item.Cpu ?? 0,
-    memory: item.Memory ?? 0,
-    gpu: item.Gpu ? Number(item.Gpu) : undefined,
-    gpuModel: gpuModelFromInstanceType(item.InstanceType),
-    discount: item.Discount,
-    network: {
-      privateIp: item.IntranetIp ?? item.PrivateIp,
-      vpcId: item.VpcId,
-      subnetId: item.VSwitchId,
-      securityGroupId: item.SecurityGroupId,
-      eniId: item.EniInstanceId,
-    },
-    associatedResources: [],
-    restartPolicy: item.RestartPolicy ?? 'Always',
-    containers: containers.map((c: any) => ({
-      id: c.ContainerId ?? '',
-      name: c.Name ?? '',
-      image: c.Image ?? '',
-      args: c.Args ?? [],
-      env: c.EnvironmentVars?.reduce?.((acc: any, e: any) => ({ ...acc, [e.Key ?? '']: e.Value ?? '' }), {}) ?? {},
-      workingDir: c.WorkingDir ?? '',
-      status: c.Status ?? 'creating',
-      alive: c.Status === 'Running',
-      createdAt: c.CreationTime ?? '',
-      startedAt: c.StartedAt,
-      finishedAt: c.FinishedAt,
-      exitCode: c.ExitCode,
-      labels: {},
-      annotations: {},
-      mounts: [],
-      resources: c.Cpu || c.Memory || c.Gpu ? { cpu: c.Cpu ?? 0, memory: c.Memory ?? 0, ...(c.Gpu ? { gpu: Number(c.Gpu) } : {}) } : undefined,
-      health: { status: c.Status === 'Running' ? 'healthy' : 'starting' },
-    })),
-    volumes: item.Volumes?.map?.((v: any) => ({
-      name: v.Name ?? '',
-      type: v.Type ?? '',
-      nfs: v.NFSVolume ? { server: v.NFSVolume.Server ?? '', path: v.NFSVolume.Path ?? '', readOnly: !!v.NFSVolume.ReadOnly } : undefined,
-    })) ?? [],
-    events: item.Events?.map?.((e: any) => ({
-      reason: e.Reason ?? '',
-      type: e.Type ?? 'Normal',
-      message: e.Message ?? '',
-      count: e.Count ?? 0,
-      lastTimestamp: e.LastTimestamp,
-    })) ?? [],
-    tags: item.Tags?.map?.((t: any) => ({ key: t.Key ?? '', value: t.Value ?? '' })) ?? [],
-    ephemeralStorageGiB: item.EphemeralStorage ? Number(item.EphemeralStorage) : undefined,
-  };
 }
