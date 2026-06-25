@@ -333,7 +333,6 @@ export class PodmanContainerGroupProvider implements IContainerGroupProvider {
       creationTime: detail.Created,
       expiredTime: undefined,
       instanceType: 'podman-pod',
-      spotStrategy: undefined,
       cpu: totalCpu || 0,
       memory: totalMem || 0,
       network: {},

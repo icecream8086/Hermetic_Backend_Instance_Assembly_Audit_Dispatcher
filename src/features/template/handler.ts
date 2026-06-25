@@ -238,10 +238,10 @@ async function listStored(atomic: IAtomicStore): Promise<SandboxTemplate[]> {
 // Inherited templates must redeclare their own instanceLimit (not merged by DAG).
 // Counts actual Running sandboxes by scanning the sandbox index.
 
-/** Lock key based on template name (hash for atomic store key safety). */
-function lockKey(tplName: string, suffix = ''): string {
+/** Lock key based on template ID (hash for atomic store key safety). */
+function lockKey(tplId: string, suffix = ''): string {
   let h = 5381;
-  for (let i = 0; i < tplName.length; i++) h = ((h << 5) + h) + tplName.charCodeAt(i);
+  for (let i = 0; i < tplId.length; i++) h = ((h << 5) + h) + tplId.charCodeAt(i);
   return `tpl:lock:${Math.abs(h).toString(36)}${suffix}`;
 }
 
@@ -257,14 +257,14 @@ const LIVE_STATUSES: string[] = [
   SandboxStatus.Terminating,   // Still has provider resources
 ];
 
-/** Count running sandboxes for a given template name. */
-async function countRunningForTemplate(atomic: IAtomicStore, tplName: string): Promise<number> {
+/** Count running sandboxes for a given template ID (matched via templateRef). */
+async function countRunningForTemplate(atomic: IAtomicStore, tplId: string): Promise<number> {
   const idx = await atomic.get<string[]>(SANDBOX_INDEX_KEY);
   if (!idx) return 0;
   let count = 0;
   for (const sid of idx.value) {
     const entry = await atomic.get<any>(SANDBOX_PREFIX + sid);
-    if (entry?.value?.name === tplName && LIVE_STATUSES.includes(entry.value.status)) {
+    if (entry?.value?.config?.templateRef === tplId && LIVE_STATUSES.includes(entry.value.status)) {
       count++;
     }
   }
@@ -278,13 +278,13 @@ async function claimInstanceSlot(
 ): Promise<void> {
   // singleton mode → acts as instanceLimit { type: 'fixed', max: 1 }
   if (tpl.singleton) {
-    const runningCount = await countRunningForTemplate(atomic, tpl.name);
+    const runningCount = await countRunningForTemplate(atomic, tpl.id);
     if (runningCount >= 1) {
       const err: any = new Error(`Template "${tpl.name}" is singleton — only 1 instance allowed at a time (${runningCount} running)`);
       err.status = 429;
       throw err;
     }
-    const key = lockKey(tpl.name);
+    const key = lockKey(tpl.id);
     const entry = await atomic.get<number>(key);
     await atomic.set(key, (entry?.value ?? 0) + 1, entry?.version ?? null);
     return;
@@ -294,11 +294,11 @@ async function claimInstanceSlot(
   if (!limit) return;
 
   const { type, max } = limit;
-  const baseKey = lockKey(tpl.name);
-  const userKey = lockKey(tpl.name, ':' + userId);
+  const baseKey = lockKey(tpl.id);
+  const userKey = lockKey(tpl.id, ':' + userId);
 
   // Check actual running count first (always run to ensure consistency)
-  const runningCount = await countRunningForTemplate(atomic, tpl.name);
+  const runningCount = await countRunningForTemplate(atomic, tpl.id);
 
   if (type === 'fixed' || type === 'perSystem') {
     if (runningCount >= max) {
@@ -319,7 +319,7 @@ async function claimInstanceSlot(
     if (idx) {
       for (const sid of idx.value) {
         const entry = await atomic.get<any>(SANDBOX_PREFIX + sid);
-        if (entry?.value?.name === tpl.name
+        if (entry?.value?.config?.templateRef === tpl.id
             && LIVE_STATUSES.includes(entry.value.status)
             && entry.value.config?.creatorId === userId) {
           userCount++;
@@ -367,14 +367,14 @@ async function releaseResourceBinding(atomic: IAtomicStore, tpl: SandboxTemplate
 
 async function releaseInstanceSlot(atomic: IAtomicStore, tpl: SandboxTemplate, _userId: string): Promise<void> {
   if (!tpl.singleton && !tpl.instanceLimit) return;
-  const baseKey = lockKey(tpl.name);
+  const baseKey = lockKey(tpl.id);
   const entry = await atomic.get<number>(baseKey);
   if (entry && entry.value > 0) {
     await atomic.set(baseKey, entry.value - 1, entry.version).catch(() => {});
   }
   // Also release per-user counter if applicable
   if (tpl.instanceLimit?.type === 'perUser') {
-    const userKey = lockKey(tpl.name, ':' + _userId);
+    const userKey = lockKey(tpl.id, ':' + _userId);
     const uEntry = await atomic.get<number>(userKey);
     if (uEntry && uEntry.value > 0) {
       await atomic.set(userKey, uEntry.value - 1, uEntry.version).catch(() => {});

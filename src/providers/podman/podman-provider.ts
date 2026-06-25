@@ -461,7 +461,6 @@ export class PodmanContainerProvider implements IContainerProvider {
       creationTime: created,
       expiredTime: undefined,
       instanceType: 'podman',
-      spotStrategy: undefined,
       cpu: 0,
       memory: 0,
       network: {

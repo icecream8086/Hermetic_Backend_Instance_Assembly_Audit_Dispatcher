@@ -22,6 +22,7 @@ import type { ComputeInstance } from '../core/region/instance.ts';
 import { WorkersAuditLogger, KvAuditLogger, HybridAuditLogger, createAuditRouter, setBootId } from './audit/index.ts';
 import { LocalAuditLogger } from './audit/local-audit-logger.ts';
 import { NoopAuditLogger } from './audit/noop-audit-logger.ts';
+import { R2AuditLogger } from './audit/r2-logger.ts';
 import { authz } from './middleware/auth.ts';
 import { jsonDepthLimit } from './middleware/security.ts';
 import { idempotency } from './middleware/idempotency.ts';
@@ -62,6 +63,18 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
     case 'workers':
       auditLogger = new WorkersAuditLogger();
       break;
+    case 'r2': {
+      const r2Bucket = platformBindings?.['BLOB_STORE'] as any;
+      if (!r2Bucket) {
+        console.warn('[audit] R2 backend requested but BLOB_STORE binding not available — falling back to hybrid');
+        auditLogger = new HybridAuditLogger(stores.atomic);
+      } else {
+        const r2Logger = new R2AuditLogger(r2Bucket);
+        r2Logger.startAutoFlush();
+        auditLogger = r2Logger;
+      }
+      break;
+    }
     case 'none':
       auditLogger = new NoopAuditLogger();
       break;
@@ -278,7 +291,6 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
     const { createPermissionGate } = await import('./middleware/permission-gate.ts');
     app.use('/api/*', createPermissionGate(
       { check: (params) => permService!.check({ userId: params.actor, action: params.action, resource: params.resource }) },
-      audit,
       {
         skipPaths: [
           '/api/auth/login',

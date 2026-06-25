@@ -58,10 +58,8 @@ export class AlibabaEciContainerProvider implements IContainerProvider {
       } : {}),
     };
 
-    // Spot strategy
-    if (input.spotStrategy && input.spotStrategy !== 'None') {
-      params.SpotStrategy = input.spotStrategy;
-    }
+    // Spot strategy is now handled via providerOverrides.alibaba + extension schema.
+    // applyExtensionOverrides maps spotStrategy → SpotStrategy automatically.
 
     // Containers
     input.containers.forEach((c, i) => {
@@ -375,6 +373,25 @@ function statusToAlibaba(status: ContainerGroupStatus): string {
   }
 }
 
+/** Map Alibaba ECS GPU instance type prefix to human-readable GPU model. */
+function gpuModelFromInstanceType(instanceType: string | undefined): string | undefined {
+  if (!instanceType) return undefined;
+  const prefix = instanceType.split('.')[0] ?? '';
+  const map: Record<string, string> = {
+    gn5: 'NVIDIA P100',
+    gn5i: 'NVIDIA P4',
+    gn6e: 'NVIDIA V100',
+    gn6v: 'NVIDIA T4',
+    gn7: 'NVIDIA A100',
+    gn7i: 'NVIDIA A10',
+    gn8: 'NVIDIA H100',
+  };
+  for (const [key, model] of Object.entries(map)) {
+    if (prefix === key || prefix.startsWith(key)) return model;
+  }
+  return undefined;
+}
+
 export function parseContainerGroup(item: any): ContainerGroupRuntime {
   const containers: any[] = item.Containers ?? [];
   return {
@@ -391,6 +408,7 @@ export function parseContainerGroup(item: any): ContainerGroupRuntime {
     cpu: item.Cpu ?? 0,
     memory: item.Memory ?? 0,
     gpu: item.Gpu ? Number(item.Gpu) : undefined,
+    gpuModel: gpuModelFromInstanceType(item.InstanceType),
     discount: item.Discount,
     network: {
       privateIp: item.IntranetIp ?? item.PrivateIp,

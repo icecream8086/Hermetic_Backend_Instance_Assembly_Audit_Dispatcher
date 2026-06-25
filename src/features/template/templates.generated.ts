@@ -384,10 +384,10 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
         }
       ],
       "extensions": {
-        "spotStrategy": "SpotAsPriceGo",
         "healthMaxRetries": 3,
         "providerOverrides": {
           "alibaba": {
+            "spotStrategy": "SpotAsPriceGo",
             "instanceType": "ecs.gn6v-c8g1.2xlarge",
             "ingressBandwidth": 100,
             "egressBandwidth": 100,
@@ -924,10 +924,10 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
         }
       ],
       "extensions": {
-        "spotStrategy": "SpotAsPriceGo",
         "healthMaxRetries": 3,
         "providerOverrides": {
           "alibaba": {
+            "spotStrategy": "SpotAsPriceGo",
             "ingressBandwidth": 100,
             "egressBandwidth": 100,
             "autoCreateEip": true,
@@ -1010,10 +1010,10 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
         }
       ],
       "extensions": {
-        "spotStrategy": "SpotAsPriceGo",
         "healthMaxRetries": 3,
         "providerOverrides": {
           "alibaba": {
+            "spotStrategy": "SpotAsPriceGo",
             "instanceType": "ecs.gn6v-c8g1.2xlarge",
             "ingressBandwidth": 100,
             "egressBandwidth": 100,

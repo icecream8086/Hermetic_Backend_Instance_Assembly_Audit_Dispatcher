@@ -27,10 +27,10 @@ containers:
     stdin: true
     tty: true
 extensions:
-  spotStrategy: "SpotAsPriceGo"
   healthMaxRetries: 3
   providerOverrides:
     alibaba:
+      spotStrategy: "SpotAsPriceGo"
       ingressBandwidth: 100
       egressBandwidth: 100
       autoCreateEip: true

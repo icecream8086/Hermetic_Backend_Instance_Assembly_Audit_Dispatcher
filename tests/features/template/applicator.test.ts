@@ -26,19 +26,25 @@ describe('applyTemplate', async () => {
     expect(r.region).toBe('cn-hangzhou');
   });
 
-  it('defaults name to template.name when not overridden', async () => {
+  it('generates distinct default name from template.name when not overridden', async () => {
     const r = await applyTemplate(minimalTpl());
-    expect(r.name).toBe('test-template');
+    expect(r.name).toMatch(/^test-template-[a-f0-9]{6}$/);
+  });
+
+  it('sets templateRef to tpl.id for instance limit tracking', async () => {
+    const r = await applyTemplate(minimalTpl());
+    expect((r as any).templateRef).toBe('tpl_test');
+  });
+
+  it('uses explicit name when provided (not template default)', async () => {
+    const r = await applyTemplate(minimalTpl(), 'my-custom-sandbox');
+    expect(r.name).toBe('my-custom-sandbox');
+    expect((r as any).templateRef).toBe('tpl_test');
   });
 
   it('defaults region to container.region', async () => {
     const r = await applyTemplate(minimalTpl());
     expect(r.region).toBe('local');
-  });
-
-  it('defaults spotStrategy to None', async () => {
-    const r = await applyTemplate(minimalTpl());
-    expect(r.spotStrategy).toBe('None');
   });
 
   it('defaults restartPolicy to Always', async () => {
@@ -417,9 +423,9 @@ describe('mapStorage', async () => {
 // ─── Extensions ───
 
 describe('applyTemplate extensions', async () => {
-  it('maps spotStrategy', async () => {
-    const r = await applyTemplate(minimalTpl({ extensions: { spotStrategy: 'SpotAsPriceGo' } }));
-    expect(r.spotStrategy).toBe('SpotAsPriceGo');
+  it('maps spotStrategy to providerOverrides.alibaba', async () => {
+    const r = await applyTemplate(minimalTpl({ extensions: { providerOverrides: { alibaba: { spotStrategy: 'SpotAsPriceGo' } } } }));
+    expect(r.providerOverrides?.alibaba?.spotStrategy).toBe('SpotAsPriceGo');
   });
 
   it('maps healthMaxRetries', async () => {
@@ -438,7 +444,7 @@ describe('applyTemplate extensions', async () => {
 describe('applyTemplate edge cases', async () => {
   it('handles template with no container block', async () => {
     const r = await applyTemplate(minimalTpl({ container: undefined as any }));
-    expect(r.name).toBe('test-template');
+    expect(r.name).toMatch(/^test-template-[a-f0-9]{6}$/);
     expect(r.containers).toEqual([]);
     expect(r.resourceSpec.cpu).toBe(0);
     expect(r.resourceSpec.memory).toBe(0);
@@ -491,11 +497,11 @@ import { deepMerge } from '../../../src/features/template/handler.ts';
 
 describe('deepMerge (template partial update)', () => {
   it('preserves top-level extension fields not in the update', () => {
-    const existing = { spotStrategy: 'SpotAsPriceGo', healthMaxRetries: 3, providerOverrides: { alibaba: { eipBandwidth: 10 } } };
+    const existing = { healthMaxRetries: 3, providerOverrides: { alibaba: { eipBandwidth: 10, spotStrategy: 'SpotAsPriceGo' } } };
     const update = { providerOverrides: { alibaba: { eipBandwidth: 50 } } };
     const result = deepMerge(existing, update);
-    expect(result.spotStrategy).toBe('SpotAsPriceGo');
     expect(result.healthMaxRetries).toBe(3);
+    expect(result.providerOverrides.alibaba.spotStrategy).toBe('SpotAsPriceGo');
     expect(result.providerOverrides.alibaba.eipBandwidth).toBe(50);
   });
 
@@ -511,10 +517,10 @@ describe('deepMerge (template partial update)', () => {
   });
 
   it('adds new top-level fields from update', () => {
-    const existing = { spotStrategy: 'SpotAsPriceGo' };
+    const existing = { healthMaxRetries: 3 };
     const update = { autoStart: true, webTerminal: false };
     const result = deepMerge(existing, update);
-    expect(result.spotStrategy).toBe('SpotAsPriceGo');
+    expect(result.healthMaxRetries).toBe(3);
     expect(result.autoStart).toBe(true);
     expect(result.webTerminal).toBe(false);
   });

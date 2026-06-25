@@ -126,7 +126,6 @@ export class JobOperator implements ITaskExecutor {
       ...(instanceId ? { instanceId } : {}),
       cpu: mainContainer.resources?.cpu ?? 1,
       memory: mainContainer.resources?.memory ?? 1024,
-      spotStrategy: 'Never',
       restartPolicy: 'Never',
       containers: [{
         name: config.jobName,

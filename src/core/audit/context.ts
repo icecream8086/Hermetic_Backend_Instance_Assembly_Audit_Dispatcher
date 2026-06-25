@@ -16,6 +16,11 @@ export function setBootId(id: string): void {
   _bootId = id;
 }
 
+/** Get the current boot ID (set at startup). */
+export function getBootId(): string | undefined {
+  return _bootId;
+}
+
 /** Extract trusted fields from a Hono request context. */
 export function trustedFromRequest(c: {
   var?: {
@@ -44,12 +49,25 @@ export function createAuditEntry(
   trusted: TrustedFields,
   extra?: { actorId?: string; metadata?: Record<string, unknown> },
 ): AuditEntry {
+  // Strip _-prefixed keys from caller metadata to prevent forgery of trusted fields.
+  // journald convention: _ prefix = trusted (kernel/journald injected, cannot be set by app).
+  const safeMetadata = extra?.metadata ? stripTrustedKeys(extra.metadata) : undefined;
+
   return {
     facility,
     level,
     message,
     trusted,
     ...(extra?.actorId ? { actorId: extra.actorId } : {}),
-    ...(extra?.metadata ? { metadata: extra.metadata } : {}),
+    ...(safeMetadata ? { metadata: safeMetadata } : {}),
   };
+}
+
+/** Strip any key starting with _ from a metadata record (prevents trusted field forgery). */
+function stripTrustedKeys(meta: Record<string, unknown>): Record<string, unknown> {
+  const cleaned: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(meta)) {
+    if (!k.startsWith('_')) cleaned[k] = v;
+  }
+  return cleaned;
 }

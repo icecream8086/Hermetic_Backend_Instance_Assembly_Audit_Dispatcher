@@ -53,7 +53,7 @@ export class PermissionChecker {
   constructor(
     private readonly atomic: IAtomicStore,
     _logger: ILogWriter,
-    _audit?: IAuditWriter,
+    private readonly audit?: IAuditWriter,
   ) {
     this.policyStore = new CrudStore(atomic, POLICY_PREFIX, POLICY_INDEX_KEY, 'POLICY_NOT_FOUND');
     this.ugStore = new CrudStore(atomic, USERGROUP_PREFIX, USERGROUP_INDEX_KEY, 'USERGROUP_NOT_FOUND');
@@ -73,14 +73,50 @@ export class PermissionChecker {
 
     // Layer 1: DAC
     const dacResult = await this.#checkDac(userId, resource, resourceOwnerId);
-    if (!dacResult.allowed) return dacResult;
+    if (!dacResult.allowed) {
+      this.#auditDenial(dacResult, userId, action, resource, input.context);
+      return dacResult;
+    }
 
     // Layer 2: Capability
     const capResult = await this.#checkCap(userId, action);
-    if (!capResult.allowed) return capResult;
+    if (!capResult.allowed) {
+      this.#auditDenial(capResult, userId, action, resource, input.context);
+      return capResult;
+    }
 
     // Layer 3: MAC
-    return this.#checkMac(userId, action, resource, resourceOwnerId, macRules);
+    const macResult = await this.#checkMac(userId, action, resource, resourceOwnerId, macRules);
+    if (!macResult.allowed) {
+      this.#auditDenial(macResult, userId, action, resource, input.context);
+    }
+    return macResult;
+  }
+
+  /** Enforce SPEC invariant: every denial must produce an audit record. */
+  #auditDenial(
+    result: PolicyMatchResult,
+    userId: string,
+    action: string,
+    resource: string,
+    context?: Record<string, unknown>,
+  ): void {
+    if (!this.audit) return;
+    this.audit.write({
+      level: 4, // WARNING
+      facility: 'perm',
+      message: `${result.auditType}: ${result.reason}`,
+      actorId: userId,
+      metadata: {
+        userId,
+        action,
+        resource,
+        layer: result.layer,
+        auditType: result.auditType,
+        reason: result.reason,
+        ...context,
+      },
+    });
   }
 
   // ─── Layer 1: DAC ───

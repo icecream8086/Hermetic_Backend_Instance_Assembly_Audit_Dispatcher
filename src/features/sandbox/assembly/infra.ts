@@ -45,7 +45,6 @@ export class InfraManager implements IInfraManager {
       // clusterId omitted — infra container doesn't need instance binding
       cpu: 0.1,
       memory: 16,
-      spotStrategy: 'None',
       restartPolicy: 'Never',
       containers: [
         {

@@ -431,7 +431,6 @@ export class WorkflowRunner {
       ...(instanceId ? { instanceId } : {}),
       cpu: c.resources?.cpu ?? 1,
       memory: c.resources?.memory ?? 1024,
-      spotStrategy: 'Never',
       restartPolicy: 'Never',
       containers: [{
         name: jobName,

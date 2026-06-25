@@ -85,7 +85,6 @@ export class StubContainerProvider implements IContainerProvider {
       instanceId: undefined,
       zoneId: 'stub-zone-a' as ZoneId,
       instanceType: 'ecs.g6.large',
-      spotStrategy: input.spotStrategy,
       cpu: input.cpu,
       memory: input.memory,
       network: {

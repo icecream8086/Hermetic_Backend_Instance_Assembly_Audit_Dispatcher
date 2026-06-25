@@ -132,9 +132,7 @@ export interface TemplateStorage {
 export interface TemplateExtensions {
   /** 存储卷 */
   readonly storage?: readonly TemplateStorage[];
-  /** 调度策略: "None" | "SpotAsPriceGo" | "SpotWithPriceLimit" */
-  readonly spotStrategy?: string;
-  /** 厂商透传参数 */
+  /** 厂商透传参数 (Alibaba spotStrategy goes here, not at extensions level) */
   readonly providerOverrides?: Record<string, unknown>;
   /** 健康检查失败最大重试次数 (-1 = 白名单永不删除) */
   readonly healthMaxRetries?: number;

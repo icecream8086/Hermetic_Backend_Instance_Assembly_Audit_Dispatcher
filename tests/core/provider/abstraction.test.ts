@@ -51,7 +51,7 @@ describe('Provider type shapes', () => {
   it('CreateContainerGroupInput accepts all fields including secretMounts', () => {
     const input: CreateContainerGroupInput = {
       name: 'test-sandbox', region: 'local' as any,
-      cpu: 1, memory: 512, spotStrategy: 'None', restartPolicy: 'Always',
+      cpu: 1, memory: 512, restartPolicy: 'Always',
       containers: [{
         name: 'main', image: 'nginx:latest',
         env: [{ name: 'ENV', value: 'prod' }],
@@ -104,7 +104,7 @@ describe('StubContainerProvider baseline', () => {
   function baseInput(): CreateContainerGroupInput {
     return {
       name: 'stub-test', region: 'local' as any,
-      cpu: 1, memory: 512, spotStrategy: 'None', restartPolicy: 'Always',
+      cpu: 1, memory: 512, restartPolicy: 'Always',
       containers: [{ name: 'main', image: 'alpine:latest' }],
       network: { allocatePublicIp: false },
     } as CreateContainerGroupInput;

@@ -39,10 +39,10 @@ containers:
     stdin: true
     tty: true
 extensions:
-  spotStrategy: "SpotAsPriceGo"
   healthMaxRetries: 3
   providerOverrides:
     alibaba:
+      spotStrategy: "SpotAsPriceGo"
       # ecs.gn6v-c8g1.2xlarge = 1× NVIDIA T4, 8 vCPU, 32 GB
       # ecs.gn7i-c32g1.8xlarge = 1× NVIDIA A10, 32 vCPU, 128 GB
       # ecs.gn6e-c12g1.3xlarge = 1× NVIDIA V100, 12 vCPU, 92 GB

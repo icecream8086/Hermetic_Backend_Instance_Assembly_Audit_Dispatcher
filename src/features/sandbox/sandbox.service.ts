@@ -620,7 +620,7 @@ export function toContainerGroupInput(input: CreateSandboxInput): CreateContaine
     memory: Math.max(1, Math.ceil(input.resourceSpec.memory / 1024)), // ECI expects GB, applicator provides MB
     gpu: input.resourceSpec.gpu,
     gpuType: input.resourceSpec.gpuType,
-    spotStrategy: input.spotStrategy,
+    // spotStrategy moved to providerOverrides.alibaba — provider-specific, not neutral.
     restartPolicy: input.restartPolicy,
     containers: input.containers.map(c => ({
       name: c.name,

@@ -77,6 +77,8 @@ export function applyExtensionOverrides(
   for (const field of schema.fields) {
     const val = overrides[field.key];
     if (val === undefined || val === null) continue;
+    // 'None' is the canonical sentinel for "not set" in our domain model.
+    if (val === 'None') continue;
     if (!field.eciParam) continue;
 
     switch (field.transform) {
@@ -96,6 +98,7 @@ export function applyExtensionOverrides(
         out[field.eciParam] = String(val);
     }
   }
+
   return out;
 }
 

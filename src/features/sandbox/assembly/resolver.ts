@@ -17,7 +17,6 @@ type MutableSandboxInput = {
   region: string;
   instanceId?: string;
   resourceSpec: { cpu: number; memory: number };
-  spotStrategy: CreateSandboxInput['spotStrategy'];
   restartPolicy: CreateSandboxInput['restartPolicy'];
   containers: ContainerConfig[];
   volumes?: CreateSandboxInput['volumes'];
@@ -96,7 +95,6 @@ function mergeTemplates(sorted: Template[]): MutableSandboxInput | null {
     name: '',
     region: '',
     resourceSpec: { cpu: 0, memory: 0 },
-    spotStrategy: 'None' as CreateSandboxInput['spotStrategy'],
     restartPolicy: 'Never',
     containers: [],
     network: { allocatePublicIp: false },

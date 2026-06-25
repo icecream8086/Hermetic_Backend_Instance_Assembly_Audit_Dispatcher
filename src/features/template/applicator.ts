@@ -1,7 +1,6 @@
 import type { SandboxTemplate, ContainerSpec, ContainerDef, HealthCheckDef, TemplateStorage, NetworkSpec } from './types.ts';
 import type { CreateSandboxInput, Volume, VolumeMount } from '../sandbox/types.ts';
 import { VolumeType, VolumeStatus, createVolumeId } from '../sandbox/types.ts';
-import type { SpotStrategy } from '../sandbox/types.ts';
 
 /**
  * Map a resolved template to CreateSandboxInput.
@@ -52,10 +51,11 @@ export async function applyTemplate(
   }
 
   return {
-    name: name ?? tpl.name,
+    name: name ?? `${tpl.name}-${crypto.randomUUID().slice(0, 6)}`,
+    templateRef: tpl.id,
     region: (region ?? container.region) as any,
     resourceSpec: { cpu, memory, ...(gpu > 0 ? { gpu, ...(gpuType ? { gpuType } : {}) } : {}) },
-    spotStrategy: (ext?.spotStrategy ?? 'None') as SpotStrategy,
+    // spotStrategy moved to providerOverrides.alibaba — it's not a cloud-neutral field.
     restartPolicy: (container.restartPolicy ?? 'Always') as any,
     containers: containers.map((c: ContainerDef, i: number) => ({
       name: c.name,

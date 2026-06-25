@@ -78,5 +78,7 @@ max_retries = 3                 # messages that fail 3× are dropped (unless DLQ
 # In production, the queue must be created first:
 #   npx wrangler queues create hbi-aad-tasks
 
-[env.production]
-# Production overrides — set real IDs via `wrangler secret` and `wrangler deploy --env production`
+[env.production.vars]
+# ─── Audit: workers 模式 — console.log 直入 Cloudflare Logs（免费），不做持久化
+#     本地开发不设此变量，默认走 hybrid（内存+KV，可查询）
+AUDIT_BACKEND = "r2"

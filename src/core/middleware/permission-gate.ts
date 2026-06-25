@@ -15,8 +15,6 @@
 
 import type { MiddlewareHandler } from 'hono';
 import type { IPermissionChecker } from '../permission/interfaces.ts';
-import { DenialLayer, DENIAL_AUDIT_TYPE } from '../permission/types.ts';
-import type { IAuditWriter } from '../audit/types.ts';
 
 export interface PermissionGateOptions {
   /** Skip permission check for these paths (e.g. health, login). */
@@ -27,7 +25,6 @@ export interface PermissionGateOptions {
 
 export function createPermissionGate(
   checker: IPermissionChecker,
-  audit: IAuditWriter,
   options: PermissionGateOptions = {},
 ): MiddlewareHandler {
   const skipPaths = new Set(options.skipPaths ?? [
@@ -67,30 +64,13 @@ export function createPermissionGate(
 
     if (result.allowed) return next();
 
-    // Write audit for rejection
-    const layer = result.layer ?? DenialLayer.MAC;
-    const auditType = result.auditType ?? DENIAL_AUDIT_TYPE[layer];
-    audit.write({
-      level: 4, // warning
-      facility: 'perm-gate',
-      message: `${auditType}: ${result.reason}`,
-      metadata: {
-        userId,
-        action,
-        resource,
-        path,
-        method,
-        ip,
-        layer,
-        auditType,
-        reason: result.reason,
-      },
-    } as any);
+    // Audit is auto-written by PermissionChecker on denial (SPEC: denial → record invariant).
+    // HTTP context (path, method, ip) is passed in PermissionCheck.context.
 
     return c.json({
       error: 'FORBIDDEN',
       message: result.reason,
-      ...(DenialLayer.DAC ? { layer } : {}),
+      ...(result.layer ? { layer: result.layer } : {}),
     }, 403);
   };
 }

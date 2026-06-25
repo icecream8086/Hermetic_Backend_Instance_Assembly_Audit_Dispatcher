@@ -167,7 +167,6 @@
       "version": "1.0.0",
       "resourceType": "spotConfig",
       "spec": {
-        "spotStrategy": "SpotAsPriceGo",
         "restartPolicy": "Always",
         "autoMatchImageCache": true,
         "resourceSpec": { "cpu": 2, "memory": 2 }

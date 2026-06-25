@@ -334,7 +334,7 @@ export interface CreateSandboxInput {
   readonly region: RegionId;
   readonly instanceId?: InstanceId | undefined;
   readonly resourceSpec: ResourceSpec;
-  readonly spotStrategy: SpotStrategy;
+  // spotStrategy moved to providerOverrides.alibaba — it's provider-specific.
   readonly restartPolicy: 'Always' | 'OnFailure' | 'Never';
   readonly initContainers?: readonly InitContainerConfig[];
   readonly containers: readonly ContainerConfig[];
@@ -356,6 +356,8 @@ export interface CreateSandboxInput {
   /** User who created this sandbox. */
   readonly creatorId?: string | undefined;
   readonly providerOverrides?: Record<string, unknown>;
+  /** Template ID that created this sandbox. Used for instance limit tracking (decoupled from sandbox name). */
+  readonly templateRef?: string | undefined;
 }
 
 /** Full sandbox entity. Extends PersistedEntity for optimistic-concurrency state mutations. */

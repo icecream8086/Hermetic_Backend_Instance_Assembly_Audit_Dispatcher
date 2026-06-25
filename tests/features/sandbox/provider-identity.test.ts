@@ -6,7 +6,7 @@ import { ConsoleLogger } from '../../../src/core/audit/console-logger.ts';
 import { StubContainerProvider } from '../../../src/providers/stub/container.ts';
 import { InstanceService } from '../../../src/core/region/instance.ts';
 import type { ComputeInstance } from '../../../src/core/region/instance.ts';
-import { SandboxStatus, SpotStrategy, createSandboxId } from '../../../src/features/sandbox/types.ts';
+import { SandboxStatus, createSandboxId } from '../../../src/features/sandbox/types.ts';
 import type { CreateSandboxInput, Sandbox } from '../../../src/features/sandbox/types.ts';
 import { ProviderResolutionError } from '../../../src/core/provider/errors.ts';
 import type { IProviderRegistry, IContainerProvider } from '../../../src/core/provider/interfaces.ts';
@@ -19,7 +19,6 @@ function baseInput(overrides?: Partial<CreateSandboxInput>): CreateSandboxInput 
     name: 'identity-test',
     region: 'local' as unknown as RegionId,
     resourceSpec: { cpu: 1, memory: 512 },
-    spotStrategy: SpotStrategy.None,
     restartPolicy: 'Never',
     containers: [{ name: 'app', image: 'nginx:latest' }],
     network: { allocatePublicIp: false },

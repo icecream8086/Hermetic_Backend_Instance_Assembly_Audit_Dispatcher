@@ -3,22 +3,42 @@ import type { IAuditWriter, IAuditReader, IAuditAdmin, AuditEntry, StoredAuditEn
 import type { LogId } from '../brand.ts';
 import { generateLogId } from '../brand.ts';
 import { shouldLogAudit } from './log-policy.ts';
+import { shouldPersist } from './persistence-policy.ts';
 import { resolveFacility, encodePriority } from './kern-level.ts';
 import { formatDmesgLine } from '../utils/dmesg.ts';
+import { encodeCursor, decodeCursor, cursorFromEntry, xorHash } from './types.ts';
+import { getBootId } from './context.ts';
 
 const PFX_AUDIT = 'audit:ring:';
 const IDX_AUDIT = 'audit:ring:ids';
 const MAX_IN_MEMORY = 2000;
 const MAX_KV_BATCH = 1000;
 
+/** Strip _-prefixed keys to prevent trusted field forgery (journald convention). */
+function sanitizeMetadata(meta: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  if (!meta) return undefined;
+  const cleaned: Record<string, unknown> = {};
+  let hasKeys = false;
+  for (const [k, v] of Object.entries(meta)) {
+    if (!k.startsWith('_')) { cleaned[k] = v; hasKeys = true; }
+  }
+  return hasKeys ? cleaned : undefined;
+}
+
 export class HybridAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
   readonly #atomic: IAtomicStore | undefined;
   readonly #memory: StoredAuditEntry[] = [];
   readonly #maxInMemory: number;
+  #seq = 0;
+  readonly #bootId: string;
+  readonly #machineHash: string;
 
   constructor(atomic?: IAtomicStore, maxInMemory = MAX_IN_MEMORY) {
     this.#atomic = atomic;
     this.#maxInMemory = maxInMemory;
+    // Derive machine hash from boot ID (stable within a process lifetime).
+    this.#bootId = getBootId() ?? '00000000-0000-0000-0000-000000000000';
+    this.#machineHash = hashBootId(this.#bootId);
   }
 
   async write(entry: AuditEntry): Promise<void> {
@@ -33,17 +53,31 @@ export class HybridAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmi
     const id = generateLogId();
     const now = Date.now();
     const facilityCode = resolveFacility(entry.facility);
+    // Strip _-prefixed keys from metadata to prevent trusted field forgery (journald convention).
+    const safeMeta = sanitizeMetadata(entry.metadata);
+    // Generate journald-style cursor with tamper-detection xor_hash.
+    const seq = ++this.#seq;
+    const cursor = encodeCursor(cursorFromEntry(
+      { id, timestamp: now } as unknown as StoredAuditEntry,
+      this.#bootId,
+      seq,
+      this.#machineHash,
+    ));
     const stored: StoredAuditEntry = {
       id, timestamp: now, priority: encodePriority(facilityCode, entry.level),
       level: entry.level, facility: entry.facility,
       message: entry.message, actorId: entry.actorId,
-      ...(entry.metadata ? { metadata: entry.metadata } : {}),
+      cursor,
+      ...(entry.trusted ? { trusted: entry.trusted } : {}),
+      ...(safeMeta ? { metadata: safeMeta } : {}),
     };
 
     this.#memory.push(stored);
     if (this.#memory.length > this.#maxInMemory) this.#memory.shift();
 
-    if (this.#atomic) {
+    // Gate durable persistence with persistence policy (KV/DO costs real money).
+    // Memory ring buffer and console output are free — always allowed.
+    if (this.#atomic && shouldPersist(entry)) {
       await this.#persistToStore(stored).catch(() => {});
     }
 
@@ -54,10 +88,35 @@ export class HybridAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmi
   }
 
   async query(params?: LogQuery): Promise<{ entries: StoredAuditEntry[]; nextCursor?: string; total?: number }> {
-    let f = this.#filterEntries(params);
-    const total = f.length;
-    if (params?.limit) f = f.slice(0, params.limit);
-    return { entries: f, total };
+    let all = this.#filterEntries(params);
+    if (this.#atomic) {
+      const fromKV = await this.#queryFromStore(params ?? {});
+      const memIds = new Set(all.map(e => e.id));
+      all = [...all, ...fromKV.filter(e => !memIds.has(e.id))].sort((a, b) => b.timestamp - a.timestamp);
+    }
+    // Apply afterCursor filter — skip entries up to and including the cursor position.
+    if (params?.afterCursor) {
+      const cursor = decodeCursor(params.afterCursor);
+      if (cursor && this.#validateCursor(cursor)) {
+        all = all.filter(e => {
+          if (!e.cursor) return true; // entries without cursor pass through
+          const ec = decodeCursor(e.cursor);
+          return ec ? ec.i > cursor.i : true;
+        });
+      }
+    }
+    const total = all.length;
+    if (params?.offset) all = all.slice(params.offset);
+    if (params?.limit) all = all.slice(0, params.limit);
+    // Return the cursor of the last entry as nextCursor for incremental consumption.
+    const lastCursor: string | undefined = all.at(-1)?.cursor;
+    return { entries: all, total, ...(lastCursor ? { nextCursor: lastCursor } : {}) };
+  }
+
+  /** Validate cursor integrity via xor_hash. Returns false if tampered. */
+  #validateCursor(c: { s: string; i: number; b: string; m: number; t: number; x: string }): boolean {
+    const expected = xorHash({ s: c.s, i: c.i, b: c.b, m: c.m, t: c.t } as any);
+    return c.x === expected;
   }
 
   async getById(id: LogId): Promise<StoredAuditEntry | null> {
@@ -65,15 +124,7 @@ export class HybridAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmi
   }
 
   async queryAsync(params: LogQuery): Promise<{ entries: StoredAuditEntry[]; nextCursor?: string; total?: number }> {
-    let all = this.#filterEntries(params);
-    if (this.#atomic) {
-      const fromKV = await this.#queryFromStore(params);
-      const memIds = new Set(all.map(e => e.id));
-      all = [...all, ...fromKV.filter(e => !memIds.has(e.id))].sort((a, b) => b.timestamp - a.timestamp);
-    }
-    const total = all.length;
-    if (params.limit) all = all.slice(0, params.limit);
-    return { entries: all, total };
+    return this.query(params);
   }
 
   #filterEntries(params?: LogQuery): StoredAuditEntry[] {
@@ -153,4 +204,11 @@ export class HybridAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmi
     }
     return 0;
   }
+}
+
+/** Derive a short machine hash from a boot UUID for cursor.s field. */
+function hashBootId(bootId: string): string {
+  let h = 0;
+  for (let i = 0; i < bootId.length; i++) h ^= bootId.charCodeAt(i) << ((i % 4) * 8);
+  return (h >>> 0).toString(16).padStart(8, '0');
 }

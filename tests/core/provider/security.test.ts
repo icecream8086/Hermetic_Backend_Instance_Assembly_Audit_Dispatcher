@@ -45,7 +45,6 @@ describe('sanitizeContainerInput', () => {
       name: 'test',
       cpu: 1, memory: 512,
       region: 'local' as any,
-      spotStrategy: 'None',
       restartPolicy: 'Always',
       containers: [{
         name: 'c1',
@@ -131,7 +130,7 @@ describe('secureContainerProvider', () => {
 
     await secured.create({
       name: 'test', cpu: 1, memory: 256,
-      region: 'local' as any, spotStrategy: 'None', restartPolicy: 'Always',
+      region: 'local' as any, restartPolicy: 'Always',
       containers: [{
         name: 'c', image: 'n',
         livenessProbe: { exec: { command: ['ls', ';rm'] } },

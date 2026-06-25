@@ -4,7 +4,7 @@ import { FileKVAtomicStore } from '../../../src/core/store/adapters/file-kv.ts';
 import { SandboxService } from '../../../src/features/sandbox/sandbox.service.ts';
 import { ConsoleLogger } from '../../../src/core/audit/console-logger.ts';
 import { StubContainerProvider } from '../../../src/providers/stub/container.ts';
-import { SandboxStatus, SpotStrategy, createSandboxId } from '../../../src/features/sandbox/types.ts';
+import { SandboxStatus, createSandboxId } from '../../../src/features/sandbox/types.ts';
 import type { CreateSandboxInput, Sandbox } from '../../../src/features/sandbox/types.ts';
 import type { RegionId } from '../../../src/core/region/types.ts';
 import type { IContainerProvider, IProviderRegistry } from '../../../src/core/provider/interfaces.ts';
@@ -17,7 +17,6 @@ function baseInput(overrides?: Partial<CreateSandboxInput>): CreateSandboxInput 
     region: 'local' as unknown as RegionId,
     instanceId: 'inst_test' as any,
     resourceSpec: { cpu: 1, memory: 512 },
-    spotStrategy: SpotStrategy.None,
     restartPolicy: 'Never',
     containers: [{ name: 'app', image: 'nginx:latest' }],
     network: { allocatePublicIp: false },

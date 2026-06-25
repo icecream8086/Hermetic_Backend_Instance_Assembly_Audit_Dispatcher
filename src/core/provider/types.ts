@@ -216,6 +216,7 @@ export interface ContainerGroupRuntime {
   readonly cpu: number;
   readonly memory: number;
   readonly gpu?: number | undefined;
+  readonly gpuModel?: string | undefined;
   readonly discount?: number;
   /** Private VPC network of the container group's ENI. */
   readonly network: ContainerGroupNetwork;
@@ -351,7 +352,6 @@ export interface CreateContainerGroupInput {
   readonly memory: number;
   readonly gpu?: number | undefined;
   readonly gpuType?: string | undefined;
-  readonly spotStrategy: string;
   readonly restartPolicy: string;
   readonly containers: readonly ContainerCreateConfig[];
   readonly volumes?: readonly VolumeConfigInput[] | undefined;

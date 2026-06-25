@@ -43,6 +43,8 @@ export interface StoredAuditEntry {
   metadata?: Record<string, unknown>;
   priority?: number;
   trusted?: TrustedFields;
+  /** Journald-style cursor for incremental consumption with tamper detection. */
+  cursor?: string;
 }
 
 /**
@@ -73,6 +75,8 @@ export interface LogQuery {
   startTs?: number;
   endTs?: number;
   limit?: number;
+  /** Skip first N entries (for page-based pagination). */
+  offset?: number;
   /** Resume from after this cursor (exclusive). Use nextCursor from previous LogQueryResult. */
   afterCursor?: string;
   /** Filter by priority range (inclusive). priorityMin=16 → SANDBOX.EMERG and above. */
@@ -107,7 +111,7 @@ export function cursorFromEntry(entry: StoredAuditEntry, bootId: string, seq: nu
   return cursor;
 }
 
-function xorHash(c: { s: string; i: number; b: string; m: number; t: number }): string {
+export function xorHash(c: { s: string; i: number; b: string; m: number; t: number }): string {
   const parts = [c.s, String(c.i), c.b, String(c.m), String(c.t)];
   let h = 0;
   for (const p of parts) { for (let i = 0; i < p.length; i++) h ^= p.charCodeAt(i) << ((i % 4) * 8); }

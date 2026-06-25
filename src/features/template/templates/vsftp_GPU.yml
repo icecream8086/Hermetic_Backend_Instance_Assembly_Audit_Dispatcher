@@ -33,10 +33,10 @@ containers:
     stdin: true
     tty: true
 extensions:
-  spotStrategy: "SpotAsPriceGo"
   healthMaxRetries: 3
   providerOverrides:
     alibaba:
+      spotStrategy: "SpotAsPriceGo"
       instanceType: "ecs.gn6v-c8g1.2xlarge"
       ingressBandwidth: 100
       egressBandwidth: 100

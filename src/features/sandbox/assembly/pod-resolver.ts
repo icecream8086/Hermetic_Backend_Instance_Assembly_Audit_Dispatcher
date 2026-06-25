@@ -136,7 +136,6 @@ export class PodResolver {
       ...(spec.instanceId ? { instanceId: spec.instanceId } : {}),
       cpu: totalCpu,
       memory: totalMem,
-      spotStrategy: 'None',
       restartPolicy: 'Never',
       containers,
       network: { allocatePublicIp: false },
