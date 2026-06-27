@@ -25,6 +25,7 @@ import type {
   ContainerCreateConfig,
   ContainerGroupRuntime,
   ContainerGroupStatus,
+  OciContainerStatus,
   VolumeConfigInput,
   VolumeRuntimeInfo,
   ProbeSpec,
@@ -33,7 +34,8 @@ import type {
   ContainerGroupRuntimeEvent,
   AssociatedResource,
 } from '../../core/provider/types.ts';
-import { createZoneId } from '../../core/region/types.ts';
+import { createRegionId, createZoneId } from '../../core/region/types.ts';
+import { createContainerId } from '../../core/provider/types.ts';
 import { applyExtensionOverrides } from '../../core/provider/extension-schema.ts';
 import './eci-schema.ts'; // register Alibaba ECI extension fields
 
@@ -46,13 +48,23 @@ type ScalarKeys<T> = {
   [K in keyof T]-?: T[K] extends string | number | boolean | undefined | null ? K : never
 }[keyof T] & string;
 
-/** Single field bidirectional codec. */
-interface EciFieldCodec<T> {
+/** Single field bidirectional codec.
+ *  TEncode: value passed to encode (after null-check — NonNullable).
+ *  TDecode: value returned by decode (full field type — may include |undefined). */
+interface EciFieldCodec<TEncode, TDecode = TEncode> {
   readonly param: string;
   readonly responsePath: string;
-  readonly encode: (v: T) => string;
-  readonly decode: (v: unknown) => T;
+  readonly encode: (v: TEncode) => string;
+  readonly decode: (v: unknown) => TDecode;
 }
+
+/** Derive precise codec table type from an interface.
+ *  encode receives NonNullable<T[P]> (null-checked by caller).
+ *  decode returns T[P] (full type — matches the interface field).
+ *  Wrong type → TS compile error. */
+type CodecTable<T, K extends keyof T = ScalarKeys<T>> = {
+  [P in K]: EciFieldCodec<NonNullable<T[P]>, T[P]>;
+};
 
 /** Describes how to map an array from CreateContainerGroupInput into indexed RPC params. */
 interface NestedSpec<TItem> {
@@ -165,8 +177,9 @@ type TopScalarKey = Exclude<
   | 'description' // → metadata only
 >;
 
-// Compiler guarantee: every TopScalarKey MUST have an entry here.
-const TOP_SCALARS: Record<TopScalarKey, EciFieldCodec<any>> = {
+// Compiler guarantee: every TopScalarKey MUST have an entry here,
+// and each entry's T must match the field type from CreateContainerGroupInput.
+const TOP_SCALARS: CodecTable<CreateContainerGroupInput, TopScalarKey> = {
   name: {
     param: 'ContainerGroupName',
     responsePath: 'ContainerGroupName',
@@ -236,7 +249,7 @@ function buildGpuParam(input: CreateContainerGroupInput): Record<string, string>
 // volumeMounts, resources, probes, providerOverrides).  No manual Exclude needed.
 type ContainerScalarKey = ScalarKeys<ContainerCreateConfig>;
 
-const CONTAINER_SCALARS: Record<ContainerScalarKey, EciFieldCodec<any>> = {
+const CONTAINER_SCALARS: CodecTable<ContainerCreateConfig, ContainerScalarKey> = {
   name: {
     param: 'Name',
     responsePath: 'Name',
@@ -362,7 +375,7 @@ function parseEnv(vars: EciEnvItem[] | undefined): Record<string, string> {
 
 type PortScalarKey = ScalarKeys<ContainerPortConfig>;
 
-const PORT_SCALARS: Record<PortScalarKey, EciFieldCodec<any>> = {
+const PORT_SCALARS: CodecTable<ContainerPortConfig, PortScalarKey> = {
   containerPort: {
     param: 'Port',
     responsePath: 'Port',
@@ -401,7 +414,7 @@ function buildPortParams(ports: readonly ContainerPortConfig[] | undefined, base
 
 type ProbeScalarKey = Exclude<ScalarKeys<ProbeSpec>, 'httpGet' | 'exec' | 'tcpSocket'>;
 
-const PROBE_SCALARS: Record<ProbeScalarKey, EciFieldCodec<any>> = {
+const PROBE_SCALARS: CodecTable<ProbeSpec, ProbeScalarKey> = {
   initialDelaySeconds: {
     param: 'InitialDelaySeconds',
     responsePath: 'InitialDelaySeconds',
@@ -488,7 +501,7 @@ export function parseProbe(raw: EciProbeItem | undefined): ProbeSpec | undefined
 
 type VolumeScalarKey = ScalarKeys<VolumeConfigInput>;
 
-const VOLUME_SCALARS: Record<VolumeScalarKey, EciFieldCodec<any>> = {
+const VOLUME_SCALARS: CodecTable<VolumeConfigInput, VolumeScalarKey> = {
   id: {
     param: 'Name',
     responsePath: 'Name',
@@ -603,21 +616,18 @@ export function buildCreateParams(
   const p: Record<string, string> = {};
 
   // ── Region (always set except partial without region) ──
-  if (!partial || (input as unknown as Record<string, unknown>).region != null) {
+  if (!partial || input.region != null) {
     p['RegionId'] = String(input.region);
   }
 
   // ── Top-level scalars ──
-  for (const [key, codec] of Object.entries(TOP_SCALARS) as [string, EciFieldCodec<any>][]) {
+  // Object.entries loses key-codec correlation (TS limitation).
+  // Cast is safe: CodecTable<> verified field-type match at definition.
+  for (const [key, codec] of Object.entries(TOP_SCALARS as Record<string, EciFieldCodec<any>>)) {
     // Skip GPU fields — handled as compound below
     if (key === 'gpu' || key === 'gpuType') continue;
-    const val = (input as any)[key];
+    const val = input[key as TopScalarKey];
     if (val !== undefined && val !== null) {
-      // Skip 'name' in partial unless explicitly set
-      if (partial && key === 'name' && val === (input as any).name) {
-        p[codec.param] = codec.encode(val);
-        continue;
-      }
       p[codec.param] = codec.encode(val);
     }
   }
@@ -632,13 +642,9 @@ export function buildCreateParams(
     input.containers.forEach((c, i) => {
       const cpfx = `Container.${i + 1}`;
 
-      // Container scalars
-      for (const [key, codec] of Object.entries(CONTAINER_SCALARS) as [string, EciFieldCodec<any>][]) {
-        // Skip compound fields handled below
-        if (key === 'command' || key === 'args' || key === 'env' ||
-            key === 'ports' || key === 'volumeMounts' ||
-            key === 'resources') continue;
-        const val = (c as any)[key];
+      // Container scalars — see note above on Object.entries cast
+      for (const [key, codec] of Object.entries(CONTAINER_SCALARS as Record<string, EciFieldCodec<any>>)) {
+        const val = c[key as ContainerScalarKey];
         if (val !== undefined && val !== null) {
           p[`${cpfx}.${codec.param}`] = codec.encode(val);
         }
@@ -765,7 +771,7 @@ export function parseContainerGroup(item: EciDescribeResponse): ContainerGroupRu
     providerId: item.ContainerGroupId ?? '',
     name: item.ContainerGroupName ?? '',
     status: (item.Status ?? 'Pending') as ContainerGroupStatus,
-    regionId: item.RegionId as any ?? '',
+    regionId: createRegionId(item.RegionId ?? 'cn-hangzhou'),
     cpu: item.Cpu ?? 0,
     memory: item.Memory ?? 0,
     network: {
@@ -778,13 +784,13 @@ export function parseContainerGroup(item: EciDescribeResponse): ContainerGroupRu
     associatedResources: parseAssociatedResources(item.AssociatedResources),
     restartPolicy: item.RestartPolicy ?? 'Always',
     containers: containers.map(c => ({
-      id: (c.ContainerId ?? '') as any,
+      id: createContainerId(c.ContainerId || 'ctr-unknown'),
       name: c.Name ?? '',
       image: c.Image ?? '',
       args: c.Args ?? [],
       env: parseEnv(c.EnvironmentVars),
       workingDir: c.WorkingDir ?? '',
-      status: (c.Status ?? 'creating') as any,
+      status: (c.Status?.toLowerCase() ?? 'creating') as OciContainerStatus,
       alive: c.Status === 'Running',
       createdAt: c.CreationTime ?? '',
       ...(c.StartedAt ? { startedAt: c.StartedAt } : {}),
@@ -819,14 +825,56 @@ export function parseContainerGroup(item: EciDescribeResponse): ContainerGroupRu
 }
 
 // ═══════════════════════════════════════════════════════════════
-// Compile-time completeness guards
+// Compile-time + init-time codec integrity
 // ═══════════════════════════════════════════════════════════════
-// These tables exist solely for Record<DerivedKey, EciFieldCodec> enforcement.
-// When a scalar field is added to CreateContainerGroupInput / ContainerCreateConfig /
-// ProbeSpec / etc., the corresponding Record type expands and TS emits a
-// missing-property error.  The tables are not iterated at runtime here (the
-// builder/parser functions above handle the mapping explicitly), but `void`
-// satisfies `noUnusedLocals`.
+// Compile-time (3 layers):
+//   1. ScalarKeys<T>         — auto-derives field union from interface
+//   2. Record<ScalarKeys, …> — no missing keys, no extra keys
+//   3. CodecTable<Interface> — each codec's T must match field type
+//
+// Init-time: validateCodecIntegrity() verifies every codec entry has
+// actual encode/decode functions.  Catches `as any` bypasses and
+// malformed codec objects that compile-time can't detect.
+
+/** Runtime validation: ensure every codec entry has actual encode/decode
+ *  functions.  Key-set correctness is guaranteed at compile time by
+ *  Record<ScalarKeys, ...> — this check only guards against runtime
+ *  corruption and `as any` type-system bypasses. */
+export function validateCodecIntegrity(): { ok: boolean; broken: string[] } {
+  const tables: Record<string, Record<string, unknown>> = {
+    TOP_SCALARS,
+    CONTAINER_SCALARS,
+    PROBE_SCALARS,
+    PORT_SCALARS,
+    VOLUME_SCALARS,
+  };
+
+  const broken: string[] = [];
+  for (const [name, table] of Object.entries(tables)) {
+    for (const [key, codec] of Object.entries(table)) {
+      const c = codec as Record<string, unknown> | undefined;
+      if (!c || typeof c.encode !== 'function') {
+        broken.push(`${name}.${key}: encode is not a function`);
+      }
+      if (!c || typeof c.decode !== 'function') {
+        broken.push(`${name}.${key}: decode is not a function`);
+      }
+      if (c && typeof c['param'] !== 'string') {
+        broken.push(`${name}.${key}: param is not a string`);
+      }
+    }
+  }
+
+  if (broken.length > 0) {
+    console.error('[eci-codec] Codec integrity failure:', broken.join('; '));
+  }
+  return { ok: broken.length === 0, broken };
+}
+
+// Run at module load
+const _INTEGRITY = validateCodecIntegrity();
+void _INTEGRITY;
+
 void PORT_SCALARS;
 void PROBE_SCALARS;
 void VOLUME_SCALARS;

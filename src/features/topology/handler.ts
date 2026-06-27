@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import type { BucketService, InstanceService, ImageRepositoryService } from '../../core/region/index.ts';
 import { createInstanceId } from '../../core/region/index.ts';
 import type { CreateImageInput, UpdateImageInput } from '../../core/region/image.ts';
@@ -17,7 +18,7 @@ import type { CreateS3PolicyInput, UpdateS3PolicyInput } from '../../core/s3-pol
 import type { IS3Provider } from '../../core/provider/s3.ts';
 import type { S3MultipartUploadSession, S3MultipartDownloadSession } from '../../core/provider/s3-types.ts';
 
-function requireRoot(c: any): Response | null {
+function requireRoot(c: Context<{ Variables: AppContext }>): Response | null {
   const user = c.var?.currentUser;
   if (!user) return null;
   const isRoot = user.role === 'root' || user.role === 'Operator' || user.role === 'wheel';

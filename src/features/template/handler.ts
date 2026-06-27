@@ -1,10 +1,11 @@
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
 import type { RouteMeta } from '../../core/http-docs/types.ts';
 import { ok, fail } from '../../core/response.ts';
 import type { AppContext } from '../../core/deps.ts';
 import type { ISandboxService } from '../sandbox/interfaces.ts';
-import type { SandboxTemplate, CreateTemplateInput, UpdateTemplateInput } from './types.ts';
+import type { SandboxTemplate, CreateTemplateInput, UpdateTemplateInput, ContainerSpec, ContainerDef, HealthCheckDef, NetworkSpec, TemplateExtensions, TemplateInstanceLimit } from './types.ts';
 import { KernLevel } from '../../core/audit/kern-level.ts';
 import { TemplateVisibility } from './types.ts';
 import type { IProviderRegistry } from '../../core/provider/interfaces.ts';
@@ -17,13 +18,17 @@ import type { PodSpec } from '../sandbox/assembly/types.ts';
 import { UserRole } from '../users/types.ts';
 import { createAtomicNetworkResolver } from '../../core/network/resolver.ts';
 import { InstanceService } from '../../core/region/instance.ts';
+import type { InstanceId } from '../../core/region/instance.ts';
+import type { RegionId } from '../../core/region/types.ts';
 import { INSTANCE_TEMPLATES, type InstanceTemplateDef } from './templates.generated.ts';
 
 type PermissionCheckFn = { check(params: { userId: string; action: string; resource: string; ip?: string }): Promise<{ allowed: boolean; reason: string }> };
 
-async function requirePerm(c: any, checker: PermissionCheckFn | undefined, action: string, resource: string, resourceOwnerId?: string): Promise<Response | null> {
+type TemplateEnv = { Variables: AppContext };
+
+async function requirePerm(c: Context<TemplateEnv>, checker: PermissionCheckFn | undefined, action: string, resource: string, resourceOwnerId?: string): Promise<Response | null> {
   if (!checker) return null;
-  const user = (c as any).var?.currentUser;
+  const user = c.var.currentUser;
   if (!user) return null;
   const result = await checker.check({ userId: user.id, action, resource, ...(resourceOwnerId ? { resourceOwnerId } : {}) });
   if (!result.allowed) return c.json(fail('FORBIDDEN', result.reason), 403);
@@ -41,32 +46,36 @@ function fromGeneratedTemplate(def: InstanceTemplateDef, defaultInstanceId?: str
   const now = Date.now();
   const cid = defaultInstanceId;
 
-  const container: Record<string, unknown> = {};
-  if (s.region !== undefined) container.region = s.region;
-  if (cid && !s.instanceId) container.instanceId = cid;
-  if (s.restartPolicy !== undefined) container.restartPolicy = s.restartPolicy;
-  if (s.containers) container.containers = s.containers;
-  if (s.initContainers) container.initContainers = s.initContainers;
+  // Build container spec from YAML fields. Each cast is narrow and specific —
+  // the source is Record<string, unknown> from a YAML-generated file.
+  const hasContainer = s.containers || s.initContainers || s.region !== undefined
+    || s.restartPolicy !== undefined || (cid && !s.instanceId);
 
-  const tpl: Record<string, unknown> = {
+  return {
     id: def.id,
     name: def.name,
     description: def.description,
-    apiVersion: (s.apiVersion as string) ?? 'hbi-aad/v1',
-    kind: (s.kind as string) ?? 'Container',
-    dependsOn: (s.dependsOn as string[]) ?? [],
+    apiVersion: (s.apiVersion as string | undefined) ?? 'hbi-aad/v1',
+    kind: ((s.kind as string | undefined) ?? 'Container') as SandboxTemplate['kind'],
+    dependsOn: (s.dependsOn as string[] | undefined) ?? [],
     createdAt: now,
     updatedAt: now,
+    ...(hasContainer ? {
+      container: {
+        ...(s.region !== undefined ? { region: s.region as RegionId } : {}),
+        ...(cid && !s.instanceId ? { instanceId: cid as InstanceId } : {}),
+        ...(s.restartPolicy !== undefined ? { restartPolicy: s.restartPolicy as ContainerSpec['restartPolicy'] } : {}),
+        ...(s.containers ? { containers: s.containers as ContainerDef[] } : {}),
+        ...(s.initContainers ? { initContainers: s.initContainers as ContainerDef[] } : {}),
+      } as ContainerSpec,
+    } : {}),
+    ...(s.singleton !== undefined ? { singleton: s.singleton as boolean } : {}),
+    ...(s.healthChecks ? { healthChecks: s.healthChecks as HealthCheckDef[] } : {}),
+    ...(s.network ? { network: s.network as NetworkSpec } : {}),
+    ...(s.extensions ? { extensions: s.extensions as TemplateExtensions } : {}),
+    ...(s.podSpec ? { podSpec: s.podSpec as PodSpec } : {}),
+    ...(s.instanceLimit ? { instanceLimit: s.instanceLimit as TemplateInstanceLimit } : {}),
   };
-  if (Object.keys(container).length > 0) tpl.container = container;
-  if (s.singleton !== undefined) tpl.singleton = s.singleton;
-  if (s.healthChecks) tpl.healthChecks = s.healthChecks;
-  if (s.network) tpl.network = s.network;
-  if (s.extensions) tpl.extensions = s.extensions;
-  if (s.podSpec) tpl.podSpec = s.podSpec;
-  if (s.instanceLimit) tpl.instanceLimit = s.instanceLimit;
-
-  return tpl as unknown as SandboxTemplate;
 }
 
 /** Generated templates (YAML source-of-truth) as SandboxTemplate shape. */
@@ -410,7 +419,7 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
     const body: CreateTemplateInput = await c.req.json();
     if (!body.name) return c.json(fail('VALIDATION_ERROR', 'name is required'), 400);
 
-    const user = (c as any).var?.currentUser as { id: string; role?: string } | undefined;
+    const user = c.var.currentUser;
     if (!isUserRoot(user) && body.healthChecks) {
       // Non-root users cannot set liveness checks — force safe defaults
       body.healthChecks = body.healthChecks.filter(h => h.type !== 'liveness');
@@ -457,7 +466,7 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
 
   // GET / — list all templates (systemd-style: generated + store overrides, tombstones hidden)
   router.get('/', async (c) => {
-    const user = (c as any).var?.currentUser as { id: string; role?: string } | undefined;
+    const user = c.var.currentUser;
     const page = parseInt(c.req.query('page') ?? '') || 1;
     const limit = parseInt(c.req.query('limit') ?? '') || 50;
     const name = c.req.query('name');
@@ -478,7 +487,7 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
   router.get('/:id', async (c) => {
     const resolved = await resolveTemplateSource(atomic, c.req.param('id'));
     if (!resolved) return c.json(fail('TEMPLATE_NOT_FOUND', 'Template not found'), 404);
-    const user = (c as any).var?.currentUser as { id: string; role?: string } | undefined;
+    const user = c.var.currentUser;
     if (!canAccessTemplate(resolved.template, user)) {
       return c.json(fail('TEMPLATE_NOT_FOUND', 'Template not found'), 404);
     }
@@ -489,7 +498,7 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
   router.get('/:id/resolved', async (c) => {
     try {
       const { template: resolved, chain } = await resolveTemplateWithChain(atomic, c.req.param('id'));
-      const user = (c as any).var?.currentUser as { id: string; role?: string } | undefined;
+      const user = c.var.currentUser;
       if (!canAccessTemplate(resolved, user)) {
         return c.json(fail('TEMPLATE_NOT_FOUND', 'Template not found'), 404);
       }
@@ -507,7 +516,7 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
       resolved = await resolveTemplate(atomic, c.req.param('id'));
       const body: any = await c.req.json().catch(() => ({}));
 
-      const user = (c as any).var?.currentUser as { id: string; role?: string } | undefined;
+      const user = c.var.currentUser;
 
       if (!canAccessTemplate(resolved, user)) {
         return c.json(fail('TEMPLATE_NOT_FOUND', 'Template not found'), 404);
@@ -615,7 +624,7 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
       console.error(`[template] apply failed for ${c.req.param('id')}:`, { code, status, message: e.message });
       // Release claimed resources if template resolution succeeded before the failure
       if (resolved) {
-        await releaseInstanceSlot(atomic, resolved, (c as any).var?.currentUser?.id ?? 'anonymous').catch(() => {});
+        await releaseInstanceSlot(atomic, resolved, c.var.currentUser?.id ?? 'anonymous').catch(() => {});
         await releaseResourceBinding(atomic, resolved).catch(() => {});
       }
       return c.json(fail(code, e.message), status);
@@ -625,7 +634,7 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
   // PUT /:id — update a template (systemd-style: root can override generated, owner can update own)
   router.put('/:id', async (c) => {
     const id = c.req.param('id');
-    const user = (c as any).var?.currentUser as { id: string; role?: string } | undefined;
+    const user = c.var.currentUser;
     const resolved = await resolveTemplateSource(atomic, id);
     if (!resolved) return c.json(fail('TEMPLATE_NOT_FOUND', 'Template not found'), 404);
 
@@ -686,7 +695,7 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
   // DELETE /:id — delete a template (systemd-style: generated → tombstone, store → actual delete)
   router.delete('/:id', async (c) => {
     const id = c.req.param('id');
-    const user = (c as any).var?.currentUser as { id: string; role?: string } | undefined;
+    const user = c.var.currentUser;
     const resolved = await resolveTemplateSource(atomic, id);
     if (!resolved) return c.json(fail('TEMPLATE_NOT_FOUND', 'Template not found'), 404);
 

@@ -17,7 +17,7 @@ import { createRouter as imagesRouter } from './images/index.ts';
 import { createRouter as actionsRouter } from './actions/index.ts';
 import { createRouter as instancesRouter } from './instances/index.ts';
 
-import type { FeatureDeps } from '../core/app.ts';
+import type { FeatureDeps } from '../core/deps.ts';
 import type { Hono } from 'hono';
 
 export interface RegisteredFeature {

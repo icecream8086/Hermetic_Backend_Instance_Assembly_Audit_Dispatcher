@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import type { IAuditReader, LogQuery } from './types.ts';
 import { ok, fail } from '../response.ts';
 import { KernLevel, kernLevelName } from './kern-level.ts';
@@ -10,6 +11,9 @@ import {
   type PersistencePolicy,
   type PersistenceRule,
 } from './persistence-policy.ts';
+import type { AppContext } from '../deps.ts';
+
+type AuditEnv = { Variables: AppContext };
 
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 500;
@@ -20,7 +24,7 @@ function intParam(raw: string | undefined, fallback: number, min: number, max: n
   return Number.isFinite(n) ? Math.min(Math.max(n, min), max) : fallback;
 }
 
-function requireRoot(c: any): Response | null {
+function requireRoot(c: Context<AuditEnv>): Response | null {
   const user = c.var?.currentUser;
   if (!user) return null;
   const isRoot = user.role === 'root' || user.role === 'Operator' || user.role === 'wheel';
@@ -28,8 +32,8 @@ function requireRoot(c: any): Response | null {
   return null;
 }
 
-export function createAuditRouter(reader: IAuditReader): Hono {
-  const router = new Hono();
+export function createAuditRouter(reader: IAuditReader): Hono<AuditEnv> {
+  const router = new Hono<AuditEnv>();
 
   // ─── Log query ───
 
@@ -79,7 +83,7 @@ export function createAuditRouter(reader: IAuditReader): Hono {
   /** PUT /logs/persistence — update persistence policy. Accepts partial updates. */
   router.put('/logs/persistence', async (c) => {
     { const r = requireRoot(c); if (r) return r; }
-    const userId = (c as any).var?.currentUser?.id as string | undefined;
+    const userId = c.var.currentUser?.id;
     const body = await c.req.json().catch(() => null);
     if (!body || typeof body !== 'object') {
       return c.json(fail('INVALID_REQUEST', 'Expected JSON body'), 400);
@@ -105,7 +109,7 @@ export function createAuditRouter(reader: IAuditReader): Hono {
   /** POST /logs/persistence/reset — reset persistence policy to built-in defaults. */
   router.post('/logs/persistence/reset', async (c) => {
     { const r = requireRoot(c); if (r) return r; }
-    const userId = (c as any).var?.currentUser?.id as string | undefined;
+    const userId = c.var.currentUser?.id;
     const reset = resetPersistencePolicy();
     reset.updatedBy = userId ?? 'unknown';
     reset.updatedAt = Date.now();

@@ -1,6 +1,8 @@
 import type { SandboxTemplate, ContainerSpec, ContainerDef, HealthCheckDef, TemplateStorage, NetworkSpec } from './types.ts';
-import type { CreateSandboxInput, Volume, VolumeMount } from '../sandbox/types.ts';
+import type { CreateSandboxInput, Volume, VolumeMount, SandboxNetworkConfig } from '../sandbox/types.ts';
+import type { EnvVar, ProbeSpec } from '../../core/provider/types.ts';
 import { VolumeType, VolumeStatus, createVolumeId } from '../sandbox/types.ts';
+import { createRegionId } from '../../core/region/types.ts';
 
 /**
  * Map a resolved template to CreateSandboxInput.
@@ -25,7 +27,7 @@ export async function applyTemplate(
   resolveVolume?: (id: string) => Promise<Record<string, unknown> | null>,
   resolveBucket?: (id: string) => Promise<Record<string, unknown> | null>,
 ): Promise<CreateSandboxInput> {
-  const container: ContainerSpec = tpl.container ?? { region: 'local' as any, containers: [] };
+  const container: ContainerSpec = tpl.container ?? { region: createRegionId('local'), containers: [] } as unknown as ContainerSpec;
   const containers = container.containers ?? [];
   const cpu = containers.reduce((s, c) => s + (c.resources?.limits?.cpu ?? c.resources?.requests?.cpu ?? 1), 0);
   const memory = containers.reduce((s, c) => s + (c.resources?.limits?.memory ?? c.resources?.requests?.memory ?? 2048), 0);
@@ -42,27 +44,31 @@ export async function applyTemplate(
   const probeMap = buildProbeMap(tpl.healthChecks);
 
   // Merge template-level env + configMap env for main containers
-  function mergeEnv(existing: readonly { name: string; value?: string; valueFrom?: unknown }[] | undefined): Record<string, unknown>[] | undefined {
-    const merged: Record<string, unknown>[] = [
-      ...(existing?.map(e => ({ name: e.name, ...(e.value !== undefined ? { value: e.value } : {}), ...(e.valueFrom !== undefined ? { valueFrom: e.valueFrom } : {}) })) ?? []),
+  function mergeEnv(existing: readonly { name: string; value?: string; valueFrom?: unknown }[] | undefined): EnvVar[] | undefined {
+    const merged: EnvVar[] = [
+      ...(existing?.map(e => ({ name: e.name, ...(e.value !== undefined ? { value: e.value } : {}), ...(e.valueFrom !== undefined ? { valueFrom: e.valueFrom as EnvVar['valueFrom'] } : {}) })) ?? []),
       ...configMapEnv,
     ];
     return merged.length > 0 ? merged : undefined;
   }
 
+  // Validate restartPolicy at the boundary — narrows from string to literal union
+  const rp = container.restartPolicy ?? 'Always';
+  const restartPolicy: CreateSandboxInput['restartPolicy'] =
+    (rp === 'Always' || rp === 'OnFailure' || rp === 'Never') ? rp : 'Always';
+
   return {
     name: name ?? `${tpl.name}-${crypto.randomUUID().slice(0, 6)}`,
     templateRef: tpl.id,
-    region: (region ?? container.region) as any,
+    region: createRegionId(region ?? String(container.region) ?? 'local'),
     resourceSpec: { cpu, memory, ...(gpu > 0 ? { gpu, ...(gpuType ? { gpuType } : {}) } : {}) },
-    // spotStrategy moved to providerOverrides.alibaba — it's not a cloud-neutral field.
-    restartPolicy: (container.restartPolicy ?? 'Always') as any,
+    restartPolicy,
     containers: containers.map((c: ContainerDef, i: number) => ({
       name: c.name,
       image: c.image,
       ...(c.command ? { command: [...c.command] } : {}),
       ...(c.args ? { args: [...c.args] } : {}),
-      ...(mergeEnv(c.env) ? { env: mergeEnv(c.env) } : {}),
+      ...((e => e ? { env: e } : {})(mergeEnv(c.env))),
       ...(c.resources ? {
         resources: {
           ...(c.resources.requests ? { requests: { cpu: c.resources.requests.cpu ?? 0, memory: c.resources.requests.memory ?? 0 } } : {}),
@@ -74,8 +80,7 @@ export async function applyTemplate(
         ...(p.protocol ? { protocol: p.protocol } : {}),
       })) } : {}),
       ...(i === 0 && mainVolMounts ? { volumeMounts: mainVolMounts } : {}),
-      // Probes from healthChecks
-      ...(probeMap.get(`container:${c.name}`) || {}),
+      ...(probeMap.get(`container:${c.name}`) ?? {}),
     })),
     ...(container.initContainers ? {
       initContainers: container.initContainers.map((c: ContainerDef) => ({
@@ -83,18 +88,18 @@ export async function applyTemplate(
         image: c.image,
         ...(c.command ? { command: [...c.command] } : {}),
         ...(c.args ? { args: [...c.args] } : {}),
-        ...(c.env ? { env: c.env.map(e => ({
-          name: e.name,
-          ...(e.value !== undefined ? { value: e.value } : {}),
-          ...(e.valueFrom !== undefined ? { valueFrom: e.valueFrom } : {}),
-        })) } : {}),
+        ...((e => e ? { env: e.map(x => ({
+          name: x.name,
+          ...(x.value !== undefined ? { value: x.value } : {}),
+          ...(x.valueFrom !== undefined ? { valueFrom: x.valueFrom as EnvVar['valueFrom'] } : {}),
+        })) } : {})(c.env)),
         ...(c.resources ? {
           resources: {
             ...(c.resources.requests ? { requests: { cpu: c.resources.requests.cpu ?? 0, memory: c.resources.requests.memory ?? 0 } } : {}),
             ...(c.resources.limits ? { limits: { cpu: c.resources.limits.cpu ?? 0, memory: c.resources.limits.memory ?? 0, ...(c.resources.limits.gpu !== undefined ? { gpu: c.resources.limits.gpu } : {}), ...(c.resources.limits.gpuType !== undefined ? { gpuType: c.resources.limits.gpuType } : {}) } } : {}),
           },
         } : {}),
-        ...(probeMap.get(`init:${c.name}`) || {}),
+        ...(probeMap.get(`init:${c.name}`) ?? {}),
       })),
     } : {}),
     ...(volumes.length > 0 ? { volumes } : {}),
@@ -103,9 +108,9 @@ export async function applyTemplate(
     ...(container.instanceId ? { instanceId: container.instanceId } : {}),
     ...(ext?.healthMaxRetries !== undefined ? { healthMaxRetries: ext.healthMaxRetries as number } : {}),
     network: mapNetwork(tpl.network),
-    description: tpl.description,
+    ...(tpl.description !== undefined ? { description: tpl.description } : {}),
     ...(ext?.providerOverrides ? { providerOverrides: ext.providerOverrides } : {}),
-  } as unknown as CreateSandboxInput;
+  };
 }
 
 // ─── Health check → probe map ───
@@ -114,18 +119,20 @@ export async function applyTemplate(
  * Map healthChecks[] to per-container probe objects.
  * Returns: Map<"container:name", {livenessProbe?, readinessProbe?, startupProbe?}>
  */
-function buildProbeMap(healthChecks: readonly HealthCheckDef[] | undefined): Map<string, Record<string, unknown>> {
-  const map = new Map<string, Record<string, unknown>>();
+// Per-container probe bag — spread into ContainerConfig
+type ProbeBag = {
+  livenessProbe?: ProbeSpec | undefined;
+  readinessProbe?: ProbeSpec | undefined;
+  startupProbe?: ProbeSpec | undefined;
+};
+
+function buildProbeMap(healthChecks: readonly HealthCheckDef[] | undefined): Map<string, ProbeBag> {
+  const map = new Map<string, ProbeBag>();
   if (!healthChecks) return map;
 
   for (const hc of healthChecks) {
-    let entry = map.get(hc.target);
-    if (!entry) {
-      entry = {};
-      map.set(hc.target, entry);
-    }
-    const probeKey = `${hc.type}Probe`;
-    (entry as any)[probeKey] = {
+    const entry = map.get(hc.target) ?? {};
+    const probe: ProbeSpec = {
       ...hc.probe,
       ...(hc.initialDelaySeconds !== undefined ? { initialDelaySeconds: hc.initialDelaySeconds } : {}),
       ...(hc.periodSeconds !== undefined ? { periodSeconds: hc.periodSeconds } : {}),
@@ -133,13 +140,16 @@ function buildProbeMap(healthChecks: readonly HealthCheckDef[] | undefined): Map
       ...(hc.successThreshold !== undefined ? { successThreshold: hc.successThreshold } : {}),
       ...(hc.failureThreshold !== undefined ? { failureThreshold: hc.failureThreshold } : {}),
     };
+    const probeKey = `${hc.type}Probe` as keyof ProbeBag;
+    entry[probeKey] = probe;
+    map.set(hc.target, entry);
   }
   return map;
 }
 
 // ─── Network mapping ───
 
-function mapNetwork(network: NetworkSpec | undefined) {
+function mapNetwork(network: NetworkSpec | undefined): SandboxNetworkConfig {
   if (!network) return { allocatePublicIp: false };
   // allocatePublicIp: NEVER from template network.publicIp — EIP costs money,
   // must come through extensions.providerOverrides.alibaba.autoCreateEip.

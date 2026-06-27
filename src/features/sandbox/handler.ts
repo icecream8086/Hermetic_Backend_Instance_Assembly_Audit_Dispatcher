@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import type { ISandboxService } from './interfaces.ts';
 import { PodResolver } from './assembly/pod-resolver.ts';
 import { createSandboxId } from './types.ts';
@@ -17,9 +18,11 @@ function errorStatus(e: unknown, fallbackCode: string, fallbackStatus = 500): { 
   return { code, status };
 }
 
-async function requirePerm(c: any, checker: PermissionCheckFn | undefined, action: string, resource: string, resourceOwnerId?: string): Promise<Response | null> {
+type SandboxEnv = { Variables: AppContext };
+
+async function requirePerm(c: Context<SandboxEnv>, checker: PermissionCheckFn | undefined, action: string, resource: string, resourceOwnerId?: string): Promise<Response | null> {
   if (!checker) return null;
-  const user = (c as any).var?.currentUser;
+  const user = c.var.currentUser;
   if (!user) return null;
   const result = await checker.check({ userId: user.id, action, resource, ...(resourceOwnerId ? { resourceOwnerId } : {}) });
   if (!result.allowed) return c.json(fail('FORBIDDEN', result.reason), 403);
@@ -250,7 +253,7 @@ export function createSandboxRouter(
     const id = createSandboxId(c.req.param('id'));
     const sandbox = await svc.getById(id);
     const ownerId = sandbox?.config?.creatorId;
-    const actorId = (c as any).var?.currentUser?.id;
+    const actorId = c.var.currentUser?.id;
     { const r = await requirePerm(c, permissionChecker, 'delete', 'sandbox', ownerId); if (r) return r; }
     try {
       await svc.terminate(id, actorId);

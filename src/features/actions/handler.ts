@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import type { FeatureDeps } from '../../core/deps.ts';
+import type { FeatureDeps, AppContext } from '../../core/deps.ts';
 import { AppError } from '../../core/types.ts';
 import { ok } from '../../core/response.ts';
 
@@ -8,13 +8,16 @@ import { generateVersionId } from '../../core/brand.ts';
 import { CreateWorkflowSchema, UpdateWorkflowSchema, TriggerWorkflowSchema } from './schema.ts';
 import { WorkflowRunner } from './runner.ts';
 import { ActionRegistry, type CreateActionInput } from './registry.ts';
+import type { TriggerConfig, JobDef } from './types.ts';
 import { registerCronTrigger } from './triggers.ts';
 import { readStepLogs } from './logs.ts';
 import { WorkflowSecretService } from './secrets.ts';
 import { SharedLinkService } from './shared-link.ts';
 import { RunnerRegistry } from './runner-registry.ts';
+import type { RunnerHeartbeatInput } from './runner-registry.ts';
 import { BlobWorkspaceStore } from './workspace.ts';
 import { OrgService, ProjectService, ApprovalService } from './extensions.ts';
+import type { CreateOrgInput, CreateProjectInput } from './extensions.ts';
 import { DashboardService } from './dashboard.ts';
 import { TEMPLATES, TEMPLATE_METAS } from './templates.generated.ts';
 import {
@@ -37,7 +40,7 @@ import { JobOperator } from './job-operator.ts';
 import { buildDagFromWorkflow, createDagRunFromTrigger } from './dag-builder.ts';
 
 export function createActionsRouter(deps: FeatureDeps): Hono<any> {
-  const router = new Hono();
+  const router = new Hono<{ Variables: AppContext }>();
   const atomic = deps.stores.atomic;
   const blob = deps.stores.blob;
 
@@ -115,14 +118,14 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
       id,
       name: input.name,
       ...(input.description ? { description: input.description } : {}),
-      on: input.on as any,
+      on: input.on as TriggerConfig,
       ...(input.env ? { env: input.env } : {}),
-      jobs: input.jobs as any,
-      ...((input as any).orgId ? { orgId: (input as any).orgId } : {}),
-      ...((input as any).projectId ? { projectId: (input as any).projectId } : {}),
-      ownerId: (c as any).get?.('userId') ?? undefined,
-      ...((input as any).metadata ? { metadata: (input as any).metadata } : {}),
-      ...((input as any).annotations ? { annotations: (input as any).annotations } : {}),
+      jobs: input.jobs as Record<string, JobDef>,
+      ...(input.orgId ? { orgId: input.orgId } : {}),
+      ...(input.projectId ? { projectId: input.projectId } : {}),
+      ownerId: c.var.currentUser?.id ?? 'anonymous',
+      ...(input.metadata ? { metadata: input.metadata } : {}),
+      ...(input.annotations ? { annotations: input.annotations } : {}),
       createdAt: now,
       updatedAt: now,
       version: generateVersionId(),
@@ -168,9 +171,9 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
       ...entry.value,
       ...(input.name !== undefined ? { name: input.name } : {}),
       ...(input.description != null ? { description: input.description } : {}),
-      ...(input.on !== undefined ? { on: input.on as any } : {}),
+      ...(input.on !== undefined ? { on: input.on as TriggerConfig } : {}),
       ...(input.env !== undefined ? { env: input.env } : {}),
-      ...(input.jobs !== undefined ? { jobs: input.jobs as any } : {}),
+      ...(input.jobs !== undefined ? { jobs: input.jobs as Record<string, JobDef> } : {}),
       updatedAt: Date.now(),
       version: generateVersionId(),
     };
@@ -203,7 +206,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
     const inputs = parsed.success && parsed.data.inputs ? parsed.data.inputs : {};
 
     const run = await runner.startRun(entry.value, 'manual', undefined, inputs,
-      (c as any).get?.('userId'));
+      c.var.currentUser?.id ?? 'anonymous');
     return c.json(ok(run), 201);
   });
 
@@ -230,7 +233,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
     const inputs = payload.inputs as Record<string, string> | undefined ?? {};
 
     const run = await runner.startRun(entry.value, 'http', payload, inputs,
-      (c as any).get?.('userId'));
+      c.var.currentUser?.id ?? 'anonymous');
     return c.json(ok(run), 201);
   });
 
@@ -254,7 +257,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
     // Create DagRun
     const dagRun = createDagRunFromTrigger(
       dag.id, 'manual', undefined, inputs,
-      (c as any).get?.('userId'),
+      c.var.currentUser?.id ?? 'anonymous',
     );
     const run: any = { ...dagRun, version: generateVersionId() };
     await schedulerCtx.saveNewDagRun(run);
@@ -289,7 +292,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
       }
 
       const run = await runner.startRun(entry.value, 'webhook', payload, undefined,
-        (c as any).get?.('userId'));
+        c.var.currentUser?.id ?? 'anonymous');
       triggered.push(run.id);
     }
 
@@ -419,8 +422,8 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
   const projectService = new ProjectService(atomic, orgService);
 
   router.post('/orgs', async (c) => {
-    const body = await c.req.json() as any;
-    const ownerId = (c as any).get?.('userId') ?? 'anonymous';
+    const body = await c.req.json() as CreateOrgInput;
+    const ownerId = c.var.currentUser?.id ?? 'anonymous';
     const org = await orgService.create(ownerId, body);
     return c.json(ok(org), 201);
   });
@@ -438,14 +441,14 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
   });
 
   router.post('/orgs/:id/members', async (c) => {
-    const { userId } = await c.req.json() as any;
+    const { userId } = await c.req.json() as { userId: string };
     await orgService.addMember(c.req.param('id'), userId);
     return c.json(ok({ ok: true }));
   });
 
   router.post('/projects', async (c) => {
-    const body = await c.req.json() as any;
-    const ownerId = (c as any).get?.('userId') ?? 'anonymous';
+    const body = await c.req.json() as CreateProjectInput;
+    const ownerId = c.var.currentUser?.id ?? 'anonymous';
     const proj = await projectService.create(ownerId, body);
     return c.json(ok(proj), 201);
   });
@@ -462,14 +465,14 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
   const approvalService = new ApprovalService(atomic);
 
   router.post('/runs/:id/approvals', async (c) => {
-    const { jobName, approvers } = await c.req.json() as any;
+    const { jobName, approvers } = await c.req.json() as { jobName: string; approvers: string[] };
     const node = await approvalService.request(c.req.param('id'), jobName, approvers);
     return c.json(ok(node), 201);
   });
 
   router.post('/approvals/:id/decide', async (c) => {
-    const { approved, reason } = await c.req.json() as any;
-    const userId = (c as any).get?.('userId') ?? 'anonymous';
+    const { approved, reason } = await c.req.json() as { approved: boolean; reason?: string };
+    const userId = c.var.currentUser?.id ?? 'anonymous';
     const node = await approvalService.decide(c.req.param('id'), userId, approved, reason);
     return c.json(ok(node));
   });
@@ -513,14 +516,14 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
   router.post('/shared-links', async (c) => {
     const body = await c.req.json();
     // Extract owner from auth context if available
-    const ownerId = (c as any).get?.('userId') ?? 'anonymous';
+    const ownerId = c.var.currentUser?.id ?? 'anonymous';
     const link = await sharedLinkService.create(ownerId, body);
     const { passwordHash, ...safe } = link;
     return c.json(ok(safe), 201);
   });
 
   router.get('/shared-links', async (c) => {
-    const ownerId = (c as any).get?.('userId') ?? 'anonymous';
+    const ownerId = c.var.currentUser?.id ?? 'anonymous';
     const links = await sharedLinkService.list(ownerId);
     return c.json(ok(links.map(({ passwordHash, ...safe }) => safe)));
   });
@@ -550,7 +553,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
   });
 
   router.post('/shared-links/:id/disable', async (c) => {
-    const ownerId = (c as any).get?.('userId') ?? 'anonymous';
+    const ownerId = c.var.currentUser?.id ?? 'anonymous';
     await sharedLinkService.disable(c.req.param('id'), ownerId);
     return c.json(ok({ disabled: true }));
   });
@@ -561,7 +564,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
 
   /** Runner heartbeat: POST /api/actions/runners/heartbeat */
   router.post('/runners/heartbeat', async (c) => {
-    const body = await c.req.json() as any;
+    const body = await c.req.json() as RunnerHeartbeatInput;
     const runner = await runnerRegistry.heartbeat(body);
     return c.json(ok(runner));
   });
@@ -616,7 +619,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
   const dashboard = new DashboardService(atomic);
 
   router.get('/dashboard', async (c) => {
-    const userId = (c as any).get?.('userId');
+    const userId = c.var.currentUser?.id ?? 'anonymous';
     const metrics = await dashboard.getMetrics(userId);
     return c.json(ok(metrics));
   });

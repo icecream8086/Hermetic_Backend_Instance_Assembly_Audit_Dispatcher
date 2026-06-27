@@ -1,10 +1,12 @@
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import type { ISecurityGroupService } from './service.ts';
+import type { AppContext } from "../../core/deps.ts";
 import { ok, fail } from '../../core/response.ts';
 import type { RouteMeta } from '../../core/http-docs/types.ts';
 import type { CreateSecurityGroupInput, UpdateSecurityGroupInput } from './types.ts';
 
-function requireRoot(c: any): Response | null {
+function requireRoot(c: Context<{ Variables: AppContext }>): Response | null {
   const user = c.var?.currentUser;
   if (!user) return null;
   const isRoot = user.role === 'root' || user.role === 'Operator' || user.role === 'wheel';

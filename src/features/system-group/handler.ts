@@ -1,11 +1,13 @@
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import type { ISysGroupService } from './service.ts';
+import type { AppContext } from "../../core/deps.ts";
 import { CreateSysGroupSchema, UpdateSysGroupSchema } from './schema.ts';
 import { ok, fail } from '../../core/response.ts';
 import type { RouteMeta } from '../../core/http-docs/types.ts';
 
 /** Reject non-root users on admin endpoints. No-op when authz is disabled (no currentUser). */
-function requireRoot(c: any): Response | null {
+function requireRoot(c: Context<{ Variables: AppContext }>): Response | null {
   const user = c.var?.currentUser;
   if (!user) return null; // authz disabled — allow
   const isRoot = user.role === 'root' || user.role === 'Operator' || user.role === 'wheel';

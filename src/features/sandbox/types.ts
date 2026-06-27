@@ -340,6 +340,8 @@ export interface CreateSandboxInput {
   readonly description?: string;
   readonly region: RegionId;
   readonly instanceId?: InstanceId | undefined;
+  /** Zone ID for provider scheduling (e.g. cn-hangzhou-a). Set by assembly pipeline. */
+  readonly zoneId?: string | undefined;
   readonly resourceSpec: ResourceSpec;
   // spotStrategy moved to providerOverrides.alibaba — it's provider-specific.
   readonly restartPolicy: 'Always' | 'OnFailure' | 'Never';

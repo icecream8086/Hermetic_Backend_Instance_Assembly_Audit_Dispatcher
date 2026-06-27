@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import { z } from 'zod';
 import type { AppContext } from '../../core/deps.ts';
 import type { IUserService } from './service.ts';
@@ -46,9 +47,11 @@ function userToResponse(user: { id: string; email: string; name: string; role: U
 
 type PermissionCheckFn = { check(params: { userId: string; action: string; resource: string; ip?: string; resourceOwnerId?: string }): Promise<{ allowed: boolean; reason: string }> };
 
-async function requirePerm(c: any, checker: PermissionCheckFn | undefined, action: string, resource: string, resourceOwnerId?: string): Promise<Response | null> {
+type UsersEnv = { Variables: AppContext };
+
+async function requirePerm(c: Context<UsersEnv>, checker: PermissionCheckFn | undefined, action: string, resource: string, resourceOwnerId?: string): Promise<Response | null> {
   if (!checker) return null;
-  const user = (c as any).var?.currentUser;
+  const user = c.var.currentUser;
   if (!user) return null;
   const result = await checker.check({ userId: user.id, action, resource, ...(resourceOwnerId ? { resourceOwnerId } : {}) });
   if (!result.allowed) return c.json(fail('FORBIDDEN', result.reason), 403);
@@ -139,7 +142,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
 
     // Construct input with all properties present (EOPT-safe)
     const data = parsed.data;
-    const actorId = (c as any).var?.currentUser?.id;
+    const actorId = c.var.currentUser?.id;
     const user = await userService.update(id, {
       name: data.name,
       password: data.password,
@@ -158,7 +161,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
   router.delete('/:id', async (c) => {
     const id = createUserId(c.req.param('id'));
     { const r = await requirePerm(c, permissionChecker, 'delete', 'user', id as string); if (r) return r; }
-    const actorId = (c as any).var?.currentUser?.id;
+    const actorId = c.var.currentUser?.id;
     await userService.delete(id, actorId);
     return c.json(ok(null));
   });
@@ -232,7 +235,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
   router.delete('/:id/login-policy', async (c) => {
     const id = createUserId(c.req.param('id'));
     { const r = await requirePerm(c, permissionChecker, 'update', 'user', id as string); if (r) return r; }
-    const actorId = (c as any).var?.currentUser?.id;
+    const actorId = c.var.currentUser?.id;
     await userService.clearLoginPolicy(id, actorId);
     return c.json(ok(null));
   });
@@ -264,7 +267,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
   router.delete('/:id/public-key', async (c) => {
     const id = createUserId(c.req.param('id'));
     { const r = await requirePerm(c, permissionChecker, 'update', 'user', id as string); if (r) return r; }
-    const actorId = (c as any).var?.currentUser?.id;
+    const actorId = c.var.currentUser?.id;
     await userService.clearPublicKey(id, actorId);
     return c.json(ok(null));
   });
@@ -290,7 +293,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
   });
 
   router.put('/:id/avatar', async (c) => {
-    const user = (c as any).var?.currentUser as { id: string; role?: string } | undefined;
+    const user = c.var.currentUser;
     if (!user) return c.json(fail('UNAUTHORIZED', 'Authentication required'), 401);
     const rawId = c.req.param('id');
     let targetId: ReturnType<typeof createUserId>;
@@ -338,7 +341,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
   });
 
   router.delete('/:id/avatar', async (c) => {
-    const user = (c as any).var?.currentUser as { id: string; role?: string } | undefined;
+    const user = c.var.currentUser;
     if (!user) return c.json(fail('UNAUTHORIZED', 'Authentication required'), 401);
     const rawId = c.req.param('id');
     let targetId: ReturnType<typeof createUserId>;
@@ -360,7 +363,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
   // Static routes before /:id to avoid Hono matching 'sessions' as a user ID.
 
   router.get('/sessions', async (c) => {
-    const user = (c as any).var?.currentUser as { id: string; role?: string } | undefined;
+    const user = c.var.currentUser;
     if (!user) return c.json(fail('UNAUTHORIZED', 'Authentication required'), 401);
 
     // Admin can query any user's sessions; users see only their own
@@ -378,7 +381,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
   });
 
   router.delete('/sessions/:token', async (c) => {
-    const user = (c as any).var?.currentUser as { id: string; role?: string } | undefined;
+    const user = c.var.currentUser;
     if (!user) return c.json(fail('UNAUTHORIZED', 'Authentication required'), 401);
     { const r = await requirePerm(c, permissionChecker, 'update', 'user', user.id); if (r) return r; }
 
@@ -400,7 +403,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
     const gid = parseInt(c.req.param('gid'));
     if (isNaN(gid) || gid < 0) return c.json(fail('VALIDATION_ERROR', 'Invalid GID'), 400);
     { const r = await requirePerm(c, permissionChecker, 'update', 'user', id as string); if (r) return r; }
-    const actorId = (c as any).var?.currentUser?.id;
+    const actorId = c.var.currentUser?.id;
     const user = await userService.addSupplementaryGroup(id, createGid(gid), actorId);
     return c.json(ok(userToResponse(user)));
   });
@@ -410,7 +413,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
     const gid = parseInt(c.req.param('gid'));
     if (isNaN(gid) || gid < 0) return c.json(fail('VALIDATION_ERROR', 'Invalid GID'), 400);
     { const r = await requirePerm(c, permissionChecker, 'update', 'user', id as string); if (r) return r; }
-    const actorId = (c as any).var?.currentUser?.id;
+    const actorId = c.var.currentUser?.id;
     const user = await userService.removeSupplementaryGroup(id, createGid(gid), actorId);
     return c.json(ok(userToResponse(user)));
   });

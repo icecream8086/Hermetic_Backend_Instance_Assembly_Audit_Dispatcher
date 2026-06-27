@@ -17,7 +17,9 @@ import type {
   DescribeContainerGroupsInput,
   DescribeContainerGroupsResult,
 } from '../../core/provider/interfaces.ts';
-import type { CreateContainerGroupInput, ContainerGroupRuntime } from '../../core/provider/types.ts';
+import type { CreateContainerGroupInput, ContainerGroupRuntime, OciContainerStatus } from '../../core/provider/types.ts';
+import { createContainerId } from '../../core/provider/types.ts';
+import { createRegionId } from '../../core/region/types.ts';
 
 // ─── Podman API response types ───
 
@@ -272,8 +274,8 @@ export class PodmanContainerGroupProvider implements IContainerGroupProvider {
     pod: PodmanPodInspectResult | PodmanPodListItem,
   ): Promise<ContainerGroupRuntime | null> {
     let detail: PodmanPodInspectResult;
-    if ('Containers' in pod && Array.isArray((pod as any).Containers)) {
-      detail = pod as PodmanPodInspectResult;
+    if ('Containers' in pod && Array.isArray(pod.Containers)) {
+      detail = pod;
     } else {
       const resp = await fetch(`${this.#libpodApi}/pods/${encodeURIComponent(pod.Id)}/json`);
       if (!resp.ok) return null;
@@ -291,13 +293,13 @@ export class PodmanContainerGroupProvider implements IContainerGroupProvider {
     const containers = containerDetails
       .filter((c): c is PodmanInspectResult => c !== null)
       .map(c => ({
-        id: c.Id as any,
+        id: createContainerId(c.Id ?? 'unknown'),
         name: c.Name.replace(/^\//, ''),
         image: c.Config?.Image ?? '',
         args: c.Config?.Cmd ?? [],
         env: parseEnv(c.Config?.Env),
         workingDir: c.Config?.WorkingDir ?? '',
-        status: c.State.Status as any,
+        status: podmanToOciStatus(c.State.Status),
         alive: c.State.Running,
         createdAt: c.Created,
         startedAt: c.State.StartedAt,
@@ -305,7 +307,7 @@ export class PodmanContainerGroupProvider implements IContainerGroupProvider {
         exitCode: c.State.ExitCode,
         labels: c.Config?.Labels ?? {},
         annotations: {},
-        mounts: (c.Mounts ?? []).map((m: any) => ({
+        mounts: (c.Mounts ?? []).map((m: { Source?: string; Destination?: string; Type?: string; Mode?: string }) => ({
           source: m.Source ?? '',
           destination: m.Destination ?? '',
           type: m.Type,
@@ -327,22 +329,19 @@ export class PodmanContainerGroupProvider implements IContainerGroupProvider {
       providerId: detail.Id,
       name: detail.Name,
       status: mapPodmanPodState(detail.State),
-      regionId: 'local',
-      instanceId: undefined,
-      zoneId: undefined,
+      regionId: createRegionId('local'),
       creationTime: detail.Created,
-      expiredTime: undefined,
       instanceType: 'podman-pod',
       cpu: totalCpu || 0,
       memory: totalMem || 0,
       network: {},
       associatedResources: [],
       restartPolicy: 'OnFailure',
-      containers: containers as any,
+      containers: containers as unknown as readonly [],
       volumes: [],
       events: [],
       tags: [{ key: 'provider', value: 'podman' }, { key: 'type', value: 'pod' }],
-    } as any;
+    };
   }
 
   async #listPods(): Promise<PodmanPodListItem[]> {
@@ -363,6 +362,17 @@ export class PodmanContainerGroupProvider implements IContainerGroupProvider {
 }
 
 // ─── Helpers ───
+
+function podmanToOciStatus(status: string | undefined): OciContainerStatus {
+  switch (status) {
+    case 'running': return 'running';
+    case 'paused': return 'paused';
+    case 'exited':
+    case 'dead': return 'stopped';
+    case 'created': return 'created';
+    default: return 'creating';
+  }
+}
 
 function mapPodmanPodState(state: string): any {
   switch (state) {

@@ -7,6 +7,7 @@ import type {
   MetricSnapshot,
   ContainerGroupRuntime,
   CreateContainerGroupInput,
+  SecretMountConfig,
 } from '../../core/provider/index.ts';
 import {
   SandboxStatus,
@@ -17,6 +18,7 @@ import type {
   SandboxId,
   Sandbox,
   CreateSandboxInput,
+  ContainerConfig,
   NetworkInfo,
   ContainerRuntime,
   ContainerEvent,
@@ -34,6 +36,7 @@ import { KernLevel } from '../../core/audit/kern-level.ts';
 import { createFacility, generateVersionId } from '../../core/brand.ts';
 import type { RegionId } from '../../core/region/types.ts';
 import { createRegionId } from '../../core/region/types.ts';
+import type { InstanceId } from '../../core/region/instance.ts';
 import { AppError } from '../../core/types.ts';
 import { ProviderResolutionError, ProviderOperationError } from '../../core/provider/errors.ts';
 import type { EventBus } from '../../core/event-bus/bus.ts';
@@ -192,13 +195,14 @@ export class SandboxService implements ISandboxService {
       }
     }
 
-    const providerInput = toContainerGroupInput(clusterEnriched);
+    const baseInput = toContainerGroupInput(clusterEnriched);
 
     // 3b. Auto-generate S3 access keys for buckets with autoGenerateKeys
     const BINDING_PREFIX = 'bucket-key:';
     const BINDING_INDEX_KEY = 'bucket-key:ids';
+    let providerInput = baseInput;
     if (input.bucketMounts?.length) {
-      (providerInput as any).secretMounts ??= [];
+      const secretMounts: SecretMountConfig[] = [];
       for (const bm of input.bucketMounts) {
         if (!bm.autoGenerateKeys) continue;
         const ak = `auto_${crypto.randomUUID().slice(0, 12)}`;
@@ -219,11 +223,14 @@ export class SandboxService implements ISandboxService {
         await this.atomic.set(BINDING_PREFIX + id, binding, null);
         const idx_ = await this.atomic.get<string[]>(BINDING_INDEX_KEY);
         await this.atomic.set(BINDING_INDEX_KEY, [...(idx_?.value ?? []), id as string], idx_?.version ?? null);
-        (providerInput as any).secretMounts.push({
+        secretMounts.push({
           mountPath: bm.mountPath,
           data: secretValue,
           mode: 0o600,
         });
+      }
+      if (secretMounts.length > 0) {
+        providerInput = { ...baseInput, secretMounts };
       }
     }
 
@@ -769,14 +776,14 @@ export function podSpecToSandboxInput(spec: {
 
   return {
     name: spec.name,
-    region: (spec.region ?? 'local') as any,
-    ...(spec.instanceId ? { instanceId: spec.instanceId as any } : {}),
+    region: createRegionId(spec.region ?? 'local'),
+    ...(spec.instanceId ? { instanceId: spec.instanceId as InstanceId } : {}),
     resourceSpec: { cpu: totalCpu, memory: totalMem },
-    restartPolicy: 'Never' as const,
-    containers: containers as any,
+    restartPolicy: 'Never',
+    containers: containers as unknown as readonly ContainerConfig[],
     network: { allocatePublicIp: false },
     ...(spec.labels ? { tags: Object.entries(spec.labels).map(([k, v]) => ({ key: k, value: v })) } : {}),
-  } as unknown as CreateSandboxInput;
+  };
 }
 
 /** Parse memory string like "512Mi" or "1Gi" to MB. */
@@ -801,7 +808,7 @@ export function toContainerGroupInput(input: CreateSandboxInput): CreateContaine
     description: input.description,
     region: input.region,
     ...(input.instanceId ? { instanceId: input.instanceId } : {}),
-    ...((input as any).zoneId ? { zoneId: (input as any).zoneId } : {}),
+    ...(input.zoneId ? { zoneId: input.zoneId } : {}),
     cpu: input.resourceSpec.cpu,
     memory: Math.max(1, Math.ceil(input.resourceSpec.memory / 1024)), // ECI expects GB, applicator provides MB
     gpu: input.resourceSpec.gpu,
@@ -876,46 +883,53 @@ function toPartialContainerGroupInput(
   input: Partial<CreateSandboxInput>,
   _existing: CreateSandboxInput,
 ): Partial<CreateContainerGroupInput> {
-  const out: Record<string, unknown> = {};
   const region = input.region ?? _existing.region;
-  if (region) out.region = region;
 
-  if (input.name) out.name = sanitizeName(input.name);
-  if (input.restartPolicy) out.restartPolicy = input.restartPolicy;
-  if (input.resourceSpec) {
-    out.cpu = input.resourceSpec.cpu;
-    out.memory = Math.max(1, Math.ceil(input.resourceSpec.memory / 1024));
-    if (input.resourceSpec.gpu !== undefined) out.gpu = input.resourceSpec.gpu;
-    if (input.resourceSpec.gpuType) out.gpuType = input.resourceSpec.gpuType;
-  }
-  if (input.containers) {
-    out.containers = input.containers.map(c => ({
-      name: c.name, image: c.image,
-      ...(c.command ? { command: c.command } : {}),
-      ...(c.args ? { args: c.args } : {}),
-      ...(c.env ? { env: mapEnvVars(c.env) } : {}),
-      ...(c.imagePullPolicy ? { imagePullPolicy: c.imagePullPolicy } : {}),
-      ...(c.resources ? { resources: c.resources } : {}),
-      ...(c.ports ? { ports: mapPorts(c.ports) } : {}),
-    }));
-  }
-  if (input.volumes) {
-    out.volumes = mapVolumes(input.volumes.map(v => ({
-      id: String(v.id), type: v.type, nfs: v.nfs, disk: v.disk, secret: v.secret,
-    })));
-  }
-  if (input.network) {
-    out.network = mapNetwork({
-      subnetIds: input.network.subnetIds ?? _existing.network.subnetIds,
-      securityGroupId: input.network.securityGroupId ?? _existing.network.securityGroupId,
-      allocatePublicIp: input.network.allocatePublicIp ?? _existing.network.allocatePublicIp,
-      publicIpBandwidth: input.network.publicIpBandwidth ?? _existing.network.publicIpBandwidth,
-      bandwidth: input.network.bandwidth ?? _existing.network.bandwidth,
-    });
-  }
-  if (input.tags) out.tags = mapTags(input.tags);
-  if (input.providerOverrides) out.providerOverrides = input.providerOverrides;
-  return out as Partial<CreateContainerGroupInput>;
+  return {
+    ...(region ? { region } : {}),
+    ...(input.name ? { name: sanitizeName(input.name) } : {}),
+    ...(input.restartPolicy ? { restartPolicy: input.restartPolicy } : {}),
+    ...(input.resourceSpec ? {
+      cpu: input.resourceSpec.cpu,
+      memory: Math.max(1, Math.ceil(input.resourceSpec.memory / 1024)),
+      ...(input.resourceSpec.gpu !== undefined ? { gpu: input.resourceSpec.gpu } : {}),
+      ...(input.resourceSpec.gpuType ? { gpuType: input.resourceSpec.gpuType } : {}),
+    } : {}),
+    ...(input.containers ? {
+      containers: input.containers.map(c => ({
+        name: c.name, image: c.image,
+        ...(c.command ? { command: c.command } : {}),
+        ...(c.args ? { args: c.args } : {}),
+        ...(c.env ? { env: mapEnvVars(c.env) } : {}),
+        ...(c.tty !== undefined ? { tty: c.tty } : {}),
+        ...(c.stdin !== undefined ? { stdin: c.stdin } : {}),
+        ...(c.imagePullPolicy ? { imagePullPolicy: c.imagePullPolicy } : {}),
+        ...(c.resources ? { resources: c.resources } : {}),
+        ...(c.livenessProbe ? { livenessProbe: c.livenessProbe } : {}),
+        ...(c.readinessProbe ? { readinessProbe: c.readinessProbe } : {}),
+        ...(c.startupProbe ? { startupProbe: c.startupProbe } : {}),
+        ...(c.ports ? { ports: mapPorts(c.ports) } : {}),
+        ...(c.networkMode ? { networkMode: c.networkMode } : {}),
+      })),
+    } : {}),
+    ...(input.volumes ? {
+      volumes: mapVolumes(input.volumes.map(v => ({
+        id: String(v.id), type: v.type, nfs: v.nfs, disk: v.disk, secret: v.secret,
+      }))),
+    } : {}),
+    ...(input.network ? {
+      network: mapNetwork({
+        subnetIds: input.network.subnetIds ?? _existing.network.subnetIds,
+        securityGroupId: input.network.securityGroupId ?? _existing.network.securityGroupId,
+        allocatePublicIp: input.network.allocatePublicIp ?? _existing.network.allocatePublicIp,
+        publicIpBandwidth: input.network.publicIpBandwidth ?? _existing.network.publicIpBandwidth,
+        bandwidth: input.network.bandwidth ?? _existing.network.bandwidth,
+      }),
+    } : {}),
+    ...(input.tags ? { tags: mapTags(input.tags) } : {}),
+    ...(input.providerOverrides ? { providerOverrides: input.providerOverrides } : {}),
+    ...(input.zoneId ? { zoneId: input.zoneId } : {}),
+  };
 }
 
 function mapProviderStatus(providerStatus: ContainerGroupRuntime['status']): SandboxStatus | null {

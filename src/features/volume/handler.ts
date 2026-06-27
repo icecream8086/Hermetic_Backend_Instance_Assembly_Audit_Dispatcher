@@ -1,11 +1,13 @@
 import { Hono } from 'hono';
+import type { Context } from 'hono';
+import type { AppContext } from '../../core/deps.ts';
 import type { IVolumeService } from './service.ts';
 import { CreateVolumeSchema, UpdateVolumeSchema } from './schema.ts';
 import type { CreateVolumeInput, UpdateVolumeInput } from './types.ts';
 import { ok, fail } from '../../core/response.ts';
 import type { RouteMeta } from '../../core/http-docs/types.ts';
 
-function requireRoot(c: any): Response | null {
+function requireRoot(c: Context<{ Variables: AppContext }>): Response | null {
   const user = c.var?.currentUser;
   if (!user) return null;
   const isRoot = user.role === 'root' || user.role === 'Operator' || user.role === 'wheel';

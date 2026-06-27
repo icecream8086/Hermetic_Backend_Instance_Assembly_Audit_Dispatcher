@@ -16,7 +16,9 @@ import type {
   GetContainerLogInput,
   ContainerLogResult,
 } from '../../core/provider/interfaces.ts';
-import type { CreateContainerGroupInput, ContainerGroupRuntime } from '../../core/provider/types.ts';
+import type { CreateContainerGroupInput, ContainerGroupRuntime, OciContainerStatus } from '../../core/provider/types.ts';
+import { createContainerId } from '../../core/provider/types.ts';
+import { createRegionId } from '../../core/region/types.ts';
 import { debugLog } from '../../core/audit/log-policy.ts';
 
 interface PodmanContainer {
@@ -52,7 +54,7 @@ interface PodmanInspectResult {
     FinishedAt?: string;
     ExitCode?: number;
     Error?: string;
-    Health?: { Status?: string; FailingStreak?: number };
+    Health?: { Status?: string; FailingStreak?: number; Log?: Array<{ Start?: string; End?: string; ExitCode?: number; Output?: string }> };
   };
   Config: {
     Image: string;
@@ -455,28 +457,24 @@ export class PodmanContainerProvider implements IContainerProvider {
       providerId: info.Id,
       name: info.Name.replace(/^\//, '') ?? '',
       status: mapPodmanState(info.State.Status),
-      regionId: 'local',
-      instanceId: undefined,
-      zoneId: undefined,
+      regionId: createRegionId('local'),
       creationTime: created,
-      expiredTime: undefined,
       instanceType: 'podman',
       cpu: 0,
       memory: 0,
       network: {
-        privateIp: info.NetworkSettings?.IPAddress,
         ...(info.NetworkSettings?.IPAddress ? { privateIp: info.NetworkSettings.IPAddress } : {}),
-      } as any,
+      },
       associatedResources: [],
       restartPolicy: info.HostConfig?.RestartPolicy?.Name ?? 'OnFailure',
       containers: [{
-        id: info.Id as any,
+        id: createContainerId(info.Id ?? 'unknown'),
         name: info.Name.replace(/^\//, ''),
         image: info.Config?.Image ?? '',
         args: info.Config?.Cmd ?? [],
         env: parseEnv(info.Config?.Env),
         workingDir: info.Config?.WorkingDir ?? '',
-        status: info.State.Status as any,
+        status: podmanToOciStatus(info.State.Status),
         alive: info.State.Running,
         createdAt: created,
         startedAt: info.State.StartedAt,
@@ -484,28 +482,28 @@ export class PodmanContainerProvider implements IContainerProvider {
         exitCode: info.State.ExitCode,
         labels: info.Config?.Labels ?? {},
         annotations: {},
-        mounts: (info.Mounts ?? []).map((m: any) => ({
-        source: m.Source ?? '',
-        destination: m.Destination ?? '',
-        type: m.Type,
-        options: m.Mode ? [m.Mode] : undefined,
-      })),
+        mounts: (info.Mounts ?? []).map((m: { Source?: string; Destination?: string; Type?: string; Mode?: string }) => ({
+          source: m.Source ?? '',
+          destination: m.Destination ?? '',
+          type: m.Type,
+          options: m.Mode ? [m.Mode] : undefined,
+        })),
         health: {
           status: info.State.Running
-            ? (info.State.Health?.Status ?? 'none')   // 有探针用探针结果，无探针报 none
+            ? (info.State.Health?.Status ?? 'none')
             : 'starting',
           ...(info.State.Health?.FailingStreak && info.State.Health.FailingStreak > 0 ? { message: `Failing health check (${info.State.Health.FailingStreak})` } : {}),
         },
-      }],
+      }] as unknown as readonly [],
       volumes: [],
       events: runtimeEvents(info),
       tags: [{ key: 'provider', value: 'podman' }],
-    } as any;
+    };
   }
 }
 
 /** Synthesize ContainerGroupRuntimeEvent[] from Podman container inspect. */
-function runtimeEvents(info: any): Array<{ reason: string; type: 'Normal' | 'Warning'; message: string; count: number; lastTimestamp?: string }> {
+function runtimeEvents(info: PodmanInspectResult): Array<{ reason: string; type: 'Normal' | 'Warning'; message: string; count: number; lastTimestamp?: string }> {
   const events: Array<{ reason: string; type: 'Normal' | 'Warning'; message: string; count: number; lastTimestamp?: string }> = [];
   const ts = info.State?.StartedAt || info.Created;
 
@@ -530,7 +528,18 @@ function runtimeEvents(info: any): Array<{ reason: string; type: 'Normal' | 'War
 
 // ─── Helpers ───
 
-function mapPodmanState(state: string): any {
+function podmanToOciStatus(status: string | undefined): OciContainerStatus {
+  switch (status) {
+    case 'running': return 'running';
+    case 'paused': return 'paused';
+    case 'exited':
+    case 'dead': return 'stopped';
+    case 'created': return 'created';
+    default: return 'creating';
+  }
+}
+
+function mapPodmanState(state: string): ContainerGroupRuntime['status'] {
   switch (state) {
     case 'running': return 'Running';
     case 'paused': return 'Running';

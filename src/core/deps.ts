@@ -15,7 +15,8 @@ import type { IMessageQueue } from '../queue/interfaces.ts';
  * All feature handlers and middleware import from here instead of app.ts.
  */
 
-/** Request-scoped context injected into every Hono route handler. */
+/** Request-scoped context injected into every Hono route handler.
+ *  currentUser is augmented by auth middleware (core/middleware/auth.ts). */
 export interface AppContext {
   stores: Stores;
   providers: IProviderRegistry;

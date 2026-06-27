@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { buildCreateParams, parseContainerGroup, parseProbe } from '../../../src/providers/alibaba/eci-codec.ts';
+import { buildCreateParams, parseContainerGroup, parseProbe, validateCodecIntegrity } from '../../../src/providers/alibaba/eci-codec.ts';
 import type { CreateContainerGroupInput } from '../../../src/core/provider/types.ts';
 import { createRegionId } from '../../../src/core/region/types.ts';
 
@@ -324,7 +324,7 @@ describe('parseContainerGroup', () => {
     const c = cg.containers[0]!;
     expect(c.name).toBe('app');
     expect(c.image).toBe('nginx:latest');
-    expect(c.status).toBe('Running'); // ECI returns capitalized status, passed through as-is
+    expect(c.status).toBe('running'); // ECI returns 'Running' → normalized to OciContainerStatus
     expect(c.alive).toBe(true);
     expect(c.resources).toEqual({ cpu: 2, memory: 4096 });
     expect(c.env).toEqual({ ENV: 'prod' });
@@ -419,5 +419,25 @@ describe('parseProbe', () => {
   it('returns undefined for empty input', () => {
     expect(parseProbe(undefined)).toBeUndefined();
     expect(parseProbe({})).toBeUndefined();
+  });
+});
+
+describe('validateCodecIntegrity', () => {
+  it('passes for the current codec tables', () => {
+    const result = validateCodecIntegrity();
+    expect(result.ok).toBe(true);
+    expect(result.broken).toEqual([]);
+  });
+
+  it('catches missing encode function', () => {
+    const result = validateCodecIntegrity();
+    // All current codecs should have valid encode/decode functions
+    expect(result.broken.filter(m => m.includes('encode is not a function'))).toEqual([]);
+    expect(result.broken.filter(m => m.includes('decode is not a function'))).toEqual([]);
+  });
+
+  it('catches missing param string', () => {
+    const result = validateCodecIntegrity();
+    expect(result.broken.filter(m => m.includes('param is not a string'))).toEqual([]);
   });
 });

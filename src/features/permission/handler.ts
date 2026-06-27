@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import type { AppContext } from '../../core/deps.ts';
 import type { IPermissionService } from './service.ts';
 import type { RouteMeta } from '../../core/http-docs/types.ts';
@@ -46,7 +47,7 @@ function actorFrom(c: any): AuditActor | undefined {
 }
 
 /** Reject non-root users on admin endpoints. No-op when authz is disabled (no currentUser). */
-function requireRoot(c: any): Response | null {
+function requireRoot(c: Context<{ Variables: AppContext }>): Response | null {
   const user = c.var?.currentUser;
   if (!user) return null; // authz disabled — allow
   const isRoot = user.role === 'root' || user.role === 'Operator' || user.role === 'wheel';

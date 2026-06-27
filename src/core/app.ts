@@ -398,7 +398,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
   // 12. Container logs — direct provider call (batch mode for ECI, Podman via Docker API)
   app.get('/api/sandboxes/:id/logs', async (c) => {
     const id = createSandboxId(c.req.param('id'));
-    const user = (c as any).var?.currentUser as { id: string } | undefined;
+    const user = c.var.currentUser;
     if (permService && user) {
       const result = await permService.check({ userId: user.id, action: 'read', resource: 'sandbox' });
       if (!result.allowed) return c.json(fail('FORBIDDEN', result.reason), 403);

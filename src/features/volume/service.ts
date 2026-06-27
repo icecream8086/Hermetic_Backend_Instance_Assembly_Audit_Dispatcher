@@ -1,11 +1,11 @@
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
+import { TransactConflictError } from '../../core/store/interfaces.ts';
 import type { ILogWriter } from '../../core/audit/types.ts';
 import type { IAuditWriter } from '../../core/audit/types.ts';
 import type { Volume } from '../sandbox/types.ts';
 import { VolumeStatus, createVolumeId } from '../sandbox/types.ts';
 import type { CreateVolumeInput, UpdateVolumeInput } from './types.ts';
 import { AppError } from '../../core/types.ts';
-import { TransactConflictError } from '../../core/store/interfaces.ts';
 
 const PREFIX = 'volume:';
 const INDEX_KEY = 'volume:ids';
@@ -48,7 +48,7 @@ export class VolumeService implements IVolumeService {
     const now = Date.now();
     const id = createVolumeId(crypto.randomUUID());
 
-    const volume: Record<string, unknown> = {
+    const volume: Volume = {
       id,
       name: input.name,
       tags: [],
@@ -56,20 +56,20 @@ export class VolumeService implements IVolumeService {
       updatedAt: now,
       status: VolumeStatus.Detached,
       type: input.type,
+      instanceId: input.instanceId,
+      ...(input.credentialRef ? { credentialRef: input.credentialRef } : {}),
+      ...(input.description ? { description: input.description } : {}),
+      ...(input.nfs ? { nfs: input.nfs } : {}),
+      ...(input.disk ? { disk: input.disk } : {}),
+      ...(input.secret ? { secret: input.secret } : {}),
     };
-    volume.instanceId = input.instanceId;
-    if (input.credentialRef) volume.credentialRef = input.credentialRef;
-    if (input.description) volume.description = input.description;
-    if (input.nfs) volume.nfs = input.nfs;
-    if (input.disk) volume.disk = input.disk;
-    if (input.secret) volume.secret = input.secret;
 
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         await this.atomic.transact(async (txn) => {
-          const idx = await (txn as any).get(INDEX_KEY);
-          (txn as any).set(INDEX_KEY, [...(idx ?? []), id]);
-          (txn as any).set(PREFIX + id, volume);
+          const idx = await txn.get<string[]>(INDEX_KEY);
+          txn.set(INDEX_KEY, [...(idx ?? []), id]);
+          txn.set(PREFIX + id, volume);
         });
         break;
       } catch (err) {
@@ -79,13 +79,13 @@ export class VolumeService implements IVolumeService {
     }
 
     this.logger.write({ facility: 'app' as any, level: 'INFO' as any, message: `[volume] Created ${input.type}: ${id} (${input.name})` });
-    return volume as unknown as Volume;
+    return volume;
   }
 
   async get(id: string): Promise<Volume | null> {
-    const entry = await this.atomic.get<Record<string, unknown>>(PREFIX + id);
+    const entry = await this.atomic.get<Volume>(PREFIX + id);
     if (!entry) return null;
-    return entry.value as unknown as Volume;
+    return entry.value;
   }
 
   async listPaginated(page = 1, limit = 50, filters?: Record<string, string>): Promise<PaginatedResult<Volume>> {
@@ -95,9 +95,9 @@ export class VolumeService implements IVolumeService {
 
     // Load all, filter in memory, then paginate
     const allItems = hasFilter
-      ? (await Promise.all(allIds.map(id => this.atomic.get<Record<string, unknown>>(PREFIX + id))))
-          .filter(Boolean)
-          .map(e => e!.value as unknown as Volume)
+      ? (await Promise.all(allIds.map(id => this.atomic.get<Volume>(PREFIX + id))))
+          .filter((e): e is NonNullable<typeof e> => Boolean(e))
+          .map(e => e.value)
       : [];
 
     let items: Volume[];
@@ -116,35 +116,39 @@ export class VolumeService implements IVolumeService {
     } else {
       total = allIds.length;
       const pageIds = allIds.slice((page - 1) * limit, (page - 1) * limit + limit);
-      const entries = await Promise.all(pageIds.map(id => this.atomic.get<Record<string, unknown>>(PREFIX + id)));
-      items = entries.filter(Boolean).map(e => (e!.value as unknown as Volume));
+      const entries = await Promise.all(pageIds.map(id => this.atomic.get<Volume>(PREFIX + id)));
+      items = entries.filter((e): e is NonNullable<typeof e> => Boolean(e)).map(e => e.value);
     }
 
     return { items, total, page, limit };
   }
 
   async update(id: string, input: UpdateVolumeInput): Promise<Volume> {
-    const entry = await this.atomic.get<Record<string, unknown>>(PREFIX + id);
+    const entry = await this.atomic.get<Volume>(PREFIX + id);
     if (!entry) throw new AppError(404, NOT_FOUND, `${NOT_FOUND}: ${id}`);
 
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         let updated: Volume | null = null;
         await this.atomic.transact<void>(async (txn) => {
-          const raw = await (txn as any).get(PREFIX + id);
+          const raw: Volume | null = await txn.get<Volume>(PREFIX + id);
           if (!raw) throw new AppError(404, NOT_FOUND, `${NOT_FOUND}: ${id}`);
 
-          const merged: Record<string, unknown> = { ...raw, updatedAt: Date.now() };
-          if (input.name !== undefined) merged.name = input.name;
-          if (input.description !== undefined) merged.description = input.description ?? undefined;
-          if (input.instanceId !== undefined) merged.instanceId = input.instanceId ?? undefined;
-          if (input.credentialRef !== undefined) merged.credentialRef = input.credentialRef ?? undefined;
-          if (input.nfs !== undefined) merged.nfs = input.nfs ?? undefined;
-          if (input.disk !== undefined) merged.disk = input.disk ?? undefined;
-          if (input.secret !== undefined) merged.secret = input.secret ?? undefined;
+          const desc = input.description;
+          const merged: Volume = {
+            ...raw,
+            updatedAt: Date.now(),
+            ...(input.name !== undefined ? { name: input.name } : {}),
+            ...(desc !== undefined && desc !== null ? { description: desc } : {}),
+            ...(input.instanceId ? { instanceId: input.instanceId } : {}),
+            ...(input.credentialRef ? { credentialRef: input.credentialRef } : {}),
+            ...(input.nfs ? { nfs: input.nfs } : {}),
+            ...(input.disk ? { disk: input.disk } : {}),
+            ...(input.secret ? { secret: input.secret } : {}),
+          };
 
-          (txn as any).set(PREFIX + id, merged);
-          updated = merged as unknown as Volume;
+          txn.set(PREFIX + id, merged);
+          updated = merged;
         });
         this.logger.write({ facility: 'app' as any, level: 'INFO' as any, message: `[volume] Updated ${id}` });
         return updated!;
@@ -160,11 +164,11 @@ export class VolumeService implements IVolumeService {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         await this.atomic.transact<void>(async (txn) => {
-          const existing = await (txn as any).get(PREFIX + id);
+          const existing = await txn.get<Volume>(PREFIX + id);
           if (!existing) throw new AppError(404, NOT_FOUND, `${NOT_FOUND}: ${id}`);
-          const idx = await (txn as any).get(INDEX_KEY);
-          if (idx) (txn as any).set(INDEX_KEY, idx.filter((i: string) => i !== id));
-          (txn as any).set(PREFIX + id, null);
+          const idx = await txn.get<string[]>(INDEX_KEY);
+          if (idx) txn.set(INDEX_KEY, idx.filter((i: string) => i !== id));
+          txn.set<Volume | null>(PREFIX + id, null);
         });
         break;
       } catch (err) {

@@ -115,6 +115,10 @@ export const CreateWorkflowSchema = z.object({
     jobs => Object.keys(jobs).length > 0,
     'At least one job is required',
   ),
+  orgId: z.string().optional(),
+  projectId: z.string().optional(),
+  metadata: z.record(z.unknown()).optional(),
+  annotations: z.record(z.string()).optional(),
 });
 
 export const UpdateWorkflowSchema = z.object({
@@ -123,6 +127,10 @@ export const UpdateWorkflowSchema = z.object({
   on: TriggerConfigSchema.optional(),
   env: z.record(z.string()).optional(),
   jobs: z.record(JobDefSchema).optional(),
+  orgId: z.string().optional(),
+  projectId: z.string().optional(),
+  metadata: z.record(z.unknown()).optional(),
+  annotations: z.record(z.string()).optional(),
 });
 
 export const TriggerWorkflowSchema = z.object({
