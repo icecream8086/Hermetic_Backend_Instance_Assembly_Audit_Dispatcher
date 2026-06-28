@@ -4,53 +4,55 @@ import { CreateContainerSecretSchema, UpdateContainerSecretSchema } from './sche
 import { ok, fail } from '../../core/response.ts';
 import type { RouteMeta } from '../../core/http-docs/types.ts';
 import { z } from 'zod';
+import type { CrudHandlerMap } from '../../core/crud/router.ts';
+import { registerCrudRoutes } from '../../core/crud/router.ts';
 
 export function createContainerSecretRouter(svc: IContainerSecretService): Hono<any> {
   const router = new Hono<any>();
 
-  // ─── Create (inline) ───
-  router.post('/', async (c) => {
-    const body: unknown = await c.req.json();
-    const parsed = CreateContainerSecretSchema.safeParse(body);
-    if (!parsed.success) {
-      return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
-    }
-    const secret = await svc.create(parsed.data as any);
-    return c.json(ok(redact(secret)), 201);
-  });
+  const crud: CrudHandlerMap = {
+    create: (r) => r.post('/', async (c) => {
+      const body: unknown = await c.req.json();
+      const parsed = CreateContainerSecretSchema.safeParse(body);
+      if (!parsed.success) {
+        return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
+      }
+      const secret = await svc.create(parsed.data as any);
+      return c.json(ok(redact(secret)), 201);
+    }),
 
-  // ─── List ───
-  router.get('/', async (c) => {
-    const scopeId = c.req.query('scopeId');
-    const items = await svc.list(scopeId);
-    return c.json(ok({ items: items.map(redact), total: items.length }));
-  });
+    list: (r) => r.get('/', async (c) => {
+      const scopeId = c.req.query('scopeId');
+      const items = await svc.list(scopeId);
+      return c.json(ok({ items: items.map(redact), total: items.length }));
+    }),
 
-  // ─── Get ───
-  router.get('/:id', async (c) => {
-    const secret = await svc.get(c.req.param('id'));
-    if (!secret) return c.json(fail('SECRET_NOT_FOUND', 'Container secret not found'), 404);
-    return c.json(ok(redact(secret)));
-  });
+    get: (r) => r.get('/:id', async (c) => {
+      const secret = await svc.get(c.req.param('id'));
+      if (!secret) return c.json(fail('SECRET_NOT_FOUND', 'Container secret not found'), 404);
+      return c.json(ok(redact(secret)));
+    }),
 
-  // ─── Update ───
-  router.put('/:id', async (c) => {
-    const body: unknown = await c.req.json();
-    const parsed = UpdateContainerSecretSchema.safeParse(body);
-    if (!parsed.success) {
-      return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
-    }
-    const secret = await svc.update(c.req.param('id'), parsed.data as any);
-    return c.json(ok(redact(secret)));
-  });
+    update: (r) => r.put('/:id', async (c) => {
+      const body: unknown = await c.req.json();
+      const parsed = UpdateContainerSecretSchema.safeParse(body);
+      if (!parsed.success) {
+        return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
+      }
+      const secret = await svc.update(c.req.param('id'), parsed.data as any);
+      return c.json(ok(redact(secret)));
+    }),
 
-  // ─── Delete ───
-  router.delete('/:id', async (c) => {
-    await svc.delete(c.req.param('id'));
-    return c.json(ok(null));
-  });
+    delete: (r) => r.delete('/:id', async (c) => {
+      await svc.delete(c.req.param('id'));
+      return c.json(ok(null));
+    }),
+  };
 
-  // ─── Upload blob (multipart) ───
+  registerCrudRoutes(router, crud);
+
+  // ─── Extra routes (beyond CRUD) ───
+
   router.post('/:id/upload', async (c) => {
     const body = await c.req.parseBody();
     const file = body.file as File | undefined;
@@ -64,21 +66,16 @@ export function createContainerSecretRouter(svc: IContainerSecretService): Hono<
     return c.json(ok(redact(secret)));
   });
 
-  // ─── Download blob ───
   router.get('/:id/download', async (c) => {
     const data = await svc.resolveData(c.req.param('id'));
     return c.body(data, 200, { 'Content-Type': 'application/octet-stream' });
   });
-
-  // ─── Public key for SealedBox encryption (GitHub Secret model) ───
 
   router.get('/public-key/:userId', async (c) => {
     const pk = await svc.getPublicKey(c.req.param('userId'));
     if (!pk) return c.json(fail('PUBLIC_KEY_NOT_FOUND', 'No SealedBox keypair for this user. Generate one first.'), 404);
     return c.json(ok({ userId: c.req.param('userId'), publicKey: pk, keyType: 'sealed-box' }));
   });
-
-  // ─── Visibility: selected scope management (GitHub Secret model) ───
 
   router.get('/:id/scopes', async (c) => {
     const secret = await svc.get(c.req.param('id'));
@@ -96,7 +93,6 @@ export function createContainerSecretRouter(svc: IContainerSecretService): Hono<
     return c.json(ok(redact(secret)));
   });
 
-  // ─── Access check ───
   router.get('/:id/check-access', async (c) => {
     const scopeId = c.req.query('scopeId');
     if (!scopeId) return c.json(fail('VALIDATION_ERROR', 'scopeId query parameter is required'), 400);

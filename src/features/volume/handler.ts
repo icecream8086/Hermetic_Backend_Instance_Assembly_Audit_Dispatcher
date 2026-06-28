@@ -6,6 +6,8 @@ import { CreateVolumeSchema, UpdateVolumeSchema } from './schema.ts';
 import type { CreateVolumeInput, UpdateVolumeInput } from './types.ts';
 import { ok, fail } from '../../core/response.ts';
 import type { RouteMeta } from '../../core/http-docs/types.ts';
+import type { CrudHandlerMap } from '../../core/crud/router.ts';
+import { registerCrudRoutes } from '../../core/crud/router.ts';
 
 function requireRoot(c: Context<{ Variables: AppContext }>): Response | null {
   const user = c.var?.currentUser;
@@ -18,47 +20,49 @@ function requireRoot(c: Context<{ Variables: AppContext }>): Response | null {
 export function createVolumeRouter(svc: IVolumeService): Hono<any> {
   const router = new Hono<any>();
 
-  router.post('/', async (c) => {
-    const r = requireRoot(c); if (r) return r;
-    const body: unknown = await c.req.json();
-    const parsed = CreateVolumeSchema.safeParse(body);
-    if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
-    const volume = await svc.create(parsed.data as CreateVolumeInput);
-    return c.json(ok(volume), 201);
-  });
+  const crud: CrudHandlerMap = {
+    create: (r) => r.post('/', async (c) => {
+      const rv = requireRoot(c); if (rv) return rv;
+      const body: unknown = await c.req.json();
+      const parsed = CreateVolumeSchema.safeParse(body);
+      if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
+      const volume = await svc.create(parsed.data as CreateVolumeInput);
+      return c.json(ok(volume), 201);
+    }),
 
-  router.get('/', async (c) => {
-    const page = parseInt(c.req.query('page') ?? '') || 1;
-    const limit = parseInt(c.req.query('limit') ?? '') || 50;
-    const filters: Record<string, string> = {};
-    const n = c.req.query('name'); if (n) filters.name = n;
-    const t = c.req.query('type'); if (t) filters.type = t;
-    const s = c.req.query('status'); if (s) filters.status = s;
-    const inst = c.req.query('instanceId'); if (inst) filters.instanceId = inst;
-    return c.json(ok(await svc.listPaginated(page, limit, Object.keys(filters).length ? filters : undefined)));
-  });
+    list: (r) => r.get('/', async (c) => {
+      const page = parseInt(c.req.query('page') ?? '') || 1;
+      const limit = parseInt(c.req.query('limit') ?? '') || 50;
+      const filters: Record<string, string> = {};
+      const n = c.req.query('name'); if (n) filters.name = n;
+      const t = c.req.query('type'); if (t) filters.type = t;
+      const s = c.req.query('status'); if (s) filters.status = s;
+      const inst = c.req.query('instanceId'); if (inst) filters.instanceId = inst;
+      return c.json(ok(await svc.listPaginated(page, limit, Object.keys(filters).length ? filters : undefined)));
+    }),
 
-  router.get('/:id', async (c) => {
-    const vol = await svc.get(c.req.param('id'));
-    if (!vol) return c.json(fail('VOLUME_NOT_FOUND', 'Volume not found'), 404);
-    return c.json(ok(vol));
-  });
+    get: (r) => r.get('/:id', async (c) => {
+      const vol = await svc.get(c.req.param('id'));
+      if (!vol) return c.json(fail('VOLUME_NOT_FOUND', 'Volume not found'), 404);
+      return c.json(ok(vol));
+    }),
 
-  router.put('/:id', async (c) => {
-    const r = requireRoot(c); if (r) return r;
-    const body: unknown = await c.req.json();
-    const parsed = UpdateVolumeSchema.safeParse(body);
-    if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
-    return c.json(ok(await svc.update(c.req.param('id'), parsed.data as UpdateVolumeInput)));
-  });
+    update: (r) => r.put('/:id', async (c) => {
+      const rv = requireRoot(c); if (rv) return rv;
+      const body: unknown = await c.req.json();
+      const parsed = UpdateVolumeSchema.safeParse(body);
+      if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
+      return c.json(ok(await svc.update(c.req.param('id'), parsed.data as UpdateVolumeInput)));
+    }),
 
-  router.delete('/:id', async (c) => {
-    const r = requireRoot(c); if (r) return r;
-    await svc.delete(c.req.param('id'));
-    return c.json(ok(null));
-  });
+    delete: (r) => r.delete('/:id', async (c) => {
+      const rv = requireRoot(c); if (rv) return rv;
+      await svc.delete(c.req.param('id'));
+      return c.json(ok(null));
+    }),
+  };
 
-  return router;
+  return registerCrudRoutes(router, crud);
 }
 
 export const volumeRouteMeta: RouteMeta[] = [

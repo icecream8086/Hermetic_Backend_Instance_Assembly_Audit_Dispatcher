@@ -8,14 +8,15 @@ import { parseCidr } from '../../core/network/cidr.ts';
 import { InstanceService } from '../../core/region/instance.ts';
 import type { Subnet, SubnetId, SubnetStatus, CreateSubnetInput, UpdateSubnetInput } from './types.ts';
 import { generateSubnetId } from './types.ts';
+import type { ICrudService, PaginatedResult } from '../../core/crud/index.ts';
 
 const FACILITY = createFacility('subnet');
 const PREFIX = 'subnet:';
 const INDEX_KEY = 'subnet:ids';
 
-export interface ISubnetService {
+export interface ISubnetService extends ICrudService<Subnet, CreateSubnetInput, UpdateSubnetInput, SubnetId> {
   create(input: CreateSubnetInput, actorId?: string): Promise<Subnet>;
-  list(page?: number, limit?: number, name?: string): Promise<{ items: Subnet[]; total: number; page: number; limit: number }>;
+  list(page?: number, limit?: number, name?: string): Promise<PaginatedResult<Subnet>>;
   get(id: SubnetId): Promise<Subnet | null>;
   update(id: SubnetId, input: UpdateSubnetInput, actorId?: string): Promise<Subnet>;
   delete(id: SubnetId, actorId?: string): Promise<void>;
@@ -56,7 +57,7 @@ export class SubnetService implements ISubnetService {
     return subnet;
   }
 
-  async list(page = 1, limit = 20, name?: string): Promise<{ items: Subnet[]; total: number; page: number; limit: number }> {
+  async list(page = 1, limit = 20, name?: string): Promise<PaginatedResult<Subnet>> {
     let all = (await this.#listAll()).reverse();
     if (name) all = all.filter(s => s.name.toLowerCase().includes(name.toLowerCase()));
     const total = all.length;

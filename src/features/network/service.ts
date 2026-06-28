@@ -11,14 +11,15 @@ import type {
   CreateSecurityGroupInput, UpdateSecurityGroupInput,
 } from './types.ts';
 import { generateSecurityGroupId } from './types.ts';
+import type { ICrudService, PaginatedResult } from '../../core/crud/index.ts';
 
 const FACILITY = createFacility('secgroup');
 const PREFIX = 'secgroup:';
 const INDEX_KEY = 'secgroup:ids';
 
-export interface ISecurityGroupService {
+export interface ISecurityGroupService extends ICrudService<SecurityGroup, CreateSecurityGroupInput, UpdateSecurityGroupInput, SecurityGroupId> {
   create(input: CreateSecurityGroupInput, actorId?: string): Promise<SecurityGroup>;
-  list(page?: number, limit?: number, name?: string): Promise<{ items: SecurityGroup[]; total: number; page: number; limit: number }>;
+  list(page?: number, limit?: number, name?: string): Promise<PaginatedResult<SecurityGroup>>;
   get(id: SecurityGroupId): Promise<SecurityGroup | null>;
   update(id: SecurityGroupId, input: UpdateSecurityGroupInput, actorId?: string): Promise<SecurityGroup>;
   delete(id: SecurityGroupId, actorId?: string): Promise<void>;
@@ -73,7 +74,7 @@ export class SecurityGroupService implements ISecurityGroupService {
     return sg;
   }
 
-  async list(page = 1, limit = 20, name?: string): Promise<{ items: SecurityGroup[]; total: number; page: number; limit: number }> {
+  async list(page = 1, limit = 20, name?: string): Promise<PaginatedResult<SecurityGroup>> {
     let all = (await this.#listAll()).reverse();
     if (name) all = all.filter(sg => sg.name.toLowerCase().includes(name.toLowerCase()));
     return { items: all.slice((page - 1) * limit, page * limit), total: all.length, page, limit };

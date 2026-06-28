@@ -6,24 +6,14 @@ import type { Volume } from '../sandbox/types.ts';
 import { VolumeStatus, createVolumeId } from '../sandbox/types.ts';
 import type { CreateVolumeInput, UpdateVolumeInput } from './types.ts';
 import { AppError } from '../../core/types.ts';
+import type { PaginatedResult, ICrudService } from '../../core/crud/index.ts';
 
 const PREFIX = 'volume:';
 const INDEX_KEY = 'volume:ids';
 const NOT_FOUND = 'VOLUME_NOT_FOUND';
 
-export interface PaginatedResult<T> {
-  items: T[];
-  total: number;
-  page: number;
-  limit: number;
-}
-
-export interface IVolumeService {
-  create(input: CreateVolumeInput): Promise<Volume>;
-  get(id: string): Promise<Volume | null>;
+export interface IVolumeService extends ICrudService<Volume, CreateVolumeInput, UpdateVolumeInput> {
   listPaginated(page?: number, limit?: number, filters?: Record<string, string>): Promise<PaginatedResult<Volume>>;
-  update(id: string, input: UpdateVolumeInput): Promise<Volume>;
-  delete(id: string): Promise<void>;
 }
 
 export class VolumeService implements IVolumeService {
@@ -121,6 +111,10 @@ export class VolumeService implements IVolumeService {
     }
 
     return { items, total, page, limit };
+  }
+
+  async list(page?: number, limit?: number): Promise<PaginatedResult<Volume>> {
+    return this.listPaginated(page, limit);
   }
 
   async update(id: string, input: UpdateVolumeInput): Promise<Volume> {

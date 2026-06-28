@@ -21,6 +21,8 @@ import { InstanceService } from '../../core/region/instance.ts';
 import type { InstanceId } from '../../core/region/instance.ts';
 import type { RegionId } from '../../core/region/types.ts';
 import { INSTANCE_TEMPLATES, type InstanceTemplateDef } from './templates.generated.ts';
+import type { CrudHandlerMap } from '../../core/crud/router.ts';
+import { registerCrudRoutes } from '../../core/crud/router.ts';
 
 type PermissionCheckFn = { check(params: { userId: string; action: string; resource: string; ip?: string }): Promise<{ allowed: boolean; reason: string }> };
 
@@ -46,8 +48,6 @@ function fromGeneratedTemplate(def: InstanceTemplateDef, defaultInstanceId?: str
   const now = Date.now();
   const cid = defaultInstanceId;
 
-  // Build container spec from YAML fields. Each cast is narrow and specific —
-  // the source is Record<string, unknown> from a YAML-generated file.
   const hasContainer = s.containers || s.initContainers || s.region !== undefined
     || s.restartPolicy !== undefined || (cid && !s.instanceId);
 
@@ -84,12 +84,6 @@ function listGenerated(): SandboxTemplate[] {
 }
 
 // ─── systemd-style layered template resolution ───
-//
-//   /usr/lib/systemd/system/  ←  generated (YAML, immutable source-of-truth)
-//   /etc/systemd/system/      ←  store overrides (admin customization)
-//   systemctl mask            ←  tombstone {__deleted:true} (root hides generated)
-//
-// Resolution order: store override > tombstone (404) > generated > 404
 
 interface ResolvedTemplate {
   source: 'generated' | 'store';
@@ -98,13 +92,11 @@ interface ResolvedTemplate {
 
 /** Resolve a template by ID using systemd-style layering. */
 async function resolveTemplateSource(atomic: IAtomicStore, id: string): Promise<ResolvedTemplate | null> {
-  // 1. Check store
   const storeEntry = await atomic.get<Record<string, unknown>>(PREFIX + id);
   if (storeEntry) {
-    if (storeEntry.value.__deleted === true) return null; // tombstone
+    if (storeEntry.value.__deleted === true) return null;
     return { source: 'store', template: storeEntry.value as unknown as SandboxTemplate };
   }
-  // 2. Check generated
   const gen = INSTANCE_TEMPLATES.find(d => d.id === id);
   if (gen) return { source: 'generated', template: fromGeneratedTemplate(gen) };
   return null;
@@ -114,11 +106,9 @@ async function resolveTemplateSource(atomic: IAtomicStore, id: string): Promise<
 async function listAllLive(atomic: IAtomicStore): Promise<SandboxTemplate[]> {
   const generated = listGenerated();
   const stored = await listStored(atomic);
-  // Build map for dedup: store overrides replace generated
   const map = new Map<string, SandboxTemplate>();
   for (const t of generated) map.set(t.id, t);
   for (const t of stored) map.set(t.id, t);
-  // Filter out tombstones
   const result: SandboxTemplate[] = [];
   for (const t of map.values()) {
     const entry = await atomic.get<any>(PREFIX + t.id);
@@ -199,7 +189,6 @@ function mergeByName(parent: any[] | undefined, child: any[] | undefined): any[]
   return [...map.values()];
 }
 
-/** Merge health checks by target+name — same target+name = merge fields. */
 function mergeHealthChecks(parent: any[] | undefined, child: any[] | undefined): any[] {
   if (!child) return parent ?? [];
   if (!parent) return child;
@@ -225,7 +214,6 @@ async function resolveTemplateWithChain(atomic: IAtomicStore, id: string): Promi
   const tpl = allTemplates.find(t => t.id === id);
   if (!tpl) throw Object.assign(new Error('Template not found'), { status: 404 });
 
-  // chain = [parent, child, ...] (root first — child overrides parent)
   const chain = resolveDag(allTemplates, [id]).reverse();
   const chainIds = chain.map(t => t.id);
   let mergedSpec: any = {};
@@ -249,11 +237,7 @@ async function listStored(atomic: IAtomicStore): Promise<SandboxTemplate[]> {
 }
 
 // ─── Instance limit enforcement ───
-// Lock key uses template name (hash) — renaming the template = different lock.
-// Inherited templates must redeclare their own instanceLimit (not merged by DAG).
-// Counts actual Running sandboxes by scanning the sandbox index.
 
-/** Lock key based on template ID (hash for atomic store key safety). */
 function lockKey(tplId: string, suffix = ''): string {
   let h = 5381;
   for (let i = 0; i < tplId.length; i++) h = ((h << 5) + h) + tplId.charCodeAt(i);
@@ -263,18 +247,16 @@ function lockKey(tplId: string, suffix = ''): string {
 const SANDBOX_INDEX_KEY = 'sandbox:ids';
 const SANDBOX_PREFIX = 'sandbox:';
 
-/** Sandbox statuses that are considered "live" — count against the limit. */
 const LIVE_STATUSES: string[] = [
   SandboxStatus.Pending,
   SandboxStatus.Scheduling,
   SandboxStatus.Running,
-  SandboxStatus.Succeeded,     // Soft terminal — can be restarted (GHA RerunRun)
-  SandboxStatus.Terminating,   // Still has provider resources
-  SandboxStatus.Restarting,    // Cloud resources active during restart
-  SandboxStatus.Updating,      // Cloud resources active during update
+  SandboxStatus.Succeeded,
+  SandboxStatus.Terminating,
+  SandboxStatus.Restarting,
+  SandboxStatus.Updating,
 ];
 
-/** Count running sandboxes for a given template ID (matched via templateRef). */
 async function countRunningForTemplate(atomic: IAtomicStore, tplId: string): Promise<number> {
   const idx = await atomic.get<string[]>(SANDBOX_INDEX_KEY);
   if (!idx) return 0;
@@ -293,7 +275,6 @@ async function claimInstanceSlot(
   tpl: SandboxTemplate,
   userId: string,
 ): Promise<void> {
-  // singleton mode → acts as instanceLimit { type: 'fixed', max: 1 }
   if (tpl.singleton) {
     const runningCount = await countRunningForTemplate(atomic, tpl.id);
     if (runningCount >= 1) {
@@ -314,7 +295,6 @@ async function claimInstanceSlot(
   const baseKey = lockKey(tpl.id);
   const userKey = lockKey(tpl.id, ':' + userId);
 
-  // Check actual running count first (always run to ensure consistency)
   const runningCount = await countRunningForTemplate(atomic, tpl.id);
 
   if (type === 'fixed' || type === 'perSystem') {
@@ -323,14 +303,12 @@ async function claimInstanceSlot(
       err.status = 429;
       throw err;
     }
-    // Atomic counter for OCC across concurrent requests
     const entry = await atomic.get<number>(baseKey);
     await atomic.set(baseKey, (entry?.value ?? 0) + 1, entry?.version ?? null);
     return;
   }
 
   if (type === 'perUser') {
-    // Count only this user's running sandboxes for this template
     const idx = await atomic.get<string[]>(SANDBOX_INDEX_KEY);
     let userCount = 0;
     if (idx) {
@@ -348,7 +326,6 @@ async function claimInstanceSlot(
       err.status = 429;
       throw err;
     }
-    // Atomic counter for OCC
     const entry = await atomic.get<number>(userKey);
     await atomic.set(userKey, (entry?.value ?? 0) + 1, entry?.version ?? null);
     return;
@@ -389,7 +366,6 @@ async function releaseInstanceSlot(atomic: IAtomicStore, tpl: SandboxTemplate, _
   if (entry && entry.value > 0) {
     await atomic.set(baseKey, entry.value - 1, entry.version).catch(() => {});
   }
-  // Also release per-user counter if applicable
   if (tpl.instanceLimit?.type === 'perUser') {
     const userKey = lockKey(tpl.id, ':' + _userId);
     const uEntry = await atomic.get<number>(userKey);
@@ -413,88 +389,190 @@ function canAccessTemplate(tpl: SandboxTemplate, user: { id: string; role?: stri
 export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISandboxService, providers?: IProviderRegistry, permissionChecker?: PermissionCheckFn): Hono<{ Variables: AppContext }> {
   const router = new Hono<{ Variables: AppContext }>();
 
-  // POST / — create a template
-  router.post('/', async (c) => {
-    { const r = await requirePerm(c, permissionChecker, 'create', 'template'); if (r) return r; }
-    const body: CreateTemplateInput = await c.req.json();
-    if (!body.name) return c.json(fail('VALIDATION_ERROR', 'name is required'), 400);
+  const crud: CrudHandlerMap = {
+    create: (r) => r.post('/', async (c) => {
+      { const rv = await requirePerm(c, permissionChecker, 'create', 'template'); if (rv) return rv; }
+      const body: CreateTemplateInput = await c.req.json();
+      if (!body.name) return c.json(fail('VALIDATION_ERROR', 'name is required'), 400);
 
-    const user = c.var.currentUser;
-    if (!isUserRoot(user) && body.healthChecks) {
-      // Non-root users cannot set liveness checks — force safe defaults
-      body.healthChecks = body.healthChecks.filter(h => h.type !== 'liveness');
-    }
+      const user = c.var.currentUser;
+      if (!isUserRoot(user) && body.healthChecks) {
+        body.healthChecks = body.healthChecks.filter(h => h.type !== 'liveness');
+      }
 
-    // Mutex: singleton and instanceLimit cannot both be set
-    if (body.singleton && body.instanceLimit) {
-      return c.json(fail('VALIDATION_ERROR', 'singleton and instanceLimit are mutually exclusive'), 400);
-    }
+      if (body.singleton && body.instanceLimit) {
+        return c.json(fail('VALIDATION_ERROR', 'singleton and instanceLimit are mutually exclusive'), 400);
+      }
 
-    const now = Date.now();
-    const tpl: SandboxTemplate = {
-      id: genId(),
-      name: body.name,
-      description: body.description,
-      apiVersion: body.apiVersion ?? 'hbi-aad/v1',
-      kind: body.kind ?? 'Container',
-      metadata: body.metadata,
-      dependsOn: body.dependsOn,
-      creatorId: user?.id,
-      createdAt: now,
-      updatedAt: now,
-      visibility: undefined,
-      singleton: body.singleton,
-      instanceLimit: body.instanceLimit,
-      resourceBinding: body.resourceBinding,
-      container: body.container,
-      healthChecks: body.healthChecks,
-      network: body.network,
-      extensions: body.extensions,
-      podSpec: body.podSpec,
-    };
-    await atomic.set(PREFIX + tpl.id, tpl, null);
-    const idx = await atomic.get<string[]>(INDEX_KEY);
-    await atomic.set(INDEX_KEY, [...(idx?.value ?? []), tpl.id], idx?.version ?? null);
-    c.var.audit?.write({
-      level: KernLevel.NOTICE,
-      facility: 'template',
-      message: `Template created — ${tpl.name}`,
-      metadata: { eventType: 'template.created', templateId: tpl.id, actorId: user?.id },
-    });
-    return c.json(ok(tpl), 201);
-  });
+      const now = Date.now();
+      const tpl: SandboxTemplate = {
+        id: genId(),
+        name: body.name,
+        description: body.description,
+        apiVersion: body.apiVersion ?? 'hbi-aad/v1',
+        kind: body.kind ?? 'Container',
+        metadata: body.metadata,
+        dependsOn: body.dependsOn,
+        creatorId: user?.id,
+        createdAt: now,
+        updatedAt: now,
+        visibility: undefined,
+        singleton: body.singleton,
+        instanceLimit: body.instanceLimit,
+        resourceBinding: body.resourceBinding,
+        container: body.container,
+        healthChecks: body.healthChecks,
+        network: body.network,
+        extensions: body.extensions,
+        podSpec: body.podSpec,
+      };
+      await atomic.set(PREFIX + tpl.id, tpl, null);
+      const idx = await atomic.get<string[]>(INDEX_KEY);
+      await atomic.set(INDEX_KEY, [...(idx?.value ?? []), tpl.id], idx?.version ?? null);
+      c.var.audit?.write({
+        level: KernLevel.NOTICE,
+        facility: 'template',
+        message: `Template created — ${tpl.name}`,
+        metadata: { eventType: 'template.created', templateId: tpl.id, actorId: user?.id },
+      });
+      return c.json(ok(tpl), 201);
+    }),
 
-  // GET / — list all templates (systemd-style: generated + store overrides, tombstones hidden)
-  router.get('/', async (c) => {
-    const user = c.var.currentUser;
-    const page = parseInt(c.req.query('page') ?? '') || 1;
-    const limit = parseInt(c.req.query('limit') ?? '') || 50;
-    const name = c.req.query('name');
-    const kind = c.req.query('kind');
+    list: (r) => r.get('/', async (c) => {
+      const user = c.var.currentUser;
+      const page = parseInt(c.req.query('page') ?? '') || 1;
+      const limit = parseInt(c.req.query('limit') ?? '') || 50;
+      const name = c.req.query('name');
+      const kind = c.req.query('kind');
 
-    let visible = await listAllLive(atomic);
-    if (user) visible = visible.filter(t => canAccessTemplate(t, user));
-    if (name) visible = visible.filter(t => t.name.toLowerCase().includes(name.toLowerCase()));
-    if (kind) visible = visible.filter(t => t.kind === kind);
+      let visible = await listAllLive(atomic);
+      if (user) visible = visible.filter(t => canAccessTemplate(t, user));
+      if (name) visible = visible.filter(t => t.name.toLowerCase().includes(name.toLowerCase()));
+      if (kind) visible = visible.filter(t => t.kind === kind);
 
-    const total = visible.length;
-    const start = (page - 1) * limit;
-    const items = visible.slice(start, start + limit);
-    return c.json(ok({ items, total, page, limit }));
-  });
+      const total = visible.length;
+      const start = (page - 1) * limit;
+      const items = visible.slice(start, start + limit);
+      return c.json(ok({ items, total, page, limit }));
+    }),
 
-  // GET /:id — get a template (systemd-style: store override > generated, tombstone → 404)
-  router.get('/:id', async (c) => {
-    const resolved = await resolveTemplateSource(atomic, c.req.param('id'));
-    if (!resolved) return c.json(fail('TEMPLATE_NOT_FOUND', 'Template not found'), 404);
-    const user = c.var.currentUser;
-    if (!canAccessTemplate(resolved.template, user)) {
-      return c.json(fail('TEMPLATE_NOT_FOUND', 'Template not found'), 404);
-    }
-    return c.json(ok(resolved.template));
-  });
+    get: (r) => r.get('/:id', async (c) => {
+      const resolved = await resolveTemplateSource(atomic, c.req.param('id'));
+      if (!resolved) return c.json(fail('TEMPLATE_NOT_FOUND', 'Template not found'), 404);
+      const user = c.var.currentUser;
+      if (!canAccessTemplate(resolved.template, user)) {
+        return c.json(fail('TEMPLATE_NOT_FOUND', 'Template not found'), 404);
+      }
+      return c.json(ok(resolved.template));
+    }),
 
-  // GET /:id/resolved — get a template with DAG-inherited spec merged + dependency chain
+    update: (r) => r.put('/:id', async (c) => {
+      const id = c.req.param('id');
+      const user = c.var.currentUser;
+      const resolved = await resolveTemplateSource(atomic, id);
+      if (!resolved) return c.json(fail('TEMPLATE_NOT_FOUND', 'Template not found'), 404);
+
+      if (resolved.source === 'generated' && !isUserRoot(user)) {
+        return c.json(fail('FORBIDDEN', 'Only root can modify built-in templates'), 403);
+      }
+      if (resolved.source === 'store' && !isUserRoot(user) && resolved.template.creatorId !== user?.id) {
+        return c.json(fail('FORBIDDEN', 'Not your template'), 403);
+      }
+
+      const body: UpdateTemplateInput = await c.req.json();
+      if (body.singleton && body.instanceLimit) {
+        return c.json(fail('VALIDATION_ERROR', 'singleton and instanceLimit are mutually exclusive'), 400);
+      }
+
+      const base = resolved.template;
+      const updated: SandboxTemplate = {
+        ...base,
+        ...(body.name !== undefined ? { name: body.name } : {}),
+        ...(body.description !== undefined ? { description: body.description ?? undefined } : {}),
+        ...(body.metadata !== undefined ? { metadata: body.metadata } : {}),
+        ...(body.singleton !== undefined ? { singleton: body.singleton } : {}),
+        ...(body.instanceLimit !== undefined ? { instanceLimit: body.instanceLimit ?? undefined } : {}),
+        ...(body.resourceBinding !== undefined ? { resourceBinding: body.resourceBinding ?? undefined } : {}),
+        ...(body.container !== undefined ? { container: deepMerge(base.container ?? {}, body.container) } : {}),
+        ...(body.healthChecks !== undefined ? { healthChecks: body.healthChecks } : {}),
+        ...(body.network !== undefined ? { network: deepMerge(base.network ?? {}, body.network) } : {}),
+        ...(body.extensions !== undefined ? { extensions: deepMerge(base.extensions ?? {}, body.extensions) } : {}),
+        ...(body.dependsOn !== undefined ? { dependsOn: body.dependsOn ?? [] } : {}),
+        ...(body.podSpec !== undefined ? { podSpec: body.podSpec ?? undefined } : {}),
+        updatedAt: Date.now(),
+        ...(resolved.source === 'generated' ? { __originalGenerated: true } : {}),
+      };
+
+      const existingVersion = resolved.source === 'store'
+        ? (await atomic.get<SandboxTemplate>(PREFIX + id))?.version
+        : null;
+      await atomic.set(PREFIX + id, updated, existingVersion ?? null);
+      if (resolved.source === 'generated') {
+        const idx = await atomic.get<string[]>(INDEX_KEY);
+        if (!idx?.value?.includes(id)) {
+          await atomic.set(INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
+        }
+      }
+      c.var.audit?.write({
+        level: KernLevel.INFO,
+        facility: 'template',
+        message: `Template ${resolved.source === 'generated' ? 'overridden' : 'updated'} — ${updated.name}`,
+        metadata: { eventType: 'template.updated', templateId: id, source: resolved.source, actorId: user?.id },
+      });
+      return c.json(ok(updated));
+    }),
+
+    delete: (r) => r.delete('/:id', async (c) => {
+      const id = c.req.param('id');
+      const user = c.var.currentUser;
+      const resolved = await resolveTemplateSource(atomic, id);
+      if (!resolved) return c.json(fail('TEMPLATE_NOT_FOUND', 'Template not found'), 404);
+
+      if (resolved.source === 'generated') {
+        if (!isUserRoot(user)) {
+          return c.json(fail('FORBIDDEN', 'Only root can delete built-in templates'), 403);
+        }
+        const now = Date.now();
+        await atomic.set(PREFIX + id, {
+          __deleted: true,
+          deletedBy: user?.id,
+          deletedAt: now,
+          __originalId: id,
+        }, null);
+        c.var.audit?.write({
+          level: KernLevel.WARNING,
+          facility: 'template',
+          message: `Template masked — ${resolved.template.name} (tombstone)`,
+          metadata: { eventType: 'template.masked', templateId: id, actorId: user?.id },
+        });
+        return c.json(ok({ masked: true, id }));
+      }
+
+      const entry = await atomic.get<SandboxTemplate>(PREFIX + id);
+      if (!entry) return c.json(fail('TEMPLATE_NOT_FOUND', 'Template not found'), 404);
+      if (!entry.value.creatorId) {
+        return c.json(fail('MAC_DENIED', `Cannot delete seed template "${entry.value.name}" — protected by system policy`), 403);
+      }
+      if (!isUserRoot(user) && entry.value.creatorId !== user?.id) {
+        return c.json(fail('FORBIDDEN', 'Not your template'), 403);
+      }
+      await atomic.set(PREFIX + id, null, entry.version);
+      const idx = await atomic.get<string[]>(INDEX_KEY);
+      if (idx) await atomic.set(INDEX_KEY, idx.value.filter((i: string) => i !== id), idx.version);
+      c.var.audit?.write({
+        level: KernLevel.WARNING,
+        facility: 'template',
+        message: `Template deleted — ${entry.value.name}`,
+        metadata: { eventType: 'template.deleted', templateId: id, actorId: user?.id },
+      });
+      return c.json(ok(null));
+    }),
+  };
+
+  registerCrudRoutes(router, crud);
+
+  // ─── Extra routes ───
+
   router.get('/:id/resolved', async (c) => {
     try {
       const { template: resolved, chain } = await resolveTemplateWithChain(atomic, c.req.param('id'));
@@ -508,10 +586,9 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
     }
   });
 
-  // POST /:id/apply — apply a template to create a sandbox
   router.post('/:id/apply', async (c) => {
     { const r = await requirePerm(c, permissionChecker, 'create', 'sandbox'); if (r) return r; }
-    let resolved;  // hoisted for catch-block release
+    let resolved;
     try {
       resolved = await resolveTemplate(atomic, c.req.param('id'));
       const body: any = await c.req.json().catch(() => ({}));
@@ -525,12 +602,10 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
       await claimInstanceSlot(atomic, resolved, user?.id ?? 'anonymous');
       await claimResourceBinding(atomic, resolved);
 
-      // v2: ContainerGroup — bridge to sandbox lifecycle via PodSpec → CreateSandboxInput
       if (resolved.kind === 'ContainerGroup' && resolved.podSpec) {
         const baseInput = podSpecToSandboxInput(resolved.podSpec as PodSpec);
         const input = { ...baseInput, apiVersion: 'hbi-aad/v2', templateRef: resolved.id, ...(user?.id ? { creatorId: user.id } : {}) };
 
-        // Resolve provider same as v1
         const explicitInstanceId = body.instanceId ?? (resolved.podSpec as any).instanceId as (string | undefined);
         const targetRegion = (body.region ?? (resolved.podSpec as any).region ?? baseInput.region) as (string | undefined);
         let svc = sandboxService;
@@ -566,7 +641,6 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
         return c.json(ok(sandbox), 201);
       }
 
-      // v1: single-container path — resolve instance dynamically
       const providerName = body.provider;
       const explicitInstanceId = body.instanceId ?? resolved.container?.instanceId as (string | undefined);
       const targetRegion = (body.region ?? resolved.container?.region) as (string | undefined);
@@ -574,12 +648,10 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
       let resolvedInstanceId: string | undefined;
 
       if (explicitInstanceId && providers?.resolveContainer) {
-        // 1. User or template explicitly picked an instance
         const instProvider = await providers.resolveContainer(explicitInstanceId as any);
         svc = new SandboxService(atomic, new ConsoleLogger(), instProvider, providers, undefined, undefined, createAtomicNetworkResolver(atomic), new InstanceService(atomic));
         resolvedInstanceId = explicitInstanceId as string;
       } else if (providers && targetRegion) {
-        // 2. Auto-resolve: pick first online instance in the requested region with container capability
         const instSvc = new InstanceService(atomic);
         const allInst = await instSvc.resolveByCapability('container');
         const match = allInst.find(i => i.status === 'online' && i.region === targetRegion);
@@ -589,21 +661,16 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
           resolvedInstanceId = match.id as string;
         }
       } else if (providerName && providers) {
-        // 3. Legacy: named provider from request body
         const entry = providers.provider(providerName);
         if (!entry) return c.json(fail('PROVIDER_NOT_FOUND', `Provider "${providerName}" not available`), 400);
         svc = new SandboxService(atomic, new ConsoleLogger(), entry.container, providers, undefined, undefined, createAtomicNetworkResolver(atomic), new InstanceService(atomic));
       }
       if (!svc) return c.json(fail('SERVICE_UNAVAILABLE', 'Sandbox service not available'), 503);
 
-      // Inject resolved instanceId into input if auto-resolved
       const baseInput = await applyTemplate(resolved, body.name, body.region, async (volumeId) => {
         const volEntry = await atomic.get<Record<string, unknown>>('volume:' + volumeId);
         return volEntry?.value ?? null;
       });
-      // Always inject instanceId when resolved — provision needs it to persist ProviderIdentity.
-      // The !explicitInstanceId guard was wrong: applyTemplate does NOT pass instanceId through,
-      // so even when the template specifies instanceId, we must add it to the input.
       const input = resolvedInstanceId
         ? { ...baseInput, instanceId: resolvedInstanceId as any }
         : baseInput;
@@ -622,123 +689,12 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
       const status = typeof e.status === 'number' ? e.status : (typeof e.statusCode === 'number' ? e.statusCode : 500);
       const code = e.code && typeof e.code === 'string' ? e.code : (status === 404 ? 'TEMPLATE_NOT_FOUND' : 'APPLY_FAILED');
       console.error(`[template] apply failed for ${c.req.param('id')}:`, { code, status, message: e.message });
-      // Release claimed resources if template resolution succeeded before the failure
       if (resolved) {
         await releaseInstanceSlot(atomic, resolved, c.var.currentUser?.id ?? 'anonymous').catch(() => {});
         await releaseResourceBinding(atomic, resolved).catch(() => {});
       }
       return c.json(fail(code, e.message), status);
     }
-  });
-
-  // PUT /:id — update a template (systemd-style: root can override generated, owner can update own)
-  router.put('/:id', async (c) => {
-    const id = c.req.param('id');
-    const user = c.var.currentUser;
-    const resolved = await resolveTemplateSource(atomic, id);
-    if (!resolved) return c.json(fail('TEMPLATE_NOT_FOUND', 'Template not found'), 404);
-
-    // DAC: non-root cannot modify generated templates (no owner)
-    if (resolved.source === 'generated' && !isUserRoot(user)) {
-      return c.json(fail('FORBIDDEN', 'Only root can modify built-in templates'), 403);
-    }
-    // DAC: non-root can only modify own templates
-    if (resolved.source === 'store' && !isUserRoot(user) && resolved.template.creatorId !== user?.id) {
-      return c.json(fail('FORBIDDEN', 'Not your template'), 403);
-    }
-
-    const body: UpdateTemplateInput = await c.req.json();
-    if (body.singleton && body.instanceLimit) {
-      return c.json(fail('VALIDATION_ERROR', 'singleton and instanceLimit are mutually exclusive'), 400);
-    }
-
-    const base = resolved.template;
-    const updated: SandboxTemplate = {
-      ...base,
-      ...(body.name !== undefined ? { name: body.name } : {}),
-      ...(body.description !== undefined ? { description: body.description ?? undefined } : {}),
-      ...(body.metadata !== undefined ? { metadata: body.metadata } : {}),
-      ...(body.singleton !== undefined ? { singleton: body.singleton } : {}),
-      ...(body.instanceLimit !== undefined ? { instanceLimit: body.instanceLimit ?? undefined } : {}),
-      ...(body.resourceBinding !== undefined ? { resourceBinding: body.resourceBinding ?? undefined } : {}),
-      ...(body.container !== undefined ? { container: deepMerge(base.container ?? {}, body.container) } : {}),
-      ...(body.healthChecks !== undefined ? { healthChecks: body.healthChecks } : {}),
-      ...(body.network !== undefined ? { network: deepMerge(base.network ?? {}, body.network) } : {}),
-      ...(body.extensions !== undefined ? { extensions: deepMerge(base.extensions ?? {}, body.extensions) } : {}),
-      ...(body.dependsOn !== undefined ? { dependsOn: body.dependsOn ?? [] } : {}),
-      ...(body.podSpec !== undefined ? { podSpec: body.podSpec ?? undefined } : {}),
-      updatedAt: Date.now(),
-      // Preserve __originalGenerated flag so tombstones can reference the source
-      ...(resolved.source === 'generated' ? { __originalGenerated: true } : {}),
-    };
-
-    const existingVersion = resolved.source === 'store'
-      ? (await atomic.get<SandboxTemplate>(PREFIX + id))?.version
-      : null;
-    await atomic.set(PREFIX + id, updated, existingVersion ?? null);
-    // Ensure store index includes this ID for new overrides
-    if (resolved.source === 'generated') {
-      const idx = await atomic.get<string[]>(INDEX_KEY);
-      if (!idx?.value?.includes(id)) {
-        await atomic.set(INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
-      }
-    }
-    c.var.audit?.write({
-      level: KernLevel.INFO,
-      facility: 'template',
-      message: `Template ${resolved.source === 'generated' ? 'overridden' : 'updated'} — ${updated.name}`,
-      metadata: { eventType: 'template.updated', templateId: id, source: resolved.source, actorId: user?.id },
-    });
-    return c.json(ok(updated));
-  });
-
-  // DELETE /:id — delete a template (systemd-style: generated → tombstone, store → actual delete)
-  router.delete('/:id', async (c) => {
-    const id = c.req.param('id');
-    const user = c.var.currentUser;
-    const resolved = await resolveTemplateSource(atomic, id);
-    if (!resolved) return c.json(fail('TEMPLATE_NOT_FOUND', 'Template not found'), 404);
-
-    // ── Generated template: write tombstone (systemctl mask) ──
-    if (resolved.source === 'generated') {
-      if (!isUserRoot(user)) {
-        return c.json(fail('FORBIDDEN', 'Only root can delete built-in templates'), 403);
-      }
-      const now = Date.now();
-      await atomic.set(PREFIX + id, {
-        __deleted: true,
-        deletedBy: user?.id,
-        deletedAt: now,
-        __originalId: id,
-      }, null);
-      c.var.audit?.write({
-        level: KernLevel.WARNING,
-        facility: 'template',
-        message: `Template masked — ${resolved.template.name} (tombstone)`,
-        metadata: { eventType: 'template.masked', templateId: id, actorId: user?.id },
-      });
-      return c.json(ok({ masked: true, id }));
-    }
-
-    // ── Store template: actual delete ──
-    const entry = await atomic.get<SandboxTemplate>(PREFIX + id);
-    if (!entry) return c.json(fail('TEMPLATE_NOT_FOUND', 'Template not found'), 404);
-    if (!entry.value.creatorId) {
-      return c.json(fail('MAC_DENIED', `Cannot delete seed template "${entry.value.name}" — protected by system policy`), 403);
-    }
-    if (!isUserRoot(user) && entry.value.creatorId !== user?.id) {
-      return c.json(fail('FORBIDDEN', 'Not your template'), 403);
-    }
-    await atomic.set(PREFIX + id, null, entry.version);
-    const idx = await atomic.get<string[]>(INDEX_KEY);
-    if (idx) await atomic.set(INDEX_KEY, idx.value.filter((i: string) => i !== id), idx.version);
-    c.var.audit?.write({
-      level: KernLevel.WARNING,
-      facility: 'template',
-      message: `Template deleted — ${entry.value.name}`,
-      metadata: { eventType: 'template.deleted', templateId: id, actorId: user?.id },
-    });
-    return c.json(ok(null));
   });
 
   return router;

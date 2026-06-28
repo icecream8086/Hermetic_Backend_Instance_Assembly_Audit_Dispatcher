@@ -19,7 +19,10 @@ import {
 } from './schema.ts';
 import { ok, fail } from '../../core/response.ts';
 import type { AuditActor } from './audit.ts';
-import { z } from 'zod';
+import { z, type ZodType } from 'zod';
+import type { CrudHandlerMap } from '../../core/crud/router.ts';
+import { registerCrudRoutes } from '../../core/crud/router.ts';
+import type { PaginatedResult } from '../../core/crud/types.ts';
 
 const KernLevelNames = z.enum([
   'emerg', 'alert', 'crit', 'err', 'warning', 'notice', 'info', 'debug', 'none',
@@ -46,174 +49,177 @@ function actorFrom(c: any): AuditActor | undefined {
   return { userId: u.id, ip: c.req.header('x-forwarded-for')?.split(',')[0]?.trim() };
 }
 
-/** Reject non-root users on admin endpoints. No-op when authz is disabled (no currentUser). */
 function requireRoot(c: Context<{ Variables: AppContext }>): Response | null {
   const user = c.var?.currentUser;
-  if (!user) return null; // authz disabled — allow
+  if (!user) return null;
   const isRoot = user.role === 'root' || user.role === 'Operator' || user.role === 'wheel';
-  if (!isRoot) {
-    return c.json(fail('FORBIDDEN', 'Admin access required'), 403);
-  }
+  if (!isRoot) return c.json(fail('FORBIDDEN', 'Admin access required'), 403);
   return null;
 }
 
-/**
- * Reject non-wheel users. Only users with role 'wheel' have full access to ALL groups.
- * root/Operator can only manage groups where they're explicitly listed as admin.
- */
 function requireWheel(c: any): Response | null {
   const user = c.var?.currentUser;
-  if (!user) return null; // authz disabled
-  if (user.role !== 'wheel') {
-    return c.json(fail('FORBIDDEN', 'Wheel privilege required'), 403);
-  }
+  if (!user) return null;
+  if (user.role !== 'wheel') return c.json(fail('FORBIDDEN', 'Wheel privilege required'), 403);
   return null;
 }
+
+// ─── CRUD sub-resource factory ───
+
+interface SubCrudOpts<T> {
+  guard: (c: any) => Response | null;
+  createSchema: ZodType;
+  createFn: (data: any, actor: AuditActor | undefined) => Promise<T>;
+  listUrlFilter: (c: any) => ((item: any) => boolean) | undefined;
+  listFn: (page: number, limit: number, filter: ((item: any) => boolean) | undefined) => Promise<PaginatedResult<T>>;
+  getFn: (id: string) => Promise<T | null>;
+  updateSchema: ZodType;
+  updateFn: (id: string, data: any, actor: AuditActor | undefined) => Promise<T>;
+  deleteFn: (id: string, actor: AuditActor | undefined) => Promise<void>;
+  notFoundCode: string;
+  notFoundMsg: string;
+}
+
+/** Build a CrudHandlerMap for a sub-resource. TypeScript enforces all 5 actions are present. */
+function subCrud<T>(opts: SubCrudOpts<T>): CrudHandlerMap {
+  return {
+    create: (r) => r.post('/', async (c) => {
+      { const rv = opts.guard(c); if (rv) return rv; }
+      const body: unknown = await c.req.json();
+      const parsed = opts.createSchema.safeParse(body);
+      if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
+      const result = await opts.createFn(parsed.data, actorFrom(c));
+      return c.json(ok(result), 201);
+    }),
+
+    list: (r) => r.get('/', async (c) => {
+      const page = parseInt(c.req.query('page') ?? '') || 1;
+      const limit = parseInt(c.req.query('limit') ?? '') || 50;
+      const filter = opts.listUrlFilter(c);
+      return c.json(ok(await opts.listFn(page, limit, filter)));
+    }),
+
+    get: (r) => r.get('/:id', async (c) => {
+      const result = await opts.getFn(c.req.param('id'));
+      if (!result) return c.json(fail(opts.notFoundCode, opts.notFoundMsg), 404);
+      return c.json(ok(result));
+    }),
+
+    update: (r) => r.put('/:id', async (c) => {
+      { const rv = opts.guard(c); if (rv) return rv; }
+      const body: unknown = await c.req.json();
+      const parsed = opts.updateSchema.safeParse(body);
+      if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
+      return c.json(ok(await opts.updateFn(c.req.param('id'), parsed.data, actorFrom(c))));
+    }),
+
+    delete: (r) => r.delete('/:id', async (c) => {
+      { const rv = opts.guard(c); if (rv) return rv; }
+      await opts.deleteFn(c.req.param('id'), actorFrom(c));
+      return c.json(ok(null));
+    }),
+  };
+}
+
+// ─── Name-based filter helper ───
+
+function nameFilter(c: any): ((item: any) => boolean) | undefined {
+  const name = c.req.query('name');
+  return name ? (item: any) => item.name?.toLowerCase().includes(name.toLowerCase()) : undefined;
+}
+
+function queryFilter(key: string) {
+  return (c: any): ((item: any) => boolean) | undefined => {
+    const q = c.req.query(key);
+    return q ? (item: any) => (item.pathPrefix ?? '').toLowerCase().includes(q.toLowerCase()) || (item.method ?? '').toLowerCase().includes(q.toLowerCase()) : undefined;
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Main router
+// ═══════════════════════════════════════════════════════════════
 
 export function createPermissionRouter(svc: IPermissionService): Hono<{ Variables: AppContext }> {
   const router = new Hono<{ Variables: AppContext }>();
 
-  // ═══════════════════════════════════
-  // Individual policies CRUD
-  // ═══════════════════════════════════
+  // ─── Policies CRUD ───
+  {
+    const policies = new Hono<any>();
+    registerCrudRoutes(policies, subCrud({
+      guard: requireRoot,
+      createSchema: CreatePolicySchema,
+      createFn: (data, actor) => svc.createPolicy(data, actor),
+      listUrlFilter: nameFilter,
+      listFn: (page, limit, filter) => svc.listPoliciesPaginated(page, limit, filter),
+      getFn: (id) => svc.getPolicy(id),
+      updateSchema: UpdatePolicySchema,
+      updateFn: (id, data, actor) => svc.updatePolicy(id, data, actor),
+      deleteFn: (id, actor) => svc.deletePolicy(id, actor),
+      notFoundCode: 'POLICY_NOT_FOUND',
+      notFoundMsg: 'Policy not found',
+    }));
+    router.route('/policies', policies);
+    router.route('/policies/', policies);
+  }
 
-  router.post('/policies', async (c) => {
-    { const r = requireRoot(c); if (r) return r; }
-    const body: unknown = await c.req.json();
-    const parsed = CreatePolicySchema.safeParse(body);
-    if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
-    const policy = await svc.createPolicy(parsed.data, actorFrom(c));
-    return c.json(ok(policy), 201);
-  });
+  // ─── User groups CRUD ───
+  {
+    const userGroups = new Hono<any>();
+    registerCrudRoutes(userGroups, subCrud({
+      guard: requireWheel,
+      createSchema: CreateUserGroupSchema,
+      createFn: (data, actor) => svc.createUserGroup(data, actor),
+      listUrlFilter: nameFilter,
+      listFn: (page, limit, filter) => svc.listUserGroupsPaginated(page, limit, filter),
+      getFn: (id) => svc.getUserGroup(id),
+      updateSchema: UpdateUserGroupSchema,
+      updateFn: (id, data, actor) => svc.updateUserGroup(id, data, actor),
+      deleteFn: (id, actor) => svc.deleteUserGroup(id, actor),
+      notFoundCode: 'USERGROUP_NOT_FOUND',
+      notFoundMsg: 'User group not found',
+    }));
+    router.route('/user-groups', userGroups);
+    router.route('/user-groups/', userGroups);
+  }
 
-  router.get('/policies', async (c) => {
-    const page = parseInt(c.req.query('page') ?? '') || 1;
-    const limit = parseInt(c.req.query('limit') ?? '') || 50;
-    const name = c.req.query('name');
-    const filter = name ? (item: any) => item.name?.toLowerCase().includes(name.toLowerCase()) : undefined;
-    return c.json(ok(await svc.listPoliciesPaginated(page, limit, filter)));
-  });
+  // ─── Permission groups CRUD ───
+  {
+    const permGroups = new Hono<any>();
 
-  router.get('/policies/:id', async (c) => {
-    const policy = await svc.getPolicy(c.req.param('id'));
-    if (!policy) return c.json(fail('POLICY_NOT_FOUND', 'Policy not found'), 404);
-    return c.json(ok(policy));
-  });
+    registerCrudRoutes(permGroups, subCrud({
+      guard: requireRoot,
+      createSchema: CreatePermGroupSchema,
+      createFn: (data, actor) => svc.createPermGroup(data, actor),
+      listUrlFilter: nameFilter,
+      listFn: (page, limit, filter) => svc.listPermGroupsPaginated(page, limit, filter),
+      getFn: (id) => svc.getPermGroup(id),
+      updateSchema: UpdatePermGroupSchema,
+      updateFn: (id, data, actor) => svc.updatePermGroup(id, data, actor),
+      deleteFn: (id, actor) => svc.deletePermGroup(id, actor),
+      notFoundCode: 'PERMGROUP_NOT_FOUND',
+      notFoundMsg: 'Permission group not found',
+    }));
 
-  router.put('/policies/:id', async (c) => {
-    { const r = requireRoot(c); if (r) return r; }
-    const body: unknown = await c.req.json();
-    const parsed = UpdatePolicySchema.safeParse(body);
-    if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
-    return c.json(ok(await svc.updatePolicy(c.req.param('id'), parsed.data, actorFrom(c))));
-  });
+    // Extra route: create from template
+    permGroups.post('/from-template/:templateId', async (c) => {
+      { const r = requireRoot(c); if (r) return r; }
+      const body: unknown = await c.req.json();
+      const parsed = CreatePermGroupSchema.partial().safeParse(body);
+      if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
+      const group = await svc.createPermGroupFromTemplate(c.req.param('templateId'), {
+        name: parsed.data.name ?? c.req.param('templateId'),
+        description: parsed.data.description,
+        userGroupIds: parsed.data.userGroupIds,
+        userIds: parsed.data.userIds,
+      }, actorFrom(c));
+      return c.json(ok(group), 201);
+    });
 
-  router.delete('/policies/:id', async (c) => {
-    { const r = requireRoot(c); if (r) return r; }
-    await svc.deletePolicy(c.req.param('id'), actorFrom(c));
-    return c.json(ok(null));
-  });
+    router.route('/groups', permGroups);
+    router.route('/groups/', permGroups);
+  }
 
-  // ═══════════════════════════════════
-  // User groups CRUD
-  // ═══════════════════════════════════
-
-  router.post('/user-groups', async (c) => {
-    { const r = requireWheel(c); if (r) return r; }
-    const body: unknown = await c.req.json();
-    const parsed = CreateUserGroupSchema.safeParse(body);
-    if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
-    const group = await svc.createUserGroup(parsed.data, actorFrom(c));
-    return c.json(ok(group), 201);
-  });
-
-  router.get('/user-groups', async (c) => {
-    const page = parseInt(c.req.query('page') ?? '') || 1;
-    const limit = parseInt(c.req.query('limit') ?? '') || 50;
-    const name = c.req.query('name');
-    const filter = name ? (item: any) => item.name?.toLowerCase().includes(name.toLowerCase()) : undefined;
-    return c.json(ok(await svc.listUserGroupsPaginated(page, limit, filter)));
-  });
-
-  router.get('/user-groups/:id', async (c) => {
-    const group = await svc.getUserGroup(c.req.param('id'));
-    if (!group) return c.json(fail('USERGROUP_NOT_FOUND', 'User group not found'), 404);
-    return c.json(ok(group));
-  });
-
-  router.put('/user-groups/:id', async (c) => {
-    { const r = requireWheel(c); if (r) return r; }
-    const body: unknown = await c.req.json();
-    const parsed = UpdateUserGroupSchema.safeParse(body);
-    if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
-    return c.json(ok(await svc.updateUserGroup(c.req.param('id'), parsed.data, actorFrom(c))));
-  });
-
-  router.delete('/user-groups/:id', async (c) => {
-    { const r = requireWheel(c); if (r) return r; }
-    await svc.deleteUserGroup(c.req.param('id'), actorFrom(c));
-    return c.json(ok(null));
-  });
-
-  // ═══════════════════════════════════
-  // Permission groups CRUD
-  // ═══════════════════════════════════
-
-  router.post('/groups', async (c) => {
-    { const r = requireRoot(c); if (r) return r; }
-    const body: unknown = await c.req.json();
-    const parsed = CreatePermGroupSchema.safeParse(body);
-    if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
-    const group = await svc.createPermGroup(parsed.data, actorFrom(c));
-    return c.json(ok(group), 201);
-  });
-
-  router.post('/groups/from-template/:templateId', async (c) => {
-    { const r = requireRoot(c); if (r) return r; }
-    const body: unknown = await c.req.json();
-    const parsed = CreatePermGroupSchema.partial().safeParse(body);
-    if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
-    const group = await svc.createPermGroupFromTemplate(c.req.param('templateId'), {
-      name: parsed.data.name ?? c.req.param('templateId'),
-      description: parsed.data.description,
-      userGroupIds: parsed.data.userGroupIds,
-      userIds: parsed.data.userIds,
-    }, actorFrom(c));
-    return c.json(ok(group), 201);
-  });
-
-  router.get('/groups', async (c) => {
-    const page = parseInt(c.req.query('page') ?? '') || 1;
-    const limit = parseInt(c.req.query('limit') ?? '') || 50;
-    const name = c.req.query('name');
-    const filter = name ? (item: any) => item.name?.toLowerCase().includes(name.toLowerCase()) : undefined;
-    return c.json(ok(await svc.listPermGroupsPaginated(page, limit, filter)));
-  });
-
-  router.get('/groups/:id', async (c) => {
-    const group = await svc.getPermGroup(c.req.param('id'));
-    if (!group) return c.json(fail('PERMGROUP_NOT_FOUND', 'Permission group not found'), 404);
-    return c.json(ok(group));
-  });
-
-  router.put('/groups/:id', async (c) => {
-    { const r = requireRoot(c); if (r) return r; }
-    const body: unknown = await c.req.json();
-    const parsed = UpdatePermGroupSchema.safeParse(body);
-    if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
-    return c.json(ok(await svc.updatePermGroup(c.req.param('id'), parsed.data, actorFrom(c))));
-  });
-
-  router.delete('/groups/:id', async (c) => {
-    { const r = requireRoot(c); if (r) return r; }
-    await svc.deletePermGroup(c.req.param('id'), actorFrom(c));
-    return c.json(ok(null));
-  });
-
-  // ═══════════════════════════════════
-  // Templates (read-only)
-  // ═══════════════════════════════════
-
+  // ─── Templates (read-only) ───
   router.get('/templates', async (c) => {
     return c.json(ok(svc.listTemplates()));
   });
@@ -224,93 +230,47 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
     return c.json(ok(tpl));
   });
 
-  // ═══════════════════════════════════
-  // UserTemplate CRUD
-  // ═══════════════════════════════════
+  // ─── UserTemplate CRUD ───
+  {
+    const userTemplates = new Hono<any>();
+    registerCrudRoutes(userTemplates, subCrud({
+      guard: requireRoot,
+      createSchema: CreateUserTplSchema,
+      createFn: (data, actor) => svc.createUserTpl(data, actor),
+      listUrlFilter: nameFilter,
+      listFn: (page, limit, filter) => svc.listUserTplsPaginated(page, limit, filter),
+      getFn: (id) => svc.getUserTpl(id),
+      updateSchema: UpdateUserTplSchema,
+      updateFn: (id, data, actor) => svc.updateUserTpl(id, data, actor),
+      deleteFn: (id, actor) => svc.deleteUserTpl(id, actor),
+      notFoundCode: 'USERTPL_NOT_FOUND',
+      notFoundMsg: 'User template not found',
+    }));
+    router.route('/user-templates', userTemplates);
+    router.route('/user-templates/', userTemplates);
+  }
 
-  router.post('/user-templates', async (c) => {
-    { const r = requireRoot(c); if (r) return r; }
-    const body: unknown = await c.req.json();
-    const parsed = CreateUserTplSchema.safeParse(body);
-    if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
-    const tpl = await svc.createUserTpl(parsed.data, actorFrom(c));
-    return c.json(ok(tpl), 201);
-  });
+  // ─── Route ACL CRUD ───
+  {
+    const routeAcls = new Hono<any>();
+    registerCrudRoutes(routeAcls, subCrud({
+      guard: requireRoot,
+      createSchema: CreateRouteAclSchema,
+      createFn: (data, actor) => svc.createRouteAcl(data, actor),
+      listUrlFilter: queryFilter('q'),
+      listFn: (page, limit, filter) => svc.listRouteAclsPaginated(page, limit, filter),
+      getFn: (id) => svc.getRouteAcl(id),
+      updateSchema: UpdateRouteAclSchema,
+      updateFn: (id, data, actor) => svc.updateRouteAcl(id, data, actor),
+      deleteFn: (id, actor) => svc.deleteRouteAcl(id, actor),
+      notFoundCode: 'ROUTEACL_NOT_FOUND',
+      notFoundMsg: 'Route ACL not found',
+    }));
+    router.route('/route-acls', routeAcls);
+    router.route('/route-acls/', routeAcls);
+  }
 
-  router.get('/user-templates', async (c) => {
-    const page = parseInt(c.req.query('page') ?? '') || 1;
-    const limit = parseInt(c.req.query('limit') ?? '') || 50;
-    const name = c.req.query('name');
-    const filter = name ? (item: any) => item.name?.toLowerCase().includes(name.toLowerCase()) : undefined;
-    return c.json(ok(await svc.listUserTplsPaginated(page, limit, filter)));
-  });
-
-  router.get('/user-templates/:id', async (c) => {
-    const tpl = await svc.getUserTpl(c.req.param('id'));
-    if (!tpl) return c.json(fail('USERTPL_NOT_FOUND', 'User template not found'), 404);
-    return c.json(ok(tpl));
-  });
-
-  router.put('/user-templates/:id', async (c) => {
-    { const r = requireRoot(c); if (r) return r; }
-    const body: unknown = await c.req.json();
-    const parsed = UpdateUserTplSchema.safeParse(body);
-    if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
-    return c.json(ok(await svc.updateUserTpl(c.req.param('id'), parsed.data, actorFrom(c))));
-  });
-
-  router.delete('/user-templates/:id', async (c) => {
-    { const r = requireRoot(c); if (r) return r; }
-    await svc.deleteUserTpl(c.req.param('id'), actorFrom(c));
-    return c.json(ok(null));
-  });
-
-  // ═══════════════════════════════════
-  // Route ACL CRUD
-  // ═══════════════════════════════════
-
-  router.post('/route-acls', async (c) => {
-    { const r = requireRoot(c); if (r) return r; }
-    const body: unknown = await c.req.json();
-    const parsed = CreateRouteAclSchema.safeParse(body);
-    if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
-    const acl = await svc.createRouteAcl(parsed.data, actorFrom(c));
-    return c.json(ok(acl), 201);
-  });
-
-  router.get('/route-acls', async (c) => {
-    const page = parseInt(c.req.query('page') ?? '') || 1;
-    const limit = parseInt(c.req.query('limit') ?? '') || 50;
-    const q = c.req.query('q'); // search by pathPrefix or method
-    const filter = q ? (item: any) => (item.pathPrefix ?? '').toLowerCase().includes(q.toLowerCase()) || (item.method ?? '').toLowerCase().includes(q.toLowerCase()) : undefined;
-    return c.json(ok(await svc.listRouteAclsPaginated(page, limit, filter)));
-  });
-
-  router.get('/route-acls/:id', async (c) => {
-    const acl = await svc.getRouteAcl(c.req.param('id'));
-    if (!acl) return c.json(fail('ROUTEACL_NOT_FOUND', 'Route ACL not found'), 404);
-    return c.json(ok(acl));
-  });
-
-  router.put('/route-acls/:id', async (c) => {
-    { const r = requireRoot(c); if (r) return r; }
-    const body: unknown = await c.req.json();
-    const parsed = UpdateRouteAclSchema.safeParse(body);
-    if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
-    return c.json(ok(await svc.updateRouteAcl(c.req.param('id'), parsed.data, actorFrom(c))));
-  });
-
-  router.delete('/route-acls/:id', async (c) => {
-    { const r = requireRoot(c); if (r) return r; }
-    await svc.deleteRouteAcl(c.req.param('id'), actorFrom(c));
-    return c.json(ok(null));
-  });
-
-  // ═══════════════════════════════════
-  // Invitations
-  // ═══════════════════════════════════
-
-  // POST /invite — send invitation (requires admin of the group)
+  // ─── Invitations ───
   router.post('/invite', async (c) => {
     const body: unknown = await c.req.json();
     const parsed = CreateInviteSchema.safeParse(body);
@@ -321,7 +281,6 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
     return c.json(ok(invite), 201);
   });
 
-  // GET /invitations — list current user's pending invitations
   router.get('/invitations', async (c) => {
     const user = c.var?.currentUser;
     if (!user) return c.json(fail('UNAUTHORIZED', 'Authentication required'), 401);
@@ -329,7 +288,6 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
     return c.json(ok(invites));
   });
 
-  // POST /invitations/:id/accept — accept invitation
   router.post('/invitations/:id/accept', async (c) => {
     const user = c.var?.currentUser;
     if (!user) return c.json(fail('UNAUTHORIZED', 'Authentication required'), 401);
@@ -337,7 +295,6 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
     return c.json(ok(null));
   });
 
-  // POST /invitations/:id/reject — reject invitation
   router.post('/invitations/:id/reject', async (c) => {
     const user = c.var?.currentUser;
     if (!user) return c.json(fail('UNAUTHORIZED', 'Authentication required'), 401);
@@ -345,10 +302,7 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
     return c.json(ok(null));
   });
 
-  // ═══════════════════════════════════
-  // Log policy (wheel-only via auth middleware)
-  // ═══════════════════════════════════
-
+  // ─── Log policy ───
   router.get('/log-policy', async (c) => {
     return c.json(ok(await svc.getLogPolicy()));
   });
@@ -362,10 +316,7 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
     return c.json(ok(policy));
   });
 
-  // ═══════════════════════════════════
-  // Capability management (wheel-only)
-  // ═══════════════════════════════════
-
+  // ─── Capability management ───
   router.put('/caps/user/:userId', async (c) => {
     { const r = requireRoot(c); if (r) return r; }
     const { caps } = await c.req.json<{ caps: number }>();
@@ -392,10 +343,7 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
     return c.json(ok(result));
   });
 
-  // ═══════════════════════════════════
-  // Temporary elevation (sudo) — RHEL sudoers
-  // ═══════════════════════════════════
-
+  // ─── Temporary elevation (sudo) ───
   router.post('/elevate', async (c) => {
     { const r = requireRoot(c); if (r) return r; }
     const { userId, durationMs, capabilities } = await c.req.json<{ userId: string; durationMs?: number; capabilities?: number }>();
@@ -415,10 +363,7 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
     return c.json(ok(list));
   });
 
-  // ═══════════════════════════════════
-  // Compare
-  // ═══════════════════════════════════════
-
+  // ─── Compare ───
   router.post('/compare/perm-groups', async (c) => {
     { const r = requireRoot(c); if (r) return r; }
     const { idA, idB } = await c.req.json<{ idA: string; idB: string }>();
@@ -435,10 +380,7 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
     catch (e: any) { return c.json(fail('NOT_FOUND', e.message), 404); }
   });
 
-  // ═══════════════════════════════════
-  // Permission check
-  // ═══════════════════════════════════
-
+  // ─── Permission check ───
   router.post('/check', async (c) => {
     { const r = requireRoot(c); if (r) return r; }
     const body: unknown = await c.req.json();

@@ -5,6 +5,8 @@ import type { AppContext } from "../../core/deps.ts";
 import { ok, fail } from '../../core/response.ts';
 import type { RouteMeta } from '../../core/http-docs/types.ts';
 import type { CreateSecurityGroupInput, UpdateSecurityGroupInput } from './types.ts';
+import type { CrudHandlerMap } from '../../core/crud/router.ts';
+import { registerCrudRoutes } from '../../core/crud/router.ts';
 
 function requireRoot(c: Context<{ Variables: AppContext }>): Response | null {
   const user = c.var?.currentUser;
@@ -21,45 +23,47 @@ function actorFrom(c: any): string | undefined {
 export function createSecurityGroupRouter(svc: ISecurityGroupService): Hono<any> {
   const router = new Hono<any>();
 
-  router.get('/', async (c) => {
-    const page = parseInt(c.req.query('page') ?? '') || 1;
-    const limit = parseInt(c.req.query('limit') ?? '') || 20;
-    const name = c.req.query('name');
-    const result = await svc.list(page, limit, name);
-    return c.json(ok(result));
-  });
+  const crud: CrudHandlerMap = {
+    list: (r) => r.get('/', async (c) => {
+      const page = parseInt(c.req.query('page') ?? '') || 1;
+      const limit = parseInt(c.req.query('limit') ?? '') || 20;
+      const name = c.req.query('name');
+      const result = await svc.list(page, limit, name);
+      return c.json(ok(result));
+    }),
 
-  router.post('/', async (c) => {
-    { const r = requireRoot(c); if (r) return r; }
-    const body = await c.req.json<CreateSecurityGroupInput>();
-    if (!body.name || !body.instanceId) return c.json(fail('VALIDATION_ERROR', 'name and instanceId are required'), 400);
-    const sg = await svc.create(body, actorFrom(c));
-    return c.json(ok(sg), 201);
-  });
+    create: (r) => r.post('/', async (c) => {
+      { const rv = requireRoot(c); if (rv) return rv; }
+      const body = await c.req.json<CreateSecurityGroupInput>();
+      if (!body.name || !body.instanceId) return c.json(fail('VALIDATION_ERROR', 'name and instanceId are required'), 400);
+      const sg = await svc.create(body, actorFrom(c));
+      return c.json(ok(sg), 201);
+    }),
 
-  router.get('/:id', async (c) => {
-    const id = c.req.param('id') as any;
-    const sg = await svc.get(id);
-    if (!sg) return c.json(fail('NOT_FOUND', 'Security group not found'), 404);
-    return c.json(ok(sg));
-  });
+    get: (r) => r.get('/:id', async (c) => {
+      const id = c.req.param('id') as any;
+      const sg = await svc.get(id);
+      if (!sg) return c.json(fail('NOT_FOUND', 'Security group not found'), 404);
+      return c.json(ok(sg));
+    }),
 
-  router.put('/:id', async (c) => {
-    { const r = requireRoot(c); if (r) return r; }
-    const id = c.req.param('id') as any;
-    const body = await c.req.json<UpdateSecurityGroupInput>();
-    const sg = await svc.update(id, body, actorFrom(c));
-    return c.json(ok(sg));
-  });
+    update: (r) => r.put('/:id', async (c) => {
+      { const rv = requireRoot(c); if (rv) return rv; }
+      const id = c.req.param('id') as any;
+      const body = await c.req.json<UpdateSecurityGroupInput>();
+      const sg = await svc.update(id, body, actorFrom(c));
+      return c.json(ok(sg));
+    }),
 
-  router.delete('/:id', async (c) => {
-    { const r = requireRoot(c); if (r) return r; }
-    const id = c.req.param('id') as any;
-    await svc.delete(id, actorFrom(c));
-    return c.json(ok(null));
-  });
+    delete: (r) => r.delete('/:id', async (c) => {
+      { const rv = requireRoot(c); if (rv) return rv; }
+      const id = c.req.param('id') as any;
+      await svc.delete(id, actorFrom(c));
+      return c.json(ok(null));
+    }),
+  };
 
-  return router;
+  return registerCrudRoutes(router, crud);
 }
 
 /** @deprecated 改用 createSecurityGroupRouter */

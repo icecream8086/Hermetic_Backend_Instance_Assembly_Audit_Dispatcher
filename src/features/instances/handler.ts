@@ -5,6 +5,8 @@ import type { AppContext } from "../../core/deps.ts";
 import { CreateRunnerSchema, UpdateRunnerSchema, CreateRunnerGroupSchema, ValidateTokenSchema } from './schema.ts';
 import { ok, fail } from '../../core/response.ts';
 import type { RouteMeta } from '../../core/http-docs/types.ts';
+import type { CrudHandlerMap } from '../../core/crud/router.ts';
+import { registerCrudRoutes } from '../../core/crud/router.ts';
 
 function requireRoot(c: Context<{ Variables: AppContext }>): Response | null {
   const user = c.var?.currentUser;
@@ -17,60 +19,60 @@ function requireRoot(c: Context<{ Variables: AppContext }>): Response | null {
 export function createInstancesRouter(svc: IRunnerService): Hono<any> {
   const router = new Hono<any>();
 
-  // ─── Runner CRUD ───
+  const crud: CrudHandlerMap = {
+    create: (r) => r.post('/', async (c) => {
+      const body: unknown = await c.req.json();
+      const parsed = CreateRunnerSchema.safeParse(body);
+      if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
+      const { runner, token } = await svc.register(parsed.data);
+      return c.json(ok({ runner, token }), 201);
+    }),
 
-  router.post('/', async (c) => {
-    const body: unknown = await c.req.json();
-    const parsed = CreateRunnerSchema.safeParse(body);
-    if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
-    const { runner, token } = await svc.register(parsed.data);
-    return c.json(ok({ runner, token }), 201);
-  });
+    list: (r) => r.get('/', async (c) => {
+      const status = c.req.query('status');
+      const runners = await svc.list(status);
+      return c.json(ok({ items: runners, total: runners.length }));
+    }),
 
-  router.get('/', async (c) => {
-    const status = c.req.query('status');
-    const runners = await svc.list(status);
-    return c.json(ok({ items: runners, total: runners.length }));
-  });
+    get: (r) => r.get('/:id', async (c) => {
+      const runner = await svc.get(c.req.param('id') as any);
+      if (!runner) return c.json(fail('RUNNER_NOT_FOUND', 'Runner not found'), 404);
+      return c.json(ok(runner));
+    }),
 
-  router.get('/:id', async (c) => {
-    const runner = await svc.get(c.req.param('id') as any);
-    if (!runner) return c.json(fail('RUNNER_NOT_FOUND', 'Runner not found'), 404);
-    return c.json(ok(runner));
-  });
+    update: (r) => r.put('/:id', async (c) => {
+      const rv = requireRoot(c); if (rv) return rv;
+      const body: unknown = await c.req.json();
+      const parsed = UpdateRunnerSchema.safeParse(body);
+      if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
+      const updated = await svc.update(c.req.param('id') as any, parsed.data, c.var?.currentUser?.id);
+      return c.json(ok(updated));
+    }),
 
-  router.put('/:id', async (c) => {
-    const r = requireRoot(c); if (r) return r;
-    const body: unknown = await c.req.json();
-    const parsed = UpdateRunnerSchema.safeParse(body);
-    if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
-    const updated = await svc.update(c.req.param('id') as any, parsed.data, c.var?.currentUser?.id);
-    return c.json(ok(updated));
-  });
+    delete: (r) => r.delete('/:id', async (c) => {
+      const rv = requireRoot(c); if (rv) return rv;
+      await svc.delete(c.req.param('id') as any, c.var?.currentUser?.id);
+      return c.json(ok(null));
+    }),
+  };
 
-  router.delete('/:id', async (c) => {
-    const r = requireRoot(c); if (r) return r;
-    await svc.delete(c.req.param('id') as any, c.var?.currentUser?.id);
-    return c.json(ok(null));
-  });
+  registerCrudRoutes(router, crud);
 
   // ─── Heartbeat ───
-
   router.post('/:id/heartbeat', async (c) => {
     const runner = await svc.heartbeat(c.req.param('id') as any);
     return c.json(ok(runner));
   });
 
   router.post('/mark-stale', async (c) => {
-    const r = requireRoot(c); if (r) return r;
+    const rv = requireRoot(c); if (rv) return rv;
     const count = await svc.markStaleOffline();
     return c.json(ok({ markedOffline: count }));
   });
 
   // ─── Registration tokens ───
-
   router.post('/registration-token', async (c) => {
-    const r = requireRoot(c); if (r) return r;
+    const rv = requireRoot(c); if (rv) return rv;
     const token = await svc.createRegistrationToken();
     return c.json(ok(token), 201);
   });
@@ -83,10 +85,9 @@ export function createInstancesRouter(svc: IRunnerService): Hono<any> {
     return c.json(ok({ valid }));
   });
 
-  // ─── Runner groups ───
-
+  // ─── Runner groups (partial CRUD — no PUT) ───
   router.post('/groups', async (c) => {
-    const r = requireRoot(c); if (r) return r;
+    const rv = requireRoot(c); if (rv) return rv;
     const body: unknown = await c.req.json();
     const parsed = CreateRunnerGroupSchema.safeParse(body);
     if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
@@ -106,7 +107,7 @@ export function createInstancesRouter(svc: IRunnerService): Hono<any> {
   });
 
   router.delete('/groups/:id', async (c) => {
-    const r = requireRoot(c); if (r) return r;
+    const rv = requireRoot(c); if (rv) return rv;
     await svc.deleteGroup(c.req.param('id') as any, c.var?.currentUser?.id);
     return c.json(ok(null));
   });

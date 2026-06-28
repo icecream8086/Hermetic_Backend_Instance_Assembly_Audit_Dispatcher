@@ -2,21 +2,23 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import type { BucketService, InstanceService, ImageRepositoryService } from '../../core/region/index.ts';
 import { createInstanceId } from '../../core/region/index.ts';
-import type { CreateImageInput, UpdateImageInput } from '../../core/region/image.ts';
+import type { CreateImageInput } from '../../core/region/image.ts';
 import { AlibabaRegion, AwsRegion, PodmanRegion } from '../../core/region/types.ts';
 import type { AppContext } from '../../core/deps.ts';
 import { ok, fail } from '../../core/response.ts';
 import type { RouteMeta } from '../../core/http-docs/types.ts';
 import type {
-  CreateBucketBody, UpdateBucketBody,
-  CreateInstanceBody, UpdateInstanceBody, HeartbeatBody,
-  CreateCredentialBody, UpdateCredentialBody,
+  CreateBucketBody,
+  CreateInstanceBody, HeartbeatBody,
+  CreateCredentialBody,
 } from './types.ts';
 import { CredentialService, toMasked } from '../../core/auth/credential.ts';
 import { S3PolicyManager } from '../../core/s3-policy/manager.ts';
 import type { CreateS3PolicyInput, UpdateS3PolicyInput } from '../../core/s3-policy/types.ts';
 import type { IS3Provider } from '../../core/provider/s3.ts';
 import type { S3MultipartUploadSession, S3MultipartDownloadSession } from '../../core/provider/s3-types.ts';
+import type { CrudHandlerMap } from '../../core/crud/router.ts';
+import { registerCrudRoutes } from '../../core/crud/router.ts';
 
 function requireRoot(c: Context<{ Variables: AppContext }>): Response | null {
   const user = c.var?.currentUser;
@@ -25,6 +27,99 @@ function requireRoot(c: Context<{ Variables: AppContext }>): Response | null {
   if (!isRoot) return c.json(fail('FORBIDDEN', 'Admin access required'), 403);
   return null;
 }
+
+// ─── Generic CRUD sub-router helper for topology services ───
+
+/** Contract that all topology services satisfy. */
+interface TopoCrudSvc<T, TC = any, TU = any> {
+  create(input: TC): Promise<T>;
+  get(id: any): Promise<T | null>;
+  list(filter?: any): Promise<T[]>;
+  update(id: any, input: TU): Promise<T>;
+  delete(id: any): Promise<void>;
+}
+
+/** Options to tune the generated CrudHandlerMap for a specific sub-resource. */
+interface TopoCrudOpts<T, TC, TU> {
+  svc: TopoCrudSvc<T, TC, TU>;
+  /** Validate create body. Return null if valid, error message string if invalid. */
+  validateCreate: (body: any) => string | null;
+  /** Optional ID transform (e.g. createInstanceId). Default: identity. */
+  idTransform?: (raw: string) => any;
+  /** Optional transform on response objects (e.g. toMasked). Default: identity. */
+  mapResult?: (item: T) => any;
+  /** Response field name for the entity. Default: singularized from route. */
+  notFoundMsg: string;
+  /** Optional guard function for create/update/delete */
+  guard?: (c: Context) => Response | null;
+}
+
+function mkTopoCrud<T, TC = any, TU = any>(opts: TopoCrudOpts<T, TC, TU>): CrudHandlerMap {
+  const id = (raw: string) => opts.idTransform ? opts.idTransform(raw) : raw;
+  const map = (item: T): any => opts.mapResult ? opts.mapResult(item) : item;
+
+  return {
+    list: (r) => r.get('/', async (c) => {
+      const filter = extractFilter(c);
+      const items = await opts.svc.list(Object.keys(filter).length ? filter : undefined);
+      return c.json(ok({ items: items.map(map), total: items.length }));
+    }),
+
+    create: (r) => r.post('/', async (c) => {
+      if (opts.guard) { const rv = opts.guard(c); if (rv) return rv; }
+      try {
+        const body = await c.req.json<TC>();
+        const err = opts.validateCreate(body);
+        if (err) return c.json(fail('VALIDATION_ERROR', err), 400);
+        const entity = await opts.svc.create(body);
+        return c.json(ok(map(entity)), 201);
+      } catch (e: any) {
+        return c.json(fail('CREATE_FAILED', e.message), 400);
+      }
+    }),
+
+    get: (r) => r.get('/:id', async (c) => {
+      const entity = await opts.svc.get(id(c.req.param('id')));
+      if (!entity) return c.json(fail('NOT_FOUND', opts.notFoundMsg), 404);
+      return c.json(ok(map(entity)));
+    }),
+
+    update: (r) => r.put('/:id', async (c) => {
+      if (opts.guard) { const rv = opts.guard(c); if (rv) return rv; }
+      try {
+        const body = await c.req.json<TU>();
+        const entity = await opts.svc.update(id(c.req.param('id')), body);
+        return c.json(ok(map(entity)));
+      } catch (e: any) {
+        return c.json(fail('UPDATE_FAILED', e.message), e.status ?? 400);
+      }
+    }),
+
+    delete: (r) => r.delete('/:id', async (c) => {
+      if (opts.guard) { const rv = opts.guard(c); if (rv) return rv; }
+      try {
+        await opts.svc.delete(id(c.req.param('id')));
+        return c.json(ok(null));
+      } catch (e: any) {
+        return c.json(fail('DELETE_FAILED', e.message), e.status ?? 400);
+      }
+    }),
+  };
+}
+
+/** Extract filter params from query string based on known keys for each sub-resource. */
+function extractFilter(c: Context): Record<string, string | undefined> {
+  const out: Record<string, string | undefined> = {};
+  for (const key of ['region', 'platform', 'status']) {
+    const v = c.req.query(key);
+    if (v) out[key] = v;
+  }
+  return out;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Main router
+// ═══════════════════════════════════════════════════════════════
 
 export function createTopologyRouter(
   buckets: BucketService,
@@ -37,89 +132,36 @@ export function createTopologyRouter(
   const router = new Hono<{ Variables: AppContext }>();
 
   // ─── Region listing ───
-
   router.get('/regions', async (c) => {
     const platform = c.req.query('platform');
-    let regions: string[];
+    let regionList: string[];
     switch (platform) {
-      case 'alibaba':
-        regions = Object.values(AlibabaRegion);
-        break;
-      case 'aws':
-        regions = Object.values(AwsRegion);
-        break;
-      case 'podman':
-        regions = Object.values(PodmanRegion);
-        break;
-      default:
-        // Return all known regions grouped by platform
-        regions = [
-          ...Object.values(AlibabaRegion),
-          ...Object.values(AwsRegion),
-          ...Object.values(PodmanRegion),
-        ];
+      case 'alibaba': regionList = Object.values(AlibabaRegion); break;
+      case 'aws': regionList = Object.values(AwsRegion); break;
+      case 'podman': regionList = Object.values(PodmanRegion); break;
+      default: regionList = [...Object.values(AlibabaRegion), ...Object.values(AwsRegion), ...Object.values(PodmanRegion)];
     }
-    return c.json(ok({ platform, regions }));
+    return c.json(ok({ platform, regions: regionList }));
   });
 
   // ─── Instance CRUD ───
+  {
+    const sub = new Hono<any>();
+    registerCrudRoutes(sub, mkTopoCrud({
+      svc: instances,
+      idTransform: (raw) => createInstanceId(raw),
+      validateCreate: (body: CreateInstanceBody) => {
+        if (!body.name || !body.platform || !body.region) return 'name, platform, and region are required';
+        if (body.platform === 'podman' && !body.endpoint?.trim()) return 'endpoint is required for podman platform';
+        return null;
+      },
+      notFoundMsg: 'Instance not found',
+    }));
+    router.route('/instances', sub);
+    router.route('/instances/', sub);
+  }
 
-  router.get('/instances', async (c) => {
-    const region = c.req.query('region');
-    const platform = c.req.query('platform');
-    const status = c.req.query('status');
-    const items = await instances.list(
-      region || platform || status ? { region, platform, status } : undefined,
-    );
-    return c.json(ok({ items, total: items.length }));
-  });
-
-  router.post('/instances', async (c) => {
-    try {
-      const body = await c.req.json<CreateInstanceBody>();
-      if (!body.name || !body.platform || !body.region) {
-        return c.json(fail('VALIDATION_ERROR', 'name, platform, and region are required'), 400);
-      }
-      // Treat empty string endpoint as "not provided" → auto-default
-      const endpoint = body.endpoint?.trim() || undefined;
-      if (body.platform === 'podman' && !endpoint) {
-        return c.json(fail('VALIDATION_ERROR', 'endpoint is required for podman platform'), 400);
-      }
-      const instance = await instances.create({ ...body, endpoint });
-      return c.json(ok(instance), 201);
-    } catch (e: any) {
-      return c.json(fail('CREATE_FAILED', e.message), 400);
-    }
-  });
-
-  router.get('/instances/:id', async (c) => {
-    const id = createInstanceId(c.req.param('id'));
-    const instance = await instances.get(id);
-    if (!instance) return c.json(fail('NOT_FOUND', 'Instance not found'), 404);
-    return c.json(ok(instance));
-  });
-
-  router.put('/instances/:id', async (c) => {
-    try {
-      const id = createInstanceId(c.req.param('id'));
-      const body = await c.req.json<UpdateInstanceBody>();
-      const instance = await instances.update(id, body);
-      return c.json(ok(instance));
-    } catch (e: any) {
-      return c.json(fail('UPDATE_FAILED', e.message), e.status ?? 400);
-    }
-  });
-
-  router.delete('/instances/:id', async (c) => {
-    try {
-      const id = createInstanceId(c.req.param('id'));
-      await instances.delete(id);
-      return c.json(ok(null));
-    } catch (e: any) {
-      return c.json(fail('DELETE_FAILED', e.message), e.status ?? 400);
-    }
-  });
-
+  // ─── Instance heartbeat (extra) ───
   router.post('/instances/:id/heartbeat', async (c) => {
     try {
       const id = createInstanceId(c.req.param('id'));
@@ -132,119 +174,40 @@ export function createTopologyRouter(
   });
 
   // ─── Credential CRUD ───
-
   if (credentials) {
-    router.get('/credentials', async (c) => {
-      const platform = c.req.query('platform');
-      const items = await credentials.list(platform ? { platform } : undefined);
-      return c.json(ok({ items: items.map(toMasked), total: items.length }));
-    });
-
-    router.post('/credentials', async (c) => {
-      try {
-        const body = await c.req.json<CreateCredentialBody>();
-        if (!body.name || !body.type || !body.platform) {
-          return c.json(fail('VALIDATION_ERROR', 'name, type, and platform are required'), 400);
-        }
-        if (body.type === 'aksk' && (!body.accessKeyId || !body.accessKeySecret)) {
-          return c.json(fail('VALIDATION_ERROR', 'accessKeyId and accessKeySecret are required for aksk type'), 400);
-        }
-        if (body.type === 'token' && !body.token) {
-          return c.json(fail('VALIDATION_ERROR', 'token is required for token type'), 400);
-        }
-        if (body.type === 'password' && (!body.username || !body.password)) {
-          return c.json(fail('VALIDATION_ERROR', 'username and password are required for password type'), 400);
-        }
-        const cred = await credentials.create(body as any);
-        return c.json(ok(toMasked(cred)), 201);
-      } catch (e: any) {
-        return c.json(fail('CREATE_FAILED', e.message), 400);
-      }
-    });
-
-    router.get('/credentials/:id', async (c) => {
-      const id = c.req.param('id') as any;
-      const cred = await credentials.get(id);
-      if (!cred) return c.json(fail('NOT_FOUND', 'Credential not found'), 404);
-      return c.json(ok(toMasked(cred)));
-    });
-
-    router.put('/credentials/:id', async (c) => {
-      try {
-        const id = c.req.param('id') as any;
-        const body = await c.req.json<UpdateCredentialBody>();
-        const cred = await credentials.update(id, body);
-        return c.json(ok(toMasked(cred)));
-      } catch (e: any) {
-        return c.json(fail('UPDATE_FAILED', e.message), e.status ?? 400);
-      }
-    });
-
-    router.delete('/credentials/:id', async (c) => {
-      try {
-        const id = c.req.param('id') as any;
-        await credentials.delete(id);
-        return c.json(ok(null));
-      } catch (e: any) {
-        return c.json(fail('DELETE_FAILED', e.message), e.status ?? 400);
-      }
-    });
+    const sub = new Hono<any>();
+    registerCrudRoutes(sub, mkTopoCrud({
+      svc: credentials,
+      mapResult: (c) => toMasked(c),
+      validateCreate: (body: CreateCredentialBody) => {
+        if (!body.name || !body.type || !body.platform) return 'name, type, and platform are required';
+        if (body.type === 'aksk' && (!body.accessKeyId || !body.accessKeySecret)) return 'accessKeyId and accessKeySecret are required for aksk type';
+        if (body.type === 'token' && !body.token) return 'token is required for token type';
+        if (body.type === 'password' && (!body.username || !body.password)) return 'username and password are required for password type';
+        return null;
+      },
+      notFoundMsg: 'Credential not found',
+    }));
+    router.route('/credentials', sub);
+    router.route('/credentials/', sub);
   }
 
   // ─── Bucket CRUD ───
+  {
+    const sub = new Hono<any>();
+    registerCrudRoutes(sub, mkTopoCrud({
+      svc: buckets,
+      validateCreate: (body: CreateBucketBody) => {
+        if (!body.name || !body.bucketType || !body.instanceId) return 'name, bucketType, and instanceId are required';
+        return null;
+      },
+      notFoundMsg: 'Bucket not found',
+    }));
+    router.route('/buckets', sub);
+    router.route('/buckets/', sub);
+  }
 
-  router.get('/buckets', async (c) => {
-    const platform = c.req.query('platform');
-    const region = c.req.query('region');
-    const items = await buckets.list(
-      platform || region ? { platform, region } : undefined,
-    );
-    return c.json(ok({ items, total: items.length }));
-  });
-
-  router.post('/buckets', async (c) => {
-    try {
-      const body = await c.req.json<CreateBucketBody>();
-      if (!body.name || !body.bucketType || !body.instanceId) {
-        return c.json(fail('VALIDATION_ERROR', 'name, bucketType, and instanceId are required'), 400);
-      }
-      const bucket = await buckets.create(body);
-      return c.json(ok(bucket), 201);
-    } catch (e: any) {
-      return c.json(fail('CREATE_FAILED', e.message), 400);
-    }
-  });
-
-  router.get('/buckets/:id', async (c) => {
-    const id = c.req.param('id');
-    const bucket = await buckets.get(id);
-    if (!bucket) return c.json(fail('NOT_FOUND', 'Bucket not found'), 404);
-    return c.json(ok(bucket));
-  });
-
-  router.put('/buckets/:id', async (c) => {
-    try {
-      const id = c.req.param('id');
-      const body = await c.req.json<UpdateBucketBody>();
-      const bucket = await buckets.update(id, body);
-      return c.json(ok(bucket));
-    } catch (e: any) {
-      return c.json(fail('UPDATE_FAILED', e.message), e.status ?? 400);
-    }
-  });
-
-  router.delete('/buckets/:id', async (c) => {
-    try {
-      const id = c.req.param('id');
-      await buckets.delete(id);
-      return c.json(ok(null));
-    } catch (e: any) {
-      return c.json(fail('DELETE_FAILED', e.message), e.status ?? 400);
-    }
-  });
-
-  // ─── S3 Policy CRUD (admin) ───
-
+  // ─── S3 Policy CRUD (nested: list/create under /buckets/:id, get/update/delete under /policies/:id) ───
   if (policyManager) {
     router.get('/buckets/:id/policies', async (c) => {
       const items = await policyManager.list(c.req.param('id'));
@@ -267,7 +230,6 @@ export function createTopologyRouter(
       if (!policy) return c.json(fail('NOT_FOUND', 'S3 policy not found'), 404);
       return c.json(ok(policy));
     });
-
     router.put('/policies/:id', async (c) => {
       const r = requireRoot(c); if (r) return r;
       try {
@@ -278,7 +240,6 @@ export function createTopologyRouter(
         return c.json(fail('UPDATE_FAILED', e.message), e.status ?? 400);
       }
     });
-
     router.delete('/policies/:id', async (c) => {
       const r = requireRoot(c); if (r) return r;
       try {
@@ -291,57 +252,21 @@ export function createTopologyRouter(
   }
 
   // ─── Image Repository CRUD ───
-
-  router.get('/images', async (c) => {
-    const platform = c.req.query('platform');
-    const status = c.req.query('status');
-    const items = await images.list(platform || status ? { platform, status } : undefined);
-    return c.json(ok({ items, total: items.length }));
-  });
-
-  router.post('/images', async (c) => {
-    try {
-      const body = await c.req.json<CreateImageInput>();
-      if (!body.name || !body.instanceId || !body.image) {
-        return c.json(fail('VALIDATION_ERROR', 'name, instanceId, and image are required'), 400);
-      }
-      const repo = await images.create(body);
-      return c.json(ok(repo), 201);
-    } catch (e: any) {
-      return c.json(fail('CREATE_FAILED', e.message), 400);
-    }
-  });
-
-  router.get('/images/:id', async (c) => {
-    const id = c.req.param('id');
-    const repo = await images.get(id);
-    if (!repo) return c.json(fail('NOT_FOUND', 'ImageRepository not found'), 404);
-    return c.json(ok(repo));
-  });
-
-  router.put('/images/:id', async (c) => {
-    try {
-      const id = c.req.param('id');
-      const body = await c.req.json<UpdateImageInput>();
-      const repo = await images.update(id, body);
-      return c.json(ok(repo));
-    } catch (e: any) {
-      return c.json(fail('UPDATE_FAILED', e.message), e.status ?? 400);
-    }
-  });
-
-  router.delete('/images/:id', async (c) => {
-    try {
-      const id = c.req.param('id');
-      await images.delete(id);
-      return c.json(ok(null));
-    } catch (e: any) {
-      return c.json(fail('DELETE_FAILED', e.message), e.status ?? 400);
-    }
-  });
+  {
+    const sub = new Hono<any>();
+    registerCrudRoutes(sub, mkTopoCrud({
+      svc: images,
+      validateCreate: (body: CreateImageInput) => {
+        if (!body.name || !body.instanceId || !body.image) return 'name, instanceId, and image are required';
+        return null;
+      },
+      notFoundMsg: 'ImageRepository not found',
+    }));
+    router.route('/images', sub);
+    router.route('/images/', sub);
+  }
 
   // ─── Image Pull (async) ───
-
   router.post('/images/:id/pull', async (c) => {
     try {
       const id = c.req.param('id');
@@ -350,20 +275,12 @@ export function createTopologyRouter(
       if (repo.status !== 'active') return c.json(fail('INVALID_STATUS', 'ImageRepository is not active'), 400);
 
       const taskId = `pull_${crypto.randomUUID()}`;
-      const task = {
-        id: taskId,
-        repositoryId: id,
-        image: repo.image,
-        status: 'pulling' as const,
-        createdAt: Date.now(),
-      };
+      const task = { id: taskId, repositoryId: id, image: repo.image, status: 'pulling' as const, createdAt: Date.now() };
 
       await c.var.stores.atomic.set('pull-task:' + taskId, task, null);
-      // Maintain per-repo index for task listing
       const idxKey = 'pull-task:repo:' + id;
       const idxEntry = await c.var.stores.atomic.get<string[]>(idxKey);
       await c.var.stores.atomic.set(idxKey, [...(idxEntry?.value ?? []), taskId], idxEntry?.version ?? null);
-      // Enqueue async pull event — pass credentialRef for registry auth
       await c.var.eventLoop.enqueueTrigger({
         type: 'image.pull',
         payload: {
@@ -380,8 +297,6 @@ export function createTopologyRouter(
     }
   });
 
-  // ─── Pull Task Status ───
-
   router.get('/pull-tasks/:taskId', async (c) => {
     const taskId = c.req.param('taskId');
     const entry = await c.var.stores.atomic.get<any>('pull-task:' + taskId);
@@ -390,7 +305,6 @@ export function createTopologyRouter(
   });
 
   router.get('/images/:id/tasks', async (c) => {
-    // List all pull tasks for a repository by scanning the index
     const idx = await c.var.stores.atomic.get<string[]>('pull-task:repo:' + c.req.param('id'));
     if (!idx) return c.json(ok({ items: [], total: 0 }));
     const entries = await Promise.all(idx.value.map((tid: string) => c.var.stores.atomic.get<any>('pull-task:' + tid)));
@@ -398,13 +312,11 @@ export function createTopologyRouter(
     return c.json(ok({ items: tasks, total: tasks.length }));
   });
 
-  // ─── Multi-part upload / download (admin) ───
-
+  // ─── Multi-part upload / download ───
   if (s3Provider) {
-    const DEFAULT_PART_SIZE = 5 * 1024 * 1024; // 5 MB
-    const DEFAULT_EXPIRES = 3600; // 1 hour
+    const DEFAULT_PART_SIZE = 5 * 1024 * 1024;
+    const DEFAULT_EXPIRES = 3600;
 
-    /** POST /buckets/:id/uploads — 创建分片上传会话 */
     router.post('/buckets/:id/uploads', async (c) => {
       const bucketId = c.req.param('id');
       const bucket = await buckets.get(bucketId);
@@ -441,7 +353,6 @@ export function createTopologyRouter(
       }
     });
 
-    /** POST /buckets/:id/uploads/:uploadId/complete — 合并分片 */
     router.post('/buckets/:id/uploads/:uploadId/complete', async (c) => {
       const bucketId = c.req.param('id');
       const bucket = await buckets.get(bucketId);
@@ -460,7 +371,6 @@ export function createTopologyRouter(
       }
     });
 
-    /** DELETE /buckets/:id/uploads/:uploadId — 取消上传 */
     router.delete('/buckets/:id/uploads/:uploadId', async (c) => {
       const bucketId = c.req.param('id');
       const bucket = await buckets.get(bucketId);
@@ -471,7 +381,6 @@ export function createTopologyRouter(
       return c.json(ok({ aborted: true }));
     });
 
-    /** GET /buckets/:id/uploads/:uploadId/parts — 列出已上传分片 */
     router.get('/buckets/:id/uploads/:uploadId/parts', async (c) => {
       const bucketId = c.req.param('id');
       const bucket = await buckets.get(bucketId);
@@ -483,7 +392,6 @@ export function createTopologyRouter(
       return c.json(ok(parts));
     });
 
-    /** GET /buckets/:id/objects/:key/download — 获取分片下载 presigned URLs */
     router.get('/buckets/:id/objects/:key/download', async (c) => {
       const bucketId = c.req.param('id');
       const bucket = await buckets.get(bucketId);
@@ -495,7 +403,6 @@ export function createTopologyRouter(
       const parts = parseInt(c.req.query('parts') ?? '1', 10);
       const expiresIn = parseInt(c.req.query('expiresIn') ?? String(DEFAULT_EXPIRES), 10);
 
-      // Get object size via headObject
       const info = await s3Provider.headObject(bucket.name, key);
       if (!info) return c.json(fail('NOT_FOUND', 'Object not found'), 404);
 
@@ -550,7 +457,6 @@ export const topologyRouteMeta: RouteMeta[] = [
   { method: 'POST', path: '/images/:id/pull', description: '异步拉取镜像（返回 taskId，轮询 pull-tasks/:taskId 确认完成）', responseDescription: '{ taskId }' },
   { method: 'GET', path: '/pull-tasks/:taskId', description: '查询拉取任务状态', responseDescription: '{ id, status, result? }' },
   { method: 'GET', path: '/images/:id/tasks', description: '列出某个仓库的历史拉取任务', responseDescription: '{ items: PullTask[] }' },
-  // Multi-part upload / download (admin, 需 S3 provider 配置)
   { method: 'POST', path: '/buckets/:id/uploads', description: '创建分片上传会话 — 返回 per-part presigned PUT URL 列表（admin only）', requestBody: { key: 'large-file.zip', contentType: 'application/zip', partSize: 5242880, parts: 4, expiresIn: 3600 }, responseDescription: '{ uploadId, bucket, key, presignedUrls: [{ partNumber, url }], partSize, expiresIn }' },
   { method: 'POST', path: '/buckets/:id/uploads/:uploadId/complete', description: '合并所有分片为完整对象（admin only）', requestBody: { key: 'large-file.zip', parts: [{ partNumber: 1, etag: '"abc123"' }] }, responseDescription: '{ location? }' },
   { method: 'DELETE', path: '/buckets/:id/uploads/:uploadId', description: '取消分片上传 — 删除已上传的分片（admin only）', requestBody: { key: 'large-file.zip' }, responseDescription: '{ aborted: true }' },

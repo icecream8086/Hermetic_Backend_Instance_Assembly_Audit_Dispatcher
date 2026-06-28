@@ -8,6 +8,7 @@ import type { SysGroup, CreateSysGroupInput, UpdateSysGroupInput } from './types
 import { generateSysGroupId } from './types.ts';
 import { createGid, GID_MIN } from '../users/types.ts';
 import type { Gid } from '../users/types.ts';
+import type { ICrudService, PaginatedResult } from '../../core/crud/index.ts';
 
 const FACILITY = createFacility('sysgrp');
 const PREFIX = 'sysgroup:';
@@ -27,10 +28,11 @@ function sysgroupShard(id: string): number {
   return Math.abs(hash) % IDS_SHARDS;
 }
 
-export interface ISysGroupService {
+export interface ISysGroupService extends ICrudService<SysGroup, CreateSysGroupInput, UpdateSysGroupInput> {
   create(input: CreateSysGroupInput, actorId?: string): Promise<SysGroup>;
-  list(): Promise<SysGroup[]>;
-  listPaginated(page?: number, limit?: number, name?: string): Promise<{ items: SysGroup[]; total: number }>;
+  list(page?: number, limit?: number): Promise<PaginatedResult<SysGroup>>;
+  listAll(): Promise<SysGroup[]>;
+  listPaginated(page?: number, limit?: number, name?: string): Promise<PaginatedResult<SysGroup>>;
   get(id: string): Promise<SysGroup | null>;
   getByGid(gid: Gid): Promise<SysGroup | null>;
   update(id: string, input: UpdateSysGroupInput, actorId?: string): Promise<SysGroup>;
@@ -63,27 +65,31 @@ export class SysGroupService implements ISysGroupService {
     return group;
   }
 
-  async list(): Promise<SysGroup[]> {
+  async list(page = 1, limit = 50): Promise<PaginatedResult<SysGroup>> {
+    return this.listPaginated(page, limit);
+  }
+
+  async listAll(): Promise<SysGroup[]> {
     return this.#listAll();
   }
 
-  async listPaginated(page = 1, limit = 50, name?: string): Promise<{ items: SysGroup[]; total: number }> {
+  async listPaginated(page = 1, limit = 50, name?: string): Promise<PaginatedResult<SysGroup>> {
     // When filtering by name, fall back to loading all items in memory
     if (name) {
       const all = await this.#listAll();
       const filtered = all.filter(g => g.name.toLowerCase().includes(name.toLowerCase()));
       const total = filtered.length;
       const start = (page - 1) * limit;
-      return { items: filtered.slice(start, start + limit), total };
+      return { items: filtered.slice(start, start + limit), total, page, limit };
     }
 
     // Read total from counter (1 I/O) — avoids reading the full index.
     const countEntry = await this.atomic.get<number>(COUNT_KEY);
     const total = countEntry?.value ?? 0;
-    if (total === 0) return { items: [], total };
+    if (total === 0) return { items: [], total, page, limit };
 
     const start = (page - 1) * limit;
-    if (start >= total) return { items: [], total };
+    if (start >= total) return { items: [], total, page, limit };
 
     // Scan shards sequentially, collecting only enough IDs for the requested page.
     const pageIds: string[] = [];
@@ -106,11 +112,11 @@ export class SysGroupService implements ISysGroupService {
       skip = 0;
     }
 
-    if (pageIds.length === 0) return { items: [], total };
+    if (pageIds.length === 0) return { items: [], total, page, limit };
 
     const entries = await Promise.all(pageIds.map(id => this.atomic.get<SysGroup>(PREFIX + id)));
     const items = entries.filter((e): e is NonNullable<typeof e> => e !== null).map(e => e.value);
-    return { items, total };
+    return { items, total, page, limit };
   }
 
   async get(id: string): Promise<SysGroup | null> {

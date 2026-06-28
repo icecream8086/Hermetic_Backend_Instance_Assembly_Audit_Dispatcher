@@ -4,63 +4,67 @@ import type { AppContext } from '../../core/deps.ts';
 import { ok, fail } from '../../core/response.ts';
 import type { RouteMeta } from '../../core/http-docs/types.ts';
 import type { CreateSubnetInput, UpdateSubnetInput } from './types.ts';
+import type { CrudHandlerMap } from '../../core/crud/router.ts';
+import { registerCrudRoutes } from '../../core/crud/router.ts';
 
 export function createSubnetRouter(svc: ISubnetService): Hono<{ Variables: AppContext }> {
   const router = new Hono<{ Variables: AppContext }>();
 
-  router.get('/', async (c) => {
-    const page = parseInt(c.req.query('page') ?? '') || 1;
-    const limit = parseInt(c.req.query('limit') ?? '') || 20;
-    const name = c.req.query('name');
-    const result = await svc.list(page, limit, name);
-    return c.json(ok(result));
-  });
+  const crud: CrudHandlerMap = {
+    list: (r) => r.get('/', async (c) => {
+      const page = parseInt(c.req.query('page') ?? '') || 1;
+      const limit = parseInt(c.req.query('limit') ?? '') || 20;
+      const name = c.req.query('name');
+      const result = await svc.list(page, limit, name);
+      return c.json(ok(result));
+    }),
 
-  router.post('/', async (c) => {
-    try {
-      const body = await c.req.json<CreateSubnetInput>();
-      if (!body.name || !body.cidr || body.subnetPrefix === undefined || !body.instanceId) {
-        return c.json(fail('VALIDATION_ERROR', 'name, cidr, subnetPrefix, and instanceId are required'), 400);
+    create: (r) => r.post('/', async (c) => {
+      try {
+        const body = await c.req.json<CreateSubnetInput>();
+        if (!body.name || !body.cidr || body.subnetPrefix === undefined || !body.instanceId) {
+          return c.json(fail('VALIDATION_ERROR', 'name, cidr, subnetPrefix, and instanceId are required'), 400);
+        }
+        const actorId = c.var?.currentUser?.id;
+        const subnet = await svc.create(body, actorId);
+        return c.json(ok(subnet), 201);
+      } catch (e: any) {
+        return c.json(fail('CREATE_FAILED', e.message), 400);
       }
-      const actorId = c.var?.currentUser?.id;
-      const subnet = await svc.create(body, actorId);
-      return c.json(ok(subnet), 201);
-    } catch (e: any) {
-      return c.json(fail('CREATE_FAILED', e.message), 400);
-    }
-  });
+    }),
 
-  router.get('/:id', async (c) => {
-    const id = c.req.param('id') as any;
-    const subnet = await svc.get(id);
-    if (!subnet) return c.json(fail('NOT_FOUND', 'Subnet not found'), 404);
-    return c.json(ok(subnet));
-  });
-
-  router.put('/:id', async (c) => {
-    try {
+    get: (r) => r.get('/:id', async (c) => {
       const id = c.req.param('id') as any;
-      const body = await c.req.json<UpdateSubnetInput>();
-      const actorId = c.var?.currentUser?.id;
-      const subnet = await svc.update(id, body, actorId);
+      const subnet = await svc.get(id);
+      if (!subnet) return c.json(fail('NOT_FOUND', 'Subnet not found'), 404);
       return c.json(ok(subnet));
-    } catch (e: any) {
-      return c.json(fail('UPDATE_FAILED', e.message), e.status ?? 400);
-    }
-  });
+    }),
 
-  router.delete('/:id', async (c) => {
-    try {
-      const id = c.req.param('id') as any;
-      const actorId = c.var?.currentUser?.id;
-      await svc.delete(id, actorId);
-      return c.json(ok(null));
-    } catch (e: any) {
-      return c.json(fail('DELETE_FAILED', e.message), e.status ?? 400);
-    }
-  });
+    update: (r) => r.put('/:id', async (c) => {
+      try {
+        const id = c.req.param('id') as any;
+        const body = await c.req.json<UpdateSubnetInput>();
+        const actorId = c.var?.currentUser?.id;
+        const subnet = await svc.update(id, body, actorId);
+        return c.json(ok(subnet));
+      } catch (e: any) {
+        return c.json(fail('UPDATE_FAILED', e.message), e.status ?? 400);
+      }
+    }),
 
-  return router;
+    delete: (r) => r.delete('/:id', async (c) => {
+      try {
+        const id = c.req.param('id') as any;
+        const actorId = c.var?.currentUser?.id;
+        await svc.delete(id, actorId);
+        return c.json(ok(null));
+      } catch (e: any) {
+        return c.json(fail('DELETE_FAILED', e.message), e.status ?? 400);
+      }
+    }),
+  };
+
+  return registerCrudRoutes(router, crud);
 }
 
 export const subnetRouteMeta: RouteMeta[] = [

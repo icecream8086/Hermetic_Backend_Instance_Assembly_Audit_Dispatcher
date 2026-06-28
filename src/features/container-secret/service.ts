@@ -14,13 +14,9 @@ export interface IContainerSecretService {
   list(scopeId?: string): Promise<ContainerSecret[]>;
   update(id: string, input: UpdateContainerSecretInput): Promise<ContainerSecret>;
   delete(id: string): Promise<void>;
-  /** Upload a file blob for an upload-type secret. */
   uploadBlob(id: string, filename: string, body: ReadableStream | ArrayBuffer, mimeType?: string): Promise<ContainerSecret>;
-  /** Read secret data (decrypted / blob content) for provider injection. */
   resolveData(id: string): Promise<string>;
-  /** Check if a scope ID can access a secret based on visibility. */
   canAccess(id: string, scopeId: string): Promise<boolean>;
-  /** Get the SealedBox public key for a user. Returns null if not yet generated. */
   getPublicKey(userId: string): Promise<string | null>;
 }
 
