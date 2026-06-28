@@ -1,5 +1,6 @@
 import eslint from '@eslint/js';
 import tseslint from 'typescript-eslint';
+import eslintComments from '@eslint-community/eslint-plugin-eslint-comments';
 
 export default tseslint.config(
   eslint.configs.recommended,
@@ -12,13 +13,23 @@ export default tseslint.config(
         tsconfigRootDir: import.meta.dirname,
       },
     },
+    plugins: {
+      '@eslint-community/eslint-comments': eslintComments,
+    },
     rules: {
+
+      // ════════════════════════════════════════════════════════
+      // CEA — 类型级封杀
+      // ════════════════════════════════════════════════════════
+
       '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/no-unsafe-assignment': 'error',
       '@typescript-eslint/no-unsafe-call': 'error',
       '@typescript-eslint/no-unsafe-member-access': 'error',
       '@typescript-eslint/no-unsafe-return': 'error',
       '@typescript-eslint/no-unsafe-declaration-merging': 'error',
+      '@typescript-eslint/no-non-null-assertion': 'error',
+
       '@typescript-eslint/consistent-type-assertions': [
         'error',
         {
@@ -49,6 +60,9 @@ export default tseslint.config(
             Partial: '禁止使用 Partial 稀释核心业务契约。如有可选字段，请在类型中显式使用 ? 标记。',
             Omit: '禁止使用 Omit 剔除必填字段来偷懒。请明确定义新的接口。',
             Pick: '禁止使用 Pick 选取部分字段来绕过完整契约校验。',
+            Function: '禁止使用 Function 类型，请使用具体函数签名 (args) => ReturnType。',
+            Object: '禁止使用 Object 类型，请使用 Record<string, unknown> 或 object。',
+            '{}': '禁止使用空对象类型 {}，请使用 Record<string, unknown>。',
           },
         },
       ],
@@ -102,6 +116,128 @@ export default tseslint.config(
       ],
       '@typescript-eslint/consistent-indexed-object-style': ['error', 'record'],
       '@typescript-eslint/consistent-type-definitions': ['error', 'interface'],
+
+      // ════════════════════════════════════════════════════════
+      // CEA — 逻辑级猎杀（no-restricted-syntax × 7）
+      // ════════════════════════════════════════════════════════
+
+      'no-restricted-syntax': [
+        'error',
+
+        // ── 解码层 ──
+
+        {
+          // 1. 禁止 .safeParse() — 必须用 .parse() 让 ZodError 抛出
+          selector: 'MemberExpression[property.name="safeParse"]',
+          message:
+            '禁止使用 .safeParse()。请用 .parse() 替代 — ZodError 会由全局错误处理器捕获并返回 400。' +
+            '这是 CEA（编译期穷举完备性）在数据解码层的要求。',
+        },
+        {
+          // 2. 禁止 Zod .catch(fallback).parse() — 静默吞掉解析失败返回默认值
+          selector: 'CallExpression[callee.property.name="parse"] CallExpression[callee.property.name="catch"]',
+          message:
+            '禁止使用 .catch(default).parse() 静默吞错。' +
+            '请直接用 .parse() — 解析失败应抛出 ZodError 由全局错误处理器接住。',
+        },
+
+        // ── 错误处理层 ──
+
+        {
+          // 3. 禁止 catch { return } — 无形参 catch 直接返回
+          selector: 'CatchClause[param=null] ReturnStatement',
+          message:
+            '禁止在无错误参数的 catch 块中静默返回。' +
+            '请用 catch (e) 显式捕获错误对象并明确处理（重新抛出 / 返回错误响应）。',
+        },
+        {
+          // 4. 禁止 catch (e) { return 字面量 } — 有参数但返回了硬编码值
+          selector: 'CatchClause > BlockStatement > ReturnStatement[argument.type!="Identifier"][argument.type!="CallExpression"]',
+          message:
+            '禁止在 catch 块中直接返回字面量或对象。' +
+            '如需处理错误，请重新抛出或调用返回明确错误结构的函数。',
+        },
+        {
+          // 5. 禁止所有 .catch() — Promise/Zod 静默吞错的最终形态
+          selector: 'MemberExpression[property.name="catch"]',
+          message:
+            '禁止使用 .catch() 静默吞错（无论是 Promise.catch 还是 Zod.catch）。' +
+            '请使用 try/catch 并显式重新抛出或返回错误响应。',
+        },
+
+        // ── 断言逃逸层 ──
+
+        {
+          // 6. 禁止 return val as T — 在出口处用断言污染调用方
+          selector: 'ReturnStatement TSAsExpression',
+          message:
+            '禁止在 return 语句中使用类型断言。请重构调用链消除断言，或使用 Zod 校验。',
+        },
+        {
+          // 7. 禁止 typeof v === 'string' ? v : fallback — 手写假守卫
+          //    只匹配三目表达式中包含 typeof 比较的模式
+          selector: 'ConditionalExpression[test.type="BinaryExpression"][test.left.type="UnaryExpression"][test.left.operator="typeof"]',
+          message:
+            '禁止手写 typeof 类型守卫三目表达式。这是假守卫——请使用 Zod schema.parse() 替代。',
+        },
+
+        // ── 类型污染层 ──
+
+        {
+          // 8. 禁止 Object.assign() — 类型污染，用展开语法 { ...a, ...b } 替代
+          selector: 'CallExpression[callee.property.name="assign"][callee.object.name="Object"]',
+          message:
+            '禁止使用 Object.assign() 造成类型污染。请使用对象展开语法 { ...a, ...b } 替代。',
+        },
+        {
+          // 9. 禁止 Boolean() 强制类型转换 — 隐藏 null/undefined
+          selector: 'CallExpression[callee.name="Boolean"]',
+          message:
+            '禁止使用 Boolean() 强制类型转换。此操作会将 null/undefined 转为 false，隐藏真实类型。',
+        },
+        {
+          // 10. 禁止 !! 双重否定 — 用显式比较取代隐式强制转换
+          selector: 'UnaryExpression[operator="!"][argument.operator="!"]',
+          message:
+            '禁止使用 !! 双重否定强制类型转换。请用显式比较 (val !== null && val !== undefined) 取代。',
+        },
+
+        // ── 裸解析层 ──
+
+        {
+          // 11. 禁止 Array.isArray() — 手写数组类型守卫
+          selector: 'CallExpression[callee.property.name="isArray"][callee.object.name="Array"]',
+          message:
+            '禁止使用 Array.isArray() 手写类型守卫。请使用 Zod schema.parse() 统一解码。',
+        },
+        {
+          // 12. 禁止裸 JSON.parse() — 必须包裹在 Zod schema.parse() 中
+          selector: 'CallExpression[callee.property.name="parse"][callee.object.name="JSON"]',
+          message:
+            '禁止裸 JSON.parse()。请用 schema.parse(JSON.parse(str)) 或 decode(schema, json) 统一入口，确保解析结果经过 Zod 校验。',
+        },
+      ],
+
+      // ════════════════════════════════════════════════════════
+      // CEA — 锁死 ESLint 逃逸通道
+      // ════════════════════════════════════════════════════════
+
+      '@eslint-community/eslint-comments/no-unlimited-disable': 'error',
+
+      '@eslint-community/eslint-comments/no-restricted-disable': [
+        'error',
+        '@typescript-eslint/consistent-type-assertions',
+        '@typescript-eslint/no-explicit-any',
+        '@typescript-eslint/no-non-null-assertion',
+        'no-restricted-syntax',
+      ],
+
+      '@eslint-community/eslint-comments/require-description': [
+        'error',
+        {
+          ignore: [],
+        },
+      ],
     },
   },
   {
