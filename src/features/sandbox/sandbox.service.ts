@@ -37,7 +37,6 @@ import { createRegionId } from '../../core/region/types.ts';
 import type { InstanceId } from '../../core/region/instance.ts';
 import { ContainerGroupState, toSandboxStatus } from '../../core/provider/container-lifecycle.ts';
 import { PodService } from '../../core/pod/service.ts';
-import { createPodId } from '../../core/pod/types.ts';
 import type { PodSpec } from '../../core/pod/types.ts';
 import { AppError } from '../../core/types.ts';
 import { ProviderResolutionError, ProviderOperationError } from '../../core/provider/errors.ts';
@@ -236,28 +235,43 @@ export class SandboxService implements ISandboxService {
       }
     }
 
-    const containerProvider = await this.#resolveProvider(input.instanceId);
+    // ── Delegate to PodService when available (v3 unified lifecycle) ──
     let providerId: string;
-    try {
-      ({ providerId } = await containerProvider.create(providerInput));
-    } catch (e) {
-      // Provider creation failed — mark sandbox as Failed so it's not orphaned
-      await this.atomic.set(`${KEY_PREFIX}${id}`, { ...initial, status: SandboxStatus.Failed, updatedAt: Date.now() }, created).catch(() => {});
-      throw translateProviderError(e, input.name);
-    }
+    let podId: string | undefined;
 
-    // 3. Transition to Running (sync providers) or Scheduling (async providers like ECI).
-    //    ECI returns before containers are actually Running — health check needs the
-    //    Scheduling status to apply a grace period before GC.
-    const createdStatus = containerProvider.lifecycle.asyncInit
-      ? SandboxStatus.Scheduling
-      : SandboxStatus.Running;
+    // ── Delegate to PodService when available (v3 unified lifecycle) ──
+    let createdStatus: SandboxStatus;
+
+    if (this.podService) {
+      const podSpec = toPodSpec(input);
+      try {
+        const pod = await this.podService.provision(podSpec);
+        providerId = pod.providerId ?? id as string;
+        podId = pod.podId as string;
+      } catch (e) {
+        await this.atomic.set(`${KEY_PREFIX}${id}`, { ...initial, status: SandboxStatus.Failed, updatedAt: Date.now() }, created).catch(() => {});
+        throw translateProviderError(e, input.name);
+      }
+      createdStatus = SandboxStatus.Scheduling;
+    } else {
+      const containerProvider = await this.#resolveProvider(input.instanceId);
+      try {
+        ({ providerId } = await containerProvider.create(providerInput));
+      } catch (e) {
+        await this.atomic.set(`${KEY_PREFIX}${id}`, { ...initial, status: SandboxStatus.Failed, updatedAt: Date.now() }, created).catch(() => {});
+        throw translateProviderError(e, input.name);
+      }
+      createdStatus = containerProvider.lifecycle.asyncInit
+        ? SandboxStatus.Scheduling
+        : SandboxStatus.Running;
+    }
     const provisioned: Sandbox = {
       ...initial,
       status: createdStatus,
       providerId,
       updatedAt: Date.now(),
       version: generateVersionId(),
+      ...(podId ? { podUid: podId } : {}),
     };
 
     const updated = await this.atomic.set(`${KEY_PREFIX}${id}`, provisioned, created);
@@ -925,6 +939,47 @@ function toPartialContainerGroupInput(
     ...(input.tags ? { tags: mapTags(input.tags) } : {}),
     ...(input.providerOverrides ? { providerOverrides: input.providerOverrides } : {}),
     ...(input.zoneId ? { zoneId: input.zoneId } : {}),
+  };
+}
+
+function toPodSpec(input: CreateSandboxInput): PodSpec {
+  return {
+    metadata: {
+      name: input.name,
+      ...(input.tags?.length ? { labels: Object.fromEntries(input.tags.map(t => [t.key, t.value])) } : {}),
+    },
+    spec: {
+      containers: input.containers.map(c => ({
+        name: c.name,
+        image: c.image,
+        command: c.command as readonly string[] | undefined,
+        args: c.args as readonly string[] | undefined,
+        env: c.env,
+        resources: c.resources?.limits ? { limits: { cpu: c.resources.limits.cpu, memory: c.resources.limits.memory, ...(c.resources.limits.gpu !== undefined ? { gpu: c.resources.limits.gpu } : {}) } } : undefined,
+        ports: c.ports,
+        volumeMounts: c.volumeMounts,
+        livenessProbe: c.livenessProbe,
+        readinessProbe: c.readinessProbe,
+        startupProbe: c.startupProbe,
+        imagePullPolicy: c.imagePullPolicy,
+        tty: c.tty,
+        stdin: c.stdin,
+        networkMode: c.networkMode,
+        providerOverrides: c.providerOverrides,
+      })),
+      ...(input.initContainers?.length ? {
+        initContainers: input.initContainers.map(c => ({
+          name: c.name,
+          image: c.image,
+          command: c.command,
+          args: c.args,
+          env: c.env,
+        })),
+      } : {}),
+      restartPolicy: input.restartPolicy as 'Always' | 'OnFailure' | 'Never',
+      // volumes: mapped via providerOverrides for now (sandbox Volume entity ≠ PodSpec VolumeSpec)
+    },
+    ...(input.providerOverrides ? { providerOverrides: input.providerOverrides } : {}),
   };
 }
 

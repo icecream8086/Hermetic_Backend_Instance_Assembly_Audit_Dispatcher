@@ -4,6 +4,7 @@ import type { IAuditWriter } from '../../core/audit/types.ts';
 import type { IProviderRegistry } from '../../core/provider/interfaces.ts';
 import type { FeatureDeps } from '../../core/deps.ts';
 import { SandboxService } from '../sandbox/sandbox.service.ts';
+import { PodService } from '../../core/pod/service.ts';
 import { ConsoleLogger } from '../../core/audit/console-logger.ts';
 import { createTemplateRouter } from './handler.ts';
 import { createAtomicNetworkResolver } from '../../core/network/resolver.ts';
@@ -22,7 +23,8 @@ function createSandboxService(atomic: IAtomicStore, providers: IProviderRegistry
   const container = entry?.container ?? null!;
   const resolveNetwork = createAtomicNetworkResolver(atomic);
   const instanceService = new InstanceService(atomic);
-  return new SandboxService(atomic, new ConsoleLogger(), container, providers, undefined, audit, resolveNetwork, instanceService);
+  const podService = new PodService(atomic, providers);
+  return new SandboxService(atomic, new ConsoleLogger(), container, providers, undefined, audit, resolveNetwork, instanceService, undefined, podService);
 }
 
 export function createRouter(deps: TemplateDeps): Hono<any> {

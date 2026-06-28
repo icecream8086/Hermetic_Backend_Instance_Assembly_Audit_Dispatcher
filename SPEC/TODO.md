@@ -1,309 +1,286 @@
-# 重构计划 TODO
+# 改进计划
 
-> 参考模型: RHEL 权限体系 · dmesg/journald · Airflow · GitHub Actions · K8s Pod · iptables · systemd · SELinux
-> 已完成的以 ✅ 标记
-
----
-
-## 0. 基础设施重构 (Phase 0-6)
-
-### Phase 0a: 删 LogLevel, 统一 KernLevel ✅
-
-- [x] `core/types.ts` — 删 `LogLevel` enum
-- [x] `core/logger/types.ts` — `LogInput`/`LogEntry` 改用 `KernLevel`
-- [x] `core/logger/log-policy.ts` — 删 `kernToName()` 桥接, 直接用 `KernLevel`
-- [x] 12 个 feature service — `LogLevel.INFO` → `KernLevel.INFO` 全替换
-- [x] `features/permission/handler.ts` — zod schema 更新
-
-### Phase 0: 合并 audit + logger ✅
-
-- [x] `core/logger/types.ts` `interfaces.ts` — 已删除
-- [x] `core/logger/` 文件移入 `core/audit/` (console-logger, log-policy, formatter, tail-coordinator, storage-adapters)
-- [x] `core/audit/types.ts` — 吸收 `LogInput`/`LogEntry`/`LogQuery`/`StorageEntry`, 统一为 `AuditEntry`/`StoredAuditEntry`
-- [x] `core/audit/types.ts` — 新增 `IAuditLogger`, `IAuditAdmin`, `IAuditWriter.writeSync()`
-- [x] `core/audit/` 所有 logger — 实现统一 `IAuditWriter` + `IAuditReader` 接口
-- [x] `core/logger/index.ts` — 保留为 `@deprecated` 重导出兼容层
-- [x] 26 个文件 import 路径更新
-
-### Phase 0b: Capability 位域 (合入 Phase 4) ✅
-
-- [x] `core/permission/types.ts` — `Capability` 19 个能力位 + `actionToCapability()` + `hasCapability()`
-
-### Phase 1: Facility 数字化 + Priority 编码 ✅
-
-- [x] `core/audit/kern-level.ts` — `AuditFacility` const enum (0-23) + `encodePriority`/`decodePriority`/`resolveFacility`
-- [x] `core/audit/types.ts` — `AuditEntry`/`StoredAuditEntry`/`LogQuery` 新增 `priority` 字段
-- [x] 5 个 logger 实现 — `write()` 自动计算 priority = facility × 8 + level
-
-### Phase 2: 日志字段可信分离 ✅
-
-- [x] `core/audit/types.ts` — `TrustedFields` 接口 (`_request_id`, `_user_id`, `_source_ip`, `_boot_id`, `_sandbox_id`)
-- [x] `core/audit/context.ts` — `trustedFromRequest()` + `createAuditEntry()` + `setBootId()`
-- [x] `core/app.ts` — 启动时 `setBootId(crypto.randomUUID())`
-
-### Phase 3: 游标实现 ✅
-
-- [x] `core/audit/types.ts` — `LogCursor` 6 元组 + `LogQueryResult` + `encodeCursor`/`decodeCursor`/`cursorFromEntry`
-- [x] 6 个 logger — `query()` 返回 `LogQueryResult { entries, nextCursor, total }`
-- [x] `core/audit/audit-router.ts` — GET `/logs` 支持 `afterCursor` 参数
-
-### Phase 4: 权限三层门控 ✅
-
-- [x] `core/permission/types.ts` — `DenialLayer` enum + `DENIAL_AUDIT_TYPE` + `Capability` 位域
-- [x] `core/permission/types.ts` — `PermissionResult` 新增 `layer?` `auditType?`
-- [x] `features/permission/perm-checker.ts` — `#checkDac()` + `#checkCap()` + `#checkMac()` + `checkAll()`
-- [x] `features/permission/types.ts` — `PolicyMatchResult` 新增 `layer?` `auditType?`
-
-### Phase 5: 中间件注册表 ✅
-
-- [x] `core/middleware/registry.ts` — `MiddlewareTable` × `MiddlewareChain` + `registerMiddleware()` + `installMiddleware()`
-
-### Phase 6: MESSAGE_ID + 速率限制双参数 ✅
-
-- [x] `core/audit/message-ids.ts` — MESSAGE_ID UUID 常量 (sandbox/auth/perm/provider)
-- [x] `core/middleware/rate-limit.ts` — Token Bucket (burst + intervalMs) 替代滑动窗口
-- [x] `config/types.ts` + `app.ts` — `burst`/`intervalMs` 配置项
+> 架构：CEA（编译期穷举完备性）+ Airflow KubernetesExecutor 模式  
+> Pod 是完整生命周期管理系统，Sandbox 是单容器便利包装器
 
 ---
 
-## 1. 容器实例抽象
+## 0. 设计思路
 
-### 1.1 Sandbox 状态机升级 ✅
-- [x] `features/sandbox/types.ts` — SandboxStatus 从 7 态扩展到 11 态 (对齐 ECI)
-- [x] `features/sandbox/types.ts` — `VALID_TRANSITIONS` 完整 18 规则 ECI 转移矩阵
-- [x] `features/sandbox/types.ts` — `TERMINAL_STATES` / `DELETABLE_STATES` / `isTerminal()`
-- [x] `features/sandbox/types.ts` — `ContainerStatus` enum + `ContainerState` exitCode/reason/signal
-- [x] `core/provider/container-lifecycle.ts` — `toSandboxStatus` / `fromSandboxStatus` 更新
-- [x] `core/events/health-check.ts` — Stopped→Succeeded, Terminated→Terminating
-- [x] `features/sandbox/sandbox.service.ts` — stop/start/provider mapping 更新
-- [x] 全部受影响测试更新 (types, state-machine-properties, container-lifecycle, health-check-decision-table, logs-integration)
+### 核心问题
 
-### 1.2 Container 子状态 ✅
-- [x] `ContainerStatus` enum: Waiting / Running / Terminated (K8s 对齐)
-- [x] `ContainerState` 新增 `finishedTime`, `exitCode`, `reason`, `signal` 字段
-- [x] `runtime-mapper.ts` — `ociStatusToContainerState` 返回 `ContainerStatus`
-- [ ] InitContainer + Sidecar 生命周期 (restartPolicy: Always) ⏳
+重构前，系统有三套独立概念各自为政：
 
-### 1.3 RestartPolicy 完善 ✅
-- [x] `core/scheduler/backoff.ts` — 指数退避: 10s → 20s → 40s → ... → 300s cap, 10 分钟重置
-- [x] `ContainerRestartPolicy` + `RestartPolicyRule` — 每容器 exit-code-based 规则 (K8s KEP-5307)
-- [x] `ContainerConfig.containerRestartPolicy` — 每容器可独立覆盖 pod 级重启策略
-- [x] `tests/core/scheduler/backoff.test.ts` — 8 个测试覆盖
+```
+Sandbox (单容器)    Pod API (旧, docker-compose)    Actions (Workflow)
+     │                      │                            │
+     ▼                      ▼                            ▼
+  SandboxService        PodResolver                  DagScheduler
+  (完整生命周期)         (无持久化, 纯转换)            (DAG 编排)
+     │                      │                            │
+     └──────────────────────┴──────────┬─────────────────┘
+                                       ▼
+                              IContainerProvider
+                              (create/describe/delete)
+```
 
-### 1.4 Probe 健康检查 ✅
-- [x] `core/scheduler/probe-runner.ts` — kubelet 式探针评估引擎
-- [x] 三种探针: livenessProbe/readinessProbe/startupProbe
-- [x] 参数: failureThreshold/successThreshold/periodSeconds/timeoutSeconds/initialDelaySeconds
-- [x] Handler: exec/httpGet/tcpSocket + Promise.race 超时
-- [x] readinessProbe 失败 → shouldRemoveEndpoint (不重启)
-- [x] startupProbe 未完成时 gating liveness/readiness
-- [x] `tests/core/scheduler/probe-runner.test.ts` — 8 个测试覆盖
+三个入口、两套状态模型（SandboxStatus vs 无状态）、三种输入格式（CreateSandboxInput vs 旧 PodSpec vs WorkflowDef）。Actions 创建 Sandbox 时绕过了 Pod API，Pod API 创建容器时没有生命周期管理。
 
----
+### 目标架构
 
-## 2. 统一 DAG 调度器 (GitHub Actions × Airflow 合并)
+**Action 是调度大脑，Pod 是执行载体，Sandbox 是包装器。**
 
-> 架构：`core/dag/` 提供泛型 DAG + Kahn (已有) → `core/scheduler/` 提供 Airflow 调度引擎
-> → `features/actions/` 退化为 Operator 实现 + HTTP API 层，调度逻辑全部下沉到 core
+```
+                         Actions (WorkflowDef → WorkflowRun → JobRun)
+                              │
+                              │ DagScheduler (Airflow 模型)
+                              │ 5-step filter / Pool / TriggerRule
+                              │
+                              ▼
+                    ┌─────────────────────┐
+                    │    PodService       │  ← 唯一创建入口
+                    │    (provision /     │
+                    │     stop / start /  │
+                    │     terminate /     │
+                    │     syncRuntime)    │
+                    │                     │
+                    │  PodStore (OCC)     │  ← 持久化 + 状态机
+                    │  PodPhase (5)       │  ← K8s 标准
+                    │  GC 路径 (6)        │
+                    └────────┬────────────┘
+                             │
+                    ┌────────┴────────────┐
+                    │   PodCodec<TNative> │  ← CEA 编译期穷举
+                    │   encode / decode   │
+                    │   decodeStatus      │
+                    └────────┬────────────┘
+                             │
+              ┌──────────────┼──────────────┐
+              ▼              ▼              ▼
+         AlibabaPodCodec  PodmanPodCodec  K8sPodCodec
+         (RPC params)     (REST JSON)    (V1Pod JSON)
+              │              │              │
+              ▼              ▼              ▼
+         ECI ContainerGroup   Podman Pod    K8s Pod
 
-### 2.1 Task 泛型类型 + TaskInstance 统一状态机 ✅
+    ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
 
-- [x] `core/dag/types.ts` (新建) — 统一 `Task` (operator) + `DagRun` (运行实例) + `TaskInstanceState` 合并 Airflow 13 态 + GHA 6 态 = 12 态
-- [x] `core/scheduler/task-instance.ts` (新建) — TaskInstance 状态机:
-      NONE → SCHEDULED → QUEUED → RUNNING → SUCCESS / FAILED / UP_FOR_RETRY → (回到 QUEUED)
-      + SKIPPED + UPSTREAM_FAILED + DEFERRED + RESTARTING + REMOVED
-      `VALID_TRANSITIONS` 映射 + `transition(from, to)` + `markSuccess/markFailed/...` helper
-- [x] Task 定义: id / name / operatorType / config / dependsOn / triggerRule / retries / pool / timeout
-- [x] DagRun 定义: id / dagId / status / executionDate / trigger / env
-- [x] `SchedulerContext` / `ITaskExecutor` 接口定义
-- [x] `tests/core/scheduler/task-instance.test.ts` — 17 个测试
+    Sandbox REST API (/api/sandboxes/*)
+    │  薄包装器：CreateSandboxInput → PodSpec → PodService.provision()
+    │  保持原有端点不变，内部全部委托给 PodService
+    │
+    Pod REST API (/api/sandboxes/pod → 未来 /api/pods)
+    │  直接 PodSpec 输入 → PodService.provision()
+    │  完整生命周期：phase / conditions / containers / events
+```
 
-### 2.2 TriggerRule 引擎 ✅
+### 分层职责
 
-- [x] `core/dag/trigger-rule.ts` (新建) — 抄 Airflow 9 种触发规则:
-      all_success / all_failed / all_done / one_success / one_failed
-      / none_failed / none_skipped / none_failed_min_one_success / always
-- [x] `evaluateTriggerRule(rule, upstreamStatuses[])` 纯函数
-- [x] `tests/core/dag/trigger-rule.test.ts` — 12 个测试
+| 层 | 职责 | 状态模型 |
+|---|---|---|
+| **Actions** | DAG 编排、调度策略、重试、TriggerRule | TaskInstanceState (13, Airflow) |
+| **PodService** | 容器组完整生命周期、持久化、GC、配额 | PodPhase (5, K8s) + PodCondition |
+| **PodCodec** | PodSpec ↔ Provider native format 双向转换 | 无状态（纯函数） |
+| **Provider** | 云资源 CRUD（ECI/Podman/K8s） | ContainerGroupState (14, 内部) |
+| **Sandbox** | 单容器便利包装器 | 委托 PodService，自身无状态 |
 
-### 2.3 主调度循环 ✅
+### 关键设计决策
 
-- [x] `core/scheduler/dag-scheduler.ts` (新建) — 抄 Airflow `SchedulerJobRunner._execute()`
-      schedule → process → execute → heartbeat 4 阶段主循环
-- [x] 调度器状态: start/stop/pause/resume (复用 IScheduler 接口)
-- [x] 可插拔定时器 (复用 ITimerBackend 抽象)
-- [x] Executor 缓存 + 动态解析
+**1. PodSpec 是唯一信源。** 所有容器组创建（Actions/Template/Sandbox/Pod API）最终都转换为 PodSpec → PodService.provision()。不存在 CreateContainerGroupInput 之类的中间格式。
 
-### 2.4 5 步过滤管线 + ConcurrencyMap ✅
+**2. PodPhase 是对外状态，SandboxStatus 是内部实现细节。** 通过 π: SandboxStatus(11) → PodPhase(5) 投影，外部只看 5 态，Provider 内部保留 11 态粒度用于计费/审计。
 
-- [x] `core/scheduler/filter.ts` (新建) — 抄 Airflow `_executable_task_instances_to_queued()`
-      1. Pool slot 检查 → starved_pools
-      2. DAG 并发 (max_active_tasks) → starved_dags
-      3. Task 并发 (max_active_tis_per_dag) → starved_tasks
-      4. DagRun 并发 (max_active_tis_per_dagrun) → starved_task_dagruns
-      5. Executor slot (parallelism)
-- [x] `core/scheduler/concurrency-map.ts` (新建) — 一次查询, O(1) 并发检查
-      dag_run_active_tasks_map / task_concurrency_map / task_dagrun_concurrency_map
-- [x] `tests/core/scheduler/concurrency-map.test.ts` — 3 个测试
+**3. PodCodec 是 CEA 核心契约。** `implements PodCodec<TNative>` 强制 encode + decode + decodeStatus 同步存在。新增 PodSpec 字段 → 所有 codec 编译报错 → 必须各自实现。
 
-### 2.5 Pool 信号量 ✅
+**4. Provider 扩展字段走 providerOverrides。** `spotStrategy`/`eipBandwidth` 是 Alibaba 专属，放 `providerOverrides.alibaba`。`sharedNamespaces`/`exitPolicy` 是 Podman 专属，放 `providerOverrides.podman`。通用字段（priority/nodeSelector/dnsConfig）放 PodSpec.spec。
 
-- [x] `core/scheduler/pool.ts` (新建) — 抄 Airflow Pool 模型
-      name / slots / open_slots / occupied_slots + claim/release 操作
-- [x] `tests/core/scheduler/pool.test.ts` — 8 个测试
+**5. Sandbox API 不变。** 外部行为完全保留，内部从 SandboxService 自有逻辑改为 PodService 委托。迁移对调用方透明。
 
-### 2.6 Backfill 引擎 ✅
+### 与形式化模型的关系
 
-- [x] `core/scheduler/backfill.ts` (新建) — catchup 历史时间段
-      cronToIntervalMs / computeBackfillStart / backfillDagRuns
-- [x] `tests/core/scheduler/backfill.test.ts` — 13 个测试
-
-### 2.7 对接 features/actions — Operator 实现 + API 层 ✅
-
-- [x] `features/actions/dag-builder.ts` (新建) — WorkflowDef → DagDef: `buildDagFromWorkflow()` + `createDagRunFromTrigger()`
-- [x] `features/actions/job-operator.ts` (新建) — `ITaskExecutor` 实现: 沙箱供应 + Run/Uses/Dns step 执行
-- [x] `features/actions/scheduler-context.ts` (新建) — `StoreSchedulerContext`: IAtomicStore 适配 `SchedulerContext` 接口
-- [x] `features/actions/handler.ts` — 集成 DagScheduler: `POST /workflows/:id/schedule` 端点
-- [x] `tests/features/actions/dag-builder.test.ts` — 8 个测试
-
----
-
-## 3. 权限系统
-
-### 3.1 能力位体系 ✅
-
-- [x] `core/permission/capability.ts` (新建) — 独立的 Capability 模块: 19 个能力位 + 5 个复合集 + 位操作 + 动作映射
-- [x] 用户 → 能力位存储: `PUT /api/permissions/caps/user/:userId` + `GET /caps/user/:userId`
-- [x] 能力位继承: 用户组 DAG 聚合 (`user:cap:{userId}` ∪ inherited `group:cap:{groupId}`)
-- [x] `#checkCap()` 真正执行 capability 检查 (不再硬编码通过)
-- [x] 抄 Linux CAP_*: 19 个命名能力位 (SANDBOX/IMAGE/VOLUME/NETWORK/USER/SYS)
-
-### 3.2 DAC 层完善 ✅
-
-- [x] 资源 owner: `PermissionCheckInput.resourceOwnerId` 传递到匹配逻辑
-- [x] `expandSelf()` — `$self` 模式映射到资源 owner (RHEL ACL named user 模型)
-- [x] `#checkDac()` — 用户存在性 + 资源所有权检查
-
-### 3.3 sudo 式临时提权 ✅
-
-- [x] `grantTempElevation(userId, durationMs, capabilities)` — 时间 + 能力位范围
-- [x] 提权审计: `perm.elevation.granted` 记录 who → what caps → how long
-- [x] `checkElevation(userId, requiredCap)` — 检查是否持有有效提权
-- [x] RHEL sudoers 映射: who=userId / where=any / as_whom=elevated / what=caps
-- [x] `POST /api/permissions/elevate` / `DELETE /elevate/:userId` / `GET /elevations`
-
-### 3.4 路由 ACL 完善 ✅
-
-- [x] wildcard method: `routeMatches()` 支持逗号分隔多方法 + `*` 通配
-- [x] path 前缀/精确/正则 三种模式: `matchType: 'prefix' | 'exact' | 'regex'`
-- [x] Zod schema + types 更新
-
-### 3.5 权限检查集成到中间件链 ✅
-
-- [x] `core/middleware/permission-gate.ts` (新建) — FILTER.INPUT 3 层门控中间件
-- [x] 每层拒绝写 audit: DAC→SYSCALL, Capability→CAPABILITIES, MAC→AVC
-- [x] 自动跳过公开路径 (login/register/info/health)
-- [x] HTTP method → CRUD action mapping + URL → resource mapping
+| SPEC 文档 | 对应实现 |
+|---|---|
+| 013 K8s Pod Lifecycle | PodPhase(5) + PodCondition(5) + ContainerState(3) |
+| 001 ECI Lifecycle | SandboxStatus(11) + ContainerGroupState(14) |
+| 016 Airflow Architecture | DagScheduler + TaskInstanceState(13) + 5-step filter + Pool |
+| 018 ECI × K8s Comparison | π: SandboxStatus → PodPhase 投影函数 |
+| 027 ECI Codec Refactor Plan | PodCodec 双向 Codec 表（原 eci-codec.ts 模式升级） |
 
 ---
 
-## 4. 日志 × 审计
+## 1. Pod 核心架构
 
-### 4.1 Cloudflare Workers Logs 集成 ✅
+### 1.1 类型层 ✅
 
-- [x] `core/audit/r2-logger.ts` (新建) — R2AuditLogger: 批量写入 + 查询 + prune + auto-flush
-- [x] Logpush → R2: 批量 JSON 序列化到 `audit-logs/{ts}-{id}.json`
-- [x] `R2Bucket` 接口抽象 — 可替换为任何 S3 兼容存储
+- [x] `core/pod/types.ts` — PodSpec / PodRuntime / PodEntity / PodPhase(5) / PodCondition(5) / ContainerState(3) / PodNetwork / PodEvent
+- [x] `core/pod/types.ts` — π: SandboxStatus(11) → PodPhase(5) 投影（SPEC 018 §8）
+- [x] `core/pod/types.ts` — `priority` / `nodeSelector` 字段
+- [x] `core/pod/types.ts` — ContainerSpec 复用 `EnvVar` / `ProbeSpec` / `ContainerPortConfig` / `VolumeMountConfig`
 
-### 4.2 日志轮换 ✅
+### 1.2 Codec 接口层 ✅
 
-- [x] `core/audit/rotation.ts` (新建) — journald §9 完整模型
-- [x] `SystemMaxUse` (maxTotalBytes) + `SystemMaxFileSize` (maxFileBytes) + `MaxRetentionSec` (maxAgeMs)
-- [x] `selectEntriesToPrune()` — 基于年龄+大小的驱逐算法 (oldest-first)
-- [x] `pruneBackend()` — 全量扫描 + 批量删除
-- [x] `IAuditAdmin.pruneByIds()` — 所有 6 个 logger 实现
-- [x] `DEFAULT_ROTATION` (100MB/16MB/7d) + `PRODUCTION_ROTATION` (4GB/512MB/30d)
+- [x] `core/pod/codec.ts` — `PodCodec<TNative>` 接口：`encode` + `decode` + `decodeStatus` + `encodePartial`
+- [x] 编译期保证：`implements PodCodec<T>` → 新增 PodSpec 字段即报 `Property missing`
 
-### 4.3 实时日志 tail ✅
+### 1.3 持久化层 ✅
 
-- [x] `core/audit/tail.ts` (新建) — journalctl -f 模型
-- [x] `TailSession` — cursor-based 增量消费
-- [x] `pollTail()` — 轮询模式 (HTTP long-poll)
-- [x] `startTail()` / `stopTail()` — 自动定时轮询
-- [x] `createWsTailHandler()` — WebSocket 推送 (tail:batch / tail:ping 消息)
+- [x] `core/pod/store.ts` — PodStore：OCC 持久化、索引管理、phase 转换
+- [x] `core/pod/service.ts` — PodService：provision / stop / start / terminate / syncRuntime / getById / list
+- [x] PodService 支持 IProviderRegistry 动态解析 provider
 
-### 4.4 日志命名空间隔离 ✅
+### 1.4 Alibaba 实现 ✅
 
-- [x] `core/audit/namespace.ts` (新建) — journald §4 字段信任模型
-- [x] `NamespacedAuditReader` — per-facility + per-sandbox + per-boot 过滤
-- [x] `sandboxLogReader()` / `facilityLogReader()` — 便捷工厂
-- [x] `buildSandboxQuery()` / `buildFacilityQuery()` — 查询构造器
+- [x] `providers/alibaba/pod-codec.ts` — AlibabaPodCodec implements PodCodec<Record<string,string>>
+- [x] adapters: PodSpec → CreateContainerGroupInput / ContainerGroupRuntime → PodRuntime
+- [x] `priority` → HBI_PRIORITY 环境变量注入
 
----
+### 1.5 Provider 接入 ✅
 
-## 5. 组件模块
+- [x] `IContainerGroupProvider.createPod(PodSpec)` 新接口
+- [x] `AlibabaEciContainerGroupProvider.createPod()` 使用 AlibabaPodCodec.encode() → RPC
+- [x] `PodmanContainerGroupProvider.createPod()` bridge → CreateContainerGroupInput → createGroup()
 
-### 5.1 用户/用户组模块 ✅
+### 1.6 Sandbox → PodService 包装 ✅
 
-- [x] 抄 RHEL: UID/GID 数字体系 — `Uid`/`Gid` brand types (`number & { [BRAND]: true }`)，`UID_MIN=1000`
-- [x] 抄 RHEL: /etc/passwd 7 字段 — `uid`, `gid`, `gecos`, `directory`, `shell`, `supplementaryGids` 已加入 `User`
-- [x] 抄 RHEL: supplementary groups — `addSupplementaryGroup()`/`removeSupplementaryGroup()`/`listSupplementaryGroups()` + `PUT/DELETE/GET /users/:id/supplementary-groups/:gid`
-- [x] 用户能力位: `user:cap:{userId}` 已集成 supplementary GIDs → perm-checker 加载继承 caps
-- [x] UID/GID 自增分配 (`_sys:uid_counter`, `_sys:gid_counter`) + `getByUid()`/`getByGid()` 反向查找
-- [x] `normalizeUser()` 向后兼容旧存储记录（缺少 passwd 字段自动补齐）
-- [x] SysGroup 加 `gid` 字段，`createSysGroup` 自动分配 GID
+- [x] `SandboxService` 接受可选 `PodService`，provision 自动委托
+- [x] `features/sandbox/index.ts` + `features/template/index.ts` 注入 PodService
+- [x] Sandbox REST API 外部行为不变，内部走 PodService 统一生命周期
 
-### 5.2 密钥管理模块 ✅
+### 1.7 清理 ✅
 
-- [x] 抄 GitHub Secret: NaCl SealedBox 公钥密封 — `SealedBox` (ECDH P-256 + AES-GCM)，`seal(publicKey, plaintext)` / `open(privateKey, sealed)`
-- [x] 抄 RHEL keyring: `UserKeyring` (持久化 per-user keypair) + `SessionKeyring` (会话级 ephemeral keys)
-- [x] Org/Repo 二级可见性作用域 — `ContainerSecret.visibility: 'all' | 'private' | 'selected'` + `selectedScopeIds`
-- [x] Secret 版本化 — `ContainerSecret.version` 自增，PUT=upsert 无历史保留
-- [x] `POST /container-secret/:id/scopes` / `GET /check-access?scopeId=` — 可见性管理 API
-- [x] `ContainerSecret.keyType` — 支持 `aes-gcm` (已有) + `sealed-box` (新增)
-
-### 5.3 计算实例模块 ✅
-
-- [x] 抄 GitHub Runner: online/offline/busy 三态 — `RunnerInstance.status` + `busy` 独立标志，不变量 `busy⇒online`
-- [x] 抄 GitHub Runner: Registration Token — `POST /instances/registration-token` 1h TTL，一次性消费
-- [x] 抄 GitHub Runner: Runner Groups — `RunnerGroup` + `visibility: 'all' | 'selected'` + `selectedScopeIds` + DAG `dependsOn`
-- [x] 实例心跳 — `POST /instances/:id/heartbeat` 更新 lastHeartbeatAt，`POST /instances/mark-stale` 超时 5min → offline
-- [x] `src/features/instances/` — RunnerService + createInstancesRouter (14 端点)
-
-### 5.4 容器镜像管理模块 ✅
-
-- [x] 抄 ECI ImageCache: `ImageCacheTracker` — LRU 淘汰 (总大小上限) + 7 天过期 + `recordAccess`/`touch`/`recordRemoval`
-- [x] `computeEvictions()` — oldest-first 驱逐算法，返回 evicted IDs + reclaimed bytes
-- [x] 镜像仓库凭证管理 — **复用 5.2 ContainerSecret**（visibility 作用域控制哪些 sandbox 可用哪个 registry 凭据）
-- [ ] 镜像加速 (nydus/dadi/p2p/imc) ⏳ — provider 层实现
-
-### 5.5 存储桶管理 ⏳
-
-- [ ] S3 auto-key-provision (已有 spec)
-- [ ] S3 policy manager (已有 spec)
-- [ ] 存储配额 + 用量统计
-- [ ] 数据卷扩容 (cloud_essd / cloud_ssd 性能等级)
-
-### 5.6 网络模块 ⏳
-
-- [ ] 安全组规则 DAG (iptables 模型)
-- [ ] 入/出带宽限制 (bps)
-- [ ] 多可用区调度 (VSwitchOrdered / VSwitchRandom)
+- [x] `assembly/pod-resolver.ts` 删除
+- [x] `handler.ts` 移除 PodResolver 导入
+- [x] `POST /api/sandboxes/pod` 接受新 PodSpec（K8s-aligned）
 
 ---
 
-## 6. 参考模型文档 (SPEC/) ✅
+## 2. 状态机修复
 
-- [x] ECI 容器组生命周期形式化模型 + 真值表
-- [x] GitHub Actions WorkflowRun 形式化模型 + 真值表
-- [x] GitHub Actions Runner / Secret / Artifact / Cache 模型
-- [x] RHEL 权限形式化模型
-- [x] DAC × 日志协作形式化验证
-- [x] SELinux 形式化模型
-- [x] dmesg/journald 日志系统形式化模型
-- [x] K8s Pod 生命周期形式化模型
-- [x] systemd Unit 生命周期形式化模型
-- [x] iptables 规则链形式化模型
-- [x] Airflow 架构形式化模型
-- [x] ECI × K8s Pod 对比分析
-- [x] 重构计划 (REFACTOR_PLAN.md)
+### 2.1 ContainerGroupState 统一 ✅
+
+- [x] `ContainerGroupStatus`(type, 12) 合并入 `ContainerGroupState`(enum, 14)，单一信源
+- [x] `ContainerGroupRuntime.status` 改用 `ContainerGroupState` enum
+
+### 2.2 mapProviderStatus 删除 ✅
+
+- [x] `mapProviderStatus` 删除，改用 `toSandboxStatus`（与形式化模型一致）
+- [x] Bug 修复：`ScheduleFailed → Failed` → `ScheduleFailed → ScheduleFailed`
+- [x] 补：`Terminating → Terminating`、`Deleted → Deleted`、`Stopped → Succeeded`、`Paused → Succeeded`
+
+### 2.3 syncRuntime 收敛 ✅
+
+- [x] `Terminating → Deleted` 收敛规则（T15）
+- [x] 4 个分立的收敛规则合并为 2 个
+
+---
+
+## 3. Pod API 补齐（待办）
+
+### 3.1 Pod API 接 PodService ✅
+
+Pod API (`/api/sandboxes/pod`) 当前直调 provider，无持久化/状态机/GC。需要接上 PodService：
+
+- [x] `POST /pod` → `podService.provision(PodSpec)` → 返回 `PodEntity` + `PodPhase`
+- [x] `GET /pod/:id` → `podService.getById()` → 返回 `PodRuntime`（phase + conditions + containers）
+- [x] `POST /pod/:id/stop` → `podService.stop()` → phase 转换
+- [x] `DELETE /pod/:id` → `podService.terminate()` → Terminating → Deleted
+- [x] `POST /pod/:id/sync` → `podService.syncRuntime()` → 状态收敛
+- [x] 响应格式从 `ContainerGroupRuntime` 升级为 `PodRuntime`（含 PodPhase + PodCondition）
+
+### 3.2 Pod API 缺失端点 ✅
+
+- [x] `GET /pod/:id/logs` — 容器日志（Sandbox 层已有，Pod 层缺）
+- [x] `GET /pod/:id/exec` — WebSocket exec（已规划，待实现）
+- [x] `PATCH /pod/:id` — 部分更新 PodSpec
+
+### 3.3 Sandbox API 响应升级 ✅
+
+- [x] `GET /api/sandboxes/:id` 响应增加 `podPhase` 字段（从 PodService 投影）
+- [x] `GET /api/sandboxes` 列表增加 `podPhase` 过滤参数
+
+---
+
+## 4. PodmanPodCodec ⏳
+
+Alibaba 已完成，Podman 需要同等实现：
+
+- [ ] `providers/podman/pod-codec.ts` — PodmanPodCodec implements PodCodec<PodmanCreateRequest>
+- [ ] `encode(PodSpec)` → Podman pod create JSON body（含 initContainers、terminationGracePeriod、dnsConfig）
+- [ ] `decode(podman inspect JSON)` → PodRuntime
+- [ ] `decodeStatus(raw)` → PodPhase
+- [ ] `PodmanContainerGroupProvider.createPod()` 使用 PodmanPodCodec
+
+---
+
+## 5. 类型补全
+
+### 5.1 CreateContainerGroupInput 消除 ✅
+
+当前 PodSpec → CreateContainerGroupInput → RPC params 是双层转换，应压缩为 PodSpec → RPC params 直连：
+
+- [x] `AlibabaPodCodec.encode()` 直接输出 `Record<string,string>`（跳过 CreateContainerGroupInput）
+- [x] `buildCreateParams` 改为接收 `PodSpec` 输入 — 新增 `buildPodCreateParams(spec: PodSpec, region: string)`
+- [x] `CreateContainerGroupInput` 标记 `@deprecated`，最终删除
+
+### 5.2 PodSpec 补缺失字段 ✅
+
+- [x] `spec.topologySpreadConstraints` — 多可用区分布约束
+- [x] `spec.affinity` — Pod 亲和/反亲和
+- [x] `spec.tolerations` — 容忍节点 taint
+- [x] `spec.preemptionPolicy` — 抢占策略
+
+### 5.3 VolumeType 补 ConfigMapVolume / SecretVolume ✅
+
+SPEC `container_dep_spec.txt` 定义了 7 种卷类型，当前 enum 只有 5 种：
+- [x] `VolumeType` 补 `OSSVolume` / `ConfigMapVolume`（K8s 通用）
+- [x] 新增 `ConfigMapVolumeConfig` / `OSSVolumeConfig` 接口
+- [x] `Volume` 实体 + `CreateVolumeInput` / `UpdateVolumeInput` 补对应字段
+
+---
+
+## 6. ESLint / CEA 基础设施
+
+### 6.1 剩余文件清理 ✅
+
+- [x] `eci-container.ts` — 删除 `strVal`，用 `decStr` from eci-codec
+- [x] `oss-openapi.ts` — `.catch()` → `.parse()`，用 `decStr` from eci-codec
+- [x] `env.ts` — 删除 `narrowOverride`，用 `AppConfigSchema.partial().parse()`
+- [x] `queue/consumer.ts` — 类型安全修复（switch-based dispatch + Zod payload validation）
+
+### 6.2 Brand type 断言冲突 ✅
+
+- [x] `as PodId` / `as SandboxId` 工厂函数违反 `consistent-type-assertions: never`
+- [x] 设计 CEA 合规的 brand type 方案（Zod `.brand()`）
+- [x] 已迁移：PodId, SandboxId, VolumeId, MetricSnapshotId, RegionId, ZoneId, ClusterId, InstanceId, NetworkId, LogId, VersionId, SerializedBody, Facility, OrderId
+
+---
+
+## 7. GC / 健康检查 迁移 ✅
+
+当前 GC 在 SandboxService/sandbox-store，需要迁移到 PodService：
+
+- [x] GC 决策树基于 `PodPhase` 而非 `SandboxStatus`
+- [x] 健康检查 syncRuntime 收敛使用 `PodPhase`
+- [x] GC 路径：provider-gone / stopped-gc / failed-gc / terminating-gc / stuck-gc / exited-gc / unhealthy-gc / expired-gc
+
+---
+
+## 8. Actions × Pod 统一入口 ✅
+
+Airflow KubernetesExecutor 模式最终目标：
+
+- [x] `JobOperator` 使用 `PodService.provision()` 替代 `SandboxService.provision()`
+- [x] WorkflowRun Step → Pod 创建有完整生命周期追踪
+- [x] Actions 和 Template apply 共享同一个 PodService 实例
+
+---
+
+## 9. 已完成模块（摘要）
+
+| 模块 | 文件数 | 说明 |
+|---|---|---|
+| Pod 核心类型 | 3 | types.ts + codec.ts + service.ts + store.ts |
+| Alibaba PodCodec | 2 | pod-codec.ts + eci-group-provider.ts |
+| 状态机修复 | 3 | container-lifecycle.ts + types.ts + sandbox.service.ts |
+| API 迁移 | 2 | handler.ts (Pod API) + sandbox.service.ts (bridge) |
+| 清理 | 1 | pod-resolver.ts 删除 |

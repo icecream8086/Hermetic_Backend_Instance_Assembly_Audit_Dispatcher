@@ -8,6 +8,8 @@ import { executeDnsStep } from './step-dns.ts';
 import { appendStepLog } from './logs.ts';
 import type { ActionRegistry } from './registry.ts';
 import { createEvent } from '../../core/event-bus/types.ts';
+import { PodService } from '../../core/pod/service.ts';
+import type { PodSpec } from '../../core/pod/types.ts';
 
 /**
  * JobOperator — executes a GitHub Actions–style Job as a single Task.
@@ -26,6 +28,7 @@ export class JobOperator implements ITaskExecutor {
       audit: IAuditWriter;
       eventBus?: EventBus;
       actionRegistry?: ActionRegistry;
+      podService?: PodService;
     },
   ) {}
 
@@ -107,6 +110,42 @@ export class JobOperator implements ITaskExecutor {
   }
 
   private async provisionSandbox(config: any): Promise<string> {
+    const mainContainer: ActionContainerConfig | undefined = config.containers?.[0] ?? config.container;
+    if (!mainContainer) throw new Error('Job has no container defined');
+
+    const env = config.env ?? {};
+    const envList = Object.entries(env).map(([name, value]) => ({ name, value: String(value) }));
+
+    // v3 path: PodService.provision() → PodEntity with lifecycle tracking
+    if (this.deps.podService) {
+      const podSpec: PodSpec = {
+        metadata: {
+          name: `action-${config.jobName}-${Date.now()}`,
+          labels: { job: config.jobName, owner: 'actions' },
+        },
+        spec: {
+          containers: [{
+            name: config.jobName,
+            image: mainContainer.image,
+            command: mainContainer.command ? [...mainContainer.command] : undefined,
+            args: mainContainer.args ? [...mainContainer.args] : undefined,
+            env: envList.length > 0 ? envList : undefined,
+            ports: mainContainer.ports ? [...mainContainer.ports] : undefined,
+            resources: mainContainer.resources ? {
+              limits: {
+                cpu: mainContainer.resources.cpu ?? 1,
+                memory: mainContainer.resources.memory ?? 1024,
+              },
+            } : undefined,
+          }],
+          restartPolicy: 'Never',
+        },
+      };
+      const pod = await this.deps.podService.provision(podSpec);
+      return pod.providerId ?? pod.podId;
+    }
+
+    // v2 fallback: direct provider.create()
     const instanceId = config.instanceId;
     if (!instanceId || !this.deps.providers.resolveContainer) {
       throw new Error('Job requires an instanceId to resolve a container provider');
@@ -114,11 +153,6 @@ export class JobOperator implements ITaskExecutor {
 
     const provider: any = await this.deps.providers.resolveContainer(instanceId);
     const region = config.region ?? 'local';
-    const mainContainer = config.containers?.[0] ?? config.container;
-    if (!mainContainer) throw new Error('Job has no container defined');
-
-    const env = config.env ?? {};
-    const envList = Object.entries(env).map(([name, value]) => ({ name, value })) as any;
 
     const result = await provider.create({
       name: `action-${config.jobName}-${Date.now()}`,

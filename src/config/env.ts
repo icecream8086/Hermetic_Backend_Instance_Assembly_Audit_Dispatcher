@@ -1,6 +1,4 @@
 import type { Credential } from './types.ts';
-import type { StorageConfig } from '../core/store/config.ts';
-import type { SchedulerBackendType } from '../core/scheduler/interfaces.ts';
 import { AuditTier } from '../core/audit/types.ts';
 import { createRegionId } from '../core/region/types.ts';
 import { AppConfigSchema } from './schema.ts';
@@ -23,44 +21,33 @@ interface RawAccount {
 }
 
 /**
- * Narrow a value from `Record<string, unknown>` to an optional shape.
- * Used for config overrides — all assertions live here so callers are clean.
- */
-// eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters
-function narrowOverride<T>(val: unknown): T | undefined {
-  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
-  return val as T | undefined;
-}
-
-/**
  * Load configuration from environment variables with strict validation.
  * All backends and credentials are wired through env, never hardcoded.
  *
- * Assembly is done with legacy env vars first, then validated against
- * the Zod schema at the end. Any missing required field or invalid
- * value → clear error message at startup (not a silent null-pointer later).
+ * Overrides (used in tests/DI) are validated via AppConfigSchema.partial() before
+ * merging — no type assertions. The fully assembled config is validated against
+ * the full Zod schema at the end.
  */
 export function loadConfig(overrides?: Record<string, unknown>): ReturnType<typeof AppConfigSchema.parse> {
+  const overridesParsed = overrides ? AppConfigSchema.partial().parse(overrides) : {};
+
   const envAuditTier = process.env.LOG_AUDIT_TIER;
   const auditTier = envAuditTier === AuditTier.AUDITABLE ? AuditTier.AUDITABLE : AuditTier.BEST_EFFORT;
 
-  const logConfig = narrowOverride<{ auditTier: string; defaultFacility: string; storage: { backend: string } }>(overrides?.log) ?? {
+  const logConfig = {
     auditTier,
     defaultFacility: 'app',
     storage: {
       backend: process.env.LOG_STORAGE_BACKEND ?? 'filesystem',
     },
+    ...overridesParsed.log,
   };
 
-  // ── Env var → string-literal-union casts are validated by Zod schema below ──
-  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
-  const stateBackend = (process.env.STATE_BACKEND ?? 'file') as StorageConfig['stateBackend'];
-  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
-  const queryBackend = (process.env.QUERY_BACKEND ?? 'none') as StorageConfig['queryBackend'];
-  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
-  const blobBackend = (process.env.BLOB_BACKEND ?? 'none') as StorageConfig['blobBackend'];
+  const stateBackend = process.env.STATE_BACKEND ?? 'file';
+  const queryBackend = process.env.QUERY_BACKEND ?? 'none';
+  const blobBackend = process.env.BLOB_BACKEND ?? 'none';
 
-  const storageConfig = narrowOverride<StorageConfig>(overrides?.storage) ?? {
+  const storageConfig = {
     stateBackend,
     queryBackend,
     blobBackend,
@@ -71,6 +58,7 @@ export function loadConfig(overrides?: Record<string, unknown>): ReturnType<type
       d1Binding: process.env.D1_BINDING ?? 'QUERY_DB',
       r2Binding: process.env.R2_BINDING ?? 'BLOB_STORE',
     },
+    ...overridesParsed.storage,
   };
 
   function loadAccounts(): Credential[] {
@@ -103,7 +91,7 @@ export function loadConfig(overrides?: Record<string, unknown>): ReturnType<type
     return [{ name: 'default', accessKeyId: '', accessKeySecret: '' }];
   }
 
-  const providerConfig = narrowOverride<Record<string, unknown>>(overrides?.provider) ?? {
+  const providerConfig = {
     container: process.env.PROVIDER_CONTAINER ?? 'stub',
     region: createRegionId(process.env.ALIBABA_REGION ?? 'cn-hangzhou'),
     accounts: loadAccounts(),
@@ -111,6 +99,7 @@ export function loadConfig(overrides?: Record<string, unknown>): ReturnType<type
     cfApiToken: process.env.CF_API_TOKEN,
     dns: process.env.PROVIDER_DNS ?? 'stub',
     metrics: process.env.PROVIDER_METRICS ?? 'stub',
+    ...overridesParsed.provider,
   };
 
   function loadS3Accounts(): Credential[] {
@@ -144,24 +133,25 @@ export function loadConfig(overrides?: Record<string, unknown>): ReturnType<type
     return [{ name: 'default', accessKeyId: '', accessKeySecret: '' }];
   }
 
-  const s3Config = narrowOverride<Record<string, unknown>>(overrides?.s3) ?? {
+  const s3Config = {
     backend: process.env.S3_BACKEND ?? 'none',
     region: process.env.S3_REGION ?? 'auto',
     endpoint: process.env.S3_ENDPOINT ?? process.env.MINIO_ENDPOINT ?? undefined,
     accounts: loadS3Accounts(),
     defaultAccount: process.env.S3_DEFAULT_ACCOUNT ?? 'default',
+    ...overridesParsed.s3,
   };
 
-  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
-  const schedulerBackend = (process.env.SCHEDULER_BACKEND ?? 'worker') as SchedulerBackendType;
+  const schedulerBackend = process.env.SCHEDULER_BACKEND ?? 'worker';
 
-  const schedulerConfig = narrowOverride<Record<string, unknown>>(overrides?.scheduler) ?? {
+  const schedulerConfig = {
     backend: schedulerBackend,
     intervalMs: Number(process.env.SCHEDULER_INTERVAL_MS ?? 60000),
     batchSize: Number(process.env.SCHEDULER_BATCH_SIZE ?? 0),
     callbackUrl: process.env.WORKER_URL
       ? `${process.env.WORKER_URL.replace(/\/+$/, '')}/__scheduled`
       : undefined,
+    ...overridesParsed.scheduler,
   };
 
   const corsOriginsRaw = process.env.CORS_ORIGINS ?? 'http://localhost:8086';
@@ -181,11 +171,11 @@ export function loadConfig(overrides?: Record<string, unknown>): ReturnType<type
     },
     server: {
       port: Number(process.env.PORT ?? 3000),
-      ...narrowOverride<Record<string, unknown>>(overrides?.server),
+      ...overridesParsed.server,
     },
-    features: narrowOverride<Record<string, boolean>>(overrides?.features) ?? {},
-    authz: narrowOverride<{ enabled: boolean }>(overrides?.authz),
-    cors: narrowOverride<{ origins: string[] }>(overrides?.cors) ?? { origins: corsOriginsRaw.split(',').map(s => s.trim()).filter(Boolean) },
+    features: overridesParsed.features ?? {},
+    authz: overridesParsed.authz,
+    cors: overridesParsed.cors ?? { origins: corsOriginsRaw.split(',').map(s => s.trim()).filter(Boolean) },
     rateLimit: {
       ...(rateLimitEnabled !== undefined ? { enabled: rateLimitEnabled !== 'false' } : {}),
       ...(rateLimitBypassIpsRaw !== undefined ? { bypassIps: rateLimitBypassIpsRaw.split(/[\s,]+/).map(s => s.trim()).filter(Boolean) } : {}),

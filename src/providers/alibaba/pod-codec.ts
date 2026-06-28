@@ -2,7 +2,7 @@
  * AlibabaPodCodec — CEA bidirectional codec for Alibaba Cloud ECI.
  *
  * Implements PodCodec<Record<string, string>>.
- *   encode: PodSpec → CreateContainerGroupInput → buildCreateParams() → RPC params
+ *   encode: PodSpec → buildPodCreateParams() → RPC params (no intermediate type)
  *   decode: raw ECI response → parseContainerGroup() → ContainerGroupRuntime → PodRuntime
  */
 
@@ -10,71 +10,11 @@ import { z } from 'zod';
 import type { PodCodec } from '../../core/pod/codec.ts';
 import type { PodSpec, PodRuntime, PodPhase, ContainerState } from '../../core/pod/types.ts';
 import { createPodId } from '../../core/pod/types.ts';
-import type { CreateContainerGroupInput, ContainerCreateConfig, ContainerGroupRuntime, OciContainer } from '../../core/provider/types.ts';
+import type { ContainerGroupRuntime, OciContainer } from '../../core/provider/types.ts';
 import { ContainerGroupState } from '../../core/provider/container-lifecycle.ts';
-import { createRegionId } from '../../core/region/types.ts';
-import { buildCreateParams, parseContainerGroup } from './eci-codec.ts';
+import { buildPodCreateParams, parseContainerGroup } from './eci-codec.ts';
 
 const eciResponseSchema = z.record(z.string(), z.unknown());
-
-// ═══════════════════════════════════════════════════════════════
-// PodSpec → CreateContainerGroupInput
-// ═══════════════════════════════════════════════════════════════
-
-const PRIORITY_ENV = 'HBI_PRIORITY';
-
-function toContainerConfig(c: PodSpec['spec']['containers'][number], priority?: number): ContainerCreateConfig {
-  const cpu = c.resources?.limits?.cpu ?? 0;
-  const mem = c.resources?.limits?.memory ?? 0;
-  const gpu = c.resources?.limits?.gpu;
-  const resources = (cpu > 0 || mem > 0)
-    ? { limits: { cpu, memory: mem, ...(gpu !== undefined ? { gpu } : {}) } }
-    : undefined;
-
-  // Inject HBI_PRIORITY env var if pod-level priority is set
-  const baseEnv = c.env ?? [];
-  const env = priority !== undefined
-    ? [...baseEnv, { name: PRIORITY_ENV, value: String(priority) }]
-    : baseEnv;
-
-  return {
-    name: c.name,
-    image: c.image,
-    command: c.command,
-    args: c.args,
-    env: env.length > 0 ? env : undefined,
-    ports: c.ports,
-    volumeMounts: c.volumeMounts,
-    livenessProbe: c.livenessProbe,
-    readinessProbe: c.readinessProbe,
-    startupProbe: c.startupProbe,
-    imagePullPolicy: c.imagePullPolicy ?? undefined,
-    tty: c.tty ?? undefined,
-    stdin: c.stdin ?? undefined,
-    networkMode: c.networkMode ?? undefined,
-    providerOverrides: c.providerOverrides ?? undefined,
-    resources,
-  };
-}
-
-function podSpecToGroupInput(spec: PodSpec, region: string): CreateContainerGroupInput {
-  const containers = spec.spec.containers.map(c => toContainerConfig(c, spec.spec.priority));
-  const totalCpu = containers.reduce((s, c) => s + (c.resources?.limits?.cpu ?? 0), 0) || 1;
-  const totalMem = containers.reduce((s, c) => s + (c.resources?.limits?.memory ?? 0), 0) || 512;
-
-  return {
-    name: spec.metadata.name,
-    region: createRegionId(region),
-    cpu: totalCpu,
-    memory: totalMem,
-    restartPolicy: spec.spec.restartPolicy,
-    containers,
-    volumes: spec.spec.volumes?.map(v => ({ id: v.id, type: v.type, options: v.options })),
-    tags: spec.metadata.labels ? Object.entries(spec.metadata.labels).map(([k, v]) => ({ key: k, value: v })) : undefined,
-    network: { allocatePublicIp: false },
-    providerOverrides: spec.providerOverrides,
-  };
-}
 
 // ═══════════════════════════════════════════════════════════════
 // ContainerGroupRuntime → PodRuntime
@@ -158,7 +98,7 @@ export class AlibabaPodCodec implements PodCodec<Record<string, string>> {
   public constructor(private readonly region: string) {}
 
   public encode(input: PodSpec): Record<string, string> {
-    return buildCreateParams(podSpecToGroupInput(input, this.region));
+    return buildPodCreateParams(input, this.region);
   }
 
   public decode(raw: unknown): PodRuntime {

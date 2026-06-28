@@ -1,15 +1,17 @@
-declare const NETWORK_ID_BRAND: unique symbol;
+import { z } from 'zod';
+
+const networkIdSchema = z.string().min(1).brand('NetworkId');
 
 /** Brand type for virtual network IDs — shared across features and providers. */
-export type NetworkId = string & { readonly [NETWORK_ID_BRAND]: true };
+export type NetworkId = z.infer<typeof networkIdSchema>;
 
 export function createNetworkId(raw: string): NetworkId {
   if (!raw) throw new TypeError('NetworkId must not be empty');
-  return raw as NetworkId;
+  return networkIdSchema.parse(raw);
 }
 
 export function generateNetworkId(): NetworkId {
-  return `net_${crypto.randomUUID()}` as NetworkId;
+  return networkIdSchema.parse(`net_${crypto.randomUUID()}`);
 }
 
 /** Minimal VNet data resolved for sandbox provisioning.

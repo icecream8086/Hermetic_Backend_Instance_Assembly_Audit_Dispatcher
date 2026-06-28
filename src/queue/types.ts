@@ -18,14 +18,14 @@ export type TaskType =
 export interface ImagePullPayload {
   taskId: string;
   image: string;
-  instanceId?: string;
-  clusterId?: string;
-  credentialRef?: string;
+  instanceId?: string | undefined;
+  clusterId?: string | undefined;
+  credentialRef?: string | undefined;
   registryCredential?: {
     server: string;
     userName: string;
     password: string;
-  };
+  } | undefined;
 }
 
 /** Sandbox garbage collection — provider delete + state cleanup. */
@@ -36,7 +36,7 @@ export interface SandboxGcPayload {
   providerId: string;
   region: string;
   /** Resolve per-instance provider for correct credential binding. */
-  instanceId?: string;
+  instanceId?: string | undefined;
   containerCount: number;
   sandboxName: string;
   createdAt: number;
@@ -46,7 +46,7 @@ export interface SandboxGcPayload {
 export interface SandboxProvisionPayload {
   sandboxId: string;
   providerId: string;
-  instanceId?: string;
+  instanceId?: string | undefined;
 }
 
 /** Bucket key rotation — generate new SK, update binding via OCC. */

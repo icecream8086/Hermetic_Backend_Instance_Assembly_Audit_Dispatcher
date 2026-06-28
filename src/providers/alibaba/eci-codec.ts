@@ -33,6 +33,7 @@ import type {
   ContainerGroupRuntimeEvent,
   AssociatedResource,
 } from '../../core/provider/types.ts';
+import type { PodSpec, ContainerSpec } from '../../core/pod/types.ts';
 import { createRegionId, createZoneId } from '../../core/region/types.ts';
 import { createContainerId } from '../../core/provider/types.ts';
 import { applyExtensionOverrides } from '../../core/provider/extension-schema.ts';
@@ -675,6 +676,161 @@ export function buildCreateParams(
   if (input.providerOverrides) {
     const raw = input.providerOverrides;
     const flat = z.record(z.string(), z.unknown()).optional().parse(raw.alibaba) ?? raw;
+    const ext = applyExtensionOverrides('alibaba', flat);
+    for (const [k, v] of Object.entries(ext)) {
+      p[k] = v;
+    }
+  }
+
+  return p;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PodSpec → flat RPC params (v3 direct path — no CreateContainerGroupInput)
+// ═══════════════════════════════════════════════════════════════
+
+const PRIORITY_ENV = 'HBI_PRIORITY';
+
+function toContainerCreateConfig(c: ContainerSpec, priority?: number): ContainerCreateConfig {
+  const baseEnv = c.env ?? [];
+  const env = priority !== undefined
+    ? [...baseEnv, { name: PRIORITY_ENV, value: String(priority) }]
+    : baseEnv;
+
+  return {
+    name: c.name,
+    image: c.image,
+    command: c.command,
+    args: c.args,
+    env: env.length > 0 ? env : undefined,
+    ports: c.ports,
+    volumeMounts: c.volumeMounts,
+    livenessProbe: c.livenessProbe,
+    readinessProbe: c.readinessProbe,
+    startupProbe: c.startupProbe,
+    imagePullPolicy: c.imagePullPolicy ?? undefined,
+    tty: c.tty ?? undefined,
+    stdin: c.stdin ?? undefined,
+    networkMode: c.networkMode ?? undefined,
+    providerOverrides: c.providerOverrides ?? undefined,
+    resources: c.resources as ContainerCreateConfig['resources'],
+  };
+}
+
+function toVolumeConfigInput(v: { readonly id: string; readonly type: string; readonly options?: Record<string, unknown> | undefined }): VolumeConfigInput {
+  return { id: v.id, type: v.type, options: v.options };
+}
+
+export function buildPodCreateParams(spec: PodSpec, region: string): Record<string, string> {
+  let p: Record<string, string> = {};
+
+  p.RegionId = region;
+
+  // ── Top-level fields ──
+  p.ContainerGroupName = spec.metadata.name;
+
+  const containers = spec.spec.containers.map(c => toContainerCreateConfig(c, spec.spec.priority));
+  const totalCpu = containers.reduce((s, c) => s + (c.resources?.limits?.cpu ?? 0), 0) || 1;
+  const totalMem = containers.reduce((s, c) => s + (c.resources?.limits?.memory ?? 0), 0) || 512;
+  p.Cpu = String(totalCpu);
+  p.Memory = String(totalMem);
+  p.RestartPolicy = spec.spec.restartPolicy;
+
+  // GPU
+  const totalGpu = containers.reduce((s, c) => s + (c.resources?.limits?.gpu ?? 0), 0);
+  if (totalGpu > 0) {
+    p.GpuSpecs = JSON.stringify([{ Count: totalGpu, Type: 'nvidia.com/gpu' }]);
+  }
+
+  // ── Containers ──
+  containers.forEach((c, i) => {
+    const cpfx = `Container.${String(i + 1)}`;
+    p[`${cpfx}.Name`] = c.name;
+    p[`${cpfx}.Image`] = c.image;
+    if (c.imagePullPolicy !== undefined) p[`${cpfx}.ImagePullPolicy`] = c.imagePullPolicy;
+    if (c.networkMode !== undefined) p[`${cpfx}.NetworkMode`] = c.networkMode;
+    if (c.tty !== undefined) p[`${cpfx}.Tty`] = c.tty ? 'true' : 'false';
+    if (c.stdin !== undefined) p[`${cpfx}.Stdin`] = c.stdin ? 'true' : 'false';
+    if (c.command?.length) p[`${cpfx}.Command`] = c.command.join(' ');
+    if (c.args?.length) p[`${cpfx}.Args`] = c.args.join(' ');
+
+    p = { ...p, ...buildContainerCompound(c, cpfx) };
+    p = { ...p, ...buildEnvParams(c.env, cpfx) };
+    p = { ...p, ...buildPortParams(c.ports, cpfx) };
+    p = { ...p, ...buildProbeParams(c.livenessProbe, cpfx, 'LivenessProbe') };
+    p = { ...p, ...buildProbeParams(c.readinessProbe, cpfx, 'ReadinessProbe') };
+    p = { ...p, ...buildProbeParams(c.startupProbe, cpfx, 'StartupProbe') };
+  });
+
+  // ── InitContainers ──
+  const initContainers = spec.spec.initContainers?.map(c => toContainerCreateConfig(c)) ?? [];
+  initContainers.forEach((c, i) => {
+    const ipfx = `InitContainer.${String(i + 1)}`;
+    p[`${ipfx}.Name`] = c.name;
+    p[`${ipfx}.Image`] = c.image;
+    if (c.command?.length) p[`${ipfx}.Command`] = c.command.join(' ');
+    if (c.args?.length) p[`${ipfx}.Args`] = c.args.join(' ');
+    p = { ...p, ...buildContainerCompound(c, ipfx) };
+    p = { ...p, ...buildEnvParams(c.env, ipfx) };
+    p = { ...p, ...buildProbeParams(c.livenessProbe, ipfx, 'LivenessProbe') };
+  });
+
+  // ── Volumes ──
+  if (spec.spec.volumes?.length) {
+    spec.spec.volumes.forEach((v, i) => {
+      const vpfx = `Volume.${String(i + 1)}`;
+      p[`${vpfx}.Name`] = v.id;
+      p[`${vpfx}.Type`] = v.type;
+      p = { ...p, ...buildVolumeCompound(toVolumeConfigInput(v), vpfx) };
+    });
+  }
+
+  // ── Tags (from labels) ──
+  if (spec.metadata.labels) {
+    const entries = Object.entries(spec.metadata.labels);
+    entries.forEach(([k, v], i) => {
+      p[`Tag.${String(i + 1)}.Key`] = k;
+      p[`Tag.${String(i + 1)}.Value`] = v;
+    });
+  }
+
+  // ── DNS config ──
+  if (spec.spec.dnsConfig) {
+    const dns = spec.spec.dnsConfig;
+    if (dns.nameservers?.length) {
+      dns.nameservers.forEach((ns, i) => { p[`DnsConfig.NameServer.${String(i + 1)}`] = ns; });
+    }
+    if (dns.searches?.length) {
+      dns.searches.forEach((s, i) => { p[`DnsConfig.Search.${String(i + 1)}`] = s; });
+    }
+    if (dns.options?.length) {
+      dns.options.forEach((o, i) => {
+        p[`DnsConfig.Option.${String(i + 1)}.Name`] = o.name;
+        if (o.value !== undefined) p[`DnsConfig.Option.${String(i + 1)}.Value`] = o.value;
+      });
+    }
+  }
+
+  // ── HostAliases ──
+  if (spec.spec.hostAliases?.length) {
+    spec.spec.hostAliases.forEach((ha, i) => {
+      p[`HostAliase.${String(i + 1)}.Ip`] = ha.ip;
+      ha.hostnames.forEach((h, j) => { p[`HostAliase.${String(i + 1)}.Hostname.${String(j + 1)}`] = h; });
+    });
+  }
+
+  // ── TerminationGracePeriod ──
+  if (spec.spec.terminationGracePeriodSeconds !== undefined) {
+    p.TerminationGracePeriodSeconds = String(spec.spec.terminationGracePeriodSeconds);
+  }
+
+  // ── Network defaults ──
+  p.AutoMatchImageCache = 'true';
+
+  // ── Extension fields (providerOverrides) ──
+  if (spec.providerOverrides) {
+    const raw = spec.providerOverrides;
+    const flat = z.record(z.string(), z.unknown()).optional().parse((raw as Record<string, unknown>).alibaba) ?? raw;
     const ext = applyExtensionOverrides('alibaba', flat);
     for (const [k, v] of Object.entries(ext)) {
       p[k] = v;

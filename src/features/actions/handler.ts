@@ -39,6 +39,7 @@ import { SetIntervalBackend } from '../../core/scheduler/set-interval-backend.ts
 import { StoreSchedulerContext } from './scheduler-context.ts';
 import { JobOperator } from './job-operator.ts';
 import { buildDagFromWorkflow, createDagRunFromTrigger } from './dag-builder.ts';
+import { PodService } from '../../core/pod/service.ts';
 
 export function createActionsRouter(deps: FeatureDeps): Hono<any> {
   const router = new Hono<{ Variables: AppContext }>();
@@ -46,6 +47,9 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
   const blob = deps.stores.blob;
 
   const actionRegistry = new ActionRegistry(atomic);
+
+  // Shared PodService — Actions and Template use the same instance (CEA K8s executor model)
+  const podService = new PodService(deps.stores.atomic, deps.providers);
 
   const runner = new WorkflowRunner({
     stores: { atomic: deps.stores.atomic, blob: deps.stores.blob },
@@ -57,6 +61,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
     queueProducer: deps.queueProducer,
     eventBus: deps.eventBus,
     actionRegistry,
+    podService,
   });
 
   // ── DAG Scheduler setup ──
@@ -71,6 +76,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
     audit: deps.audit,
     eventBus: deps.eventBus,
     actionRegistry,
+    podService,
   });
   schedulerCtx.registerExecutor(jobOperator);
 

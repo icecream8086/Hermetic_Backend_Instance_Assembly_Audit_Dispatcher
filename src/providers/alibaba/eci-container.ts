@@ -23,13 +23,7 @@ import { rpcCall } from './eci-signer.ts';
 import { createRegionId } from '../../core/region/types.ts';
 import { AppError } from '../../core/types.ts';
 import './eci-schema.ts'; // register Alibaba ECI extension fields
-import { buildCreateParams, parseContainerGroup } from './eci-codec.ts';
-
-/** Narrow a `Record<string, unknown>` value to string. */
-function strVal(resp: Record<string, unknown>, key: string, fallback = ''): string {
-  const v = resp[key];
-  return typeof v === 'string' ? v : fallback;
-}
+import { buildCreateParams, parseContainerGroup, decStr, decStrOpt } from './eci-codec.ts';
 
 export class AlibabaEciContainerProvider implements IContainerProvider {
   public readonly lifecycle: ContainerLifecycle = { stopIsDelete: true, startable: false, healthProbes: false, asyncInit: true };
@@ -58,7 +52,7 @@ export class AlibabaEciContainerProvider implements IContainerProvider {
       this.endpoint, this.accessKeyId, this.accessKeySecret,
       'CreateContainerGroup', params,
     );
-    return { providerId: strVal(resp, 'ContainerGroupId') };
+    return { providerId: decStr(resp.ContainerGroupId) };
   }
 
   /**
@@ -97,7 +91,7 @@ export class AlibabaEciContainerProvider implements IContainerProvider {
     return {
       // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
       sandboxes: list.map(item => parseContainerGroup(item as Parameters<typeof parseContainerGroup>[0])),
-      nextToken: strVal(resp, 'NextToken'),
+      nextToken: decStrOpt(resp.NextToken) ?? '',
       ...(typeof resp.TotalCount === 'number' ? { totalCount: resp.TotalCount } : {}),
     };
   }
@@ -127,8 +121,8 @@ export class AlibabaEciContainerProvider implements IContainerProvider {
 
     return {
       containerName: input.containerName,
-      content: strVal(resp, 'Content'),
-      timestamp: strVal(resp, 'Time'),
+      content: decStr(resp.Content),
+      timestamp: decStrOpt(resp.Time) ?? '',
     };
   }
 
@@ -182,9 +176,10 @@ export class AlibabaEciContainerProvider implements IContainerProvider {
     };
     if (containerName) params.ContainerName = containerName;
     const resp = await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret, 'ExecContainerCommand', params);
+    const wsUri = decStrOpt(resp.WebSocketUri);
     return {
-      execId: strVal(resp, 'HttpUrl'),
-      ...(strVal(resp, 'WebSocketUri') ? { webSocketUri: strVal(resp, 'WebSocketUri') } : {}),
+      execId: decStr(resp.HttpUrl),
+      ...(wsUri ? { webSocketUri: wsUri } : {}),
     };
   }
 

@@ -1,5 +1,6 @@
 /// <reference types="@cloudflare/workers-types" />
 
+import { z } from 'zod';
 import type { TaskMessage, TaskResult, SandboxGcPayload, ImagePullPayload, SandboxProvisionPayload, BucketKeyRotatePayload, WorkflowJobRunPayload } from './types.ts';
 import type { AppInstance } from '../core/deps.ts';
 import { SandboxStatus } from '../features/sandbox/types.ts';
@@ -75,32 +76,73 @@ export async function processMessages(
 }
 
 /**
- * Task handler registry — Record<TaskType, Handler> enforces at compile time
- * that every task type has a handler. Add a new TaskType → must add entry here.
+ * Task handler dispatch — validates payload against Zod schema before delegating.
+ * CEA: no `any`, no `as`. Every task type validates its payload with `.parse()`.
  */
-type TaskHandler = (payload: any, instance: AppInstance) => Promise<TaskResult>;
-
-const taskHandlers: Record<TaskMessage['type'], TaskHandler> = {
-  'image:pull':       (p, i) => handleImagePull(p as ImagePullPayload, i),
-  'sandbox:gc':       (p, i) => handleSandboxGc(p as SandboxGcPayload, i),
-  'sandbox:provision': (p, i) => handleSandboxProvision(p as SandboxProvisionPayload, i),
-  'bucket-key:rotate': (p, i) => handleBucketKeyRotate(p as BucketKeyRotatePayload, i),
-  'workflow:job:run': (p, i) => handleWorkflowJobRun(p as WorkflowJobRunPayload, i),
-};
-
-/** Dispatch a single task to its handler by type. */
 export async function handleTask(
   msg: TaskMessage,
   instance: AppInstance,
 ): Promise<TaskResult> {
-  const handler = taskHandlers[msg.type];
-  if (!handler) {
-    // Compile-time: Record<TaskType, Handler> guarantees all keys exist.
-    // This branch is runtime-only — triggers on corrupted/unknown messages.
-    return { success: false, error: `Unknown task type: ${msg.type}` };
+  switch (msg.type) {
+    case 'image:pull':         return handleImagePull(validateImagePullPayload(msg.payload), instance);
+    case 'sandbox:gc':         return handleSandboxGc(validateSandboxGcPayload(msg.payload), instance);
+    case 'sandbox:provision':  return handleSandboxProvision(validateSandboxProvisionPayload(msg.payload), instance);
+    case 'bucket-key:rotate':  return handleBucketKeyRotate(validateBucketKeyRotatePayload(msg.payload), instance);
+    case 'workflow:job:run':   return handleWorkflowJobRun(validateWorkflowJobRunPayload(msg.payload), instance);
+    default: {
+      const _exhaustive: never = msg.type;
+      void _exhaustive;
+      return { success: false, error: `Unknown task type: ${msg.type}` };
+    }
   }
-  return handler(msg.payload, instance);
 }
+
+// ── Payload validators (CEA: fail-fast on malformed queue messages) ──
+
+const imagePullPayloadSchema = z.object({
+  taskId: z.string(),
+  image: z.string(),
+  instanceId: z.string().optional(),
+  clusterId: z.string().optional(),
+  credentialRef: z.string().optional(),
+  registryCredential: z.object({
+    server: z.string(),
+    userName: z.string(),
+    password: z.string(),
+  }).optional(),
+});
+
+const sandboxGcPayloadSchema = z.object({
+  sandboxId: z.string(),
+  reason: z.enum(['stopped-gc', 'provider-gone', 'exited-gc', 'unhealthy-gc', 'manual']),
+  providerId: z.string(),
+  region: z.string(),
+  instanceId: z.string().optional(),
+  containerCount: z.number(),
+  sandboxName: z.string(),
+  createdAt: z.number(),
+});
+
+const sandboxProvisionPayloadSchema = z.object({
+  sandboxId: z.string(),
+  providerId: z.string(),
+  instanceId: z.string().optional(),
+});
+
+const bucketKeyRotatePayloadSchema = z.object({
+  bindingId: z.string(),
+});
+
+const workflowJobRunPayloadSchema = z.object({
+  jobRunId: z.string(),
+  workflowRunId: z.string(),
+});
+
+function validateImagePullPayload(p: unknown): ImagePullPayload { return imagePullPayloadSchema.parse(p); }
+function validateSandboxGcPayload(p: unknown): SandboxGcPayload { return sandboxGcPayloadSchema.parse(p); }
+function validateSandboxProvisionPayload(p: unknown): SandboxProvisionPayload { return sandboxProvisionPayloadSchema.parse(p); }
+function validateBucketKeyRotatePayload(p: unknown): BucketKeyRotatePayload { return bucketKeyRotatePayloadSchema.parse(p); }
+function validateWorkflowJobRunPayload(p: unknown): WorkflowJobRunPayload { return workflowJobRunPayloadSchema.parse(p); }
 
 // ─── Task handlers ───
 

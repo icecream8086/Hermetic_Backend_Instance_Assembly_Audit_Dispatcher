@@ -39,6 +39,11 @@ export class PodStore {
     return { items, ...(nextCursorVal !== undefined ? { nextCursor: nextCursorVal } : {}) };
   }
 
+  async getAllIds(): Promise<string[]> {
+    const idx = await this.atomic.get<string[]>(INDEX_KEY);
+    return idx?.value ?? [];
+  }
+
   async addToIndex(id: string): Promise<void> {
     const idx = await this.atomic.get<string[]>(INDEX_KEY);
     await this.atomic.set(INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);

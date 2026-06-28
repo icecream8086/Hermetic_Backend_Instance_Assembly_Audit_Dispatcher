@@ -11,6 +11,7 @@
 
 import { rpcCall } from './rpc.ts';
 import { z } from 'zod';
+import { decStr, decStrOpt } from './eci-codec.ts';
 
 // ─── OSS management API version ───
 
@@ -61,29 +62,34 @@ export interface BucketPolicy {
     readonly action: readonly string[];
     readonly resource: readonly string[];
     readonly principal: readonly string[];
-    readonly condition?: Record<string, unknown>;
+    readonly condition?: Record<string, unknown> | undefined;
   }[];
 }
 
 // ═══════════════════════════════════════════════════════════════
-// Response helpers — narrow Record<string, unknown> safely
+// Response helpers — Zod fail-fast, no silent defaults
 // ═══════════════════════════════════════════════════════════════
 
-function respStr(v: unknown, fallback: string): string {
-  return z.string().catch(fallback).parse(v);
-}
+const respObjSchema = z.record(z.string(), z.unknown());
+const respArrSchema = z.array(z.record(z.string(), z.unknown()));
 
 function respObj(v: unknown): Record<string, unknown> {
-  return z.record(z.string(), z.unknown()).catch({}).parse(v);
+  return respObjSchema.parse(v);
 }
 
 function respArr(v: unknown): Record<string, unknown>[] {
-  return z.array(z.record(z.string(), z.unknown())).catch([]).parse(v);
+  return respArrSchema.parse(v);
 }
 
-function respStrRaw(v: unknown): string | undefined {
-  return z.string().optional().parse(v);
-}
+const bucketPolicySchema = z.object({
+  statements: z.array(z.object({
+    effect: z.enum(['Allow', 'Deny']),
+    action: z.array(z.string()),
+    resource: z.array(z.string()),
+    principal: z.array(z.string()),
+    condition: z.record(z.string(), z.unknown()).optional(),
+  })),
+});
 
 // ═══════════════════════════════════════════════════════════════
 // OSS OpenAPI client
@@ -107,10 +113,10 @@ export class AlibabaOssOpenApiClient {
     const resp = await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret, 'ListBuckets', API_VERSION, rpcParams);
     const buckets = respObj(resp.Buckets);
     const bucketArr = respArr(buckets.Bucket);
-    const marker = respStrRaw(resp.Marker);
+    const marker = decStrOpt(resp.Marker);
     return {
       buckets: bucketArr.map(mapBucket),
-      isTruncated: respStr(resp.IsTruncated, 'false') === 'true',
+      isTruncated: (decStrOpt(resp.IsTruncated) ?? 'false') === 'true',
       ...(marker ? { marker } : {}),
       maxKeys: Number(resp.MaxKeys ?? 100),
     };
@@ -128,20 +134,20 @@ export class AlibabaOssOpenApiClient {
       if (Object.keys(info).length === 0) return null;
       const owner = respObj(info.Owner);
       const acl = respObj(info.AccessControlList);
-      const versioning = respStrRaw(info.Versioning);
+      const versioning = decStrOpt(info.Versioning);
       return {
-        name: respStr(info.Name, ''),
-        region: respStr(info.Location, ''),
-        creationDate: respStr(info.CreationDate, ''),
-        extranetEndpoint: respStr(info.ExtranetEndpoint, ''),
-        intranetEndpoint: respStr(info.IntranetEndpoint, ''),
+        name: decStr(info.Name),
+        region: decStr(info.Location),
+        creationDate: decStr(info.CreationDate),
+        extranetEndpoint: decStr(info.ExtranetEndpoint),
+        intranetEndpoint: decStr(info.IntranetEndpoint),
         owner: {
-          id: respStr(owner.ID, ''),
-          displayName: respStr(owner.DisplayName, ''),
+          id: decStr(owner.ID),
+          displayName: decStr(owner.DisplayName),
         },
-        acl: respStr(acl.Grant, 'private'),
-        storageClass: respStr(info.StorageClass, 'Standard'),
-        redundancyType: respStr(info.DataRedundancyType, 'LRS'),
+        acl: decStr(acl.Grant),
+        storageClass: decStrOpt(info.StorageClass) ?? 'Standard',
+        redundancyType: decStrOpt(info.DataRedundancyType) ?? 'LRS',
         ...(versioning ? { versioning } : {}),
       };
     } catch {
@@ -189,7 +195,7 @@ export class AlibabaOssOpenApiClient {
         Bucket: bucket,
       });
       const acl = respObj(resp.AccessControlList);
-      return respStrRaw(acl.Grant) ?? null;
+      return decStrOpt(acl.Grant) ?? null;
     } catch {
       return null;
     }
@@ -213,10 +219,9 @@ export class AlibabaOssOpenApiClient {
       const resp = await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret, 'GetBucketPolicy', API_VERSION, {
         Bucket: bucket,
       });
-      const policyRaw = respStrRaw(resp.Policy);
+      const policyRaw = decStrOpt(resp.Policy);
       if (!policyRaw) return null;
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
-      return JSON.parse(policyRaw) as BucketPolicy;
+      return bucketPolicySchema.parse(JSON.parse(policyRaw));
     } catch {
       return null;
     }
@@ -249,7 +254,7 @@ export class AlibabaOssOpenApiClient {
       const resp = await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret, 'GetBucketVersioning', API_VERSION, {
         Bucket: bucket,
       });
-      return respStrRaw(resp.Status) ?? null;
+      return decStrOpt(resp.Status) ?? null;
     } catch {
       return null;
     }
@@ -286,12 +291,12 @@ export class AlibabaOssOpenApiClient {
 
 function mapBucket(raw: Record<string, unknown>): OssBucket {
   return {
-    name: respStr(raw.Name, ''),
-    region: respStr(raw.Region, ''),
-    creationDate: respStr(raw.CreationDate, ''),
-    storageClass: respStr(raw.StorageClass, 'Standard'),
-    extranetEndpoint: respStr(raw.ExtranetEndpoint, ''),
-    intranetEndpoint: respStr(raw.IntranetEndpoint, ''),
-    acl: respStr(raw.ACL, 'private'),
+    name: decStr(raw.Name),
+    region: decStr(raw.Region),
+    creationDate: decStr(raw.CreationDate),
+    storageClass: decStrOpt(raw.StorageClass) ?? 'Standard',
+    extranetEndpoint: decStr(raw.ExtranetEndpoint),
+    intranetEndpoint: decStr(raw.IntranetEndpoint),
+    acl: decStrOpt(raw.ACL) ?? 'private',
   };
 }

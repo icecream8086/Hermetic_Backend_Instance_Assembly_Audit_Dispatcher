@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type {
   BaseEntity,
   PersistedEntity,
@@ -10,18 +11,19 @@ import type { RegionId } from '../../core/region/types.ts';
 import type { NetworkId } from '../../core/network/types.ts';
 import type { InstanceId } from '../../core/region/instance.ts';
 
-// ─── Brand types ───
-declare const SANDBOX_ID_BRAND: unique symbol;
-declare const VOLUME_ID_BRAND: unique symbol;
-declare const METRIC_SNAPSHOT_ID_BRAND: unique symbol;
+// ─── Brand types (CEA: Zod .brand(), no `as` assertions) ───
 
-export type SandboxId = string & { readonly [SANDBOX_ID_BRAND]: true };
-export type VolumeId = string & { readonly [VOLUME_ID_BRAND]: true };
-export type MetricSnapshotId = string & { readonly [METRIC_SNAPSHOT_ID_BRAND]: true };
+const sandboxIdSchema = z.string().min(1).brand('SandboxId');
+const volumeIdSchema = z.string().min(1).brand('VolumeId');
+const metricSnapshotIdSchema = z.string().min(1).brand('MetricSnapshotId');
 
-export function createSandboxId(raw: string): SandboxId { if (!raw) throw new TypeError('SandboxId must not be empty'); return raw as SandboxId; }
-export function createVolumeId(raw: string): VolumeId { if (!raw) throw new TypeError('VolumeId must not be empty'); return raw as VolumeId; }
-export function createMetricSnapshotId(raw: string): MetricSnapshotId { if (!raw) throw new TypeError('MetricSnapshotId must not be empty'); return raw as MetricSnapshotId; }
+export type SandboxId = z.infer<typeof sandboxIdSchema>;
+export type VolumeId = z.infer<typeof volumeIdSchema>;
+export type MetricSnapshotId = z.infer<typeof metricSnapshotIdSchema>;
+
+export function createSandboxId(raw: string): SandboxId { return sandboxIdSchema.parse(raw); }
+export function createVolumeId(raw: string): VolumeId { return volumeIdSchema.parse(raw); }
+export function createMetricSnapshotId(raw: string): MetricSnapshotId { return metricSnapshotIdSchema.parse(raw); }
 
 // ─── Sandbox state machine (ECI-aligned 11 states) ───
 
@@ -124,6 +126,10 @@ export enum VolumeType {
   Disk = 'DiskVolume',
   /** Secret — inject sensitive data (e.g. passwords, tokens) as in-memory files via provider (podman secret / KMS). */
   Secret = 'SecretVolume',
+  /** ConfigMap — inject non-sensitive configuration data as files. */
+  ConfigMap = 'ConfigMapVolume',
+  /** OSS (Object Storage Service) — mount cloud object storage as a filesystem. */
+  OSS = 'OSSVolume',
 }
 
 export interface NFSVolumeConfig {
@@ -154,6 +160,24 @@ export interface SecretVolumeConfig {
   readonly items?: readonly { readonly key: string; readonly path: string; readonly mode?: number }[];
 }
 
+export interface ConfigMapVolumeConfig {
+  /** ConfigMap name (provider-resolved). */
+  readonly name: string;
+  /** Specific items to project as files. Omit to project all keys. */
+  readonly items?: readonly { readonly key: string; readonly path: string; readonly mode?: number }[];
+}
+
+export interface OSSVolumeConfig {
+  /** OSS bucket name. */
+  readonly bucket: string;
+  /** Path within the bucket (prefix). */
+  readonly path?: string | undefined;
+  /** Whether the mount is read-only. */
+  readonly readOnly?: boolean | undefined;
+  /** Custom OSS endpoint for VPC access. */
+  readonly endpoint?: string | undefined;
+}
+
 /** Volume entity — bound to a ComputeInstance (spatial locality). */
 export interface Volume extends BaseEntity<VolumeId, VolumeStatus> {
   readonly type: VolumeType;
@@ -164,6 +188,8 @@ export interface Volume extends BaseEntity<VolumeId, VolumeStatus> {
   readonly nfs?: NFSVolumeConfig;
   readonly disk?: DiskVolumeConfig;
   readonly secret?: SecretVolumeConfig;
+  readonly configMap?: ConfigMapVolumeConfig;
+  readonly oss?: OSSVolumeConfig;
 }
 
 // ─── VolumeMount ───

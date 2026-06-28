@@ -9,6 +9,7 @@
  *   π: SandboxStatus → PodPhase projection defined below (018 §8).
  */
 
+import { z } from 'zod';
 import type { EnvVar, ProbeSpec, ContainerPortConfig, VolumeMountConfig } from '../provider/types.ts';
 export type { ProbeSpec };
 import { SandboxStatus } from '../../features/sandbox/types.ts';
@@ -17,10 +18,10 @@ import { SandboxStatus } from '../../features/sandbox/types.ts';
 // Pod Identity
 // ═══════════════════════════════════════════════════════════════
 
-declare const POD_ID_BRAND: unique symbol;
-export type PodId = string & { readonly [POD_ID_BRAND]: true };
+const podIdSchema = z.string().min(1).brand('PodId');
+export type PodId = z.infer<typeof podIdSchema>;
 
-export function createPodId(raw: string): PodId { if (!raw) throw new TypeError('PodId must not be empty'); return raw as PodId; }
+export function createPodId(raw: string): PodId { return podIdSchema.parse(raw); }
 
 // ═══════════════════════════════════════════════════════════════
 // PodPhase — K8s Pod Phase (013 §1.1)
@@ -83,7 +84,7 @@ export interface ContainerSpec {
 
 export interface VolumeSpec {
   readonly id: string;
-  readonly type: 'NFSVolume' | 'HostPathVolume' | 'EmptyDirVolume' | 'DiskVolume' | 'SecretVolume' | 'ConfigMapVolume';
+  readonly type: 'NFSVolume' | 'HostPathVolume' | 'EmptyDirVolume' | 'DiskVolume' | 'SecretVolume' | 'ConfigMapVolume' | 'OSSVolume';
   readonly options?: Record<string, unknown> | undefined;
 }
 
@@ -112,8 +113,89 @@ export interface PodSpec {
       readonly options?: readonly { readonly name: string; readonly value?: string | undefined }[] | undefined;
     } | undefined;
     readonly hostAliases?: readonly { readonly ip: string; readonly hostnames: readonly string[] }[] | undefined;
+    /** Topology spread constraints for multi-zone / multi-host distribution.
+     *  K8s-aligned: maxSkew, topologyKey, whenUnsatisfiable, labelSelector. */
+    readonly topologySpreadConstraints?: readonly TopologySpreadConstraint[] | undefined;
+    /** Pod affinity and anti-affinity rules. */
+    readonly affinity?: PodAffinity | undefined;
+    /** Tolerations allow the pod to schedule on nodes with matching taints. */
+    readonly tolerations?: readonly Toleration[] | undefined;
+    /** PreemptionPolicy determines whether the pod can preempt other pods.
+     *  'PreemptLowerPriority' | 'Never'. Default: 'PreemptLowerPriority'. */
+    readonly preemptionPolicy?: 'PreemptLowerPriority' | 'Never' | undefined;
   };
   readonly providerOverrides?: Record<string, unknown> | undefined;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Scheduling types
+// ═══════════════════════════════════════════════════════════════
+
+export interface TopologySpreadConstraint {
+  readonly maxSkew: number;
+  readonly topologyKey: string;
+  readonly whenUnsatisfiable: 'DoNotSchedule' | 'ScheduleAnyway';
+  readonly labelSelector?: LabelSelector | undefined;
+  readonly matchLabelKeys?: readonly string[] | undefined;
+  readonly nodeAffinityPolicy?: 'Honor' | 'Ignore' | undefined;
+  readonly nodeTaintsPolicy?: 'Honor' | 'Ignore' | undefined;
+}
+
+export interface PodAffinity {
+  readonly nodeAffinity?: NodeAffinity | undefined;
+  readonly podAffinity?: PodAffinityTerm[] | undefined;
+  readonly podAntiAffinity?: PodAffinityTerm[] | undefined;
+}
+
+export interface NodeAffinity {
+  readonly requiredDuringSchedulingIgnoredDuringExecution?: NodeSelector | undefined;
+  readonly preferredDuringSchedulingIgnoredDuringExecution?: PreferredSchedulingTerm[] | undefined;
+}
+
+export interface NodeSelector {
+  readonly nodeSelectorTerms: readonly NodeSelectorTerm[];
+}
+
+export interface NodeSelectorTerm {
+  readonly matchExpressions?: readonly NodeSelectorRequirement[] | undefined;
+  readonly matchFields?: readonly NodeSelectorRequirement[] | undefined;
+}
+
+export interface NodeSelectorRequirement {
+  readonly key: string;
+  readonly operator: 'In' | 'NotIn' | 'Exists' | 'DoesNotExist' | 'Gt' | 'Lt';
+  readonly values?: readonly string[] | undefined;
+}
+
+export interface PreferredSchedulingTerm {
+  readonly weight: number;
+  readonly preference: NodeSelectorTerm;
+}
+
+export interface PodAffinityTerm {
+  readonly labelSelector?: LabelSelector | undefined;
+  readonly namespaces?: readonly string[] | undefined;
+  readonly topologyKey: string;
+  readonly namespaceSelector?: LabelSelector | undefined;
+}
+
+export interface LabelSelector {
+  readonly matchLabels?: Record<string, string> | undefined;
+  readonly matchExpressions?: readonly LabelSelectorRequirement[] | undefined;
+}
+
+export interface LabelSelectorRequirement {
+  readonly key: string;
+  readonly operator: 'In' | 'NotIn' | 'Exists' | 'DoesNotExist';
+  readonly values?: readonly string[] | undefined;
+}
+
+export interface Toleration {
+  readonly key?: string | undefined;
+  readonly operator?: 'Equal' | 'Exists' | undefined;
+  readonly value?: string | undefined;
+  readonly effect?: 'NoSchedule' | 'PreferNoSchedule' | 'NoExecute' | undefined;
+  readonly tolerationSeconds?: number | undefined;
 }
 
 // ═══════════════════════════════════════════════════════════════

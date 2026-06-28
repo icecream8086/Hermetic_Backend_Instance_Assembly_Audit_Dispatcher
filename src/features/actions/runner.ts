@@ -31,6 +31,10 @@ import type { ActionRegistry } from './registry.ts';
 import { MatrixExpander } from './matrix.ts';
 import { DashboardService } from './dashboard.ts';
 import { generateVersionId } from '../../core/brand.ts';
+import { PodService } from '../../core/pod/service.ts';
+import type { PodSpec } from '../../core/pod/types.ts';
+import { createRegionId } from '../../core/region/types.ts';
+import { createInstanceId } from '../../core/region/instance.ts';
 
 function runId(): WorkflowRunId { return createWorkflowRunId(`wfr_${crypto.randomUUID()}`); }
 function jId(): JobRunId { return createJobRunId(`jr_${crypto.randomUUID()}`); }
@@ -42,6 +46,7 @@ export interface WorkflowRunnerDeps {
   queueProducer?: IMessageQueue;
   eventBus?: EventBus;
   actionRegistry?: ActionRegistry;
+  podService?: PodService;
 }
 
 export class WorkflowRunner {
@@ -154,11 +159,11 @@ export class WorkflowRunner {
     }
 
     try {
-      const sandboxId = await this.#provisionJobSandbox(jobDef, wfEntry.value.env, jobRun.jobName);
+      const { sandboxId, podId } = await this.#provisionJobSandbox(jobDef, wfEntry.value.env, jobRun.jobName);
 
       const sEntry = await atomic.get<JobRun>(PFX_JOB_RUN + jobRunId);
       if (sEntry) {
-        current = { ...current, sandboxId, version: generateVersionId() };
+        current = { ...current, sandboxId, ...(podId ? { podId } : {}), version: generateVersionId() };
         await atomic.set(PFX_JOB_RUN + jobRunId, current, sEntry.version);
       }
 
@@ -393,59 +398,80 @@ export class WorkflowRunner {
     jobDef: JobDef,
     env: Record<string, string>,
     jobName: string,
-  ): Promise<string> {
-    // Resolve provider by instance — mirrors SandboxService.#resolveProvider()
-    const instanceId = jobDef.instanceId as any;
+  ): Promise<{ sandboxId: string; podId?: string }> {
+    const instanceId = jobDef.instanceId as string | undefined;
+    const region = jobDef.region ?? 'local';
+    const mergedEnv = { ...env, ...jobDef.env };
+    const container = jobDef.containers?.[0] ?? jobDef.container;
+    if (!container) throw new Error(`Job ${jobName} has no container defined`);
+
+    // v3 path: PodService.provision() → PodEntity with lifecycle tracking
+    if (this.deps.podService) {
+      const podSpec = this.#jobToPodSpec(jobName, container, mergedEnv, jobDef);
+      const pod = await this.deps.podService.provision(podSpec);
+      return { sandboxId: pod.providerId ?? pod.podId, podId: pod.podId };
+    }
+
+    // v2 fallback: direct provider.create()
     if (!instanceId || !this.deps.providers.resolveContainer) {
       throw new Error('Workflow job requires an instanceId to resolve a container provider');
     }
-    const provider = await this.deps.providers.resolveContainer(instanceId);
-    const region = jobDef.region ?? 'local';
-    const mergedEnv = { ...env, ...jobDef.env };
-
-    if (jobDef.containers && jobDef.containers.length > 0) {
-      const main = jobDef.containers[0]!;
-      return this.#createSingleContainer(provider, main, mergedEnv, jobName, region, instanceId);
-    }
-
-    if (jobDef.container) {
-      return this.#createSingleContainer(provider, jobDef.container, mergedEnv, jobName, region, instanceId);
-    }
-
-    throw new Error(`Job ${jobName} has no container or containers defined`);
-  }
-
-  async #createSingleContainer(
-    provider: any,
-    c: ActionContainerConfig,
-    env: Record<string, string>,
-    jobName: string,
-    region: string,
-    instanceId?: any,
-  ): Promise<string> {
-    const envList = Object.entries(env).map(([name, value]) => ({ name, value }));
+    const provider = await this.deps.providers.resolveContainer(createInstanceId(instanceId));
 
     const result = await provider.create({
       name: `action-${jobName}-${Date.now()}`,
-      region,
-      ...(instanceId ? { instanceId } : {}),
-      cpu: c.resources?.cpu ?? 1,
-      memory: c.resources?.memory ?? 1024,
+      region: createRegionId(region),
+      ...(instanceId ? { instanceId: createInstanceId(instanceId) } : {}),
+      cpu: container.resources?.cpu ?? 1,
+      memory: container.resources?.memory ?? 1024,
       restartPolicy: 'Never',
       containers: [{
         name: jobName,
-        image: c.image,
-        command: c.command ? [...c.command] : undefined,
-        args: c.args ? [...c.args] : undefined,
-        env: envList,
-        ports: c.ports ? [...c.ports] : undefined,
-        workingDir: c.workingDir,
-        resources: c.resources ? { cpu: c.resources.cpu ?? 1, memory: c.resources.memory ?? 1024 } : { cpu: 1, memory: 2048 },
+        image: container.image,
+        command: container.command ? [...container.command] : undefined,
+        args: container.args ? [...container.args] : undefined,
+        env: Object.entries(mergedEnv).map(([k, v]) => ({ name: k, value: v })),
+        ports: container.ports ? [...container.ports] : undefined,
+        resources: container.resources ? { limits: { cpu: container.resources.cpu ?? 1, memory: container.resources.memory ?? 1024 } } : undefined,
       }],
       network: { allocatePublicIp: false },
     });
 
-    return result.providerId;
+    return { sandboxId: result.providerId };
+  }
+
+  /** Build a PodSpec from a job definition for PodService.provision(). */
+  #jobToPodSpec(
+    jobName: string,
+    container: ActionContainerConfig,
+    env: Record<string, string>,
+    jobDef: JobDef,
+  ): PodSpec {
+    const envList = Object.entries(env).map(([name, value]) => ({ name, value }));
+    return {
+      metadata: {
+        name: `action-${jobName}-${Date.now()}`,
+        labels: { job: jobName, owner: 'actions' },
+      },
+      spec: {
+        containers: [{
+          name: jobName,
+          image: container.image,
+          command: container.command ? [...container.command] : undefined,
+          args: container.args ? [...container.args] : undefined,
+          env: envList.length > 0 ? envList : undefined,
+          ports: container.ports ? [...container.ports] : undefined,
+          resources: container.resources ? {
+            limits: {
+              cpu: container.resources.cpu ?? 1,
+              memory: container.resources.memory ?? 1024,
+            },
+          } : undefined,
+        }],
+        restartPolicy: 'Never',
+      },
+      ...(jobDef.region ? { providerOverrides: { region: jobDef.region, ...(jobDef.instanceId ? { instanceId: jobDef.instanceId } : {}) } } : {}),
+    };
   }
 
   async #executeSteps(

@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { IAtomicStore } from '../store/interfaces.ts';
 import type { RegionId, ZoneId, Platform } from './types.ts';
 import { createZoneId } from './types.ts';
@@ -5,15 +6,15 @@ import { AppError } from '../types.ts';
 
 // ─── Brand type ───
 
-declare const INSTANCE_ID_BRAND: unique symbol;
-export type InstanceId = string & { readonly [INSTANCE_ID_BRAND]: true };
+const instanceIdSchema = z.string().min(1).brand('InstanceId');
+export type InstanceId = z.infer<typeof instanceIdSchema>;
 
 export function generateInstanceId(): InstanceId {
-  return `inst_${crypto.randomUUID()}` as InstanceId;
+  return instanceIdSchema.parse(`inst_${crypto.randomUUID()}`);
 }
 
 export function createInstanceId(raw: string): InstanceId {
-  return raw as InstanceId;
+  return instanceIdSchema.parse(raw);
 }
 
 // ─── Entity ───

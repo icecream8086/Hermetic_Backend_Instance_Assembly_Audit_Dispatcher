@@ -338,6 +338,7 @@ export interface ContainerGroupNetworkInput {
   } | undefined;
 }
 
+/** @deprecated Use PodSpec + buildPodCreateParams() for the v3 direct path. Retained for Sandbox v1 backward compat. */
 export interface CreateContainerGroupInput {
   readonly name: string;
   readonly description?: string | undefined;

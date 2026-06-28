@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 // ─── Platform enumeration ───
 
 export type Platform = 'alibaba' | 'aws' | 'podman' | 'stub';
@@ -58,13 +60,12 @@ export enum PodmanRegion {
 
 // ─── RegionId brand type ───
 
-declare const REGION_ID_BRAND: unique symbol;
-
-export type RegionId = string & { readonly [REGION_ID_BRAND]: true };
+const regionIdSchema = z.string().min(1).brand('RegionId');
+export type RegionId = z.infer<typeof regionIdSchema>;
 
 export function createRegionId(raw: string): RegionId {
   if (!raw?.trim()) throw new TypeError('RegionId must not be empty');
-  return raw as RegionId;
+  return regionIdSchema.parse(raw);
 }
 
 export function createAlibabaRegion(raw: string): AlibabaRegion {
@@ -84,9 +85,8 @@ export const LOCAL_REGION = createRegionId('local');
 
 // ─── ZoneId brand type (validated per platform, not a closed enum) ───
 
-declare const ZONE_ID_BRAND: unique symbol;
-
-export type ZoneId = string & { readonly [ZONE_ID_BRAND]: true };
+const zoneIdSchema = z.string().min(1).brand('ZoneId');
+export type ZoneId = z.infer<typeof zoneIdSchema>;
 
 /** Alibaba zone pattern: cn-hangzhou-g, cn-beijing-g, us-east-1-a, etc. */
 const ALIBABA_ZONE_RE = /^[a-z]+(?:-[a-z0-9]+)+-[a-z]$/;
@@ -117,15 +117,14 @@ export function createZoneId(raw: string, platform: Platform): ZoneId {
       }
       break;
   }
-  return raw as ZoneId;
+  return zoneIdSchema.parse(raw);
 }
 
 // ─── ClusterId brand type ───
 
-declare const CLUSTER_ID_BRAND: unique symbol;
-
-export type ClusterId = string & { readonly [CLUSTER_ID_BRAND]: true };
+const clusterIdSchema = z.string().min(1).brand('ClusterId');
+export type ClusterId = z.infer<typeof clusterIdSchema>;
 
 export function generateClusterId(): ClusterId {
-  return `cluster_${crypto.randomUUID()}` as ClusterId;
+  return clusterIdSchema.parse(`cluster_${crypto.randomUUID()}`);
 }
