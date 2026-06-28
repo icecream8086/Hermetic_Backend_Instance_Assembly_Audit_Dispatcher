@@ -81,20 +81,20 @@ export class RunnerService implements IRunnerService {
     };
 
     await this.atomic.set(RUNNER_PREFIX + id, runner, null);
-    await this.#addRunnerToIndex(id as string);
+    await this.#addRunnerToIndex(id);
 
     const token = await this.createRegistrationToken();
 
     await this.logger.write({
       facility: FACILITY, level: KernLevel.INFO,
       message: `Runner registered: ${input.name}`,
-      metadata: { runnerId: id as string, os: runner.os },
+      metadata: { runnerId: id, os: runner.os },
     });
 
     await this.audit?.write({
       level: KernLevel.NOTICE, facility: FACILITY,
       message: `Runner registered — ${input.name} (id=${id as string})`,
-      metadata: { eventType: 'runner.registered', runnerId: id as string },
+      metadata: { eventType: 'runner.registered', runnerId: id },
     });
 
     return { runner, token };
@@ -135,12 +135,12 @@ export class RunnerService implements IRunnerService {
     const entry = await this.atomic.get<RunnerInstance>(RUNNER_PREFIX + id);
     if (!entry) throw new AppError(404, 'RUNNER_NOT_FOUND', 'Runner not found');
     await this.atomic.set(RUNNER_PREFIX + id, null, entry.version);
-    await this.#removeRunnerFromIndex(id as string);
+    await this.#removeRunnerFromIndex(id);
 
     await this.audit?.write({
       level: KernLevel.WARNING, facility: FACILITY,
       message: `Runner deleted — ${entry.value.name}`,
-      metadata: { eventType: 'runner.deleted', runnerId: id as string },
+      metadata: { eventType: 'runner.deleted', runnerId: id },
     });
   }
 
@@ -194,7 +194,7 @@ export class RunnerService implements IRunnerService {
       createdAt: now, updatedAt: now,
     };
     await this.atomic.set(RUNNER_GROUP_PREFIX + id, group, null);
-    await this.#addGroupToIndex(id as string);
+    await this.#addGroupToIndex(id);
     return group;
   }
 
@@ -216,7 +216,7 @@ export class RunnerService implements IRunnerService {
     const entry = await this.atomic.get<RunnerGroup>(RUNNER_GROUP_PREFIX + id);
     if (!entry) throw new AppError(404, 'RUNNER_GROUP_NOT_FOUND', 'Runner group not found');
     await this.atomic.set(RUNNER_GROUP_PREFIX + id, null, entry.version);
-    await this.#removeGroupFromIndex(id as string);
+    await this.#removeGroupFromIndex(id);
   }
 
   // ─── Registration tokens ───

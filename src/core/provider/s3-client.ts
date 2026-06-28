@@ -93,7 +93,7 @@ export abstract class S3ClientBase implements IS3Provider {
     if (input.contentType) amzHeaders['content-type'] = input.contentType;
     const res = await this.authFetch(url, 'POST', `/${this.bucketMapping(input.bucket)}/${encodeKey(input.key)}`, 'uploads', amzHeaders, '');
     const xml = await res.text();
-    const uploadId = xml.match(/<UploadId>(.*?)<\/UploadId>/)?.[1] ?? '';
+    const uploadId = (/<UploadId>(.*?)<\/UploadId>/.exec(xml))?.[1] ?? '';
     return { uploadId, key: input.key, bucket: input.bucket };
   }
 
@@ -107,14 +107,14 @@ export abstract class S3ClientBase implements IS3Provider {
     return { etag: (res.headers.get('etag') ?? '').replace(/"/g, ''), partNumber: input.partNumber };
   }
 
-  async completeMultipartUpload(input: { bucket: string; key: string; uploadId: string; parts: ReadonlyArray<{ partNumber: number; etag: string }> }): Promise<{ location?: string }> {
+  async completeMultipartUpload(input: { bucket: string; key: string; uploadId: string; parts: readonly { partNumber: number; etag: string }[] }): Promise<{ location?: string }> {
     const path = `/${this.bucketMapping(input.bucket)}/${encodeKey(input.key)}?uploadId=${encodeURIComponent(input.uploadId)}`;
     const url = `${this.endpointFor(input.bucket)}${path}`;
     const body = buildCompleteXml(input.parts);
     const amzHeaders: Record<string, string> = { host: new URL(url).host, 'content-type': 'application/xml' };
     const res = await this.authFetch(url, 'POST', `/${this.bucketMapping(input.bucket)}/${encodeKey(input.key)}`, `uploadId=${encodeURIComponent(input.uploadId)}`, amzHeaders, '', body);
     const xml = await res.text();
-    const location = xml.match(/<Location>(.*?)<\/Location>/)?.[1];
+    const location = (/<Location>(.*?)<\/Location>/.exec(xml))?.[1];
     return { ...(location ? { location } : {}) };
   }
 
@@ -125,7 +125,7 @@ export abstract class S3ClientBase implements IS3Provider {
     await this.authFetch(url, 'DELETE', `/${this.bucketMapping(input.bucket)}/${encodeKey(input.key)}`, `uploadId=${encodeURIComponent(input.uploadId)}`, amzHeaders, '');
   }
 
-  async listParts(bucket: string, key: string, uploadId: string): Promise<{ parts: ReadonlyArray<{ partNumber: number; size: number; etag: string }>; uploadId: string; isTruncated: boolean; nextPartNumberMarker?: number }> {
+  async listParts(bucket: string, key: string, uploadId: string): Promise<{ parts: readonly { partNumber: number; size: number; etag: string }[]; uploadId: string; isTruncated: boolean; nextPartNumberMarker?: number }> {
     const path = `/${this.bucketMapping(bucket)}/${encodeKey(key)}?uploadId=${encodeURIComponent(uploadId)}`;
     const url = `${this.endpointFor(bucket)}${path}`;
     const amzHeaders: Record<string, string> = { host: new URL(url).host };
@@ -133,13 +133,13 @@ export abstract class S3ClientBase implements IS3Provider {
     const xml = await res.text();
     const parts: { partNumber: number; size: number; etag: string }[] = [];
     for (const m of xml.matchAll(/<Part>(.*?)<\/Part>/gs)) {
-      const pn = parseInt(m[1]!.match(/<PartNumber>(.*?)<\/PartNumber>/)?.[1] ?? '0', 10);
-      const sz = parseInt(m[1]!.match(/<Size>(.*?)<\/Size>/)?.[1] ?? '0', 10);
-      const et = (m[1]!.match(/<ETag>(.*?)<\/ETag>/)?.[1] ?? '').replace(/"/g, '');
+      const pn = parseInt((/<PartNumber>(.*?)<\/PartNumber>/.exec((m[1]!)))?.[1] ?? '0', 10);
+      const sz = parseInt((/<Size>(.*?)<\/Size>/.exec((m[1]!)))?.[1] ?? '0', 10);
+      const et = ((/<ETag>(.*?)<\/ETag>/.exec((m[1]!)))?.[1] ?? '').replace(/"/g, '');
       parts.push({ partNumber: pn, size: sz, etag: et });
     }
     const truncated = xml.includes('<IsTruncated>true</IsTruncated>');
-    const nextMarker = xml.match(/<NextPartNumberMarker>(.*?)<\/NextPartNumberMarker>/)?.[1];
+    const nextMarker = (/<NextPartNumberMarker>(.*?)<\/NextPartNumberMarker>/.exec(xml))?.[1];
     return { parts, uploadId, isTruncated: truncated, ...(nextMarker ? { nextPartNumberMarker: parseInt(nextMarker, 10) } : {}) };
   }
 
@@ -169,7 +169,7 @@ function encodeKey(key: string): string {
 }
 
 async function toArrayBuffer(body: ReadableStream | ArrayBuffer | Uint8Array): Promise<ArrayBuffer> {
-  if (body instanceof ReadableStream) return new Response(body).arrayBuffer() as Promise<ArrayBuffer>;
+  if (body instanceof ReadableStream) return new Response(body).arrayBuffer();
   if (body instanceof ArrayBuffer) return body;
   return body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength) as ArrayBuffer;
 }
@@ -192,11 +192,11 @@ function parseListResult(xml: string): S3ListObjectsResult {
 
   const contents = xml.matchAll(/<Contents>(.*?)<\/Contents>/gs);
   for (const match of contents) {
-    const key = match[1]!.match(/<Key>(.*?)<\/Key>/)?.[1] ?? '';
-    const size = parseInt(match[1]!.match(/<Size>(.*?)<\/Size>/)?.[1] ?? '0', 10);
-    const etag = (match[1]!.match(/<ETag>(.*?)<\/ETag>/)?.[1] ?? '').replace(/"/g, '');
-    const lastMod = match[1]!.match(/<LastModified>(.*?)<\/LastModified>/)?.[1];
-    const ct = match[1]!.match(/<ContentType>(.*?)<\/ContentType>/)?.[1];
+    const key = (/<Key>(.*?)<\/Key>/.exec((match[1]!)))?.[1] ?? '';
+    const size = parseInt((/<Size>(.*?)<\/Size>/.exec((match[1]!)))?.[1] ?? '0', 10);
+    const etag = ((/<ETag>(.*?)<\/ETag>/.exec((match[1]!)))?.[1] ?? '').replace(/"/g, '');
+    const lastMod = (/<LastModified>(.*?)<\/LastModified>/.exec((match[1]!)))?.[1];
+    const ct = (/<ContentType>(.*?)<\/ContentType>/.exec((match[1]!)))?.[1];
     objects.push({
       key: decodeURIComponent(key), size, etag,
       lastModified: lastMod ? new Date(lastMod) : new Date(0),
@@ -206,18 +206,18 @@ function parseListResult(xml: string): S3ListObjectsResult {
 
   const prefixes = xml.matchAll(/<CommonPrefixes>(.*?)<\/CommonPrefixes>/gs);
   for (const match of prefixes) {
-    const prefix = match[1]!.match(/<Prefix>(.*?)<\/Prefix>/)?.[1] ?? '';
+    const prefix = (/<Prefix>(.*?)<\/Prefix>/.exec((match[1]!)))?.[1] ?? '';
     commonPrefixes.push(prefix);
   }
 
   isTruncated = xml.includes('<IsTruncated>true</IsTruncated>');
-  const tokenMatch = xml.match(/<NextContinuationToken>(.*?)<\/NextContinuationToken>/);
+  const tokenMatch = /<NextContinuationToken>(.*?)<\/NextContinuationToken>/.exec(xml);
   if (tokenMatch) nextToken = tokenMatch[1];
 
   return { objects, commonPrefixes, isTruncated, ...(nextToken ? { nextContinuationToken: nextToken } : {}) };
 }
 
-function buildCompleteXml(parts: ReadonlyArray<{ partNumber: number; etag: string }>): string {
+function buildCompleteXml(parts: readonly { partNumber: number; etag: string }[]): string {
   const sorted = [...parts].sort((a, b) => a.partNumber - b.partNumber);
   const partTags = sorted.map(p => `  <Part><PartNumber>${p.partNumber}</PartNumber><ETag>"${p.etag}"</ETag></Part>`).join('\n');
   return `<?xml version="1.0" encoding="UTF-8"?>\n<CompleteMultipartUpload>\n${partTags}\n</CompleteMultipartUpload>`;

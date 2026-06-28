@@ -16,34 +16,34 @@ export type { AppConfig } from './types.ts';
  * value → clear error message at startup (not a silent null-pointer later).
  */
 export function loadConfig(overrides?: Partial<AppConfig>): AppConfig {
-  const envAuditTier = process.env['LOG_AUDIT_TIER'];
+  const envAuditTier = process.env.LOG_AUDIT_TIER;
   const auditTier = envAuditTier === AuditTier.AUDITABLE ? AuditTier.AUDITABLE : AuditTier.BEST_EFFORT;
 
   const logConfig = overrides?.log ?? {
     auditTier,
     defaultFacility: 'app',
     storage: {
-      backend: process.env['LOG_STORAGE_BACKEND'] ?? 'filesystem',
+      backend: process.env.LOG_STORAGE_BACKEND ?? 'filesystem',
     },
   };
 
   const storageConfig: StorageConfig = overrides?.storage ?? {
-    stateBackend: (process.env['STATE_BACKEND'] as StorageConfig['stateBackend']) ?? 'file',
-    queryBackend: (process.env['QUERY_BACKEND'] as StorageConfig['queryBackend']) ?? 'none',
-    blobBackend: (process.env['BLOB_BACKEND'] as StorageConfig['blobBackend']) ?? 'none',
+    stateBackend: (process.env.STATE_BACKEND as StorageConfig['stateBackend']) ?? 'file',
+    queryBackend: (process.env.QUERY_BACKEND as StorageConfig['queryBackend']) ?? 'none',
+    blobBackend: (process.env.BLOB_BACKEND as StorageConfig['blobBackend']) ?? 'none',
     connections: {
-      filePath: process.env['STATE_FILE_PATH'] ?? '.data',
-      kvNamespace: process.env['KV_NAMESPACE'] ?? 'KV_STORE',
-      doNamespace: process.env['DO_NAMESPACE'] ?? 'ATOMIC_STORE_DO',
-      d1Binding: process.env['D1_BINDING'] ?? 'QUERY_DB',
-      r2Binding: process.env['R2_BINDING'] ?? 'BLOB_STORE',
+      filePath: process.env.STATE_FILE_PATH ?? '.data',
+      kvNamespace: process.env.KV_NAMESPACE ?? 'KV_STORE',
+      doNamespace: process.env.DO_NAMESPACE ?? 'ATOMIC_STORE_DO',
+      d1Binding: process.env.D1_BINDING ?? 'QUERY_DB',
+      r2Binding: process.env.R2_BINDING ?? 'BLOB_STORE',
     },
   };
 
-  const providerContainer = (process.env['PROVIDER_CONTAINER'] as any) ?? 'stub';
+  const providerContainer = (process.env.PROVIDER_CONTAINER as any) ?? 'stub';
 
   function loadAccounts(): any[] {
-    const json = process.env['ALIBABA_ACCOUNTS'];
+    const json = process.env.ALIBABA_ACCOUNTS;
     if (json) {
       try {
         const parsed: any[] = JSON.parse(json);
@@ -58,14 +58,14 @@ export function loadConfig(overrides?: Partial<AppConfig>): AppConfig {
         }));
       } catch { /* fall through to legacy */ }
     }
-    const legacyAk = process.env['ALIBABA_ACCESS_KEY_ID'];
-    const legacySk = process.env['ALIBABA_ACCESS_KEY_SECRET'];
+    const legacyAk = process.env.ALIBABA_ACCESS_KEY_ID;
+    const legacySk = process.env.ALIBABA_ACCESS_KEY_SECRET;
     if (legacyAk && legacySk) {
       return [{
         name: 'default',
         accessKeyId: legacyAk,
         accessKeySecret: legacySk,
-        defaultRegion: process.env['ALIBABA_REGION'] ?? 'cn-hangzhou',
+        defaultRegion: process.env.ALIBABA_REGION ?? 'cn-hangzhou',
       }];
     }
     return [{ name: 'default', accessKeyId: '', accessKeySecret: '' }];
@@ -73,16 +73,16 @@ export function loadConfig(overrides?: Partial<AppConfig>): AppConfig {
 
   const providerConfig = overrides?.provider ?? {
     container: providerContainer,
-    region: createRegionId(process.env['ALIBABA_REGION'] ?? 'cn-hangzhou'),
+    region: createRegionId(process.env.ALIBABA_REGION ?? 'cn-hangzhou'),
     accounts: loadAccounts(),
-    defaultAccount: process.env['ALIBABA_DEFAULT_ACCOUNT'] ?? 'default',
-    cfApiToken: process.env['CF_API_TOKEN'],
-    dns: (process.env['PROVIDER_DNS'] as any) ?? 'stub',
-    metrics: (process.env['PROVIDER_METRICS'] as any) ?? 'stub',
+    defaultAccount: process.env.ALIBABA_DEFAULT_ACCOUNT ?? 'default',
+    cfApiToken: process.env.CF_API_TOKEN,
+    dns: (process.env.PROVIDER_DNS as any) ?? 'stub',
+    metrics: (process.env.PROVIDER_METRICS as any) ?? 'stub',
   };
 
   function loadS3Accounts(): any[] {
-    const json = process.env['S3_ACCOUNTS'];
+    const json = process.env.S3_ACCOUNTS;
     if (json) {
       try {
         const parsed: any[] = JSON.parse(json);
@@ -97,42 +97,42 @@ export function loadConfig(overrides?: Partial<AppConfig>): AppConfig {
         }));
       } catch { /* fall through */ }
     }
-    const legacyAk = process.env['S3_ACCESS_KEY_ID'] ?? process.env['MINIO_ACCESS_KEY'] ?? process.env['MINIO_ROOT_USER'];
-    const legacySk = process.env['S3_SECRET_ACCESS_KEY'] ?? process.env['MINIO_SECRET_KEY'] ?? process.env['MINIO_ROOT_PASSWORD'];
+    const legacyAk = process.env.S3_ACCESS_KEY_ID ?? process.env.MINIO_ACCESS_KEY ?? process.env.MINIO_ROOT_USER;
+    const legacySk = process.env.S3_SECRET_ACCESS_KEY ?? process.env.MINIO_SECRET_KEY ?? process.env.MINIO_ROOT_PASSWORD;
     if (legacyAk && legacySk) {
       return [{
         name: 'default',
         accessKeyId: legacyAk,
         accessKeySecret: legacySk,
-        defaultRegion: process.env['S3_REGION'] ?? 'us-east-1',
-        endpoint: process.env['S3_ENDPOINT'] ?? process.env['MINIO_ENDPOINT'],
+        defaultRegion: process.env.S3_REGION ?? 'us-east-1',
+        endpoint: process.env.S3_ENDPOINT ?? process.env.MINIO_ENDPOINT,
       }];
     }
     return [{ name: 'default', accessKeyId: '', accessKeySecret: '' }];
   }
 
   const s3Config = overrides?.s3 ?? {
-    backend: (process.env['S3_BACKEND'] as any) ?? 'none',
-    region: process.env['S3_REGION'] ?? 'auto',
-    endpoint: process.env['S3_ENDPOINT'] ?? process.env['MINIO_ENDPOINT'] ?? undefined,
+    backend: (process.env.S3_BACKEND as any) ?? 'none',
+    region: process.env.S3_REGION ?? 'auto',
+    endpoint: process.env.S3_ENDPOINT ?? process.env.MINIO_ENDPOINT ?? undefined,
     accounts: loadS3Accounts(),
-    defaultAccount: process.env['S3_DEFAULT_ACCOUNT'] ?? 'default',
+    defaultAccount: process.env.S3_DEFAULT_ACCOUNT ?? 'default',
   };
 
   const schedulerConfig = overrides?.scheduler ?? {
-    backend: (process.env['SCHEDULER_BACKEND'] as SchedulerBackendType) ?? 'worker',
-    intervalMs: Number(process.env['SCHEDULER_INTERVAL_MS'] ?? 60000),
-    batchSize: Number(process.env['SCHEDULER_BATCH_SIZE'] ?? 0),
-    callbackUrl: process.env['WORKER_URL']
-      ? `${process.env['WORKER_URL'].replace(/\/+$/, '')}/__scheduled`
+    backend: (process.env.SCHEDULER_BACKEND as SchedulerBackendType) ?? 'worker',
+    intervalMs: Number(process.env.SCHEDULER_INTERVAL_MS ?? 60000),
+    batchSize: Number(process.env.SCHEDULER_BATCH_SIZE ?? 0),
+    callbackUrl: process.env.WORKER_URL
+      ? `${process.env.WORKER_URL.replace(/\/+$/, '')}/__scheduled`
       : undefined,
   };
 
-  const corsOriginsRaw = process.env['CORS_ORIGINS'] ?? 'http://localhost:8086';
+  const corsOriginsRaw = process.env.CORS_ORIGINS ?? 'http://localhost:8086';
 
-  const rateLimitEnabled = process.env['RATE_LIMIT_ENABLED'];
-  const rateLimitBypassIpsRaw = process.env['RATE_LIMIT_BYPASS_IPS'];
-  const rateLimitBypassToken = process.env['RATE_LIMIT_BYPASS_TOKEN'] || undefined;
+  const rateLimitEnabled = process.env.RATE_LIMIT_ENABLED;
+  const rateLimitBypassIpsRaw = process.env.RATE_LIMIT_BYPASS_IPS;
+  const rateLimitBypassToken = process.env.RATE_LIMIT_BYPASS_TOKEN || undefined;
 
   const assembled = {
     storage: storageConfig,
@@ -141,10 +141,10 @@ export function loadConfig(overrides?: Partial<AppConfig>): AppConfig {
     s3: s3Config,
     scheduler: schedulerConfig,
     audit: {
-      backend: (process.env['AUDIT_BACKEND'] as any) ?? (storageConfig.stateBackend === 'file' ? 'hybrid' : 'hybrid'),
+      backend: (process.env.AUDIT_BACKEND as any) ?? (storageConfig.stateBackend === 'file' ? 'hybrid' : 'hybrid'),
     },
     server: {
-      port: Number(process.env['PORT'] ?? 3000),
+      port: Number(process.env.PORT ?? 3000),
       ...overrides?.server,
     },
     features: overrides?.features ?? {},

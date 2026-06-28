@@ -55,15 +55,7 @@ export class AtomicStoreDO implements DurableObject {
       this.ctx.storage.setAlarm(Date.now() + IDLE_ALARM_MS).catch(() => {});
     }
 
-    const { op, key, keys, value, expectedVersion, ttlSeconds, txnOps } = await request.json() as {
-      op: 'get' | 'set' | 'transact' | 'batchGet';
-      key?: string;
-      keys?: string[];
-      value?: unknown;
-      expectedVersion?: string | null;
-      ttlSeconds?: number;
-      txnOps?: Array<{ op: 'get' | 'set' | 'check'; key: string; value?: unknown; expectedVersion?: string | null }>;
-    };
+    const { op, key, keys, value, expectedVersion, ttlSeconds, txnOps } = await request.json();
 
     try {
       switch (op) {
@@ -98,7 +90,7 @@ export class AtomicStoreDO implements DurableObject {
 
           // Clean up old TTL marker if the entry had one
           if (current?._expiresAt !== null && current?._expiresAt !== undefined) {
-            await this.ctx.storage.delete(markerKey(current!._expiresAt, key));
+            await this.ctx.storage.delete(markerKey(current._expiresAt, key));
           }
 
           // Store value with explicit expiry metadata
@@ -126,7 +118,7 @@ export class AtomicStoreDO implements DurableObject {
           const stored = await this.ctx.storage.get<StoredValue>(keys);
           const now = Date.now();
           const expiredKeys: string[] = [];
-          const results: Array<{ key: string; value: unknown; version: string | null }> = [];
+          const results: { key: string; value: unknown; version: string | null }[] = [];
 
           for (const k of keys) {
             const entry = stored.get(k);
@@ -295,7 +287,7 @@ export class DurableObjectAtomicStore implements IAtomicStore {
       method: 'POST',
       body: JSON.stringify({ op: 'get', key }),
     });
-    const body = await resp.json() as { value: T | null; version: string | null };
+    const body = await resp.json();
     if (body.value === null || body.value === undefined) return null;
     if (body.version === null || body.version === undefined) return null;
     return { value: body.value, version: body.version as VersionId };
@@ -306,13 +298,13 @@ export class DurableObjectAtomicStore implements IAtomicStore {
       method: 'POST',
       body: JSON.stringify({ op: 'set', key, value, expectedVersion, ttlSeconds }),
     });
-    const body = await resp.json() as { version: string | null; conflict?: boolean };
+    const body = await resp.json();
     return body.version as VersionId | null;
   }
 
   async transact<T>(action: (txn: IStoreTransaction) => Promise<T>): Promise<T> {
     const readSet = new Map<string, string | null>();
-    const deferredWrites: Array<{ key: string; value: unknown }> = [];
+    const deferredWrites: { key: string; value: unknown }[] = [];
 
     // ── 生产者-消费者：延迟批量读 ──
     interface ReadRequest {
@@ -334,7 +326,7 @@ export class DurableObjectAtomicStore implements IAtomicStore {
         method: 'POST',
         body: JSON.stringify({ op: 'batchGet', keys }),
       });
-      const body = await resp.json() as { results: Array<{ key: string; value: unknown; version: string | null }> };
+      const body = await resp.json();
 
       // Build lookup and record versions for OCC (null = phantom read tracking)
       const lookup = new Map<string, unknown>();
@@ -386,7 +378,7 @@ export class DurableObjectAtomicStore implements IAtomicStore {
           method: 'POST',
           body: JSON.stringify({ op: 'batchGet', keys: remoteKeys }),
         });
-        const body = await resp.json() as { results: Array<{ key: string; value: unknown; version: string | null }> };
+        const body = await resp.json();
         for (const r of body.results) {
           readSet.set(r.key, r.version);
           const idx = keys.indexOf(r.key);
@@ -407,12 +399,12 @@ export class DurableObjectAtomicStore implements IAtomicStore {
     }
 
     if (deferredWrites.length > 0) {
-      const txnOps: Array<{
+      const txnOps: {
         op: 'get' | 'set' | 'check';
         key: string;
         value?: unknown;
         expectedVersion?: string | null;
-      }> = [];
+      }[] = [];
 
       for (const [key, version] of readSet) {
         txnOps.push({ op: 'check', key, expectedVersion: version });
@@ -439,7 +431,7 @@ export class DurableObjectAtomicStore implements IAtomicStore {
       });
 
       if (!resp.ok) {
-        const body = await resp.json() as { error?: string };
+        const body = await resp.json();
         if (resp.status === 409) {
           throw new TransactConflictError(body.error ?? 'Transaction conflict in DO transact');
         }

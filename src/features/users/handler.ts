@@ -45,9 +45,9 @@ function userToResponse(user: { id: string; email: string; name: string; role: U
   });
 }
 
-type PermissionCheckFn = { check(params: { userId: string; action: string; resource: string; ip?: string; resourceOwnerId?: string }): Promise<{ allowed: boolean; reason: string }> };
+interface PermissionCheckFn { check(params: { userId: string; action: string; resource: string; ip?: string; resourceOwnerId?: string }): Promise<{ allowed: boolean; reason: string }> }
 
-type UsersEnv = { Variables: AppContext };
+interface UsersEnv { Variables: AppContext }
 
 async function requirePerm(c: Context<UsersEnv>, checker: PermissionCheckFn | undefined, action: string, resource: string, resourceOwnerId?: string): Promise<Response | null> {
   if (!checker) return null;
@@ -138,7 +138,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
     if (!parsed.success) {
       return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
     }
-    { const r = await requirePerm(c, permissionChecker, 'update', 'user', id as string); if (r) return r; }
+    { const r = await requirePerm(c, permissionChecker, 'update', 'user', id); if (r) return r; }
 
     // Construct input with all properties present (EOPT-safe)
     const data = parsed.data;
@@ -160,7 +160,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
   // DELETE /api/users/:id
   router.delete('/:id', async (c) => {
     const id = createUserId(c.req.param('id'));
-    { const r = await requirePerm(c, permissionChecker, 'delete', 'user', id as string); if (r) return r; }
+    { const r = await requirePerm(c, permissionChecker, 'delete', 'user', id); if (r) return r; }
     const actorId = c.var.currentUser?.id;
     await userService.delete(id, actorId);
     return c.json(ok(null));
@@ -171,11 +171,11 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
   router.post('/:id/refresh', async (c) => {
     const id = createUserId(c.req.param('id'));
     const now = Date.now();
-    const last = refreshTimestamps.get(id as string);
+    const last = refreshTimestamps.get(id);
     if (last !== undefined && now - last < 3_600_000) {
       return c.json(fail('RATE_LIMITED', 'Can refresh once per hour'), 429);
     }
-    refreshTimestamps.set(id as string, now);
+    refreshTimestamps.set(id, now);
 
     const user = await userService.refresh(id);
     if (!user) return c.json(fail('USER_NOT_FOUND', 'User not found'), 404);
@@ -217,7 +217,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
 
   router.put('/:id/login-policy', async (c) => {
     const id = createUserId(c.req.param('id'));
-    { const r = await requirePerm(c, permissionChecker, 'update', 'user', id as string); if (r) return r; }
+    { const r = await requirePerm(c, permissionChecker, 'update', 'user', id); if (r) return r; }
     const body: unknown = await c.req.json();
     const parsed = LoginPolicySchema.safeParse(body);
     if (!parsed.success) {
@@ -234,7 +234,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
 
   router.delete('/:id/login-policy', async (c) => {
     const id = createUserId(c.req.param('id'));
-    { const r = await requirePerm(c, permissionChecker, 'update', 'user', id as string); if (r) return r; }
+    { const r = await requirePerm(c, permissionChecker, 'update', 'user', id); if (r) return r; }
     const actorId = c.var.currentUser?.id;
     await userService.clearLoginPolicy(id, actorId);
     return c.json(ok(null));
@@ -255,7 +255,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
     if (!parsed.success) {
       return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
     }
-    { const r = await requirePerm(c, permissionChecker, 'update', 'user', id as string); if (r) return r; }
+    { const r = await requirePerm(c, permissionChecker, 'update', 'user', id); if (r) return r; }
     const user = await userService.update(id, {
       name: undefined, password: undefined, role: undefined,
       loginPolicy: undefined, publicKeyEd25519: parsed.data.publicKey,
@@ -266,7 +266,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
 
   router.delete('/:id/public-key', async (c) => {
     const id = createUserId(c.req.param('id'));
-    { const r = await requirePerm(c, permissionChecker, 'update', 'user', id as string); if (r) return r; }
+    { const r = await requirePerm(c, permissionChecker, 'update', 'user', id); if (r) return r; }
     const actorId = c.var.currentUser?.id;
     await userService.clearPublicKey(id, actorId);
     return c.json(ok(null));
@@ -402,7 +402,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
     const id = createUserId(c.req.param('id'));
     const gid = parseInt(c.req.param('gid'));
     if (isNaN(gid) || gid < 0) return c.json(fail('VALIDATION_ERROR', 'Invalid GID'), 400);
-    { const r = await requirePerm(c, permissionChecker, 'update', 'user', id as string); if (r) return r; }
+    { const r = await requirePerm(c, permissionChecker, 'update', 'user', id); if (r) return r; }
     const actorId = c.var.currentUser?.id;
     const user = await userService.addSupplementaryGroup(id, createGid(gid), actorId);
     return c.json(ok(userToResponse(user)));
@@ -412,7 +412,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
     const id = createUserId(c.req.param('id'));
     const gid = parseInt(c.req.param('gid'));
     if (isNaN(gid) || gid < 0) return c.json(fail('VALIDATION_ERROR', 'Invalid GID'), 400);
-    { const r = await requirePerm(c, permissionChecker, 'update', 'user', id as string); if (r) return r; }
+    { const r = await requirePerm(c, permissionChecker, 'update', 'user', id); if (r) return r; }
     const actorId = c.var.currentUser?.id;
     const user = await userService.removeSupplementaryGroup(id, createGid(gid), actorId);
     return c.json(ok(userToResponse(user)));

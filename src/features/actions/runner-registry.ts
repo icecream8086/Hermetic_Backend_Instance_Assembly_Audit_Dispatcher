@@ -101,7 +101,7 @@ export class RunnerRegistry {
       level: 5, facility: 'runner-registry',
       message: `Runner registered: ${input.name} (${id})`,
       metadata: { runnerId: id, labels: input.labels },
-    } as any);
+    });
 
     return runner;
   }
@@ -115,7 +115,7 @@ export class RunnerRegistry {
 
     for (const id of idx.value) {
       const entry = await this.atomic.get<RunnerRegistration>(PFX + id);
-      if (!entry || entry.value.status !== 'online') continue;
+      if (entry?.value.status !== 'online') continue;
       if (now - entry.value.lastHeartbeat < HEARTBEAT_TIMEOUT_MS) continue;
 
       const updated: RunnerRegistration = {
@@ -138,7 +138,7 @@ export class RunnerRegistry {
     const entries = await Promise.all(
       idx.value.map(i => this.atomic.get<RunnerRegistration>(PFX + i)),
     );
-    let runners = entries.filter(e => e && e.value.status === 'online').map(e => e!.value);
+    let runners = entries.filter(e => e?.value.status === 'online').map(e => e!.value);
 
     if (requiredLabels) {
       runners = runners.filter(r =>
@@ -188,7 +188,7 @@ export class RunnerRegistry {
     if (!idx) return null;
     for (const id of idx.value) {
       const entry = await this.atomic.get<RunnerRegistration>(PFX + id);
-      if (entry && entry.value.name === name) return entry.value;
+      if (entry?.value.name === name) return entry.value;
     }
     return null;
   }

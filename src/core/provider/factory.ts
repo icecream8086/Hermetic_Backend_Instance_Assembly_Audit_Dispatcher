@@ -103,7 +103,7 @@ class LazyProviderRegistry implements IProviderRegistry {
 
   get networkPolicy(): INetworkPolicyProvider | undefined {
     if (this._networkPolicy === undefined) {
-      const ep = process.env['PODMAN_ENDPOINT'] ?? 'http://127.0.0.1:8080';
+      const ep = process.env.PODMAN_ENDPOINT ?? 'http://127.0.0.1:8080';
       this._networkPolicy = this._isAlibaba ? undefined : new PodmanNetworkPolicyProvider(ep);
     }
     return this._networkPolicy;
@@ -306,7 +306,7 @@ class LazyProviderRegistry implements IProviderRegistry {
   }
 
   private _buildPodmanEntry(): ProviderEntry {
-    const ep = process.env['PODMAN_ENDPOINT'] ?? 'http://127.0.0.1:8080';
+    const ep = process.env.PODMAN_ENDPOINT ?? 'http://127.0.0.1:8080';
     return {
       name: 'podman',
       container: secureContainerProvider(new PodmanContainerProvider(ep)),
@@ -323,7 +323,7 @@ class LazyProviderRegistry implements IProviderRegistry {
     };
   }
 
-  private _buildAlibabaAccounts(): Array<{ name: string; container: IContainerProvider; image: IImageProvider }> {
+  private _buildAlibabaAccounts(): { name: string; container: IContainerProvider; image: IImageProvider }[] {
     return this.config.accounts
       .filter((a): a is Credential & { accessKeyId: string; accessKeySecret: string } => !!(a.accessKeyId && a.accessKeySecret))
       .map(a => ({
@@ -331,7 +331,7 @@ class LazyProviderRegistry implements IProviderRegistry {
         container: secureContainerProvider(new AlibabaEciContainerProvider(a.accessKeyId, a.accessKeySecret, a.endpoint)),
         image: new AlibabaEciImageProvider(a.accessKeyId, a.accessKeySecret, a.endpoint,
           a.defaultRegion ?? this.config.region as string,
-          a.extra?.registryCredentials as Array<{ server: string; userName: string; password: string }> | undefined),
+          a.extra?.registryCredentials as { server: string; userName: string; password: string }[] | undefined),
       }));
   }
 
@@ -362,7 +362,7 @@ class LazyProviderRegistry implements IProviderRegistry {
       }
     }
     if (this.config.container === 'podman') {
-      const ep = process.env['PODMAN_ENDPOINT'] ?? 'http://127.0.0.1:8080';
+      const ep = process.env.PODMAN_ENDPOINT ?? 'http://127.0.0.1:8080';
       return secureContainerGroupProvider(new PodmanContainerGroupProvider(ep));
     }
     return undefined;

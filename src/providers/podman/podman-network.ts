@@ -29,7 +29,7 @@ export class PodmanNetworkPolicyProvider implements INetworkPolicyProvider {
     // Check if already exists
     const listResp = await fetch(`${this.#libpodApi}/networks/json`);
     if (listResp.ok) {
-      const networks = await listResp.json() as Array<{ Name?: string }>;
+      const networks = await listResp.json();
       const existing = networks.find(n => n.Name === name);
       if (existing) return name;
     }

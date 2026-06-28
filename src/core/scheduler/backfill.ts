@@ -35,7 +35,7 @@ export function cronToIntervalMs(cron: string): number | null {
 
   // */N * * * *
   if (minute?.startsWith('*/') && hour === '*' && day === '*' && month === '*' && weekday === '*') {
-    const n = parseInt(minute!.slice(2), 10);
+    const n = parseInt(minute.slice(2), 10);
     if (n > 0 && n <= 60) return n * 60_000;
   }
 
@@ -98,7 +98,7 @@ export async function backfillDagRuns(
     }
 
     const dagRun: Omit<DagRun, 'version'> = {
-      id: createDagRunId(`dr_${dagDef.id}_${execDate}_${crypto.randomUUID()}` as string),
+      id: createDagRunId(`dr_${dagDef.id}_${execDate}_${crypto.randomUUID()}`),
       dagId: dagDef.id,
       status: 'QUEUED',
       executionDate: execDate,

@@ -27,7 +27,7 @@ export class RequestCachedAtomicStore implements IAtomicStore {
     if (cached !== undefined) return cached as { value: T; version: VersionId } | null;
 
     const result = await this.#inner.get<T>(key);
-    this.#cache.set(key, result as { value: unknown; version: VersionId } | null);
+    this.#cache.set(key, result);
     return result;
   }
 

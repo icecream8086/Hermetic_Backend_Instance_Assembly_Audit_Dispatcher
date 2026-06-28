@@ -39,7 +39,7 @@ export class FileQueryStore implements IQueryStore {
     await this.#ensureDir();
 
     // Minimal SQL parser: supports SELECT * FROM <table> WHERE <col> = <val>
-    const selectMatch = sql.match(/SELECT\s+\*\s+FROM\s+(\w+)(?:\s+WHERE\s+(.+))?/i);
+    const selectMatch = /SELECT\s+\*\s+FROM\s+(\w+)(?:\s+WHERE\s+(.+))?/i.exec(sql);
     if (selectMatch) {
       const table = selectMatch[1]!;
       let rows = await this.#readTable(table);
@@ -47,7 +47,7 @@ export class FileQueryStore implements IQueryStore {
       if (selectMatch[2]) {
         const whereClause = selectMatch[2].trim();
         // Simple WHERE col = $1
-        const whereMatch = whereClause.match(/(\w+)\s*=\s*\?/);
+        const whereMatch = /(\w+)\s*=\s*\?/.exec(whereClause);
         if (whereMatch && Array.isArray(params)) {
           const col = whereMatch[1]!;
           rows = rows.filter(r => r[col] === params[0]);
@@ -58,7 +58,7 @@ export class FileQueryStore implements IQueryStore {
     }
 
     // INSERT INTO <table> VALUES (...)
-    const insertMatch = sql.match(/INSERT\s+INTO\s+(\w+)\s+VALUES\s*\((.+)\)/i);
+    const insertMatch = /INSERT\s+INTO\s+(\w+)\s+VALUES\s*\((.+)\)/i.exec(sql);
     if (insertMatch) {
       const table = insertMatch[1]!;
       const rows = await this.#readTable(table);

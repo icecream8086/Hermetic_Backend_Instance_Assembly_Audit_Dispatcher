@@ -89,7 +89,7 @@ export class CrudStore<T extends { id: string }> {
     for (let attempt = 0; attempt < 3; attempt++) {
       const entry = await this.atomic.get<T>(this.prefix + id);
       if (!entry) throw new AppError(404, this.notFoundCode, `${this.notFoundCode}: ${id}`);
-      updated = { ...entry.value, ...updated, updatedAt: Date.now() } as T;
+      updated = { ...entry.value, ...updated, updatedAt: Date.now() };
       const ver = await this.atomic.set(this.prefix + id, updated, entry.version);
       if (ver) return;
     }
@@ -100,7 +100,7 @@ export class CrudStore<T extends { id: string }> {
   async #loadAll(): Promise<T[]> {
     return this.atomic.transact(async (txn) => {
       const idxEntry = await txn.get<string[]>(this.indexKey);
-      if (!idxEntry || !idxEntry.length) return [];
+      if (!idxEntry?.length) return [];
       const keys = idxEntry.map(id => this.prefix + id);
       const entries = await txn.getMany<T>(keys);
       return entries.filter((e: T | null): e is T => e !== null);

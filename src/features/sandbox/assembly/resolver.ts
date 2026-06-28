@@ -11,7 +11,7 @@ import { TemplateKind } from './types.ts';
 import type { CreateSandboxInput, ContainerConfig } from '../types.ts';
 
 /** Mutable builder used internally during merge. Frozen to CreateSandboxInput on completion. */
-type MutableSandboxInput = {
+interface MutableSandboxInput {
   name: string;
   description?: string;
   region: string;
@@ -29,7 +29,7 @@ type MutableSandboxInput = {
   };
   tags?: CreateSandboxInput['tags'];
   providerOverrides?: Record<string, unknown>;
-};
+}
 
 // ─── DAG resolver ───
 
@@ -45,7 +45,7 @@ export function resolveAssembly(
     rootName,
     name => store.get(name),
     t => t.kind === TemplateKind.Assembly
-      ? (t as AssemblyTemplate).components.map(c => c.target)
+      ? (t).components.map(c => c.target)
       : [],
     t => t.name,
   );
@@ -72,8 +72,8 @@ export function resolveAssembly(
 
   // Apply assembly-level static overrides
   const root = store.get(rootName);
-  if (root?.kind === TemplateKind.Assembly && (root as AssemblyTemplate).overrides) {
-    Object.assign(merged, (root as AssemblyTemplate).overrides);
+  if (root?.kind === TemplateKind.Assembly && (root).overrides) {
+    Object.assign(merged, (root).overrides);
   }
 
   const validationErrors = validateConfig(merged);
@@ -108,7 +108,7 @@ function mergeTemplates(sorted: Template[]): MutableSandboxInput | null {
         break;
 
       case TemplateKind.Container: {
-        const ct = template as ContainerTemplate;
+        const ct = template;
         const idx = config.containers.findIndex(c => c.name === ct.spec.name);
         if (idx >= 0) {
           config.containers = [
@@ -123,7 +123,7 @@ function mergeTemplates(sorted: Template[]): MutableSandboxInput | null {
       }
 
       case TemplateKind.Resource: {
-        const rt = template as ResourceTemplate;
+        const rt = template;
         if (!config.providerOverrides) config.providerOverrides = {};
         const prev = (config.providerOverrides[rt.resourceType] ?? {}) as Record<string, unknown>;
         config.providerOverrides[rt.resourceType] = { ...prev, ...rt.spec };

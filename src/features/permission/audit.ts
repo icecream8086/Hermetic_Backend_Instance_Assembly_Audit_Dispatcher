@@ -1,4 +1,4 @@
-import { KernLevel } from '../../core/audit/kern-level.ts';
+import type { KernLevel } from '../../core/audit/kern-level.ts';
 import type { IAuditWriter } from '../../core/audit/types.ts';
 import type { ILogWriter } from '../../core/audit/types.ts';
 import { createFacility } from '../../core/brand.ts';

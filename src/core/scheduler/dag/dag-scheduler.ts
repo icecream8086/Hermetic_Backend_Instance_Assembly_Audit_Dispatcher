@@ -76,7 +76,7 @@ export class DagScheduler {
     let clock = 0;
 
     // Resource snapshots — track availableAt per resource
-    const snapshots: Map<string, ResourceSnapshot> = new Map();
+    const snapshots = new Map<string, ResourceSnapshot>();
     for (const r of resources) {
       snapshots.set(r.id, {
         node: r,

@@ -17,7 +17,7 @@ export function createContainerSecretRouter(svc: IContainerSecretService): Hono<
       if (!parsed.success) {
         return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
       }
-      const secret = await svc.create(parsed.data as any);
+      const secret = await svc.create(parsed.data);
       return c.json(ok(redact(secret)), 201);
     }),
 
@@ -39,7 +39,7 @@ export function createContainerSecretRouter(svc: IContainerSecretService): Hono<
       if (!parsed.success) {
         return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
       }
-      const secret = await svc.update(c.req.param('id'), parsed.data as any);
+      const secret = await svc.update(c.req.param('id'), parsed.data);
       return c.json(ok(redact(secret)));
     }),
 
@@ -89,7 +89,7 @@ export function createContainerSecretRouter(svc: IContainerSecretService): Hono<
     if (!parsed.success) {
       return c.json(fail('VALIDATION_ERROR', 'Expected array of scope IDs'), 400);
     }
-    const secret = await svc.update(c.req.param('id'), { selectedScopeIds: parsed.data } as any);
+    const secret = await svc.update(c.req.param('id'), { selectedScopeIds: parsed.data });
     return c.json(ok(redact(secret)));
   });
 

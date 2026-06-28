@@ -45,12 +45,12 @@ interface PodmanInspectResult {
     Memory?: number;
     CpuShares?: number;
   };
-  Mounts?: Array<{
+  Mounts?: {
     Source: string;
     Destination: string;
     Type?: string;
     Mode?: string;
-  }>;
+  }[];
   NetworkSettings?: {
     IPAddress?: string;
   };
@@ -103,8 +103,8 @@ export class PodmanContainerGroupProvider implements IContainerGroupProvider {
     const portMappings = this.#collectPortMappings(input);
 
     // Apply network from providerOverrides (set by network policy layer)
-    const overrides = input.providerOverrides as Record<string, unknown> | undefined;
-    const networkName = overrides?.['network'] as string | undefined;
+    const overrides = input.providerOverrides;
+    const networkName = overrides?.network as string | undefined;
 
     // 1. Create pod
     const podSpec: Record<string, unknown> = {
@@ -127,7 +127,7 @@ export class PodmanContainerGroupProvider implements IContainerGroupProvider {
       const err = await podResp.text();
       throw new Error(`Podman pod create failed (${podResp.status}): ${err}`);
     }
-    const pod = await podResp.json() as PodmanPodCreateResult;
+    const pod = await podResp.json();
 
     // 2. Create each container in the pod
     for (const c of input.containers) {
@@ -241,9 +241,9 @@ export class PodmanContainerGroupProvider implements IContainerGroupProvider {
 
   #buildHealthcheck(lp: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
     if (!lp) return undefined;
-    const exec = lp['exec'] as { command?: string[] } | undefined;
-    const httpGet = lp['httpGet'] as { port?: number; path?: string } | undefined;
-    const tcpSocket = lp['tcpSocket'] as { port?: number } | undefined;
+    const exec = lp.exec as { command?: string[] } | undefined;
+    const httpGet = lp.httpGet as { port?: number; path?: string } | undefined;
+    const tcpSocket = lp.tcpSocket as { port?: number } | undefined;
 
     let hc: Record<string, unknown> | undefined;
     if (exec?.command) {
@@ -254,10 +254,10 @@ export class PodmanContainerGroupProvider implements IContainerGroupProvider {
       hc = { Test: ['CMD-SHELL', `exec 3<>/dev/tcp/localhost/${tcpSocket.port}`] };
     }
     if (hc) {
-      if (lp['initialDelaySeconds']) hc.StartPeriod = (lp['initialDelaySeconds'] as number) * 1_000_000_000;
-      if (lp['periodSeconds']) hc.Interval = (lp['periodSeconds'] as number) * 1_000_000_000;
-      if (lp['timeoutSeconds']) hc.Timeout = (lp['timeoutSeconds'] as number) * 1_000_000_000;
-      if (lp['failureThreshold']) hc.Retries = lp['failureThreshold'];
+      if (lp.initialDelaySeconds) hc.StartPeriod = (lp.initialDelaySeconds as number) * 1_000_000_000;
+      if (lp.periodSeconds) hc.Interval = (lp.periodSeconds as number) * 1_000_000_000;
+      if (lp.timeoutSeconds) hc.Timeout = (lp.timeoutSeconds as number) * 1_000_000_000;
+      if (lp.failureThreshold) hc.Retries = lp.failureThreshold;
     }
     return hc;
   }
@@ -266,7 +266,7 @@ export class PodmanContainerGroupProvider implements IContainerGroupProvider {
     const resp = await fetch(`${this.#libpodApi}/pods/${encodeURIComponent(idOrName)}/json`);
     if (resp.status === 404) return null;
     if (!resp.ok) return null;
-    const info = await resp.json() as PodmanPodInspectResult;
+    const info = await resp.json();
     return this.#podToRuntime(info);
   }
 
@@ -279,14 +279,14 @@ export class PodmanContainerGroupProvider implements IContainerGroupProvider {
     } else {
       const resp = await fetch(`${this.#libpodApi}/pods/${encodeURIComponent(pod.Id)}/json`);
       if (!resp.ok) return null;
-      detail = await resp.json() as PodmanPodInspectResult;
+      detail = await resp.json();
     }
 
     const containerDetails = await Promise.all(
       detail.Containers.map(async (pc) => {
         const cResp = await fetch(`${this.#dockerApi}/containers/${pc.Id}/json`);
         if (!cResp.ok) return null;
-        return cResp.json() as Promise<PodmanInspectResult>;
+        return cResp.json();
       }),
     );
 
@@ -347,7 +347,7 @@ export class PodmanContainerGroupProvider implements IContainerGroupProvider {
   async #listPods(): Promise<PodmanPodListItem[]> {
     const resp = await fetch(`${this.#libpodApi}/pods/json`);
     if (!resp.ok) return [];
-    return resp.json() as Promise<PodmanPodListItem[]>;
+    return resp.json();
   }
 
   async #forceDeletePod(idOrName: string): Promise<void> {

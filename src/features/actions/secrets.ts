@@ -57,14 +57,14 @@ export class WorkflowSecretService {
       : secret.encryptedValue;
   }
 
-  async list(workflowId: string): Promise<Array<{ key: string; id: string }>> {
+  async list(workflowId: string): Promise<{ key: string; id: string }[]> {
     const idx = await this.atomic.get<string[]>(IDX);
     if (!idx) return [];
     const entries = await Promise.all(
       idx.value.map(i => this.atomic.get<WorkflowSecret>(PFX + i)),
     );
     return entries
-      .filter(e => e && e.value.workflowId === workflowId)
+      .filter(e => e?.value.workflowId === workflowId)
       .map(e => ({ key: e!.value.key, id: e!.value.id }));
   }
 
@@ -107,7 +107,7 @@ export class WorkflowSecretService {
     if (!idx) return null;
     for (const id of idx.value) {
       const entry = await this.atomic.get<WorkflowSecret>(PFX + id);
-      if (entry && entry.value.workflowId === workflowId && entry.value.key === key) {
+      if (entry?.value.workflowId === workflowId && entry.value.key === key) {
         return entry.value;
       }
     }

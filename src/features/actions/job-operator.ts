@@ -6,7 +6,7 @@ import type { EventBus } from '../../core/event-bus/bus.ts';
 import type { RunStepDef, UsesStepDef, StepDef, ActionContainerConfig } from './types.ts';
 import { executeDnsStep } from './step-dns.ts';
 import { appendStepLog } from './logs.ts';
-import { ActionRegistry } from './registry.ts';
+import type { ActionRegistry } from './registry.ts';
 import { createEvent } from '../../core/event-bus/types.ts';
 
 /**
@@ -58,7 +58,7 @@ export class JobOperator implements ITaskExecutor {
           level: 6, facility: 'job-operator',
           message: `Step ${name} started for ${jobName}`,
           metadata: { taskInstanceId: ti.id, stepName: name },
-        } as any);
+        });
 
         try {
           if ('run' in step) {
@@ -76,7 +76,7 @@ export class JobOperator implements ITaskExecutor {
             level: 3, facility: 'job-operator',
             message: `Step ${name} failed: ${msg}`,
             metadata: { taskInstanceId: ti.id, stepName: name, error: msg },
-          } as any);
+          });
 
           if (step.continueOnError) continue;
           return { success: false, error: msg, exitCode: 1 };

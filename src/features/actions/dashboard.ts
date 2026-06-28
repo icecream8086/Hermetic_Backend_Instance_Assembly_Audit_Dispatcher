@@ -65,7 +65,7 @@ export class DashboardService {
     let runnersOnline = 0;
     if (runnerIdx) {
       const rs = (await Promise.all(runnerIdx.value.map(i => this.atomic.get<any>('action-runner:' + i))))
-        .filter(e => e && e.value.status === 'online');
+        .filter(e => e?.value.status === 'online');
       runnersOnline = rs.length;
     }
 

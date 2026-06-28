@@ -68,7 +68,7 @@ export class VolumeService implements IVolumeService {
       }
     }
 
-    this.logger.write({ facility: 'app' as any, level: 'INFO' as any, message: `[volume] Created ${input.type}: ${id} (${input.name})` });
+    this.logger.write({ facility: 'app', level: 'INFO' as any, message: `[volume] Created ${input.type}: ${id} (${input.name})` });
     return volume;
   }
 
@@ -144,7 +144,7 @@ export class VolumeService implements IVolumeService {
           txn.set(PREFIX + id, merged);
           updated = merged;
         });
-        this.logger.write({ facility: 'app' as any, level: 'INFO' as any, message: `[volume] Updated ${id}` });
+        this.logger.write({ facility: 'app', level: 'INFO' as any, message: `[volume] Updated ${id}` });
         return updated!;
       } catch (err) {
         if (err instanceof TransactConflictError && attempt < 2) continue;
@@ -170,6 +170,6 @@ export class VolumeService implements IVolumeService {
         throw err;
       }
     }
-    this.logger.write({ facility: 'app' as any, level: 'INFO' as any, message: `[volume] Deleted ${id}` });
+    this.logger.write({ facility: 'app', level: 'INFO' as any, message: `[volume] Deleted ${id}` });
   }
 }

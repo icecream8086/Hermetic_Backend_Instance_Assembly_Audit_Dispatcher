@@ -13,7 +13,7 @@ import {
 } from './persistence-policy.ts';
 import type { AppContext } from '../deps.ts';
 
-type AuditEnv = { Variables: AppContext };
+interface AuditEnv { Variables: AppContext }
 
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 500;

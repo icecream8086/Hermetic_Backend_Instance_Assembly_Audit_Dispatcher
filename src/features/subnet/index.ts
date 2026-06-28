@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import type { Hono } from 'hono';
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
 import type { IAuditWriter } from '../../core/audit/types.ts';
 import { ConsoleLogger } from '../../core/audit/console-logger.ts';

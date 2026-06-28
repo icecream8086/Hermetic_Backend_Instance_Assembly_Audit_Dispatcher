@@ -1,6 +1,6 @@
 import type { IImageProvider, ImageInfo, ListImagesOptions } from '../../core/provider/interfaces.ts';
 
-const ENDPOINT = process.env['PODMAN_ENDPOINT'] ?? 'http://127.0.0.1:8080';
+const ENDPOINT = process.env.PODMAN_ENDPOINT ?? 'http://127.0.0.1:8080';
 
 interface RawImage {
   Id: string; RepoTags?: string[]; Created?: number; Size?: number;
@@ -118,7 +118,7 @@ export class PodmanImageProvider implements IImageProvider {
     const resp = await this.#fetch(`${this.#apiBase}/images/prune`, { method: 'POST' });
     if (!resp) return { reclaimed: 0 };
     if (!resp.ok) return { reclaimed: 0 };
-    const data = await resp.json() as { reclaimed?: number };
+    const data = await resp.json();
     return { reclaimed: data.reclaimed ?? 0 };
   }
 
@@ -136,7 +136,7 @@ export class PodmanImageProvider implements IImageProvider {
     }
     // No tag provided, find the newest image
     const all = await this.list();
-    return all[all.length - 1] ?? { id: 'unknown', tags: [] as any };
+    return all[all.length - 1] ?? { id: 'unknown', tags: [] };
   }
 
   /** Fetch with connection error protection. Returns null when Podman is down. */

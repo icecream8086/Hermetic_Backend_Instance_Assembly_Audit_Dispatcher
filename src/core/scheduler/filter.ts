@@ -1,5 +1,5 @@
 import type { TaskInstance, Task } from '../dag/types.ts';
-import { ConcurrencyMap } from './concurrency-map.ts';
+import type { ConcurrencyMap } from './concurrency-map.ts';
 
 /**
  * 5-step filter pipeline — Airflow `_executable_task_instances_to_queued()`.

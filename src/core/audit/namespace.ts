@@ -49,13 +49,13 @@ export class NamespacedAuditReader implements IAuditReader {
     if (this.ns.sandboxId) {
       entries = entries.filter(e =>
         (e as any)._sandbox_id === this.ns.sandboxId ||
-        e.metadata?.['sandboxId'] === this.ns.sandboxId,
+        e.metadata?.sandboxId === this.ns.sandboxId,
       );
     }
     if (this.ns.bootId) {
       entries = entries.filter(e =>
         (e as any)._boot_id === this.ns.bootId ||
-        e.metadata?.['bootId'] === this.ns.bootId,
+        e.metadata?.bootId === this.ns.bootId,
       );
     }
     if (this.ns.minLevel !== undefined) {

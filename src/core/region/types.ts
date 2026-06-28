@@ -63,7 +63,7 @@ declare const REGION_ID_BRAND: unique symbol;
 export type RegionId = string & { readonly [REGION_ID_BRAND]: true };
 
 export function createRegionId(raw: string): RegionId {
-  if (!raw || !raw.trim()) throw new TypeError('RegionId must not be empty');
+  if (!raw?.trim()) throw new TypeError('RegionId must not be empty');
   return raw as RegionId;
 }
 
@@ -95,7 +95,7 @@ const ALIBABA_ZONE_RE = /^[a-z]+(?:-[a-z0-9]+)+-[a-z]$/;
 const PODMAN_ZONE_RE = /^local(?:-[a-zA-Z0-9_-]+)?$/;
 
 export function createZoneId(raw: string, platform: Platform): ZoneId {
-  if (!raw || !raw.trim()) throw new TypeError('ZoneId must not be empty');
+  if (!raw?.trim()) throw new TypeError('ZoneId must not be empty');
   switch (platform) {
     case 'alibaba':
       if (!ALIBABA_ZONE_RE.test(raw)) {

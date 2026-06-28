@@ -25,7 +25,7 @@ export class AlibabaEciImageProvider implements IImageProvider {
     private readonly accessKeySecret: string,
     private readonly endpoint = 'eci.cn-hangzhou.aliyuncs.com',
     private readonly region = 'cn-hangzhou',
-    private readonly registryCredentials?: Array<{ server: string; userName: string; password: string }>,
+    private readonly registryCredentials?: { server: string; userName: string; password: string }[],
   ) {}
 
   async pull(image: string, registryCredentialOrClusterId?: { server: string; userName: string; password: string } | string): Promise<ImageInfo> {
@@ -66,7 +66,7 @@ export class AlibabaEciImageProvider implements IImageProvider {
       const params: Record<string, string | undefined> = {
         RegionId: this.region,
       };
-      if (options?.limit) params['MaxResults'] = String(options.limit);
+      if (options?.limit) params.MaxResults = String(options.limit);
       // Note: Alibaba uses NextToken for offset-style pagination. For simplicity
       // here we pass limit only. Full next-token iteration would require state.
       const resp = await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret, 'DescribeImageCaches', params);
@@ -76,7 +76,7 @@ export class AlibabaEciImageProvider implements IImageProvider {
         tags: c.Images ?? [],
         created: c.CreationTime ? new Date(c.CreationTime).getTime() : undefined,
         size: c.FlashSize ?? c.Size ?? undefined,
-      })) as any;
+      }));
     } catch (e) {
       return [];
     }

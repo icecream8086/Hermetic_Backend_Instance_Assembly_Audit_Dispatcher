@@ -127,7 +127,7 @@ export function registerHealthCheck(deps: HealthCheckDeps): void {
             // Try provider status check (only if we have instance routing info)
             if (resolvedInstanceId) {
               try {
-                const p = await providers.resolveContainer?.(resolvedInstanceId as any);
+                const p = await providers.resolveContainer?.(resolvedInstanceId);
                 if (p?.getStatus) {
                   const rt = await p.getStatus(entry.value.providerId ?? sid);
                   if (!rt) {
@@ -145,7 +145,7 @@ export function registerHealthCheck(deps: HealthCheckDeps): void {
                   // Scheduling auto-promotion: provider says Running → promote locally
                   if (entry.value.status === SandboxStatus.Scheduling && rt.status === 'Running') {
                     const latest = await stores.atomic.get<Sandbox>(`sandbox:${sid}`);
-                    if (latest && latest.value.status === SandboxStatus.Scheduling) {
+                    if (latest?.value.status === SandboxStatus.Scheduling) {
                       await stores.atomic.set(`sandbox:${sid}`, {
                         ...latest.value,
                         status: SandboxStatus.Running,
@@ -188,7 +188,7 @@ export function registerHealthCheck(deps: HealthCheckDeps): void {
           if (lastStableAt !== undefined && entry.value.updatedAt <= lastStableAt) continue;
 
           if (!instanceId || !providers.resolveContainer) continue;
-          const provider = await providers.resolveContainer(instanceId as any);
+          const provider = await providers.resolveContainer(instanceId);
           if (!provider?.getStatus) continue;
 
           const runtime = await provider.getStatus(entry.value.providerId ?? sid);
@@ -261,7 +261,7 @@ export function registerHealthCheck(deps: HealthCheckDeps): void {
         for (const iid of instIdx.value) {
           try {
             const instEntry = await stores.atomic.get<any>('instance:' + iid);
-            if (!instEntry?.value || instEntry.value.status !== 'online') continue;
+            if (instEntry?.value?.status !== 'online') continue;
             if (instEntry.value.updatedAt && (now - instEntry.value.updatedAt > 120_000)) {
               await stores.atomic.set('instance:' + iid, { ...instEntry.value, status: 'offline', updatedAt: now }, instEntry.version);
             }
@@ -396,7 +396,7 @@ async function gcUpdateState(
       level: 4, facility: 'sandbox-service',
       message: `Sandbox auto-deleted (${reason}) — ${sid}`,
       metadata: { eventType: 'sandbox.auto-deleted', sandboxId: sid, reason },
-    } as any);
+    });
     break;
   }
 }

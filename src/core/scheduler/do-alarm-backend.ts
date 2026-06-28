@@ -25,7 +25,7 @@ export class DoAlarmBackend implements ITimerBackend {
   readonly #callbackUrl: string | undefined;
   #localTimerId: ReturnType<typeof setInterval> | null = null;
 
-  constructor(doStub: DurableObjectStub, callbackUrl?: string | undefined) {
+  constructor(doStub: DurableObjectStub, callbackUrl?: string  ) {
     this.#doStub = doStub;
     this.#callbackUrl = callbackUrl;
   }

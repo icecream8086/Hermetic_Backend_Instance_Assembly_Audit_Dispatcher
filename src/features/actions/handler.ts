@@ -268,7 +268,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
       level: 5, facility: 'dag-scheduler',
       message: `DagRun ${run.id} created via scheduler for workflow ${entry.value.name}`,
       metadata: { dagId: dag.id, dagRunId: run.id, trigger: 'manual', taskCount: dag.tasks.length },
-    } as any);
+    });
 
     return c.json(ok({ dagRunId: run.id, dagId: dag.id, status: run.status, taskCount: dag.tasks.length }), 201);
   });
@@ -278,7 +278,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
    *  on.push configured.  Basic branch-name matching for now. */
   router.post('/webhook', async (c) => {
     const payload = await c.req.json().catch(() => ({}));
-    const branch = (payload as any)?.ref?.replace('refs/heads/', '') ?? '';
+    const branch = (payload)?.ref?.replace('refs/heads/', '') ?? '';
 
     const idx = await atomic.get<string[]>(IDX_WORKFLOW_IDS);
     if (!idx) return c.json(ok({ triggered: [], count: 0 }));
@@ -401,7 +401,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
   // ── Action registry ──
 
   router.post('/actions', async (c) => {
-    const body = await c.req.json() as CreateActionInput;
+    const body = await c.req.json();
     if (!body.name || !body.version || !body.runs) {
       throw new AppError(400, 'INVALID_ACTION', 'name, version, and runs are required');
     }
@@ -424,7 +424,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
   const projectService = new ProjectService(atomic, orgService);
 
   router.post('/orgs', async (c) => {
-    const body = await c.req.json() as CreateOrgInput;
+    const body = await c.req.json();
     const ownerId = c.var.currentUser?.id ?? 'anonymous';
     const org = await orgService.create(ownerId, body);
     return c.json(ok(org), 201);
@@ -443,13 +443,13 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
   });
 
   router.post('/orgs/:id/members', async (c) => {
-    const { userId } = await c.req.json() as { userId: string };
+    const { userId } = await c.req.json();
     await orgService.addMember(c.req.param('id'), userId);
     return c.json(ok({ ok: true }));
   });
 
   router.post('/projects', async (c) => {
-    const body = await c.req.json() as CreateProjectInput;
+    const body = await c.req.json();
     const ownerId = c.var.currentUser?.id ?? 'anonymous';
     const proj = await projectService.create(ownerId, body);
     return c.json(ok(proj), 201);
@@ -467,13 +467,13 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
   const approvalService = new ApprovalService(atomic);
 
   router.post('/runs/:id/approvals', async (c) => {
-    const { jobName, approvers } = await c.req.json() as { jobName: string; approvers: string[] };
+    const { jobName, approvers } = await c.req.json();
     const node = await approvalService.request(c.req.param('id'), jobName, approvers);
     return c.json(ok(node), 201);
   });
 
   router.post('/approvals/:id/decide', async (c) => {
-    const { approved, reason } = await c.req.json() as { approved: boolean; reason?: string };
+    const { approved, reason } = await c.req.json();
     const userId = c.var.currentUser?.id ?? 'anonymous';
     const node = await approvalService.decide(c.req.param('id'), userId, approved, reason);
     return c.json(ok(node));
@@ -493,7 +493,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
     const wfEntry = await atomic.get<WorkflowDef>(PFX_WORKFLOW_DEF + wid);
     if (!wfEntry) throw new AppError(404, 'WORKFLOW_NOT_FOUND', 'Workflow not found');
 
-    const { key, value } = await c.req.json() as { key: string; value: string };
+    const { key, value } = await c.req.json();
     if (!key || value === undefined) throw new AppError(400, 'INVALID_SECRET', 'key and value required');
 
     const secret = await secretService.set(wid, key, value);
@@ -566,7 +566,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
 
   /** Runner heartbeat: POST /api/actions/runners/heartbeat */
   router.post('/runners/heartbeat', async (c) => {
-    const body = await c.req.json() as RunnerHeartbeatInput;
+    const body = await c.req.json();
     const runner = await runnerRegistry.heartbeat(body);
     return c.json(ok(runner));
   });
@@ -596,7 +596,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
         level: 4, facility: 'runner-registry',
         message: `Marked ${marked} stale runner(s) offline`,
         metadata: { count: marked },
-      } as any);
+      });
     }
   });
   deps.eventLoop.enqueuePriority({ type: 'runner:heartbeat:check', payload: {} });

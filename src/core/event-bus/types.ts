@@ -93,7 +93,7 @@ export function createEvent<T>(type: string, payload?: T, metadata?: Record<stri
     id: `evt_${crypto.randomUUID().slice(0, 12)}`,
     timestamp: Date.now(),
     ...(metadata !== undefined ? { metadata } : {}),
-  } as Event<T>;
+  };
 }
 
 /**

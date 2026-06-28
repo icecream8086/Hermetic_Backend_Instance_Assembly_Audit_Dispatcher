@@ -1,7 +1,7 @@
 import type { IAtomicStore, IBlobStore } from '../../core/store/interfaces.ts';
 import { AppError } from '../../core/types.ts';
-import { SecretEncryption } from '../../core/auth/secret-encryption.ts';
-import { UserKeyring } from '../../core/auth/keyring.ts';
+import type { SecretEncryption } from '../../core/auth/secret-encryption.ts';
+import type { UserKeyring } from '../../core/auth/keyring.ts';
 import { SealedBox } from '../../core/auth/sealed-box.ts';
 import type { ContainerSecret, CreateContainerSecretInput, UpdateContainerSecretInput } from './types.ts';
 

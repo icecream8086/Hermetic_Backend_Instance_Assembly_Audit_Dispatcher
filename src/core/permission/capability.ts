@@ -111,7 +111,7 @@ export function formatCapabilities(caps: CapabilityValue): string[] {
 /** Parse a comma-separated cap name list into a bitmask. */
 export function parseCapabilities(names: string): CapabilityValue {
   let caps = 0;
-  const entries = Object.entries(CAP_NAMES) as [string, string][];
+  const entries = Object.entries(CAP_NAMES);
   for (const name of names.split(',').map(s => s.trim())) {
     for (const [bitStr, label] of entries) {
       if (label === name) caps |= parseInt(bitStr);

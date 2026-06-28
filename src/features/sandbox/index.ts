@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import type { Hono } from 'hono';
 import { ConsoleLogger } from '../../core/audit/console-logger.ts';
 import type { FeatureDeps } from '../../core/deps.ts';
 import { SandboxService } from './sandbox.service.ts';
@@ -18,5 +18,5 @@ export function createRouter(deps: FeatureDeps): Hono<any> {
 // Base type hierarchy
 export * from './base.ts';
 export * from './types.ts';
-export * from './interfaces.ts';
+export type * from './interfaces.ts';
 export * as Assembly from './assembly/index.ts';

@@ -28,7 +28,7 @@ export function buildDagFromWorkflow(
   wf: WorkflowDef,
   options: BuildDagOptions = {},
 ): { dag: DagDef; taskMap: Map<string, Task> } {
-  const dagId = options.dagId ?? createDagId(`wf_${wf.id}` as string);
+  const dagId = options.dagId ?? createDagId(`wf_${wf.id}`);
   const now = Date.now();
 
   const tasks: Task[] = [];
@@ -61,7 +61,7 @@ function jobToTask(
   wfEnv: Record<string, string> = {},
   metadata?: Record<string, unknown>,
 ): Task {
-  const taskId = createTaskId(`task_${jobName}` as string);
+  const taskId = createTaskId(`task_${jobName}`);
 
   return {
     id: taskId,
@@ -81,7 +81,7 @@ function jobToTask(
       cache: jobDef.cache,
       ...metadata,
     },
-    dependsOn: (jobDef.needs ?? []).map(n => createTaskId(`task_${n}` as string)),
+    dependsOn: (jobDef.needs ?? []).map(n => createTaskId(`task_${n}`)),
     triggerRule: DEFAULT_TRIGGER_RULE,
     retries: 0,
     retryDelayMs: 30_000,
@@ -98,7 +98,7 @@ export function createDagRunFromTrigger(
   ownerId?: string,
 ): Omit<DagRun, 'version'> {
   return {
-    id: createDagRunId(`dr_${dagId}_${Date.now()}_${crypto.randomUUID()}` as string),
+    id: createDagRunId(`dr_${dagId}_${Date.now()}_${crypto.randomUUID()}`),
     dagId,
     status: 'QUEUED',
     executionDate: Date.now(),

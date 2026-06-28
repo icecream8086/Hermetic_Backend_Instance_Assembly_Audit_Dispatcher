@@ -26,7 +26,7 @@ export interface R2Bucket {
   put(key: string, value: string | ArrayBuffer | Uint8Array): Promise<void>;
   get(key: string): Promise<{ body: ArrayBuffer; key: string } | null>;
   list(options?: { prefix?: string; limit?: number; cursor?: string }): Promise<{
-    objects: Array<{ key: string; size: number; uploaded: Date }>;
+    objects: { key: string; size: number; uploaded: Date }[];
     cursor?: string;
     truncated: boolean;
   }>;
@@ -242,7 +242,7 @@ export class R2AuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
     const result = await this.bucket.list({ prefix: this.#config.prefix, limit: 500 });
     let removed = 0;
     for (const obj of result.objects) {
-      const tsMatch = obj.key.match(/(\d{13})-/);
+      const tsMatch = /(\d{13})-/.exec(obj.key);
       if (tsMatch && parseInt(tsMatch[1]!) < beforeTs) {
         await this.bucket.delete(obj.key);
         removed++;
@@ -278,7 +278,7 @@ export class R2AuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
   // ─── Cursor validation ───
 
   #validateCursor(c: { s: string; i: number; b: string; m: number; t: number; x: string }): boolean {
-    const expected = xorHash({ s: c.s, i: c.i, b: c.b, m: c.m, t: c.t } as any);
+    const expected = xorHash({ s: c.s, i: c.i, b: c.b, m: c.m, t: c.t });
     return c.x === expected;
   }
 }

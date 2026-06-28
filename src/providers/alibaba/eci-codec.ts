@@ -149,8 +149,8 @@ interface EciVolumeItem {
   NFSVolume?: { Server?: string; Path?: string; ReadOnly?: boolean };
   OSSVolume?: { Bucket?: string; Path?: string; ReadOnly?: boolean; Endpoint?: string };
   DiskVolume?: { DiskId?: string; FsType?: string; DiskSize?: number; DiskCategory?: string; ReadOnly?: boolean; DeleteWithInstance?: boolean };
-  ConfigMapVolume?: { Name?: string; Items?: Array<{ Key?: string; Path?: string; Mode?: number }> };
-  SecretVolume?: { SecretName?: string; Items?: Array<{ Key?: string; Path?: string; Mode?: number }> };
+  ConfigMapVolume?: { Name?: string; Items?: { Key?: string; Path?: string; Mode?: number }[] };
+  SecretVolume?: { SecretName?: string; Items?: { Key?: string; Path?: string; Mode?: number }[] };
 }
 interface EciEventItem { Reason?: string; Type?: string; Message?: string; Count?: number; LastTimestamp?: string; }
 interface EciTagItem { Key?: string; Value?: string; }
@@ -492,7 +492,7 @@ export function parseProbe(raw: EciProbeItem | undefined): ProbeSpec | undefined
     spec.httpGet = hg;
   }
   if (raw.Exec?.Commands?.length) spec.exec = { command: raw.Exec.Commands };
-  return Object.keys(spec).length > 0 ? (spec as unknown as ProbeSpec) : undefined;
+  return Object.keys(spec).length > 0 ? (spec) : undefined;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -521,7 +521,7 @@ const VOLUME_SCALARS: CodecTable<VolumeConfigInput, VolumeScalarKey> = {
 /** Volume compound builder — dispatches options by type. */
 function buildVolumeCompound(v: VolumeConfigInput, pfx: string): Record<string, string> {
   const p: Record<string, string> = {};
-  const opts = (v.options ?? {}) as Record<string, unknown>;
+  const opts = (v.options ?? {});
 
   if (opts.server) {
     // NFS volume
@@ -548,7 +548,7 @@ function buildVolumeCompound(v: VolumeConfigInput, pfx: string): Record<string, 
   }
   if (v.type === 'ConfigMapVolume' || opts.configMapName) {
     const name = String(opts.configMapName ?? opts.name ?? '');
-    const items = (opts.items as Array<{ key: string; path: string; mode?: number }> | undefined) ?? [];
+    const items = (opts.items as { key: string; path: string; mode?: number }[] | undefined) ?? [];
     p[`${pfx}.ConfigMapVolume.Name`] = name;
     items.forEach((item, j) => {
       p[`${pfx}.ConfigMapVolume.Items.${j + 1}.Key`] = item.key;
@@ -558,7 +558,7 @@ function buildVolumeCompound(v: VolumeConfigInput, pfx: string): Record<string, 
   }
   if (v.type === 'SecretVolume' || opts.secretName) {
     const name = String(opts.secretName ?? opts.name ?? '');
-    const items = (opts.items as Array<{ key: string; path: string; mode?: number }> | undefined) ?? [];
+    const items = (opts.items as { key: string; path: string; mode?: number }[] | undefined) ?? [];
     p[`${pfx}.SecretVolume.SecretName`] = name;
     items.forEach((item, j) => {
       p[`${pfx}.SecretVolume.Items.${j + 1}.Key`] = item.key;
@@ -617,7 +617,7 @@ export function buildCreateParams(
 
   // ── Region (always set except partial without region) ──
   if (!partial || input.region != null) {
-    p['RegionId'] = String(input.region);
+    p.RegionId = String(input.region);
   }
 
   // ── Top-level scalars ──
@@ -682,17 +682,17 @@ export function buildCreateParams(
 
   // ── Network ──
   if (!partial || input.network) {
-    p['SecurityGroupId'] = input.network.securityGroupId ?? '';
+    p.SecurityGroupId = input.network.securityGroupId ?? '';
     if (input.network.subnetIds?.length) {
-      p['VSwitchId'] = input.network.subnetIds.join(',');
-      p['ScheduleStrategy'] = 'VSwitchRandom';
-      delete p['ZoneId'];
+      p.VSwitchId = input.network.subnetIds.join(',');
+      p.ScheduleStrategy = 'VSwitchRandom';
+      delete p.ZoneId;
     }
   }
 
   // ── Image cache (hardcoded default) ──
   if (!partial) {
-    p['AutoMatchImageCache'] = 'true';
+    p.AutoMatchImageCache = 'true';
   }
 
   // ── Tags ──
@@ -702,8 +702,8 @@ export function buildCreateParams(
 
   // ── Extension fields (providerOverrides) ──
   if (input.providerOverrides) {
-    const raw = input.providerOverrides as Record<string, unknown>;
-    const flat = (raw['alibaba'] as Record<string, unknown> | undefined) ?? raw;
+    const raw = input.providerOverrides;
+    const flat = (raw.alibaba as Record<string, unknown> | undefined) ?? raw;
     const ext = applyExtensionOverrides('alibaba', flat);
     for (const [k, v] of Object.entries(ext)) {
       p[k] = v;
@@ -749,7 +749,7 @@ function parseEvents(raw: EciEventItem[] | undefined): ContainerGroupRuntimeEven
   if (!raw?.length) return [];
   return raw.map(e => ({
     reason: e.Reason ?? '',
-    type: (e.Type === 'Warning' ? 'Warning' : 'Normal') as 'Normal' | 'Warning',
+    type: (e.Type === 'Warning' ? 'Warning' : 'Normal'),
     message: e.Message ?? '',
     count: e.Count ?? 0,
     ...(e.LastTimestamp ? { lastTimestamp: e.LastTimestamp } : {}),
@@ -859,7 +859,7 @@ export function validateCodecIntegrity(): { ok: boolean; broken: string[] } {
       if (!c || typeof c.decode !== 'function') {
         broken.push(`${name}.${key}: decode is not a function`);
       }
-      if (c && typeof c['param'] !== 'string') {
+      if (c && typeof c.param !== 'string') {
         broken.push(`${name}.${key}: param is not a string`);
       }
     }

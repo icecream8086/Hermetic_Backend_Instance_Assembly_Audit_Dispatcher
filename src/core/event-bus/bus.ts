@@ -74,7 +74,7 @@ export class EventBus {
 
     // Fast path: single handler — no array / allSettled allocation
     if (handlers.size === 1) {
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+       
       const handler: EventHandler | undefined = handlers.values().next().value;
       if (handler) {
         try {

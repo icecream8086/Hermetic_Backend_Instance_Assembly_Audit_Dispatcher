@@ -21,7 +21,7 @@ function getApp(platformBindings: Record<string, unknown>): Promise<AppInstance>
       }
     }
     const config = loadConfig();
-    _appPromise = createApp(config, platformBindings) as Promise<AppInstance>;
+    _appPromise = createApp(config, platformBindings);
   }
   return _appPromise;
 }

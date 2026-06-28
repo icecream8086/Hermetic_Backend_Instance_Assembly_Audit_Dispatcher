@@ -76,14 +76,14 @@ export class CloudflareLogReader implements IAuditReader {
   }
 
   #parseLine(line: string, since: number, until: number, facility?: string): StoredAuditEntry | null {
-    const match = line.match(LINE_REGEX);
+    const match = LINE_REGEX.exec(line);
     if (!match) return null;
     const [, ts, _level, lineFacility, message] = match;
     const timestamp = new Date(ts!).getTime();
     if (timestamp < since || timestamp > until) return null;
     if (facility && lineFacility !== facility) return null;
     return {
-      id: crypto.randomUUID() as LogId,
+      id: crypto.randomUUID(),
       timestamp,
       level: 6, // default INFO
       facility: lineFacility ?? 'unknown',

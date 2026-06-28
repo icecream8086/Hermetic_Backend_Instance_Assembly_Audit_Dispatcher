@@ -36,7 +36,7 @@ export class NotificationDO implements DurableObject {
       if (contentLength > MAX_BROADCAST_BYTES) {
         return new Response('payload too large', { status: 413 });
       }
-      const body = await request.json() as { type: string; data: unknown };
+      const body = await request.json();
       if (!ALLOWED_EVENT_TYPES.has(body.type)) {
         return new Response('unknown event type', { status: 400 });
       }

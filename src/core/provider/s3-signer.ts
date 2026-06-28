@@ -128,7 +128,7 @@ export async function payloadHash(body: BufferSource | string): Promise<string> 
  * RequestTimeTooSkewed errors. Returns null if no server time is found.
  */
 export function extractServerTimeFromError(body: string): Date | null {
-  const match = body.match(/<ServerTime>(.+?)<\/ServerTime>/);
+  const match = /<ServerTime>(.+?)<\/ServerTime>/.exec(body);
   if (match) {
     const d = new Date(match[1]!);
     if (!isNaN(d.getTime())) return d;

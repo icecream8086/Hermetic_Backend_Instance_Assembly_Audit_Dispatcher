@@ -63,7 +63,7 @@ function base64ToBuffer(b64: string): Uint8Array<ArrayBuffer> {
   const rawStr = atob(b64);
   const raw = new Uint8Array(rawStr.length);
   for (let i = 0; i < rawStr.length; i++) raw[i] = rawStr.charCodeAt(i);
-  const copy = new Uint8Array<ArrayBuffer>(new ArrayBuffer(raw.length));
+  const copy = new Uint8Array(new ArrayBuffer(raw.length));
   copy.set(raw);
   return copy;
 }
@@ -289,7 +289,7 @@ export class UserService implements IUserService {
       facility: FACILITY,
       level: KernLevel.INFO,
       message: 'User registered',
-      metadata: { userId: id as string, email: input.email, role: input.role, uid },
+      metadata: { userId: id, email: input.email, role: input.role, uid },
     });
 
     await this.audit?.write({
@@ -532,14 +532,14 @@ export class UserService implements IUserService {
       facility: FACILITY,
       level: KernLevel.INFO,
       message: 'User updated',
-      metadata: { userId: id as string },
+      metadata: { userId: id },
     });
 
     await this.audit?.write({
       level: KernLevel.INFO,
       facility: FACILITY,
       message: `User profile updated — ${updated.email}`,
-      metadata: { eventType: 'user.updated', userId: id as string, actorId },
+      metadata: { eventType: 'user.updated', userId: id, actorId },
     });
 
     return updated;
@@ -570,14 +570,14 @@ export class UserService implements IUserService {
       facility: FACILITY,
       level: KernLevel.INFO,
       message: 'User deleted',
-      metadata: { userId: id as string, email },
+      metadata: { userId: id, email },
     });
 
     await this.audit?.write({
       level: KernLevel.WARNING,
       facility: FACILITY,
       message: `User deleted — ${email}`,
-      metadata: { eventType: 'user.deleted', userId: id as string, email, actorId },
+      metadata: { eventType: 'user.deleted', userId: id, email, actorId },
     });
   }
 
@@ -668,7 +668,7 @@ export class UserService implements IUserService {
       level: KernLevel.NOTICE,
       facility: FACILITY,
       message: `Login policy cleared for user — ${updated.email}`,
-      metadata: { eventType: 'user.loginPolicy.cleared', userId: id as string, actorId },
+      metadata: { eventType: 'user.loginPolicy.cleared', userId: id, actorId },
     });
 
     return updated;
@@ -688,7 +688,7 @@ export class UserService implements IUserService {
       level: KernLevel.NOTICE,
       facility: FACILITY,
       message: `Public key cleared for user — ${updated.email}`,
-      metadata: { eventType: 'user.publicKey.cleared', userId: id as string, actorId },
+      metadata: { eventType: 'user.publicKey.cleared', userId: id, actorId },
     });
 
     return updated;
@@ -811,7 +811,7 @@ export class UserService implements IUserService {
       level: KernLevel.INFO,
       facility: FACILITY,
       message: `Session revoked for user ${userId}`,
-      metadata: { eventType: 'user.session.revoked', userId: userId as string, tokenHint: (token as string).slice(-4), actorId },
+      metadata: { eventType: 'user.session.revoked', userId: userId, tokenHint: (token as string).slice(-4), actorId },
     });
   }
 
@@ -846,7 +846,7 @@ export class UserService implements IUserService {
       level: KernLevel.INFO,
       facility: FACILITY,
       message: `Supplementary group added — user ${userId} → gid ${gid}`,
-      metadata: { eventType: 'user.suppGroup.added', userId: userId as string, gid, actorId },
+      metadata: { eventType: 'user.suppGroup.added', userId: userId, gid, actorId },
     });
     return updated;
   }
@@ -869,7 +869,7 @@ export class UserService implements IUserService {
       level: KernLevel.INFO,
       facility: FACILITY,
       message: `Supplementary group removed — user ${userId} → gid ${gid}`,
-      metadata: { eventType: 'user.suppGroup.removed', userId: userId as string, gid, actorId },
+      metadata: { eventType: 'user.suppGroup.removed', userId: userId, gid, actorId },
     });
     return updated;
   }

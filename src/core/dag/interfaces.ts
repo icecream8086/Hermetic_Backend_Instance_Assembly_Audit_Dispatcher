@@ -9,7 +9,7 @@ export type TopoSortResult<TNode> = {
 };
 
 /** Error reported by buildDag when a node is missing or a cycle is detected. */
-export type DagBuildError<TId> = {
+export interface DagBuildError<TId> {
   readonly id: TId;
   readonly message: string;
-};
+}

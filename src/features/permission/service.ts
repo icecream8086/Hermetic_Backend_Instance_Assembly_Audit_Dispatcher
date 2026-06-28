@@ -119,7 +119,7 @@ export interface IPermissionService {
 
   grantTempElevation(userId: string, durationMs?: number, capabilities?: number): Promise<number>;
   revokeTempElevation(userId: string): Promise<void>;
-  listTempElevations(): Promise<Array<{ userId: string; expiry: number; caps: number; capsNames: string[] }>>;
+  listTempElevations(): Promise<{ userId: string; expiry: number; caps: number; capsNames: string[] }[]>;
   checkElevation(userId: string, requiredCap?: number): Promise<boolean>;
 
   // ── Invitations ──
@@ -403,11 +403,11 @@ export class PermissionService implements IPermissionService {
     });
   }
 
-  async listTempElevations(): Promise<Array<{ userId: string; expiry: number; caps: number; capsNames: string[] }>> {
+  async listTempElevations(): Promise<{ userId: string; expiry: number; caps: number; capsNames: string[] }[]> {
     const idsEntry = await this.atomic.get<string[]>('temp:elev:ids');
     if (!idsEntry) return [];
     const ids = idsEntry.value;
-    const result: Array<{ userId: string; expiry: number; caps: number; capsNames: string[] }> = [];
+    const result: { userId: string; expiry: number; caps: number; capsNames: string[] }[] = [];
     const now = Date.now();
     const stale: string[] = [];
     for (const userId of ids) {
@@ -475,8 +475,8 @@ export class PermissionService implements IPermissionService {
     // Update invitation status + add user to group
     await this.atomic.transact(async (txn) => {
       const inv = await txn.get<Invitation>(INVITE_PREFIX + inviteId);
-      if (!inv || inv.status !== 'pending') throw new AppError(409, 'ALREADY_PROCESSED', 'Invitation already processed');
-      txn.set(INVITE_PREFIX + inviteId, { ...inv, status: 'accepted' as InviteStatus });
+      if (inv?.status !== 'pending') throw new AppError(409, 'ALREADY_PROCESSED', 'Invitation already processed');
+      txn.set(INVITE_PREFIX + inviteId, { ...inv, status: 'accepted' });
 
       const grp = await txn.get<any>('usergroup:' + entry.value.groupId);
       if (grp) {
@@ -499,7 +499,7 @@ export class PermissionService implements IPermissionService {
     if (entry.value.inviteeId !== userId) throw new AppError(403, 'FORBIDDEN', 'Only the invitee can reject');
     if (entry.value.status !== 'pending') throw new AppError(409, 'ALREADY_PROCESSED', 'Invitation already processed');
 
-    await this.atomic.set(INVITE_PREFIX + inviteId, { ...entry.value, status: 'rejected' as InviteStatus }, entry.version);
+    await this.atomic.set(INVITE_PREFIX + inviteId, { ...entry.value, status: 'rejected' }, entry.version);
   }
 
   async listInvitations(userId: string): Promise<Invitation[]> {

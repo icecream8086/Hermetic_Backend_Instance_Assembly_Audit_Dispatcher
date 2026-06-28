@@ -36,11 +36,11 @@ export function createImagesRouter(providers: IProviderRegistry): Hono<{ Variabl
 
   router.post('/pull', async (c) => {
     const r = requireRoot(c); if (r) return r;
-    const { image, instanceId, clusterId, credentialRef } = await c.req.json() as any;
+    const { image, instanceId, clusterId, credentialRef } = await c.req.json();
     if (!image) return c.json(fail('VALIDATION_ERROR', 'image is required'), 400);
 
     const provider = instanceId
-      ? await providers.resolveImage(instanceId as any)
+      ? await providers.resolveImage(instanceId)
       : providers.image;
 
     const info = await provider.pull(image, clusterId ?? credentialRef);
@@ -83,7 +83,7 @@ export function createImagesRouter(providers: IProviderRegistry): Hono<{ Variabl
     const r = requireRoot(c); if (r) return r;
     const id = c.req.param('id');
     const instanceId = c.req.query('instanceId');
-    const { tag } = await c.req.json() as any;
+    const { tag } = await c.req.json();
     if (!tag) return c.json(fail('VALIDATION_ERROR', 'tag is required'), 400);
 
     const provider = instanceId ? await providers.resolveImage(instanceId as any) : providers.image;
@@ -112,7 +112,7 @@ export function createImagesRouter(providers: IProviderRegistry): Hono<{ Variabl
     const instanceId = c.req.query('instanceId');
     const provider = instanceId ? await providers.resolveImage(instanceId as any) : providers.image;
     if (!provider.prune) return c.json(fail('NOT_IMPLEMENTED', 'prune is not supported by the current provider'), 501);
-    const { dangling } = await c.req.json() as any;
+    const { dangling } = await c.req.json();
     const result = await provider.prune({ dangling });
     return c.json(ok(result));
   });
@@ -135,7 +135,7 @@ export function createImagesRouter(providers: IProviderRegistry): Hono<{ Variabl
     const instanceId = c.req.query('instanceId');
     const provider = instanceId ? await providers.resolveImage(instanceId as any) : providers.image;
     if (!provider.build) return c.json(fail('NOT_IMPLEMENTED', 'build is not supported by the current provider'), 501);
-    const { context, dockerfile, tag } = await c.req.json() as any;
+    const { context, dockerfile, tag } = await c.req.json();
     const result = await provider.build(context, { dockerfile, tag });
     return c.json(ok(result), 201);
   });

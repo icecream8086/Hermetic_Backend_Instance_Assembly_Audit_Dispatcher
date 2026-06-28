@@ -1,7 +1,7 @@
 import type { IAtomicStore } from '../store/interfaces.ts';
 import type { Platform } from '../region/types.ts';
 import { AppError } from '../types.ts';
-import { SecretEncryption } from './secret-encryption.ts';
+import type { SecretEncryption } from './secret-encryption.ts';
 
 // ─── Credential type ───
 

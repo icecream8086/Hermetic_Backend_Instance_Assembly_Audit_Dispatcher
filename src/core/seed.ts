@@ -59,8 +59,8 @@ export async function seedPolicyLibrary(atomic: IAtomicStore): Promise<void> {
   }
 
   // Set capability bits on wheel and root groups (new capability model)
-  const wheelGid = userGroupIds['wheel'];
-  const rootGid = userGroupIds['root'];
+  const wheelGid = userGroupIds.wheel;
+  const rootGid = userGroupIds.root;
   if (wheelGid) {
     await atomic.set(GROUP_CAP_KEY + wheelGid, Cap.ALL, null);
     count++;
@@ -71,7 +71,7 @@ export async function seedPolicyLibrary(atomic: IAtomicStore): Promise<void> {
   }
 
   // Link user groups → system group rules via permission groups
-  const permGroupBindings: Array<{ userGroupName: string; sysGroupName: string }> = [
+  const permGroupBindings: { userGroupName: string; sysGroupName: string }[] = [
     { userGroupName: 'wheel', sysGroupName: 'perm.sysadmin' },
     { userGroupName: 'root', sysGroupName: 'perm.operator' },
     { userGroupName: 'users', sysGroupName: 'perm.viewer' },
@@ -95,7 +95,7 @@ export async function seedPolicyLibrary(atomic: IAtomicStore): Promise<void> {
   }
 
   // Owner permission group
-  const usersUgId = userGroupIds['users'];
+  const usersUgId = userGroupIds.users;
   if (usersUgId) {
     const pgId = `permgrp_${crypto.randomUUID()}`;
     await atomic.set('permgroup:' + pgId, {
@@ -113,7 +113,7 @@ export async function seedPolicyLibrary(atomic: IAtomicStore): Promise<void> {
   }
 
   // Route ACLs
-  type RouteAclDef = { method: string; pathPrefix: string; priority: number };
+  interface RouteAclDef { method: string; pathPrefix: string; priority: number }
   const groupAcls: Record<string, RouteAclDef[]> = {
     wheel: [{ method: '*', pathPrefix: '/', priority: 1000 }],
     root: [
@@ -175,7 +175,7 @@ async function seedDefaultInstance(atomic: IAtomicStore): Promise<string | undef
   try {
     const { InstanceService } = await import('./region/instance.ts');
     const instanceSvc = new InstanceService(atomic);
-    const podmanEp = process.env['PODMAN_ENDPOINT'] ?? 'http://127.0.0.1:8080';
+    const podmanEp = process.env.PODMAN_ENDPOINT ?? 'http://127.0.0.1:8080';
     const instance = await instanceSvc.create({
       name: 'default-podman',
       platform: 'podman',

@@ -3,7 +3,7 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import type { IAtomicStore } from '../store/interfaces.ts';
 
 /** Env shape this middleware requires on `c.var`. */
-type IdempotencyEnv = { Variables: { stores: { atomic: IAtomicStore } } };
+interface IdempotencyEnv { Variables: { stores: { atomic: IAtomicStore } } }
 
 /**
  * Idempotency middleware — requires `IAtomicStore` bound to `c.var.stores`.
@@ -34,7 +34,7 @@ export function idempotency(): MiddlewareHandler<IdempotencyEnv> {
 
     if (c.res.status >= 200 && c.res.status < 500) {
       try {
-        const clone = (await c.res.clone().json()) as unknown;
+        const clone = (await c.res.clone().json());
         await stores.set(
           storageKey,
           JSON.stringify({ status: c.res.status, body: clone }),

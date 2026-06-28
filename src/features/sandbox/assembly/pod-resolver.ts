@@ -46,7 +46,7 @@ function parseCpu(s: string | undefined): number | undefined {
 function parseMemory(s: string | undefined): number | undefined {
   if (s === undefined) return undefined;
   const re = /^(\d+(?:\.\d+)?)\s*(Ki|Mi|Gi|Ti|k|M|G|T|KB|MB|GB|TB)?$/i;
-  const m = s.match(re);
+  const m = re.exec(s);
   if (!m) return undefined;
   const num = parseFloat(m[1]!);
   if (!Number.isFinite(num) || num < 0) return undefined;
@@ -92,7 +92,7 @@ export class PodResolver {
       const svc = spec.services[name]!;
       const args = typeof svc.command === 'string'
         ? [svc.command]
-        : svc.command as readonly string[] | undefined;
+        : svc.command;
 
       const env = svc.environment
         ? mapEnvVars(Object.entries(svc.environment).map(([k, v]) => ({ name: k, value: v })))
@@ -120,11 +120,11 @@ export class PodResolver {
         name: `${spec.name}-${name}`,
         image: svc.image,
         ...(args ? { args } : {}),
-        ...(env ? { env: env as any } : {}),
+        ...(env ? { env: env } : {}),
         ...(ports ? { ports } : {}),
         ...(resources ? { resources } : {}),
         ...(livenessProbe ? { livenessProbe } : {}),
-      } as ContainerCreateConfig;
+      };
     });
 
     const totalCpu = parseCpu(spec.resources?.cpu) ?? 1;

@@ -79,7 +79,7 @@ export function startTail(
     pollTail(reader, session, options).catch(() => {});
   }, session.intervalMs);
   session.timer = timer;
-  return () => clearInterval(timer);
+  return () => { clearInterval(timer); };
 }
 
 /** Stop a tail session. */
@@ -124,7 +124,7 @@ export function createWsTailHandler(
       const stop = startTail(reader, session, options);
 
       // Ping every 30s
-      const pingTimer = setInterval(() => send({ type: 'tail:ping' }), 30000);
+      const pingTimer = setInterval(() => { send({ type: 'tail:ping' }); }, 30000);
 
       return () => {
         stop();

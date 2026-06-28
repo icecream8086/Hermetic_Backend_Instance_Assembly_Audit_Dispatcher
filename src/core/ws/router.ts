@@ -14,7 +14,7 @@ import { Hono } from 'hono';
 export function createWsRouter(platformBindings?: Record<string, unknown>): Hono {
   const router = new Hono();
 
-  const notifDO = platformBindings?.['NOTIFICATION_DO'] as DurableObjectNamespace | undefined;
+  const notifDO = platformBindings?.NOTIFICATION_DO as DurableObjectNamespace | undefined;
 
   if (!notifDO) {
     // Dev mode: no DO bindings, WebSocket not available

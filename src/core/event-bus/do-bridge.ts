@@ -1,6 +1,6 @@
 /// <reference types="@cloudflare/workers-types" />
 
-import { EventBus } from './bus.ts';
+import type { EventBus } from './bus.ts';
 
 /**
  * Bridge 层：将 EventBus 内部事件投射到 NotificationDO 进行 WebSocket 广播。

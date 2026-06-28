@@ -76,7 +76,7 @@ export interface S3CompleteMultipartUploadInput {
   readonly bucket: string;
   readonly key: string;
   readonly uploadId: string;
-  readonly parts: ReadonlyArray<{ readonly partNumber: number; readonly etag: string }>;
+  readonly parts: readonly { readonly partNumber: number; readonly etag: string }[];
 }
 
 export interface S3AbortMultipartUploadInput {
@@ -86,7 +86,7 @@ export interface S3AbortMultipartUploadInput {
 }
 
 export interface S3ListPartsResult {
-  readonly parts: ReadonlyArray<{ readonly partNumber: number; readonly size: number; readonly etag: string }>;
+  readonly parts: readonly { readonly partNumber: number; readonly size: number; readonly etag: string }[];
   readonly uploadId: string;
   readonly isTruncated: boolean;
   readonly nextPartNumberMarker?: number;
@@ -104,7 +104,7 @@ export interface S3MultipartUploadSession {
   readonly uploadId: string;
   readonly bucket: string;
   readonly key: string;
-  readonly presignedUrls: ReadonlyArray<S3PresignedPartUrl>;
+  readonly presignedUrls: readonly S3PresignedPartUrl[];
   readonly partSize: number;
   readonly expiresIn: number;
 }
@@ -113,5 +113,5 @@ export interface S3MultipartDownloadSession {
   readonly bucket: string;
   readonly key: string;
   readonly size: number;
-  readonly presignedUrls: ReadonlyArray<S3PresignedPartUrl>;
+  readonly presignedUrls: readonly S3PresignedPartUrl[];
 }

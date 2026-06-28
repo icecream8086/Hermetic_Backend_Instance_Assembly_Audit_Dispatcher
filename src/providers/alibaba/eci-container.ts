@@ -35,7 +35,7 @@ export class AlibabaEciContainerProvider implements IContainerProvider {
     private readonly endpoint = 'eci.cn-hangzhou.aliyuncs.com',
   ) {
     // Extract region from endpoint: eci.cn-hangzhou.aliyuncs.com → cn-hangzhou
-    const m = endpoint.match(/eci\.([^.]+)\./);
+    const m = /eci\.([^.]+)\./.exec(endpoint);
     this.region = m?.[1] ?? 'cn-hangzhou';
   }
 
@@ -61,8 +61,8 @@ export class AlibabaEciContainerProvider implements IContainerProvider {
    */
   async update(providerId: string, input: Partial<CreateContainerGroupInput>): Promise<void> {
     const params = buildCreateParams(input as CreateContainerGroupInput, { partial: true });
-    params['RegionId'] = (input.region as string | undefined) ?? this.region;
-    params['ContainerGroupId'] = providerId;
+    params.RegionId = (input.region as string | undefined) ?? this.region;
+    params.ContainerGroupId = providerId;
     await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret,
       'UpdateContainerGroup', params);
   }

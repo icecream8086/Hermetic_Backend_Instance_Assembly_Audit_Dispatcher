@@ -9,9 +9,7 @@
 
 import { AkSkProvider } from '../../core/auth/providers.ts';
 
-export interface RpcParams {
-  readonly [key: string]: string | undefined;
-}
+export type RpcParams = Readonly<Record<string, string | undefined>>;
 
 /**
  * Call an Alibaba Cloud RPC API and return the parsed JSON response.
@@ -30,7 +28,7 @@ export async function rpcCall(
     Action: action,
     Version: '2018-08-08',
     ...params,
-  }).filter(([_, v]) => v !== undefined) as [string, string][];
+  }).filter(([_, v]) => v !== undefined);
 
   // Alibaba RPC expects commas in VSwitchId/InstanceType to be literal (not %2C)
   const encodeVal = (v: string) => encodeURIComponent(v).replace(/%2C/g, ',');

@@ -27,7 +27,7 @@ export class CloudflareKVAtomicStore implements IAtomicStore {
   }
 
   async set<T>(key: string, value: T, expectedVersion: VersionId | null, ttlSeconds?: number): Promise<VersionId | null> {
-    const existing = await this.kv.getWithMetadata<unknown>(key, 'json');
+    const existing = await this.kv.getWithMetadata(key, 'json');
     const currentVersion = (existing.metadata as { v?: string } | null)?.v;
 
     if (expectedVersion === null && existing.value !== null) return null;
@@ -80,7 +80,7 @@ export class CloudflareKVAtomicStore implements IAtomicStore {
 
     for (const [key, expectedVersion] of readSet) {
       if (deferredWrites.has(key)) continue;
-      const current = await this.kv.getWithMetadata<unknown>(key, 'json');
+      const current = await this.kv.getWithMetadata(key, 'json');
       const currentVersion = (current.metadata as { v?: string } | null)?.v;
       if (currentVersion !== expectedVersion) {
         throw new TransactConflictError(

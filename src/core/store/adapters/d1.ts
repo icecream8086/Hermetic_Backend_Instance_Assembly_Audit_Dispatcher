@@ -14,7 +14,7 @@ export class D1QueryStore implements IQueryStore {
     } else if (Array.isArray(params)) {
       bound = stmt.bind(...params);
     } else {
-      bound = stmt.bind(params as Record<string, unknown>);
+      bound = stmt.bind(params);
     }
 
     const result = await bound.all<T>();

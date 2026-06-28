@@ -15,5 +15,5 @@ export class NoopMessageQueue implements IMessageQueue {
   async sendSandboxProvision(): Promise<boolean> { return false; }
   async sendBucketKeyRotate(): Promise<boolean> { return false; }
   async send(): Promise<boolean> { return false; }
-  async sendBatch(_messages: Array<any>): Promise<number> { return 0; }
+  async sendBatch(_messages: any[]): Promise<number> { return 0; }
 }

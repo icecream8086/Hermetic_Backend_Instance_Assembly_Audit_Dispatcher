@@ -5,7 +5,7 @@ import { createFacility } from '../../core/brand.ts';
 import { AppError } from '../../core/types.ts';
 import { KernLevel } from '../../core/audit/kern-level.ts';
 import { parseCidr } from '../../core/network/cidr.ts';
-import { InstanceService } from '../../core/region/instance.ts';
+import type { InstanceService } from '../../core/region/instance.ts';
 import type { Subnet, SubnetId, SubnetStatus, CreateSubnetInput, UpdateSubnetInput } from './types.ts';
 import { generateSubnetId } from './types.ts';
 import type { ICrudService, PaginatedResult } from '../../core/crud/index.ts';
@@ -83,7 +83,7 @@ export class SubnetService implements ISubnetService {
       ...(input.visibility !== undefined ? { visibility: input.visibility } : {}),
       ...(input.userIds !== undefined ? { userIds: input.userIds ?? [] } : {}),
       ...(input.userGroupIds !== undefined ? { userGroupIds: input.userGroupIds ?? [] } : {}),
-      ...(input.status !== undefined ? { status: input.status as SubnetStatus } : {}),
+      ...(input.status !== undefined ? { status: input.status } : {}),
       updatedAt: Date.now(),
     };
 

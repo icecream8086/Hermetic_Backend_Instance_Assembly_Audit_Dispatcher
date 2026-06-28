@@ -125,7 +125,7 @@ export async function pruneBackend(
 
   while (true) {
     const result = await reader.query({ limit: batchSize, ...(cursor ? { afterCursor: cursor } : {}) });
-    allEntries.push(...(result.entries as StoredAuditEntry[]));
+    allEntries.push(...(result.entries));
     if (!result.nextCursor || result.entries.length < batchSize) break;
     cursor = result.nextCursor;
   }

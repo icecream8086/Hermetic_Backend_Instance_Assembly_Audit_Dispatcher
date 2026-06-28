@@ -115,7 +115,7 @@ export class HybridAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmi
 
   /** Validate cursor integrity via xor_hash. Returns false if tampered. */
   #validateCursor(c: { s: string; i: number; b: string; m: number; t: number; x: string }): boolean {
-    const expected = xorHash({ s: c.s, i: c.i, b: c.b, m: c.m, t: c.t } as any);
+    const expected = xorHash({ s: c.s, i: c.i, b: c.b, m: c.m, t: c.t });
     return c.x === expected;
   }
 

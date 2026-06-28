@@ -56,8 +56,8 @@ export class LogStreamDO implements DurableObject {
 
     // WebSocket upgrade
     const pair = new WebSocketPair();
-    const client = pair[0]!;
-    const server = pair[1]!;
+    const client = pair[0];
+    const server = pair[1];
 
     this.#sessions.add(server);
     server.accept();

@@ -46,5 +46,5 @@ export async function executeDnsStep(
     facility: 'action-dns',
     message: `DNS ${dns.action} ${dns.type} ${dns.name} → ${dns.value}`,
     metadata: { stepType: 'dns', ...dns },
-  } as any);
+  });
 }

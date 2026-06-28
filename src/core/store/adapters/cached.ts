@@ -155,7 +155,7 @@ export class CachedAtomicStore implements IAtomicStore {
     if (current !== null) {
       const ver = await this.store.set(
         key,
-        { data: null, cachedAt: 0, coordinatorVersion: null } as unknown as CacheEntry<unknown>,
+        { data: null, cachedAt: 0, coordinatorVersion: null },
         current.version,
       ).catch(() => null);
       if (ver) this.#storeVersion.set(key, ver);

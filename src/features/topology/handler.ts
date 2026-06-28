@@ -12,8 +12,9 @@ import type {
   CreateInstanceBody, HeartbeatBody,
   CreateCredentialBody,
 } from './types.ts';
-import { CredentialService, toMasked } from '../../core/auth/credential.ts';
-import { S3PolicyManager } from '../../core/s3-policy/manager.ts';
+import type { CredentialService} from '../../core/auth/credential.ts';
+import { toMasked } from '../../core/auth/credential.ts';
+import type { S3PolicyManager } from '../../core/s3-policy/manager.ts';
 import type { CreateS3PolicyInput, UpdateS3PolicyInput } from '../../core/s3-policy/types.ts';
 import type { IS3Provider } from '../../core/provider/s3.ts';
 import type { S3MultipartUploadSession, S3MultipartDownloadSession } from '../../core/provider/s3-types.ts';

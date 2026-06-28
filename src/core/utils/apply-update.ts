@@ -18,5 +18,5 @@ export function applyUpdate<T extends object>(
       updates[key] = input[key];
     }
   }
-  return { ...entity, ...updates } as T;
+  return { ...entity, ...updates };
 }

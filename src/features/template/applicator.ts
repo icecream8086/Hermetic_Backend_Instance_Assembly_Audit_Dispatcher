@@ -27,7 +27,7 @@ export async function applyTemplate(
   resolveVolume?: (id: string) => Promise<Record<string, unknown> | null>,
   resolveBucket?: (id: string) => Promise<Record<string, unknown> | null>,
 ): Promise<CreateSandboxInput> {
-  const container: ContainerSpec = tpl.container ?? { region: createRegionId('local'), containers: [] } as unknown as ContainerSpec;
+  const container: ContainerSpec = tpl.container ?? { region: createRegionId('local'), containers: [] };
   const containers = container.containers ?? [];
   const cpu = containers.reduce((s, c) => s + (c.resources?.limits?.cpu ?? c.resources?.requests?.cpu ?? 1), 0);
   const memory = containers.reduce((s, c) => s + (c.resources?.limits?.memory ?? c.resources?.requests?.memory ?? 2048), 0);
@@ -106,7 +106,7 @@ export async function applyTemplate(
     ...(bucketMounts.length > 0 ? { bucketMounts } : {}),
     ...(container.account ? { account: container.account } : {}),
     ...(container.instanceId ? { instanceId: container.instanceId } : {}),
-    ...(ext?.healthMaxRetries !== undefined ? { healthMaxRetries: ext.healthMaxRetries as number } : {}),
+    ...(ext?.healthMaxRetries !== undefined ? { healthMaxRetries: ext.healthMaxRetries } : {}),
     network: mapNetwork(tpl.network),
     ...(tpl.description !== undefined ? { description: tpl.description } : {}),
     ...(ext?.providerOverrides ? { providerOverrides: ext.providerOverrides } : {}),
@@ -120,11 +120,11 @@ export async function applyTemplate(
  * Returns: Map<"container:name", {livenessProbe?, readinessProbe?, startupProbe?}>
  */
 // Per-container probe bag — spread into ContainerConfig
-type ProbeBag = {
+interface ProbeBag {
   livenessProbe?: ProbeSpec | undefined;
   readinessProbe?: ProbeSpec | undefined;
   startupProbe?: ProbeSpec | undefined;
-};
+}
 
 function buildProbeMap(healthChecks: readonly HealthCheckDef[] | undefined): Map<string, ProbeBag> {
   const map = new Map<string, ProbeBag>();

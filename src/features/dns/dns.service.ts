@@ -65,7 +65,7 @@ export class DnsService implements IDnsService {
       level: KernLevel.INFO,
       message: `DNS record ${type} ${domain} → ${value}`,
       actorId,
-      metadata: { dnsRecordId: id as string, domain, type, value },
+      metadata: { dnsRecordId: id, domain, type, value },
     });
 
     this.audit?.write({
@@ -73,7 +73,7 @@ export class DnsService implements IDnsService {
       facility: FACILITY,
       message: `DNS record synced — ${type} ${domain} → ${value}`,
       actorId,
-      metadata: { eventType: 'dns.synced', dnsRecordId: id as string, domain, type, value },
+      metadata: { eventType: 'dns.synced', dnsRecordId: id, domain, type, value },
     });
 
     return record;
@@ -95,7 +95,7 @@ export class DnsService implements IDnsService {
       level: KernLevel.INFO,
       message: `DNS record deleted ${entry.value.domain}`,
       actorId,
-      metadata: { dnsRecordId: id as string, domain: entry.value.domain },
+      metadata: { dnsRecordId: id, domain: entry.value.domain },
     });
 
     this.audit?.write({
@@ -103,7 +103,7 @@ export class DnsService implements IDnsService {
       facility: FACILITY,
       message: `DNS record deleted — ${entry.value.domain}`,
       actorId,
-      metadata: { eventType: 'dns.deleted', dnsRecordId: id as string, domain: entry.value.domain },
+      metadata: { eventType: 'dns.deleted', dnsRecordId: id, domain: entry.value.domain },
     });
   }
 

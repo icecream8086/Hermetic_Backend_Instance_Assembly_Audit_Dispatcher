@@ -11,16 +11,16 @@ import { KernLevel } from '../audit/kern-level.ts';
 // ─── Built-in defaults ───
 
 function defaultKernLevel(): KernLevel {
-  const env = process.env['LOG_LEVEL']?.toLowerCase();
+  const env = process.env.LOG_LEVEL?.toLowerCase();
   if (env === 'debug')  return KernLevel.DEBUG;
   if (env === 'notice') return KernLevel.NOTICE;
   if (env === 'warning') return KernLevel.WARNING;
   if (env === 'error')  return KernLevel.ERR;
-  return process.env['NODE_ENV'] === 'production' ? KernLevel.INFO : KernLevel.DEBUG;
+  return process.env.NODE_ENV === 'production' ? KernLevel.INFO : KernLevel.DEBUG;
 }
 
 function defaultAuditKernLevel(): KernLevel {
-  const env = process.env['AUDIT_LEVEL']?.toLowerCase();
+  const env = process.env.AUDIT_LEVEL?.toLowerCase();
   if (env === 'debug')  return KernLevel.DEBUG;
   if (env === 'notice') return KernLevel.NOTICE;
   if (env === 'warning') return KernLevel.WARNING;

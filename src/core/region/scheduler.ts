@@ -82,7 +82,7 @@ export function scheduleRegion(request: ScheduleRequest): ScheduleResult {
 function resolveProvider(region: string, preferred?: string): string {
   if (preferred) return preferred;
   if (region === 'local') return 'podman';
-  if (ALIBABA_REGIONS.includes(region as AlibabaRegion)) return 'alibaba';
+  if (ALIBABA_REGIONS.includes(region)) return 'alibaba';
   return 'stub';
 }
 
@@ -112,7 +112,7 @@ function scoreRegion(region: string, request: ScheduleRequest): number {
   }
 
   // Alibaba regions get their own base score
-  if (ALIBABA_REGIONS.includes(region as AlibabaRegion)) {
+  if (ALIBABA_REGIONS.includes(region)) {
     score += 20;
   }
 
@@ -124,7 +124,7 @@ function scoreRegion(region: string, request: ScheduleRequest): number {
  */
 export function getEndpointFor(region: RegionId, provider: string, service: string): string {
   if (provider === 'podman' || region === 'local') {
-    return process.env['PODMAN_ENDPOINT'] ?? 'http://127.0.0.1:8080';
+    return process.env.PODMAN_ENDPOINT ?? 'http://127.0.0.1:8080';
   }
   const registry = getDefaultRegistry();
   return registry.getEndpoint(provider as any, region, service);

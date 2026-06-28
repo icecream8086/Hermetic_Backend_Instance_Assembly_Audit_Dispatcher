@@ -27,7 +27,7 @@ import {
 } from './types.ts';
 import { executeDnsStep } from './step-dns.ts';
 import { appendStepLog } from './logs.ts';
-import { ActionRegistry } from './registry.ts';
+import type { ActionRegistry } from './registry.ts';
 import { MatrixExpander } from './matrix.ts';
 import { DashboardService } from './dashboard.ts';
 import { generateVersionId } from '../../core/brand.ts';
@@ -94,7 +94,7 @@ export class WorkflowRunner {
       level: 5, facility: 'workflow-runner',
       message: `WorkflowRun ${id} started: ${workflowDef.name} (trigger=${trigger})`,
       metadata: { workflowRunId: id, workflowId: workflowDef.id, trigger },
-    } as any);
+    });
 
     return updated;
   }
@@ -107,7 +107,7 @@ export class WorkflowRunner {
     if (jobRun.status !== 'Queued') return jobRun;
 
     const started = Date.now();
-    let current: JobRun = { ...jobRun, status: 'Running' as JobRunStatus, startedAt: started, attempts: jobRun.attempts + 1, version: generateVersionId() };
+    let current: JobRun = { ...jobRun, status: 'Running', startedAt: started, attempts: jobRun.attempts + 1, version: generateVersionId() };
     const ver1 = await atomic.set(PFX_JOB_RUN + jobRunId, current, entry.version);
     if (!ver1) return current; // OCC conflict
 
@@ -145,7 +145,7 @@ export class WorkflowRunner {
       if (jobApproval.status === 'rejected') {
         const finalEntry = await atomic.get<JobRun>(PFX_JOB_RUN + jobRunId);
         if (finalEntry) {
-          current = { ...current, status: 'Failure' as JobRunStatus, error: `Approval rejected: ${jobApproval.reason ?? 'no reason'}`, completedAt: Date.now(), version: generateVersionId() };
+          current = { ...current, status: 'Failure', error: `Approval rejected: ${jobApproval.reason ?? 'no reason'}`, completedAt: Date.now(), version: generateVersionId() };
           await atomic.set(PFX_JOB_RUN + jobRunId, current, finalEntry.version);
         }
         return current;
@@ -169,7 +169,7 @@ export class WorkflowRunner {
       if (finalEntry) {
         current = {
           ...current,
-          status: allOk ? 'Success' as JobRunStatus : 'Failure' as JobRunStatus,
+          status: allOk ? 'Success' : 'Failure',
           stepRuns,
           completedAt: Date.now(),
           version: generateVersionId(),
@@ -182,7 +182,7 @@ export class WorkflowRunner {
       if (finalEntry) {
         current = {
           ...current,
-          status: 'Failure' as JobRunStatus,
+          status: 'Failure',
           error: msg,
           completedAt: Date.now(),
           version: generateVersionId(),
@@ -311,7 +311,7 @@ export class WorkflowRunner {
 
     for (const ref of run.jobRunRefs) {
       const jEntry = await atomic.get<JobRun>(PFX_JOB_RUN + ref.jobRunId);
-      if (!jEntry || jEntry.value.status !== 'Queued') continue;
+      if (jEntry?.value.status !== 'Queued') continue;
 
       const jobDef = wf.jobs[ref.jobName];
       if (!jobDef) continue;
@@ -324,7 +324,7 @@ export class WorkflowRunner {
             const depRef = run.jobRunRefs.find(r => r.jobName === needName);
             if (!depRef) return { name: needName, status: 'Queued' as const };
             const depEntry = await atomic.get<JobRun>(PFX_JOB_RUN + depRef.jobRunId);
-            return { name: needName, status: (depEntry?.value.status ?? 'Queued') as JobRunStatus };
+            return { name: needName, status: (depEntry?.value.status ?? 'Queued') };
           }),
         );
 
@@ -334,7 +334,7 @@ export class WorkflowRunner {
           const jEntry2 = await atomic.get<JobRun>(PFX_JOB_RUN + ref.jobRunId);
           if (jEntry2) {
             await atomic.set(PFX_JOB_RUN + ref.jobRunId, {
-              ...jEntry2.value, status: 'Skipped' as JobRunStatus,
+              ...jEntry2.value, status: 'Skipped',
               error: `Upstream dependency failed: ${failed.map(d => d.name).join(', ')}`,
               completedAt: Date.now(), version: generateVersionId(),
             }, jEntry2.version);
@@ -467,26 +467,26 @@ export class WorkflowRunner {
         level: 6, facility: 'step-executor',
         message: `Step started: ${name}`,
         metadata: { jobRunId, stepName: name },
-      } as any);
+      });
 
       try {
         if ('run' in step) {
-          await this.#executeRunStep(step as RunStepDef, env, sandboxId, provider);
+          await this.#executeRunStep(step, env, sandboxId, provider);
           await appendStepLog(this.deps.stores.blob, jobRunId, name,
             `Step completed: ${name} (exit 0)`);
-          stepRuns.push({ name, status: 'Success' as JobRunStatus, startedAt, completedAt: Date.now(), exitCode: 0 });
+          stepRuns.push({ name, status: 'Success', startedAt, completedAt: Date.now(), exitCode: 0 });
 
         } else if ('dns' in step) {
-          await executeDnsStep(step as DnsStepDef, this.deps.providers.dns, this.deps.audit);
+          await executeDnsStep(step, this.deps.providers.dns, this.deps.audit);
           await appendStepLog(this.deps.stores.blob, jobRunId, name,
-            `DNS ${(step as DnsStepDef).dns.action} ${(step as DnsStepDef).dns.name}`);
-          stepRuns.push({ name, status: 'Success' as JobRunStatus, startedAt, completedAt: Date.now() });
+            `DNS ${(step).dns.action} ${(step).dns.name}`);
+          stepRuns.push({ name, status: 'Success', startedAt, completedAt: Date.now() });
 
         } else if ('uses' in step) {
-          await this.#executeUsesStep(step as UsesStepDef, env, sandboxId, provider);
+          await this.#executeUsesStep(step, env, sandboxId, provider);
           await appendStepLog(this.deps.stores.blob, jobRunId, name,
-            `Action completed: ${(step as UsesStepDef).uses}`);
-          stepRuns.push({ name, status: 'Success' as JobRunStatus, startedAt, completedAt: Date.now(), exitCode: 0 });
+            `Action completed: ${(step).uses}`);
+          stepRuns.push({ name, status: 'Success', startedAt, completedAt: Date.now(), exitCode: 0 });
         }
 
       } catch (err) {
@@ -497,12 +497,12 @@ export class WorkflowRunner {
           level: 3, facility: 'step-executor',
           message: `Step failed: ${name} — ${msg}`,
           metadata: { jobRunId, stepName: name, error: msg },
-        } as any);
+        });
 
         if (step.continueOnError) {
-          stepRuns.push({ name, status: 'Success' as JobRunStatus, startedAt, completedAt: Date.now(), error: msg });
+          stepRuns.push({ name, status: 'Success', startedAt, completedAt: Date.now(), error: msg });
         } else {
-          stepRuns.push({ name, status: 'Failure' as JobRunStatus, startedAt, completedAt: Date.now(), exitCode: 1, error: msg });
+          stepRuns.push({ name, status: 'Failure', startedAt, completedAt: Date.now(), exitCode: 1, error: msg });
           break;
         }
       }

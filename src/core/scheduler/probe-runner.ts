@@ -95,7 +95,7 @@ export async function evaluateProbe(
     const result = await Promise.race([
       handler(spec),
       new Promise<{ success: false; message: string }>((_, reject) =>
-        setTimeout(() => reject(new Error('probe timeout')), timeoutMs),
+        setTimeout(() => { reject(new Error('probe timeout')); }, timeoutMs),
       ),
     ]);
     success = result.success;

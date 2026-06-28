@@ -42,7 +42,7 @@ export class AlarmTimerDO implements DurableObject {
     const url = new URL(request.url);
 
     if (url.pathname.endsWith('/start')) {
-      const body = await request.json() as { intervalMs: number; callbackUrl?: string };
+      const body = await request.json();
       this._intervalMs = Math.max(body.intervalMs, AlarmTimerDO.MIN_INTERVAL);
       this._callbackUrl = body.callbackUrl ?? '';
       this._running = true;

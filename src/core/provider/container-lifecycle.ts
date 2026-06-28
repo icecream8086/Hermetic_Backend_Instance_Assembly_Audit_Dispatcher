@@ -104,12 +104,12 @@ export interface Transition {
  *  Each entry is a (from, trigger, to) triple.
  *  System transitions are always valid when the system reports the event.
  *  API transitions are only valid when canApplyOperation(from, op) is true. */
-export const ECI_TRANSITIONS: ReadonlyArray<{
+export const ECI_TRANSITIONS: readonly {
   readonly from: ContainerGroupState;
   readonly trigger: TransitionTrigger;
   readonly to: ContainerGroupState;
   readonly rule: string;
-}> = [
+}[] = [
   // T1: Scheduling + ScheduleSucceeded → Pending
   { from: ContainerGroupState.Scheduling, trigger: { kind: 'System', event: 'ScheduleSucceeded' }, to: ContainerGroupState.Pending, rule: 'T1' },
   // T2: Scheduling + ScheduleFailed → ScheduleFailed
@@ -149,12 +149,12 @@ export const ECI_TRANSITIONS: ReadonlyArray<{
 ];
 
 /** Podman-specific transitions (not in ECI model). */
-export const PODMAN_TRANSITIONS: ReadonlyArray<{
+export const PODMAN_TRANSITIONS: readonly {
   readonly from: ContainerGroupState;
   readonly trigger: TransitionTrigger;
   readonly to: ContainerGroupState;
   readonly rule: string;
-}> = [
+}[] = [
   // P1: Running + StopContainerGroup → Stopped (reversible, unlike ECI)
   { from: ContainerGroupState.Running, trigger: { kind: 'Api', operation: 'StopContainerGroup' }, to: ContainerGroupState.Stopped, rule: 'P1' },
   // P2: Stopped + StartContainerGroup → Running
@@ -172,12 +172,12 @@ export const PODMAN_TRANSITIONS: ReadonlyArray<{
 ];
 
 /** All known transitions (ECI + Podman). */
-export const ALL_TRANSITIONS: ReadonlyArray<{
+export const ALL_TRANSITIONS: readonly {
   readonly from: ContainerGroupState;
   readonly trigger: TransitionTrigger;
   readonly to: ContainerGroupState;
   readonly rule: string;
-}> = [...ECI_TRANSITIONS, ...PODMAN_TRANSITIONS];
+}[] = [...ECI_TRANSITIONS, ...PODMAN_TRANSITIONS];
 
 // ─── 5. Transition function ───
 

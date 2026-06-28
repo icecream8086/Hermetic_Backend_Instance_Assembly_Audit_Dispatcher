@@ -201,7 +201,7 @@ export class PermissionChecker {
 
     const allPermGroups = await this.#cachedPermGroupList();
     const matchedGroups = allPermGroups.filter(pg =>
-      pg.userGroupIds?.some(ugId => userGroupIds.includes(ugId as any))
+      pg.userGroupIds?.some(ugId => userGroupIds.includes(ugId))
       || pg.userIds?.includes(userId)
     );
 

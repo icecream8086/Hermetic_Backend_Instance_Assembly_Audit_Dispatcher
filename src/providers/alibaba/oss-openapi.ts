@@ -82,7 +82,7 @@ export class AlibabaOssOpenApiClient {
    */
   async listBuckets(params?: { marker?: string; maxKeys?: number }): Promise<ListBucketsResult> {
     const rpcParams: Record<string, string> = {};
-    if (params?.marker) rpcParams['marker'] = params.marker;
+    if (params?.marker) rpcParams.marker = params.marker;
     if (params?.maxKeys) rpcParams['max-keys'] = String(params.maxKeys);
 
     const resp = await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret, 'ListBuckets', API_VERSION, rpcParams);
@@ -129,9 +129,9 @@ export class AlibabaOssOpenApiClient {
    */
   async createBucket(request: CreateBucketRequest): Promise<void> {
     const rpcParams: Record<string, string> = { Bucket: request.Bucket };
-    if (request.Acl) rpcParams['Acl'] = request.Acl;
-    if (request.StorageClass) rpcParams['StorageClass'] = request.StorageClass;
-    if (request.DataRedundancyType) rpcParams['DataRedundancyType'] = request.DataRedundancyType;
+    if (request.Acl) rpcParams.Acl = request.Acl;
+    if (request.StorageClass) rpcParams.StorageClass = request.StorageClass;
+    if (request.DataRedundancyType) rpcParams.DataRedundancyType = request.DataRedundancyType;
 
     await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret, 'CreateBucket', API_VERSION, rpcParams);
   }

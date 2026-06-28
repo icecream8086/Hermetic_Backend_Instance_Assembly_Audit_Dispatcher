@@ -94,7 +94,7 @@ function snapshot(c: MutableContainer): OciContainer {
       },
     } : {}),
     health,
-  } as OciContainer;
+  };
 }
 
 function computeHealth(c: MutableContainer): { status: OciHealthStatus; lastCheckedAt?: string; message?: string; failingSince?: string } {
@@ -244,12 +244,12 @@ export class StubOciRuntime implements IOCIRuntime {
       logLines: [],
     };
 
-    this.#containers.set(id as string, c);
+    this.#containers.set(id, c);
     return snapshot(c);
   }
 
   async startContainer(id: ContainerId): Promise<void> {
-    const c = this.#containers.get(id as string);
+    const c = this.#containers.get(id);
     if (!c) throw new Error(`Container ${id} not found`);
     if (c.status !== 'created') throw new Error(`Cannot start container in state: ${c.status}`);
 
@@ -261,7 +261,7 @@ export class StubOciRuntime implements IOCIRuntime {
   }
 
   async stopContainer(id: ContainerId, timeoutSeconds?: number): Promise<void> {
-    const c = this.#containers.get(id as string);
+    const c = this.#containers.get(id);
     if (!c) throw new Error(`Container ${id} not found`);
     if (c.status !== 'running' && c.status !== 'paused') throw new Error(`Container ${id} is ${c.status}, expected running`);
 
@@ -278,7 +278,7 @@ export class StubOciRuntime implements IOCIRuntime {
   }
 
   async killContainer(id: ContainerId, signal?: string): Promise<void> {
-    const c = this.#containers.get(id as string);
+    const c = this.#containers.get(id);
     if (!c) throw new Error(`Container ${id} not found`);
     c.logLines.push(`[${new Date().toISOString()}] received ${signal ?? 'SIGKILL'}, forced shutdown`);
     c.alive = false;
@@ -288,7 +288,7 @@ export class StubOciRuntime implements IOCIRuntime {
   }
 
   async pauseContainer(id: ContainerId): Promise<void> {
-    const c = this.#containers.get(id as string);
+    const c = this.#containers.get(id);
     if (!c) throw new Error(`Container ${id} not found`);
     if (c.status !== 'running') throw new Error(`Container ${id} is ${c.status}, expected running`);
     c.logLines.push(`[${new Date().toISOString()}] cgroup frozen`);
@@ -296,7 +296,7 @@ export class StubOciRuntime implements IOCIRuntime {
   }
 
   async unpauseContainer(id: ContainerId): Promise<void> {
-    const c = this.#containers.get(id as string);
+    const c = this.#containers.get(id);
     if (!c) throw new Error(`Container ${id} not found`);
     if (c.status !== 'paused') throw new Error(`Container ${id} is ${c.status}, expected paused`);
     c.logLines.push(`[${new Date().toISOString()}] cgroup unfrozen, resuming`);
@@ -304,14 +304,14 @@ export class StubOciRuntime implements IOCIRuntime {
   }
 
   async removeContainer(id: ContainerId): Promise<void> {
-    const c = this.#containers.get(id as string);
+    const c = this.#containers.get(id);
     if (!c) throw new Error(`Container ${id} not found`);
     if (c.status === 'running') throw new Error(`Cannot remove running container ${id}`);
-    this.#containers.delete(id as string);
+    this.#containers.delete(id);
   }
 
   async inspectContainer(id: ContainerId): Promise<OciContainer | null> {
-    const c = this.#containers.get(id as string);
+    const c = this.#containers.get(id);
     return c ? snapshot(c) : null;
   }
 
@@ -321,7 +321,7 @@ export class StubOciRuntime implements IOCIRuntime {
   }
 
   async getLogs(id: ContainerId, options?: OciLogOptions): Promise<string> {
-    const c = this.#containers.get(id as string);
+    const c = this.#containers.get(id);
     if (!c) throw new Error(`Container ${id} not found`);
 
     let lines = c.logLines;

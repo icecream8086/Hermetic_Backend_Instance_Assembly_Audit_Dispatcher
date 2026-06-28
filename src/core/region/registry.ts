@@ -55,7 +55,7 @@ export class RegionRegistry {
   /** Cluster-specific overrides applied on top of regional config. */
   readonly #clusterOverrides = new Map<string, RegionConfig>();
 
-  constructor(seed?: ReadonlyArray<{ region: string; config: RegionConfig }>) {
+  constructor(seed?: readonly { region: string; config: RegionConfig }[]) {
     if (seed) {
       for (const { region, config } of seed) {
         this.#overrides.set(region, config);
@@ -76,8 +76,8 @@ export class RegionRegistry {
     if (ov) return ov;
 
     // Route to the correct static default table based on provider hint
-    if (provider === 'alibaba' || ALIBABA_REGIONS.includes(region as AlibabaRegion)) {
-      return RegionRegistry.ALIBABA.get(region as AlibabaRegion) ?? {};
+    if (provider === 'alibaba' || ALIBABA_REGIONS.includes(region)) {
+      return RegionRegistry.ALIBABA.get(region) ?? {};
     }
     if (region === 'local') return RegionRegistry.LOCAL;
 
@@ -102,7 +102,7 @@ export class RegionRegistry {
     }
 
     // Fallback to dynamic endpoint by provider
-    if (provider === 'alibaba' && ALIBABA_REGIONS.includes(region as AlibabaRegion)) {
+    if (provider === 'alibaba' && ALIBABA_REGIONS.includes(region)) {
       return defaultAlibabaEndpoint(region, service);
     }
 

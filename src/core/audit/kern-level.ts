@@ -95,7 +95,7 @@ export function encodePriority(facility: AuditFacility, level: KernLevel): numbe
 
 /** Decode a priority integer back to facility and severity. */
 export function decodePriority(priority: number): { facility: AuditFacility; level: KernLevel } {
-  return { facility: (priority >> 3) as AuditFacility, level: (priority & 0x7) as KernLevel };
+  return { facility: (priority >> 3), level: (priority & 0x7) };
 }
 
 /** Look up numeric facility from a string name. Unknown facilities → LOCAL0. */

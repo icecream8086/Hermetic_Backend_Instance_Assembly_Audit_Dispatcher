@@ -67,7 +67,7 @@ export interface IEventLoopControl {
   enqueuePriority<T>(input: TriggerEventInput<T>): Event;
 
   /** List pending events in the queue (type + id, no payload). */
-  pendingEvents(): Array<{ type: string; id: string }>;
+  pendingEvents(): { type: string; id: string }[];
 
   /** Current number of pending events. */
   readonly size: number;
@@ -142,7 +142,7 @@ export class EventLoop implements IEventLoopControl {
     this.#queue = new CircularQueue<Event>({ capacity: 0 }); // auto-grow
     this.#config = { ...DEFAULT_EVENT_LOOP_CONFIG, ...config };
     this.#store = store;
-    if (this.#store) this.#recover().catch(err => this.#reportError(err, 'recover'));
+    if (this.#store) this.#recover().catch(err => { this.#reportError(err, 'recover'); });
     if (this.#config.autoStart) this.start();
   }
 
@@ -153,7 +153,7 @@ export class EventLoop implements IEventLoopControl {
     this.#paused = false;
     this.#startTime = this.#startTime === 0 ? Date.now() : this.#startTime;
     this.#timerHandle = this.#timerBackend.start(
-      () => { this.#tick().catch(err => this.#reportError(err, 'tick')); },
+      () => { this.#tick().catch(err => { this.#reportError(err, 'tick'); }); },
       this.#config.intervalMs,
     );
   }
@@ -194,7 +194,7 @@ export class EventLoop implements IEventLoopControl {
     if (restart) {
       this.#timerHandle!.clear();
       this.#timerHandle = this.#timerBackend.start(
-        () => { this.#tick().catch(err => this.#reportError(err, 'tick')); },
+        () => { this.#tick().catch(err => { this.#reportError(err, 'tick'); }); },
         this.#config.intervalMs,
       );
     }
@@ -224,7 +224,7 @@ export class EventLoop implements IEventLoopControl {
     // Persist BEFORE memory enqueue to close the crash window.
     // If persist is in-flight when crash occurs, the event is in the store
     // and will be recovered on restart (at-least-once delivery).
-    if (this.#store) this.#persistEnqueue(event).catch(err => this.#reportError(err, 'persist-enqueue'));
+    if (this.#store) this.#persistEnqueue(event).catch(err => { this.#reportError(err, 'persist-enqueue'); });
     this.#queue.enqueue(event);
   }
 
@@ -237,19 +237,19 @@ export class EventLoop implements IEventLoopControl {
       );
       return event;
     }
-    if (this.#store) this.#persistEnqueue(event).catch(err => this.#reportError(err, 'persist-enqueue'));
+    if (this.#store) this.#persistEnqueue(event).catch(err => { this.#reportError(err, 'persist-enqueue'); });
     this.#queue.enqueue(event);
     return event;
   }
 
   enqueuePriority<T>(input: TriggerEventInput<T>): Event {
     const event = eventFromTrigger(input);
-    if (this.#store) this.#persistEnqueue(event).catch(err => this.#reportError(err, 'persist-enqueue'));
+    if (this.#store) this.#persistEnqueue(event).catch(err => { this.#reportError(err, 'persist-enqueue'); });
     this.#queue.enqueue(event);
     return event;
   }
 
-  pendingEvents(): Array<{ type: string; id: string }> {
+  pendingEvents(): { type: string; id: string }[] {
     return this.#queue.toArray().map(e => ({ type: e.type, id: e.id }));
   }
 

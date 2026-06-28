@@ -76,7 +76,7 @@ export class SharedLinkService {
       level: 5, facility: 'shared-link',
       message: `SharedLink created: ${input.name} (${id})`,
       metadata: { linkId: id, ownerId, workflowId: input.workflowId },
-    } as any);
+    });
 
     return link;
   }
@@ -141,7 +141,7 @@ export class SharedLinkService {
     const entries = await Promise.all(
       idx.value.map(i => this.atomic.get<SharedLink>(PFX + i)),
     );
-    return entries.filter(e => e && e.value.ownerId === ownerId).map(e => e!.value);
+    return entries.filter(e => e?.value.ownerId === ownerId).map(e => e!.value);
   }
 
   async get(id: string): Promise<SharedLink | null> {

@@ -267,7 +267,7 @@ export class DagScheduler {
       const alreadyQueued = tis.filter(ti => ti.state === 'QUEUED').length;
 
       const filterCtx: FilterContext = {
-        tasks: taskMap as ReadonlyMap<string, import('../dag/types.ts').Task>,
+        tasks: taskMap,
         poolSlots,
         dagMaxActive,
         concurrencyMap,

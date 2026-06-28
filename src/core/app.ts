@@ -65,7 +65,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
       auditLogger = new WorkersAuditLogger();
       break;
     case 'r2': {
-      const r2Bucket = platformBindings?.['BLOB_STORE'] as any;
+      const r2Bucket = platformBindings?.BLOB_STORE as any;
       if (!r2Bucket) {
         console.warn('[audit] R2 backend requested but BLOB_STORE binding not available — falling back to hybrid');
         auditLogger = new HybridAuditLogger(stores.atomic);
@@ -106,7 +106,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
   // binding routes messages to the Cloudflare Queues service.
   // When unavailable, createMessageQueue() returns a NoopMessageQueue — callers fall back to inline.
   const queueProducer = createMessageQueue(
-    platformBindings?.['TASK_QUEUE'] as Queue<any> | undefined,
+    platformBindings?.TASK_QUEUE as Queue<any> | undefined,
   );
   if (queueProducer.available) {
     console.log(formatDmesgLine('[app] Queue producer enabled (TASK_QUEUE)'));
@@ -116,7 +116,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
 
   // 4. Create timer backend (driven by SCHEDULER_BACKEND env var)
   const schedulerBackend = createTimerBackend(config.scheduler.backend, {
-    doNamespace: platformBindings?.['ALARM_TIMER_DO'] as DurableObjectNamespace | undefined,
+    doNamespace: platformBindings?.ALARM_TIMER_DO as DurableObjectNamespace | undefined,
     callbackUrl: config.scheduler.callbackUrl,
   });
 
@@ -128,8 +128,8 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
       intervalMs: 30000,
       batchSize: config.scheduler.batchSize,
       autoStart: true,
-      onError: (err, ctx) => console.error(formatDmesgLine(`[event-loop] ${ctx}: ${err instanceof Error ? err.message : err}`)),
-    } as Partial<EventLoopConfig>,
+      onError: (err, ctx) => { console.error(formatDmesgLine(`[event-loop] ${ctx}: ${err instanceof Error ? err.message : err}`)); },
+    },
     schedulerBackend,
     stores.atomic,
   );
@@ -169,7 +169,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
   } catch (err: unknown) { console.error('[init] Failed to load log policy:', err instanceof Error ? err.message : err); }
 
   // 5d. Bridge EventBus → WebSocket DOs for real-time notifications
-  const notifDONamespace = platformBindings?.['NOTIFICATION_DO'] as DurableObjectNamespace | undefined;
+  const notifDONamespace = platformBindings?.NOTIFICATION_DO as DurableObjectNamespace | undefined;
   if (notifDONamespace) {
     new DoBridge(eventBus, notifDONamespace);
   }
@@ -293,7 +293,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
   if (permService) {
     const { createPermissionGate } = await import('./middleware/permission-gate.ts');
     app.use('/api/*', createPermissionGate(
-      { check: (params) => permService!.check({ userId: params.actor, action: params.action, resource: params.resource }) },
+      { check: (params) => permService.check({ userId: params.actor, action: params.action, resource: params.resource }) },
       {
         skipPaths: [
           '/api/auth/login',
@@ -369,7 +369,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
   app.get('/api/openapi.json', async (c) => {
     if (!openApiSpec) {
       try {
-        const mod = await import('../../openapi.json' as string) as { default: Record<string, unknown> };
+        const mod = await import('../../openapi.json') as { default: Record<string, unknown> };
         openApiSpec = mod.default;
       } catch {
         return c.json({ error: 'OpenAPI spec not generated. Run: npm run docs:openapi' }, 503);
@@ -423,9 +423,9 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
     const since = c.req.query('since') ? parseInt(c.req.query('since')!) : undefined;
 
     try {
-      const logProvider = await providers.resolveContainer(sandbox.config.instanceId as any);
+      const logProvider = await providers.resolveContainer(sandbox.config.instanceId);
       const logResult = await logProvider.getLogs({
-        region: sandbox.config.region as any,
+        region: sandbox.config.region,
         providerId: sandbox.providerId,
         containerName,
         ...(tail ? { limitBytes: tail } : {}),
@@ -445,7 +445,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
   });
 
   // Optional: WebSocket streaming via DO for Podman live tail
-  const logStreamNs = platformBindings?.['LOG_STREAM_DO'] as DurableObjectNamespace | undefined;
+  const logStreamNs = platformBindings?.LOG_STREAM_DO as DurableObjectNamespace | undefined;
   if (logStreamNs) {
     app.get('/api/sandboxes/:id/logs/stream', async (c) => {
       const id = createSandboxId(c.req.param('id'));

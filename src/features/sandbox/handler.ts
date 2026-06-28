@@ -10,7 +10,7 @@ import type { AppContext } from '../../core/deps.ts';
 import { ok, fail } from '../../core/response.ts';
 import type { ErrorCode } from '../../core/error-codes.ts';
 
-type PermissionCheckFn = { check(params: { userId: string; action: string; resource: string; ip?: string }): Promise<{ allowed: boolean; reason: string }> };
+interface PermissionCheckFn { check(params: { userId: string; action: string; resource: string; ip?: string }): Promise<{ allowed: boolean; reason: string }> }
 
 /** Extract HTTP status and error code from a caught error, respecting AppError subtypes. */
 function errorStatus(e: unknown, fallbackCode: ErrorCode, fallbackStatus = 500): { code: ErrorCode; status: any } {
@@ -19,7 +19,7 @@ function errorStatus(e: unknown, fallbackCode: ErrorCode, fallbackStatus = 500):
   return { code, status };
 }
 
-type SandboxEnv = { Variables: AppContext };
+interface SandboxEnv { Variables: AppContext }
 
 async function requirePerm(c: Context<SandboxEnv>, checker: PermissionCheckFn | undefined, action: string, resource: string, resourceOwnerId?: string): Promise<Response | null> {
   if (!checker) return null;
@@ -59,7 +59,7 @@ export function createSandboxRouter(
         return c.json(fail('VALIDATION_ERROR', 'PodSpec requires name and services'), 400);
       }
       // Resolve the right group provider for the target region/instance — no global default.
-      const groupProvider = await resolvePodProvider(providers, spec.region, spec.instanceId as any);
+      const groupProvider = await resolvePodProvider(providers, spec.region, spec.instanceId);
       if (!groupProvider) {
         return c.json(fail('NOT_CONFIGURED', `No container group provider available for region=${spec.region ?? '(unspecified)'}. Register an instance with group capability or use a different region.`), 501);
       }

@@ -242,7 +242,7 @@ export class ApprovalService {
     const idx = await this.atomic.get<string[]>(IDX_APPROVAL);
     if (!idx) return [];
     const entries = (await Promise.all(idx.value.map(i => this.atomic.get<ApprovalNode>(PFX_APPROVAL + i))))
-      .filter(e => e && e.value.workflowRunId === runId).map(e => e!.value);
+      .filter(e => e?.value.workflowRunId === runId).map(e => e!.value);
     return entries;
   }
 

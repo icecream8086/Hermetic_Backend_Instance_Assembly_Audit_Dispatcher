@@ -9,6 +9,6 @@ import type { ITimerBackend, TimerHandle } from './interfaces.ts';
 export class SetIntervalBackend implements ITimerBackend {
   start(handler: () => void, intervalMs: number): TimerHandle {
     const id = setInterval(handler, intervalMs);
-    return { clear: () => clearInterval(id) };
+    return { clear: () => { clearInterval(id); } };
   }
 }

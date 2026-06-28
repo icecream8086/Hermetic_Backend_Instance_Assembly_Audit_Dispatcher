@@ -24,9 +24,9 @@ import { INSTANCE_TEMPLATES, type InstanceTemplateDef } from './templates.genera
 import type { CrudHandlerMap } from '../../core/crud/router.ts';
 import { registerCrudRoutes } from '../../core/crud/router.ts';
 
-type PermissionCheckFn = { check(params: { userId: string; action: string; resource: string; ip?: string }): Promise<{ allowed: boolean; reason: string }> };
+interface PermissionCheckFn { check(params: { userId: string; action: string; resource: string; ip?: string }): Promise<{ allowed: boolean; reason: string }> }
 
-type TemplateEnv = { Variables: AppContext };
+interface TemplateEnv { Variables: AppContext }
 
 async function requirePerm(c: Context<TemplateEnv>, checker: PermissionCheckFn | undefined, action: string, resource: string, resourceOwnerId?: string): Promise<Response | null> {
   if (!checker) return null;
@@ -71,8 +71,8 @@ function fromGeneratedTemplate(def: InstanceTemplateDef, defaultInstanceId?: str
     } : {}),
     ...(s.singleton !== undefined ? { singleton: s.singleton as boolean } : {}),
     ...(s.healthChecks ? { healthChecks: s.healthChecks as HealthCheckDef[] } : {}),
-    ...(s.network ? { network: s.network as NetworkSpec } : {}),
-    ...(s.extensions ? { extensions: s.extensions as TemplateExtensions } : {}),
+    ...(s.network ? { network: s.network } : {}),
+    ...(s.extensions ? { extensions: s.extensions } : {}),
     ...(s.podSpec ? { podSpec: s.podSpec as PodSpec } : {}),
     ...(s.instanceLimit ? { instanceLimit: s.instanceLimit as TemplateInstanceLimit } : {}),
   };
@@ -129,7 +129,7 @@ function resolveDag(tpls: SandboxTemplate[], seedIds: string[]): SandboxTemplate
   const visited = new Set<string>();
   const inStack = new Set<string>();
   const result: SandboxTemplate[] = [];
-  const stack: Array<{ id: string; phase: 'enter' | 'exit' }> = seedIds.map(id => ({ id, phase: 'enter' as const }));
+  const stack: { id: string; phase: 'enter' | 'exit' }[] = seedIds.map(id => ({ id, phase: 'enter' as const }));
 
   while (stack.length) {
     const frame = stack.pop()!;
@@ -603,7 +603,7 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
       await claimResourceBinding(atomic, resolved);
 
       if (resolved.kind === 'ContainerGroup' && resolved.podSpec) {
-        const baseInput = podSpecToSandboxInput(resolved.podSpec as PodSpec);
+        const baseInput = podSpecToSandboxInput(resolved.podSpec);
         const input = { ...baseInput, apiVersion: 'hbi-aad/v2', templateRef: resolved.id, ...(user?.id ? { creatorId: user.id } : {}) };
 
         const explicitInstanceId = body.instanceId ?? (resolved.podSpec as any).instanceId as (string | undefined);
@@ -612,7 +612,7 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
         let resolvedInstanceId: string | undefined;
 
         if (explicitInstanceId && providers?.resolveContainer) {
-          const instProvider = await providers.resolveContainer(explicitInstanceId as any);
+          const instProvider = await providers.resolveContainer(explicitInstanceId);
           svc = new SandboxService(atomic, new ConsoleLogger(), instProvider, providers, undefined, undefined, createAtomicNetworkResolver(atomic), new InstanceService(atomic));
           resolvedInstanceId = explicitInstanceId as string;
         } else if (providers && targetRegion) {
@@ -620,9 +620,9 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
           const allInst = await instSvc.resolveByCapability('container');
           const match = allInst.find(i => i.status === 'online' && i.region === targetRegion);
           if (match) {
-            const instProvider = await providers.resolveContainer(match.id as any);
+            const instProvider = await providers.resolveContainer(match.id);
             svc = new SandboxService(atomic, new ConsoleLogger(), instProvider, providers, undefined, undefined, createAtomicNetworkResolver(atomic), instSvc);
-            resolvedInstanceId = match.id as string;
+            resolvedInstanceId = match.id;
           }
         }
 
@@ -648,7 +648,7 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
       let resolvedInstanceId: string | undefined;
 
       if (explicitInstanceId && providers?.resolveContainer) {
-        const instProvider = await providers.resolveContainer(explicitInstanceId as any);
+        const instProvider = await providers.resolveContainer(explicitInstanceId);
         svc = new SandboxService(atomic, new ConsoleLogger(), instProvider, providers, undefined, undefined, createAtomicNetworkResolver(atomic), new InstanceService(atomic));
         resolvedInstanceId = explicitInstanceId as string;
       } else if (providers && targetRegion) {
@@ -656,9 +656,9 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
         const allInst = await instSvc.resolveByCapability('container');
         const match = allInst.find(i => i.status === 'online' && i.region === targetRegion);
         if (match) {
-          const instProvider = await providers.resolveContainer(match.id as any);
+          const instProvider = await providers.resolveContainer(match.id);
           svc = new SandboxService(atomic, new ConsoleLogger(), instProvider, providers, undefined, undefined, createAtomicNetworkResolver(atomic), instSvc);
-          resolvedInstanceId = match.id as string;
+          resolvedInstanceId = match.id;
         }
       } else if (providerName && providers) {
         const entry = providers.provider(providerName);

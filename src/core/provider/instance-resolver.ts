@@ -85,14 +85,14 @@ export class InstanceProviderResolver {
   /** Resolve a network policy provider for a specific instance. */
   async resolveNetworkPolicy(instanceId: InstanceId): Promise<INetworkPolicyProvider | undefined> {
     const inst = await this.instanceService.get(instanceId);
-    if (!inst || !inst.capabilities.network) return undefined;
+    if (!inst?.capabilities.network) return undefined;
     return this.#createNetworkPolicyProvider(inst);
   }
 
   /** Resolve an S3 provider for a specific instance. */
   async resolveS3(instanceId: InstanceId): Promise<IS3Provider | undefined> {
     const inst = await this.instanceService.get(instanceId);
-    if (!inst || !inst.capabilities.s3) return undefined;
+    if (!inst?.capabilities.s3) return undefined;
     return this.#createS3Provider(inst);
   }
 
@@ -131,8 +131,8 @@ export class InstanceProviderResolver {
       );
     }
     // 2. Fallback to environment variables (backward compatible)
-    const envAk = process.env['ALIBABA_ACCESS_KEY_ID'];
-    const envSk = process.env['ALIBABA_ACCESS_KEY_SECRET'];
+    const envAk = process.env.ALIBABA_ACCESS_KEY_ID;
+    const envSk = process.env.ALIBABA_ACCESS_KEY_SECRET;
     if (envAk && envSk) {
       return { accessKeyId: envAk, accessKeySecret: envSk };
     }
@@ -165,7 +165,7 @@ export class InstanceProviderResolver {
         return new AlibabaEciImageProvider(
           cred.accessKeyId ?? '', cred.accessKeySecret ?? '', instance.endpoint,
           instance.region,
-          cred.registryCredentials as Array<{ server: string; userName: string; password: string }> | undefined,
+          cred.registryCredentials as { server: string; userName: string; password: string }[] | undefined,
         );
       }
       case 'stub':
@@ -224,7 +224,7 @@ export class InstanceProviderResolver {
   /** Resolve a raw ECI API client for a specific instance. */
   async resolveRawEciApi(instanceId: InstanceId): Promise<any | undefined> {
     const inst = await this.instanceService.get(instanceId);
-    if (!inst || inst.platform !== 'alibaba') return undefined;
+    if (inst?.platform !== 'alibaba') return undefined;
     const cred = await this.#resolveCredential(inst.credentialRef);
     if (!cred.accessKeyId || !cred.accessKeySecret) return undefined;
     return new AlibabaEciApiClient(cred.accessKeyId, cred.accessKeySecret, inst.endpoint);
@@ -233,7 +233,7 @@ export class InstanceProviderResolver {
   /** Resolve a CR (Container Registry) API client for a specific instance. */
   async resolveCrApi(instanceId: InstanceId): Promise<any | undefined> {
     const inst = await this.instanceService.get(instanceId);
-    if (!inst || inst.platform !== 'alibaba') return undefined;
+    if (inst?.platform !== 'alibaba') return undefined;
     const cred = await this.#resolveCredential(inst.credentialRef);
     if (!cred.accessKeyId || !cred.accessKeySecret) return undefined;
     return new AlibabaCrApiClient(cred.accessKeyId, cred.accessKeySecret);
@@ -242,7 +242,7 @@ export class InstanceProviderResolver {
   /** Resolve an OSS management-plane API client for a specific instance. */
   async resolveOssOpenApi(instanceId: InstanceId): Promise<any | undefined> {
     const inst = await this.instanceService.get(instanceId);
-    if (!inst || inst.platform !== 'alibaba') return undefined;
+    if (inst?.platform !== 'alibaba') return undefined;
     const cred = await this.#resolveCredential(inst.credentialRef);
     if (!cred.accessKeyId || !cred.accessKeySecret) return undefined;
     return new AlibabaOssOpenApiClient(cred.accessKeyId, cred.accessKeySecret);

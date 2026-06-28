@@ -79,7 +79,7 @@ export class SandboxService implements ISandboxService {
       sandboxId: id,
       reason: 'manual',
       providerId: sandbox.providerId ?? id,
-      region: sandbox.config.region as unknown as string,
+      region: sandbox.config.region,
       ...(sandbox.config.instanceId ? { instanceId: sandbox.config.instanceId as any } : {}),
       containerCount: sandbox.containers.length,
       sandboxName: sandbox.name,
@@ -133,10 +133,10 @@ export class SandboxService implements ISandboxService {
 
     // 0b. Resolve ComputeInstance reference if specified
     const resolvedInst = input.instanceId && this.instanceService
-      ? await this.instanceService.get(input.instanceId as any)
+      ? await this.instanceService.get(input.instanceId)
       : null;
     if (resolvedInst) {
-      mergedNetwork = { ...mergedNetwork, instanceId: resolvedInst.id as any };
+      mergedNetwork = { ...mergedNetwork, instanceId: resolvedInst.id };
     }
     // Build provider identity for persistence (audit trail + deterministic re-resolution)
     const providerIdentity = resolvedInst ? {
@@ -164,18 +164,18 @@ export class SandboxService implements ISandboxService {
       updatedAt: Date.now(),
       status: SandboxStatus.Scheduling,
       version: generateVersionId(),
-      config: { ...input, ...(resolvedInst ? { instanceId: resolvedInst.id as any } : {}), network: mergedNetwork, ...(providerIdentity ? { providerIdentity } : {}) },
+      config: { ...input, ...(resolvedInst ? { instanceId: resolvedInst.id } : {}), network: mergedNetwork, ...(providerIdentity ? { providerIdentity } : {}) },
       ...(input.creatorId ? { creatorId: input.creatorId } : {}),
-      network: {} as NetworkInfo,
+      network: {},
       containers: [] as ContainerRuntime[],
       events: [] as ContainerEvent[],
-    } as Sandbox;
+    };
 
     const created = await this.atomic.set<Sandbox>(`${KEY_PREFIX}${id}`, initial, null);
     if (!created) throw new AppError(500, 'CREATE_FAILED', 'Failed to persist initial sandbox state');
 
     // Add to sandbox ID index
-    await this.store.addToIndex(id as string);
+    await this.store.addToIndex(id);
 
     // 2. Build provider input (with merged VNet + cluster settings) and create cloud resource
     const clusterEnriched = resolvedInst
@@ -256,7 +256,7 @@ export class SandboxService implements ISandboxService {
       providerId,
       updatedAt: Date.now(),
       version: generateVersionId(),
-    } as Sandbox;
+    };
 
     const updated = await this.atomic.set(`${KEY_PREFIX}${id}`, provisioned, created);
     if (!updated) throw new AppError(409, 'CONFLICT', 'Concurrent modification during provision');
@@ -276,7 +276,7 @@ export class SandboxService implements ISandboxService {
       level: KernLevel.NOTICE,
       message: 'Sandbox provisioned',
       actorId: input.creatorId,
-      metadata: { sandboxId: id as string, providerId, name: input.name },
+      metadata: { sandboxId: id, providerId, name: input.name },
     });
 
     this.audit?.write({
@@ -284,12 +284,12 @@ export class SandboxService implements ISandboxService {
       facility: FACILITY,
       message: `Sandbox provisioned — ${input.name}`,
       actorId: input.creatorId,
-      metadata: { eventType: 'sandbox.provisioned', sandboxId: id as string, providerId },
+      metadata: { eventType: 'sandbox.provisioned', sandboxId: id, providerId },
     });
 
     // Notify real-time subscribers
     this.eventBus?.dispatch(createEvent('sandbox.provisioned', {
-      sandboxId: id as string,
+      sandboxId: id,
       status: SandboxStatus.Running,
       name: input.name,
       creatorId: input.creatorId,
@@ -390,7 +390,7 @@ export class SandboxService implements ISandboxService {
     // Hard terminals with no cloud resource — delete directly
     if (sandbox.status === SandboxStatus.ScheduleFailed || sandbox.status === SandboxStatus.Expired) {
       await this.transition(id, SandboxStatus.Deleted, 'user requested termination (no cloud resource)', actorId);
-      await this.store.removeFromIndex(id as string);
+      await this.store.removeFromIndex(id);
       await this.logTerminated(id, actorId);
       return;
     }
@@ -405,17 +405,17 @@ export class SandboxService implements ISandboxService {
         await provider.delete({ region: sandbox.config.region, providerId: sandbox.providerId });
         // Cloud resource confirmed deleted — advance to Deleted
         await this.transition(id, SandboxStatus.Deleted, 'provider cleanup complete', actorId);
-        await this.store.removeFromIndex(id as string);
+        await this.store.removeFromIndex(id);
       } catch (e) {
         console.error(`[sandbox] terminate: provider delete failed name=${sandbox.name} id=${id} provider=${sandbox.providerId} instance=${sandbox.config.instanceId ?? '(none)'} — ${e instanceof Error ? e.message : String(e)}`);
         // Enqueue GC retry — sandbox stays in Terminating, health-check will re-dispatch
-        this.#enqueueGcRetry(id as string, sandbox);
+        this.#enqueueGcRetry(id, sandbox);
       }
     } else {
       console.error(`[sandbox] terminate: sandbox ${id} has no providerId — cloud resource may be orphaned`);
       // No cloud resource to clean up — advance to Deleted directly
       await this.transition(id, SandboxStatus.Deleted, 'no provider resource to clean up', actorId);
-      await this.store.removeFromIndex(id as string);
+      await this.store.removeFromIndex(id);
     }
 
     await this.logTerminated(id, actorId);
@@ -427,14 +427,14 @@ export class SandboxService implements ISandboxService {
       level: KernLevel.NOTICE,
       message: 'Sandbox terminated',
       actorId,
-      metadata: { sandboxId: id as string },
+      metadata: { sandboxId: id },
     });
     this.audit?.write({
       level: KernLevel.WARNING,
       facility: FACILITY,
       message: `Sandbox terminated — ${id}`,
       actorId,
-      metadata: { eventType: 'sandbox.terminated', sandboxId: id as string },
+      metadata: { eventType: 'sandbox.terminated', sandboxId: id },
     });
   }
 
@@ -632,7 +632,7 @@ export class SandboxService implements ISandboxService {
       facility: FACILITY,
       level: KernLevel.DEBUG,
       message: `Sandbox runtime synced (${runtime.status})`,
-      metadata: { sandboxId: id as string, providerStatus: runtime.status, containers: runtime.containers.length },
+      metadata: { sandboxId: id, providerStatus: runtime.status, containers: runtime.containers.length },
     });
 
     return runtime;
@@ -674,7 +674,7 @@ export class SandboxService implements ISandboxService {
     });
 
     this.eventBus?.dispatch(createEvent('sandbox.status', {
-      sandboxId: id as string,
+      sandboxId: id,
       fromStatus,
       toStatus: to,
       reason,
@@ -780,7 +780,7 @@ export function podSpecToSandboxInput(spec: {
     ...(spec.instanceId ? { instanceId: spec.instanceId as InstanceId } : {}),
     resourceSpec: { cpu: totalCpu, memory: totalMem },
     restartPolicy: 'Never',
-    containers: containers as unknown as readonly ContainerConfig[],
+    containers: containers,
     network: { allocatePublicIp: false },
     ...(spec.labels ? { tags: Object.entries(spec.labels).map(([k, v]) => ({ key: k, value: v })) } : {}),
   };
@@ -789,7 +789,7 @@ export function podSpecToSandboxInput(spec: {
 /** Parse memory string like "512Mi" or "1Gi" to MB. */
 function parseMemoryString(s: string): number {
   const re = /^(\d+(?:\.\d+)?)\s*(Ki|Mi|Gi|Ti|k|M|G|T|KB|MB|GB|TB)?$/i;
-  const m = s.match(re);
+  const m = re.exec(s);
   if (!m) return 512;
   const num = parseFloat(m[1]!);
   const unit = (m[2] ?? 'M').toLowerCase();
@@ -860,7 +860,7 @@ function mergeNetworkWithExtensions(input: CreateSandboxInput): {
   bandwidth?: any;
 } {
   const nw = input.network;
-  const ext = (input.providerOverrides as Record<string, unknown> | undefined)?.alibaba as Record<string, unknown> | undefined;
+  const ext = (input.providerOverrides)?.alibaba as Record<string, unknown> | undefined;
 
   // EIP: extensions ONLY. Standard network.publicIp is silently ignored (EIP costs money).
   // VPC: standard network first, extensions as override.

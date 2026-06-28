@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import type { Hono } from 'hono';
 import type { FeatureDeps } from '../../core/deps.ts';
 import { createImagesRouter } from './handler.ts';
 

@@ -1,8 +1,10 @@
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
-import type { SandboxId, Sandbox } from './types.ts';
-import { SandboxStatus, isValidTransition } from './types.ts';
+import type { SandboxId, Sandbox , SandboxStatus} from './types.ts';
+import { isValidTransition } from './types.ts';
 import { generateVersionId } from '../../core/brand.ts';
 import { AppError } from '../../core/types.ts';
+import { getValidated } from '../../core/store/validate.ts';
+import { SandboxSchema } from './entity-schema.ts';
 
 const KEY_PREFIX = 'sandbox:';
 const INDEX_KEY = 'sandbox:ids';
@@ -12,8 +14,8 @@ export class SandboxStore {
   constructor(private readonly atomic: IAtomicStore) {}
 
   async getById(id: SandboxId): Promise<Sandbox | null> {
-    const entry = await this.atomic.get<Sandbox>(`${KEY_PREFIX}${id}`);
-    return entry?.value ?? null;
+    const validated = await getValidated(this.atomic, `${KEY_PREFIX}${id}`, SandboxSchema);
+    return validated as unknown as Sandbox | null;
   }
 
   async list(status?: SandboxStatus, limit = 50, cursor?: string): Promise<{ items: Sandbox[]; nextCursor?: string }> {
@@ -30,7 +32,7 @@ export class SandboxStore {
       ids.map(id => this.atomic.get<Sandbox>(`${KEY_PREFIX}${id}`)),
     );
 
-    let items = entries.filter(e => e !== null).map(e => e!.value);
+    let items = entries.filter(e => e !== null).map(e => e.value);
     if (status) items = items.filter(s => s.status === status);
 
     const nextCursorVal = startIdx + limit < (idx?.value.length ?? 0)

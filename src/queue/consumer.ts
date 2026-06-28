@@ -175,10 +175,10 @@ async function handleSandboxGc(
     try {
       // Must have instanceId to resolve the right provider — no global default.
       if (!instanceId || !providers.resolveContainer) return { success: true };
-      const provider = await providers.resolveContainer!(instanceId as any);
+      const provider = await providers.resolveContainer(instanceId as any);
       await Promise.race([
         provider.delete({ region: region as any, providerId }),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('GC delete timeout after 10s')), 10_000)),
+        new Promise((_, reject) => setTimeout(() => { reject(new Error('GC delete timeout after 10s')); }, 10_000)),
       ]);
     } catch { /* best-effort — provider may be unreachable or the resource already gone */ }
 
@@ -221,7 +221,7 @@ async function handleSandboxGc(
           sandboxId: sid,
           reason,
         },
-      } as any);
+      });
       deleted = true;
       break;
     }
