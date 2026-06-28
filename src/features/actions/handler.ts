@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { FeatureDeps, AppContext } from '../../core/deps.ts';
 import { AppError } from '../../core/types.ts';
 import { ok } from '../../core/response.ts';
+import { register as registerScheduler } from '../../core/scheduler/registry.ts';
 
 import type { RouteMeta } from '../../core/http-docs/types.ts';
 import { generateVersionId } from '../../core/brand.ts';
@@ -79,6 +80,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
     { intervalMs: 5000, parallelism: 4, autoStart: true },
   );
   dagScheduler.start();
+  registerScheduler('dagScheduler', dagScheduler);
 
   const guard = (action: string, resource: string) =>
     async (c: any, next: () => Promise<void>) => {

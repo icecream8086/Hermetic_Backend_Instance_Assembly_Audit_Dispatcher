@@ -61,8 +61,13 @@ const FACILITY_NAMES: Record<number, string> = {
   20: 'local4', 21: 'local5', 22: 'local6', 23: 'local7',
 };
 
-/** Map facility string name to numeric code. Unknown facilities → LOCAL0 (16). */
-const NAME_TO_FACILITY: Record<string, AuditFacility> = {
+/**
+ * Map facility string name to numeric code. Unknown facilities → LOCAL0 (16).
+ *
+ * Typed as `as const` + `satisfies` to preserve literal key types for
+ * `FacilityName` union — typos in facility strings → compile error.
+ */
+const NAME_TO_FACILITY = {
   kern: AuditFacility.KERN, system: AuditFacility.KERN,
   sandbox: AuditFacility.SANDBOX, 'sandbox-service': AuditFacility.SANDBOX,
   image: AuditFacility.IMAGE, 'image-pull': AuditFacility.IMAGE,
@@ -78,7 +83,7 @@ const NAME_TO_FACILITY: Record<string, AuditFacility> = {
   'user-service': AuditFacility.AUTH,
   sysgrp: AuditFacility.PERM,
   subnet: AuditFacility.NETWORK,
-};
+} as const satisfies Record<string, AuditFacility>;
 
 /** Known facility name — derived from NAME_TO_FACILITY keys. Typo → compile error. */
 export type FacilityName = keyof typeof NAME_TO_FACILITY;
@@ -95,7 +100,7 @@ export function decodePriority(priority: number): { facility: AuditFacility; lev
 
 /** Look up numeric facility from a string name. Unknown facilities → LOCAL0. */
 export function resolveFacility(name: string): AuditFacility {
-  return NAME_TO_FACILITY[name.toLowerCase()] ?? AuditFacility.LOCAL0;
+  return (NAME_TO_FACILITY as Record<string, AuditFacility | undefined>)[name.toLowerCase()] ?? AuditFacility.LOCAL0;
 }
 
 /** Get the human-readable name of a numeric facility. */

@@ -11,7 +11,7 @@ import { createFacility } from './brand.ts';
 import { getFeatures } from '../features/generated.ts';
 import { createProviderRegistry } from './provider/factory.ts';
 import { createTimerBackend } from './scheduler/factory.ts';
-import { register as registerScheduler, stopAll } from './scheduler/registry.ts';
+import { register as registerScheduler, startAll, stopAll } from './scheduler/registry.ts';
 import { EventBus } from './event-bus/bus.ts';
 import { EventLoop } from './event-bus/loop.ts';
 import { SecretEncryption } from './auth/secret-encryption.ts';
@@ -397,6 +397,10 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
       app.route(feat.path + '/', router);
     }
   }
+
+  // 13b. Start all registered schedulers (idempotent — already-running are skipped).
+  // Called after features mount so DagScheduler etc. are registered before startAll runs.
+  startAll();
 
   // 12. Container logs — direct provider call (batch mode for ECI, Podman via Docker API)
   app.get('/api/sandboxes/:id/logs', async (c) => {

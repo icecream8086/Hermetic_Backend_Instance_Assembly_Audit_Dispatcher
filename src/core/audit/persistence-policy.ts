@@ -63,7 +63,7 @@ export function buildDefaultPersistencePolicy(): PersistencePolicy {
       // (IMMUTABLE_FACILITIES are always persisted at ERR+ in code below)
       { facility: 'auth', minLevel: KernLevel.WARNING, sampleRate: 1 },
       { facility: 'perm', minLevel: KernLevel.WARNING, sampleRate: 1 },
-      { facility: 'perm-gate', minLevel: KernLevel.WARNING, sampleRate: 1 },
+      { facility: 'perm-audit', minLevel: KernLevel.WARNING, sampleRate: 1 },
       // Tier 2 overrides for critical infrastructure
       { facility: 'sandbox', minLevel: KernLevel.ERR, sampleRate: 1 },
       { facility: 'provider', minLevel: KernLevel.ERR, sampleRate: 1 },

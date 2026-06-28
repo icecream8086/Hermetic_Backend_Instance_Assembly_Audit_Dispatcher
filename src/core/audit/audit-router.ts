@@ -138,8 +138,9 @@ function parseLevel(raw: unknown): KernLevel | null {
 }
 
 function parseRule(raw: any): PersistenceRule {
+  const rawFacility = String(raw.facility ?? '*');
   return {
-    facility: String(raw.facility ?? '*'),
+    facility: (rawFacility === '*' ? '*' : rawFacility) as PersistenceRule['facility'],
     minLevel: parseLevel(raw.minLevel) ?? KernLevel.ERR,
     ...(typeof raw.sampleRate === 'number' && raw.sampleRate > 0 ? { sampleRate: raw.sampleRate } : {}),
     ...(typeof raw.ttlMs === 'number' && raw.ttlMs >= 0 ? { ttlMs: raw.ttlMs } : {}),
