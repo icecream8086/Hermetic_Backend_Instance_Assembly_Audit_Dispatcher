@@ -14,7 +14,7 @@ export interface PaginatedResult<T> {
  * Generic CRUD store operations for permission entities.
  */
 export class CrudStore<T extends { id: string }> {
-  constructor(
+  public constructor(
     private readonly atomic: IAtomicStore,
     private readonly prefix: string,
     private readonly indexKey: string,
@@ -22,12 +22,12 @@ export class CrudStore<T extends { id: string }> {
   ) {}
 
   /** Return all entities (unpaginated — for internal evaluation use). */
-  async list(): Promise<T[]> {
+  public async list(): Promise<T[]> {
     return this.#loadAll();
   }
 
   /** Return a page of entities. Defaults to page 1, limit 50. */
-  async listPaginated(page = 1, limit = 50, filter?: (item: T) => boolean): Promise<PaginatedResult<T>> {
+  public async listPaginated(page = 1, limit = 50, filter?: (item: T) => boolean): Promise<PaginatedResult<T>> {
     // Apply filter before pagination: load all items, filter, then slice
     const allItems = await this.#loadAll();
     let items = filter ? allItems.filter(filter) : allItems;
@@ -39,12 +39,12 @@ export class CrudStore<T extends { id: string }> {
     return { items, total, page, limit };
   }
 
-  async get(id: string): Promise<T | null> {
+  public async get(id: string): Promise<T | null> {
     const entry = await this.atomic.get<T>(this.prefix + id);
     return entry?.value ?? null;
   }
 
-  async delete(id: string): Promise<T> {
+  public async delete(id: string): Promise<T> {
     const entry = await this.atomic.get<T>(this.prefix + id);
     if (!entry) throw new AppError(404, this.notFoundCode, `${this.notFoundCode}: ${id}`);
     // Atomically remove entity + update index
@@ -66,7 +66,7 @@ export class CrudStore<T extends { id: string }> {
     return entry.value;
   }
 
-  async insert(entity: T): Promise<void> {
+  public async insert(entity: T): Promise<void> {
     // Atomically create entity + update index
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
@@ -85,7 +85,7 @@ export class CrudStore<T extends { id: string }> {
     }
   }
 
-  async commitUpdate(id: string, updated: T): Promise<void> {
+  public async commitUpdate(id: string, updated: T): Promise<void> {
     for (let attempt = 0; attempt < 3; attempt++) {
       const entry = await this.atomic.get<T>(this.prefix + id);
       if (!entry) throw new AppError(404, this.notFoundCode, `${this.notFoundCode}: ${id}`);
@@ -97,7 +97,7 @@ export class CrudStore<T extends { id: string }> {
   }
 
   /** Load all entities — uses transact().getMany() to batch DO reads into 1 round-trip. */
-  async #loadAll(): Promise<T[]> {
+  public async #loadAll(): Promise<T[]> {
     return this.atomic.transact(async (txn) => {
       const idxEntry = await txn.get<string[]>(this.indexKey);
       if (!idxEntry?.length) return [];

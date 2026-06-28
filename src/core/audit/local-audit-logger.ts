@@ -11,19 +11,19 @@ export class LocalAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin
   readonly #entries: StoredAuditEntry[] = [];
   readonly #capacity: number;
 
-  constructor(capacity = MAX_ENTRIES) {
+  public constructor(capacity = MAX_ENTRIES) {
     this.#capacity = capacity;
   }
 
-  async write(entry: AuditEntry): Promise<void> {
+  public async write(entry: AuditEntry): Promise<void> {
     await this.#store(entry);
   }
 
-  async writeSync(entry: AuditEntry): Promise<LogId> {
+  public async writeSync(entry: AuditEntry): Promise<LogId> {
     return this.#store(entry);
   }
 
-  async #store(entry: AuditEntry): Promise<LogId> {
+  public async #store(entry: AuditEntry): Promise<LogId> {
     const id = generateLogId();
     const now = Date.now();
     const facilityCode = resolveFacility(entry.facility);
@@ -42,7 +42,7 @@ export class LocalAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin
     return id;
   }
 
-  async query(params?: LogQuery): Promise<{ entries: StoredAuditEntry[]; nextCursor?: string; total?: number }> {
+  public async query(params?: LogQuery): Promise<{ entries: StoredAuditEntry[]; nextCursor?: string; total?: number }> {
     let f = [...this.#entries];
     if (params?.facility) f = f.filter(e => e.facility === params.facility);
     if (params?.startTs !== undefined) f = f.filter(e => e.timestamp >= params.startTs!);
@@ -52,7 +52,7 @@ export class LocalAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin
     return { entries: f, total };
   }
 
-  async getById(id: LogId): Promise<StoredAuditEntry | null> {
+  public async getById(id: LogId): Promise<StoredAuditEntry | null> {
     return this.#entries.find(e => e.id === id) ?? null;
   }
 
@@ -61,11 +61,11 @@ export class LocalAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin
   }
 
   // ─── IAuditAdmin ───
-  async forceSetTail(_facility: any, _tailId: any): Promise<void> {}
+  public async forceSetTail(_facility: any, _tailId: any): Promise<void> {}
 
 
 
-  async prune(beforeTs: number): Promise<number> {
+  public async prune(beforeTs: number): Promise<number> {
     const kept = this.#entries.filter(e => e.timestamp >= beforeTs);
     const removed = this.#entries.length - kept.length;
     this.#entries.length = 0;
@@ -73,7 +73,7 @@ export class LocalAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin
     return removed;
   }
 
-  async pruneByIds(ids: readonly string[]): Promise<number> {
+  public async pruneByIds(ids: readonly string[]): Promise<number> {
     const idSet = new Set(ids);
     const before = this.#entries.length;
     const kept = this.#entries.filter(e => !idSet.has(e.id));

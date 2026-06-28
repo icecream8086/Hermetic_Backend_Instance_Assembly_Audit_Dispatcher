@@ -12,14 +12,14 @@ import { createRegionId } from '../region/types.ts';
 import { generateVersionId } from '../brand.ts';
 import { AppError } from '../types.ts';
 import { PodStore } from './store.ts';
-import type { PodPhase, PodEntity, PodNetwork } from './types.ts';
+import type { PodSpec, PodPhase, PodEntity, PodNetwork, PodId, ContainerState } from './types.ts';
 import { createPodId } from './types.ts';
 
 // ═══════════════════════════════════════════════════════════════
 // Adapters (to be replaced by PodCodec injection)
 // ═══════════════════════════════════════════════════════════════
 
-function podSpecToGroupInput(spec: import('./types.ts').PodSpec): CreateContainerGroupInput {
+function podSpecToGroupInput(spec: PodSpec): CreateContainerGroupInput {
   const containers = spec.spec.containers.map(c => {
     const cpu = c.resources?.limits?.cpu ?? 0;
     const mem = c.resources?.limits?.memory ?? 0;
@@ -83,11 +83,7 @@ function toContainers(cg: ContainerGroupRuntime): PodEntity['containers'] {
   return cg.containers.map(c => ({
     name: c.name,
     image: c.image,
-    state: (
-      c.status.toLowerCase() === 'running' ? { state: 'Running' as const, startedAt: c.startedAt ?? '' } :
-      c.status.toLowerCase() === 'exited' || c.status.toLowerCase() === 'terminated' ? { state: 'Terminated' as const, exitCode: c.exitCode ?? 0, startedAt: c.startedAt, finishedAt: c.finishedAt } :
-      { state: 'Waiting' as const }
-    ),
+    state: buildContainerState(c.status, c),
     env: c.env,
     ports: c.network?.ports.map(p => ({ containerPort: p.containerPort, hostPort: p.hostPort ?? undefined, protocol: p.protocol })),
     resources: c.resources ? { cpu: c.resources.cpu, memory: c.resources.memory, gpu: c.resources.gpu } : undefined,
@@ -97,6 +93,13 @@ function toContainers(cg: ContainerGroupRuntime): PodEntity['containers'] {
   }));
 }
 
+function buildContainerState(status: string, c: { exitCode?: number | undefined; startedAt?: string | undefined; finishedAt?: string | undefined }): ContainerState {
+  const s = status.toLowerCase();
+  if (s === 'running') return { state: 'Running', startedAt: c.startedAt ?? '' };
+  if (s === 'exited' || s === 'terminated') return { state: 'Terminated', exitCode: c.exitCode ?? 0, reason: undefined, signal: undefined, startedAt: c.startedAt, finishedAt: c.finishedAt };
+  return { state: 'Waiting' };
+}
+
 // ═══════════════════════════════════════════════════════════════
 // PodService
 // ═══════════════════════════════════════════════════════════════
@@ -104,7 +107,7 @@ function toContainers(cg: ContainerGroupRuntime): PodEntity['containers'] {
 export class PodService {
   private readonly store: PodStore;
 
-  constructor(
+  public constructor(
     atomic: IAtomicStore,
     private readonly providerRegistry?: IProviderRegistry | undefined,
     /** Fallback provider when no registry is available. */
@@ -122,7 +125,7 @@ export class PodService {
     throw new ProviderResolutionError('No container provider available for PodService');
   }
 
-  async provision(spec: import('./types.ts').PodSpec): Promise<PodEntity> {
+  public async provision(spec: PodSpec): Promise<PodEntity> {
     const podId = createPodId(crypto.randomUUID());
     const provider = await this.resolveProvider();
     const groupInput = podSpecToGroupInput(spec);
@@ -147,19 +150,19 @@ export class PodService {
 
     const written = await this.store.insert(entity);
     if (!written) throw new AppError(500, 'CREATE_FAILED', 'Failed to persist Pod');
-    await this.store.addToIndex(podId as string);
+    await this.store.addToIndex(podId);
     return entity;
   }
 
-  async getById(podId: import('./types.ts').PodId): Promise<PodEntity | null> {
+  public async getById(podId: PodId): Promise<PodEntity | null> {
     return this.store.getById(podId);
   }
 
-  async list(phase?: PodPhase, limit = 50, cursor?: string): Promise<{ items: PodEntity[]; nextCursor?: string }> {
+  public async list(phase?: PodPhase, limit = 50, cursor?: string): Promise<{ items: PodEntity[]; nextCursor?: string }> {
     return this.store.list(phase, limit, cursor);
   }
 
-  async stop(podId: import('./types.ts').PodId): Promise<PodEntity> {
+  public async stop(podId: PodId): Promise<PodEntity> {
     const pod = await this.store.getById(podId);
     if (!pod) throw new AppError(404, 'POD_NOT_FOUND', `Pod ${podId} not found`);
     if (pod.providerId) {
@@ -169,7 +172,7 @@ export class PodService {
     return this.store.transition(podId, 'Succeeded');
   }
 
-  async start(podId: import('./types.ts').PodId): Promise<PodEntity> {
+  public async start(podId: PodId): Promise<PodEntity> {
     const pod = await this.store.getById(podId);
     if (!pod) throw new AppError(404, 'POD_NOT_FOUND', `Pod ${podId} not found`);
     if (pod.providerId) {
@@ -179,7 +182,7 @@ export class PodService {
     return this.store.transition(podId, 'Running');
   }
 
-  async terminate(podId: import('./types.ts').PodId): Promise<void> {
+  public async terminate(podId: PodId): Promise<void> {
     const pod = await this.store.getById(podId);
     if (!pod) throw new AppError(404, 'POD_NOT_FOUND', `Pod ${podId} not found`);
     if (pod.providerId) {
@@ -187,15 +190,15 @@ export class PodService {
       try { await provider.delete({ region: createRegionId('cn-hangzhou'), providerId: pod.providerId }); } catch { /* GC will retry */ }
     }
     await this.store.transition(podId, 'Failed');
-    await this.store.removeFromIndex(podId as string);
+    await this.store.removeFromIndex(podId);
   }
 
-  async getAllIds(): Promise<string[]> {
+  public async getAllIds(): Promise<string[]> {
     return this.store.getAllIds();
   }
 
   /** GC cleanup — delete provider resource (best-effort) + remove from index. */
-  async gcCleanup(podId: import('./types.ts').PodId): Promise<void> {
+  public async gcCleanup(podId: PodId): Promise<void> {
     const pod = await this.store.getById(podId);
     if (!pod) return;
     if (pod.providerId) {
@@ -219,19 +222,21 @@ export class PodService {
   }
 
   /** Lightweight provider status check — returns runtime or null if resource is gone. */
-  async checkProviderStatus(podId: import('./types.ts').PodId): Promise<ContainerGroupRuntime | null> {
+  public async checkProviderStatus(podId: PodId): Promise<ContainerGroupRuntime | null> {
     const pod = await this.store.getById(podId);
     if (!pod?.providerId) return null;
     const provider = await this.resolveProvider();
     if (!provider.getStatus) return null;
+    let providerStatus: ContainerGroupRuntime | null = null;
     try {
-      return provider.getStatus(pod.providerId);
-    } catch { return null; }
+      providerStatus = await provider.getStatus(pod.providerId);
+    } catch (_e) { /* provider unreachable — treat as resource gone */ }
+    return providerStatus;
   }
 
-  async syncRuntime(podId: import('./types.ts').PodId): Promise<PodEntity> {
+  public async syncRuntime(podId: PodId): Promise<PodEntity> {
     const pod = await this.store.getById(podId);
-    if (!pod || !pod.providerId) throw new AppError(404, 'POD_NOT_FOUND', `Pod ${podId} not found or has no providerId`);
+    if (!pod?.providerId) throw new AppError(404, 'POD_NOT_FOUND', `Pod ${podId} not found or has no providerId`);
     const provider = await this.resolveProvider();
     const result = await provider.describe({ region: createRegionId('cn-hangzhou'), sandboxId: pod.providerId });
     const runtime = result.sandboxes[0];
@@ -258,14 +263,14 @@ export class PodService {
     return this.store.update(podId, updated, pod.version);
   }
 
-  async getLogs(podId: import('./types.ts').PodId, containerName: string, options?: { limitBytes?: number; sinceSeconds?: number; timestamps?: boolean }): Promise<ContainerLogResult> {
+  public async getLogs(podId: PodId, containerName: string, options?: { limitBytes?: number; sinceSeconds?: number; timestamps?: boolean }): Promise<ContainerLogResult> {
     const pod = await this.store.getById(podId);
     if (!pod?.providerId) throw new AppError(404, 'POD_NOT_FOUND', `Pod ${podId} not found or has no providerId`);
     const provider = await this.resolveProvider();
     return provider.getLogs({ region: createRegionId('cn-hangzhou'), providerId: pod.providerId, containerName, ...options });
   }
 
-  async exec(podId: import('./types.ts').PodId, cmd: readonly string[], containerName?: string): Promise<{ execId: string; webSocketUri?: string | undefined }> {
+  public async exec(podId: PodId, cmd: readonly string[], containerName?: string): Promise<{ execId: string; webSocketUri?: string | undefined }> {
     const pod = await this.store.getById(podId);
     if (!pod?.providerId) throw new AppError(404, 'POD_NOT_FOUND', `Pod ${podId} not found or has no providerId`);
     const provider = await this.resolveProvider();
@@ -274,7 +279,7 @@ export class PodService {
     return { execId: result.execId, webSocketUri: result.webSocketUri ?? undefined };
   }
 
-  async update(podId: import('./types.ts').PodId, specPatch: Partial<import('./types.ts').PodSpec>): Promise<PodEntity> {
+  public async update(podId: PodId, specPatch: Partial<PodSpec>): Promise<PodEntity> {
     const pod = await this.store.getById(podId);
     if (!pod) throw new AppError(404, 'POD_NOT_FOUND', `Pod ${podId} not found`);
     if (pod.providerId) {
@@ -295,7 +300,7 @@ export class PodService {
   }
 }
 
-function mergePodSpec(base: import('./types.ts').PodSpec, patch: Partial<import('./types.ts').PodSpec>): import('./types.ts').PodSpec {
+function mergePodSpec(base: PodSpec, patch: Partial<PodSpec>): PodSpec {
   return {
     metadata: { ...base.metadata, ...patch.metadata },
     spec: {

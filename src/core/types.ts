@@ -12,7 +12,7 @@ export interface ErrorBody {
 }
 
 export class AppError extends Error {
-  constructor(
+  public constructor(
     public readonly statusCode: number,
     public readonly code: ErrorCode,
     message: string,

@@ -63,7 +63,7 @@ export function jsonDepthLimit(maxDepth = DEFAULT_MAX_DEPTH): MiddlewareHandler<
 }
 
 class BodyDepthError extends Error {
-  constructor(maxDepth: number) {
+  public constructor(maxDepth: number) {
     super(`JSON nesting depth exceeds limit of ${maxDepth}`);
     this.name = 'BodyDepthError';
   }

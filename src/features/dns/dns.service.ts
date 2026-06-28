@@ -17,14 +17,14 @@ const FACILITY = createFacility('dns-service');
 const KEY_PREFIX = 'dns:';
 
 export class DnsService implements IDnsService {
-  constructor(
+  public constructor(
     private readonly atomic: IAtomicStore,
     private readonly logger: ILogWriter,
     private readonly dnsProvider: IDnsProvider,
     private readonly audit?: IAuditWriter,
   ) {}
 
-  async syncRecord(input: DnsSyncInput, actorId?: string): Promise<DnsRecord> {
+  public async syncRecord(input: DnsSyncInput, actorId?: string): Promise<DnsRecord> {
     const { domain, type, value, ttl, proxied, zoneId, id } = input;
 
     if (type !== 'A' && type !== 'CNAME') {
@@ -79,7 +79,7 @@ export class DnsService implements IDnsService {
     return record;
   }
 
-  async deleteRecord(id: DnsRecordId, actorId?: string): Promise<void> {
+  public async deleteRecord(id: DnsRecordId, actorId?: string): Promise<void> {
     const entry = await this.atomic.get<DnsRecord>(`${KEY_PREFIX}${id}`);
     if (!entry) return;
 
@@ -107,12 +107,12 @@ export class DnsService implements IDnsService {
     });
   }
 
-  async getRecord(id: DnsRecordId): Promise<DnsRecord | null> {
+  public async getRecord(id: DnsRecordId): Promise<DnsRecord | null> {
     const entry = await this.atomic.get<DnsRecord>(`${KEY_PREFIX}${id}`);
     return entry?.value ?? null;
   }
 
-  async listRecords(_refId?: string): Promise<readonly DnsRecord[]> {
+  public async listRecords(_refId?: string): Promise<readonly DnsRecord[]> {
     // Atomic store (KV + DO) doesn't support prefix scans or relational queries.
     // A query-capable backend (e.g. D1) is needed to implement this efficiently.
     // See wrangler.toml — D1 is reserved for future use.

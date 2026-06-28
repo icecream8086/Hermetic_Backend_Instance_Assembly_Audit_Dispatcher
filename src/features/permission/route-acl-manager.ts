@@ -40,7 +40,7 @@ export class RouteAclManager {
   #cachedAcls: readonly RouteAcl[] | null = null;
   static readonly VERSION_KEY = 'routeacl:version';
 
-  constructor(
+  public constructor(
     _atomic: IAtomicStore,
     private readonly logger: ILogWriter,
     private readonly audit?: IAuditWriter,
@@ -50,13 +50,13 @@ export class RouteAclManager {
   }
 
   /** Bump the global version so all RouteAclManager instances see the mutation. */
-  async #bumpVersion(): Promise<void> {
+  public async #bumpVersion(): Promise<void> {
     this.#cachedAcls = null;
     const entry = await this.atomic.get<number>(RouteAclManager.VERSION_KEY);
     await this.atomic.set(RouteAclManager.VERSION_KEY, (entry?.value ?? 0) + 1, entry?.version ?? null);
   }
 
-  async create(input: CreateRouteAclInput, actor?: AuditActor): Promise<RouteAcl> {
+  public async create(input: CreateRouteAclInput, actor?: AuditActor): Promise<RouteAcl> {
     // Check for exact duplicates
     const existing = await this.store.list();
     const dup = existing.find(a =>
@@ -82,11 +82,11 @@ export class RouteAclManager {
     return acl;
   }
 
-  async list() { return this.store.list(); }
-  async listPaginated(page?: number, limit?: number, filter?: (item: RouteAcl) => boolean) { return this.store.listPaginated(page, limit, filter); }
-  async get(id: string) { return this.store.get(id); }
+  public async list() { return this.store.list(); }
+  public async listPaginated(page?: number, limit?: number, filter?: (item: RouteAcl) => boolean) { return this.store.listPaginated(page, limit, filter); }
+  public async get(id: string) { return this.store.get(id); }
 
-  async update(id: string, input: UpdateRouteAclInput, actor?: AuditActor): Promise<RouteAcl> {
+  public async update(id: string, input: UpdateRouteAclInput, actor?: AuditActor): Promise<RouteAcl> {
     const old = await this.store.get(id);
     if (!old) throw new AppError(404, 'ROUTEACL_NOT_FOUND', 'Route ACL not found');
     const updated: RouteAcl = applyUpdate(old, {
@@ -99,7 +99,7 @@ export class RouteAclManager {
     return updated;
   }
 
-  async delete(id: string, actor?: AuditActor): Promise<void> {
+  public async delete(id: string, actor?: AuditActor): Promise<void> {
     const old = await this.store.get(id);
     if (!old) throw new AppError(404, 'ROUTEACL_NOT_FOUND', 'Route ACL not found');
     await this.store.delete(id);
@@ -108,7 +108,7 @@ export class RouteAclManager {
   }
 
   /** Load ACLs, refreshing cache only when store version changes (cross-instance safe). */
-  async #loadCachedAcls(): Promise<readonly RouteAcl[]> {
+  public async #loadCachedAcls(): Promise<readonly RouteAcl[]> {
     const verEntry = await this.atomic.get<number>(RouteAclManager.VERSION_KEY);
     const currentVersion = verEntry?.value ?? 0;
     if (this.#cachedAcls === null || this.#cachedAclsVersion !== currentVersion) {
@@ -119,7 +119,7 @@ export class RouteAclManager {
     return this.#cachedAcls;
   }
 
-  async checkAccess(method: string, path: string, userId: string, userGroupIds: string[]): Promise<boolean> {
+  public async checkAccess(method: string, path: string, userId: string, userGroupIds: string[]): Promise<boolean> {
     const acls = await this.#loadCachedAcls();
     for (const acl of acls) {
       if (!routeMatches(method, path, acl)) continue;

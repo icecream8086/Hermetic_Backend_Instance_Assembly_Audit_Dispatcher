@@ -106,9 +106,9 @@ const IDX_APPROVAL = 'action-approval:ids';
 // ═══════════════════════════════════════════════════════════════
 
 export class OrgService {
-  constructor(private readonly atomic: IAtomicStore) {}
+  public constructor(private readonly atomic: IAtomicStore) {}
 
-  async create(ownerId: string, input: CreateOrgInput): Promise<Organization> {
+  public async create(ownerId: string, input: CreateOrgInput): Promise<Organization> {
     const id = `org_${crypto.randomUUID()}`;
     const now = Date.now();
     const org: Organization = {
@@ -124,12 +124,12 @@ export class OrgService {
     return org;
   }
 
-  async get(id: string): Promise<Organization | null> {
+  public async get(id: string): Promise<Organization | null> {
     const e = await this.atomic.get<Organization>(PFX_ORG + id);
     return e?.value ?? null;
   }
 
-  async list(memberId?: string): Promise<Organization[]> {
+  public async list(memberId?: string): Promise<Organization[]> {
     const idx = await this.atomic.get<string[]>(IDX_ORG);
     if (!idx) return [];
     const entries = (await Promise.all(idx.value.map(i => this.atomic.get<Organization>(PFX_ORG + i))))
@@ -137,7 +137,7 @@ export class OrgService {
     return memberId ? entries.filter(o => o.memberIds.includes(memberId)) : entries;
   }
 
-  async addMember(orgId: string, userId: string): Promise<void> {
+  public async addMember(orgId: string, userId: string): Promise<void> {
     const e = await this.atomic.get<Organization>(PFX_ORG + orgId);
     if (!e) throw new AppError(404, 'ORG_NOT_FOUND', 'Organization not found');
     if (e.value.memberIds.includes(userId)) return;
@@ -145,14 +145,14 @@ export class OrgService {
     await this.atomic.set(PFX_ORG + orgId, updated, e.version);
   }
 
-  async addProject(orgId: string, projectId: string): Promise<void> {
+  public async addProject(orgId: string, projectId: string): Promise<void> {
     const e = await this.atomic.get<Organization>(PFX_ORG + orgId);
     if (!e) throw new AppError(404, 'ORG_NOT_FOUND', 'Organization not found');
     const updated: Organization = { ...e.value, projectIds: [...e.value.projectIds, projectId], updatedAt: Date.now(), version: generateVersionId() };
     await this.atomic.set(PFX_ORG + orgId, updated, e.version);
   }
 
-  async #addToIdx(key: string, id: string): Promise<void> {
+  public async #addToIdx(key: string, id: string): Promise<void> {
     const idx = await this.atomic.get<string[]>(key);
     await this.atomic.set(key, [...(idx?.value ?? []), id], idx?.version ?? null);
   }
@@ -163,9 +163,9 @@ export class OrgService {
 // ═══════════════════════════════════════════════════════════════
 
 export class ProjectService {
-  constructor(private readonly atomic: IAtomicStore, private readonly orgService: OrgService) {}
+  public constructor(private readonly atomic: IAtomicStore, private readonly orgService: OrgService) {}
 
-  async create(ownerId: string, input: CreateProjectInput): Promise<Project> {
+  public async create(ownerId: string, input: CreateProjectInput): Promise<Project> {
     const org = await this.orgService.get(input.orgId);
     if (!org) throw new AppError(404, 'ORG_NOT_FOUND', 'Organization not found');
 
@@ -184,12 +184,12 @@ export class ProjectService {
     return proj;
   }
 
-  async get(id: string): Promise<Project | null> {
+  public async get(id: string): Promise<Project | null> {
     const e = await this.atomic.get<Project>(PFX_PROJ + id);
     return e?.value ?? null;
   }
 
-  async list(orgId: string): Promise<Project[]> {
+  public async list(orgId: string): Promise<Project[]> {
     const idx = await this.atomic.get<string[]>(IDX_PROJ);
     if (!idx) return [];
     const entries = (await Promise.all(idx.value.map(i => this.atomic.get<Project>(PFX_PROJ + i))))
@@ -197,7 +197,7 @@ export class ProjectService {
     return entries.filter(p => p.orgId === orgId);
   }
 
-  async #addToIdx(key: string, id: string): Promise<void> {
+  public async #addToIdx(key: string, id: string): Promise<void> {
     const idx = await this.atomic.get<string[]>(key);
     await this.atomic.set(key, [...(idx?.value ?? []), id], idx?.version ?? null);
   }
@@ -208,9 +208,9 @@ export class ProjectService {
 // ═══════════════════════════════════════════════════════════════
 
 export class ApprovalService {
-  constructor(private readonly atomic: IAtomicStore) {}
+  public constructor(private readonly atomic: IAtomicStore) {}
 
-  async request(runId: string, jobName: string, approvers: string[]): Promise<ApprovalNode> {
+  public async request(runId: string, jobName: string, approvers: string[]): Promise<ApprovalNode> {
     const id = `aprv_${crypto.randomUUID()}`;
     const now = Date.now();
     const node: ApprovalNode = {
@@ -222,7 +222,7 @@ export class ApprovalService {
     return node;
   }
 
-  async decide(id: string, userId: string, approved: boolean, reason?: string): Promise<ApprovalNode> {
+  public async decide(id: string, userId: string, approved: boolean, reason?: string): Promise<ApprovalNode> {
     const e = await this.atomic.get<ApprovalNode>(PFX_APPROVAL + id);
     if (!e) throw new AppError(404, 'APPROVAL_NOT_FOUND', 'Approval not found');
     if (!e.value.approvers.includes(userId)) throw new AppError(403, 'NOT_APPROVER', 'You are not an approver');
@@ -238,7 +238,7 @@ export class ApprovalService {
     return updated;
   }
 
-  async getForRun(runId: string): Promise<ApprovalNode[]> {
+  public async getForRun(runId: string): Promise<ApprovalNode[]> {
     const idx = await this.atomic.get<string[]>(IDX_APPROVAL);
     if (!idx) return [];
     const entries = (await Promise.all(idx.value.map(i => this.atomic.get<ApprovalNode>(PFX_APPROVAL + i))))
@@ -246,7 +246,7 @@ export class ApprovalService {
     return entries;
   }
 
-  async #addToIdx(key: string, id: string): Promise<void> {
+  public async #addToIdx(key: string, id: string): Promise<void> {
     const idx = await this.atomic.get<string[]>(key);
     await this.atomic.set(key, [...(idx?.value ?? []), id], idx?.version ?? null);
   }

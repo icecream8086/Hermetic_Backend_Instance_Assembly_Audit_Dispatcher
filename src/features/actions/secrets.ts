@@ -18,12 +18,12 @@ export interface WorkflowSecret {
 }
 
 export class WorkflowSecretService {
-  constructor(
+  public constructor(
     private readonly atomic: IAtomicStore,
     private readonly encryption?: SecretEncryption,
   ) {}
 
-  async set(workflowId: string, key: string, value: string): Promise<WorkflowSecret> {
+  public async set(workflowId: string, key: string, value: string): Promise<WorkflowSecret> {
     const id = `ws_${crypto.randomUUID()}`;
     const now = Date.now();
     const encrypted = this.encryption
@@ -49,7 +49,7 @@ export class WorkflowSecretService {
     return secret;
   }
 
-  async get(workflowId: string, key: string): Promise<string | null> {
+  public async get(workflowId: string, key: string): Promise<string | null> {
     const secret = await this.#findByKey(workflowId, key);
     if (!secret) return null;
     return this.encryption
@@ -57,7 +57,7 @@ export class WorkflowSecretService {
       : secret.encryptedValue;
   }
 
-  async list(workflowId: string): Promise<{ key: string; id: string }[]> {
+  public async list(workflowId: string): Promise<{ key: string; id: string }[]> {
     const idx = await this.atomic.get<string[]>(IDX);
     if (!idx) return [];
     const entries = await Promise.all(
@@ -68,7 +68,7 @@ export class WorkflowSecretService {
       .map(e => ({ key: e!.value.key, id: e!.value.id }));
   }
 
-  async delete(id: string): Promise<void> {
+  public async delete(id: string): Promise<void> {
     const entry = await this.atomic.get<WorkflowSecret>(PFX + id);
     if (!entry) throw new AppError(404, 'SECRET_NOT_FOUND', 'Secret not found');
     await this.atomic.set(PFX + id, null, entry.version);
@@ -79,7 +79,7 @@ export class WorkflowSecretService {
   /**
    * Resolve `${{ secrets.KEY }}` placeholders in a values object.
    */
-  async resolveSecrets(
+  public async resolveSecrets(
     workflowId: string,
     values: Record<string, string>,
   ): Promise<Record<string, string>> {
@@ -90,7 +90,7 @@ export class WorkflowSecretService {
     return result;
   }
 
-  async #resolveValue(workflowId: string, value: string): Promise<string> {
+  public async #resolveValue(workflowId: string, value: string): Promise<string> {
     const pattern = /\$\{\{\s*secrets\.(\w+)\s*\}\}/g;
     let resolved = value;
     for (const match of value.matchAll(pattern)) {
@@ -102,7 +102,7 @@ export class WorkflowSecretService {
     return resolved;
   }
 
-  async #findByKey(workflowId: string, key: string): Promise<WorkflowSecret | null> {
+  public async #findByKey(workflowId: string, key: string): Promise<WorkflowSecret | null> {
     const idx = await this.atomic.get<string[]>(IDX);
     if (!idx) return null;
     for (const id of idx.value) {

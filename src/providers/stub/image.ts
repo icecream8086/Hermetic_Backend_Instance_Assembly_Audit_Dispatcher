@@ -3,7 +3,7 @@ import type { IImageProvider, ImageInfo, ListImagesOptions } from '../../core/pr
 export class StubImageProvider implements IImageProvider {
   private images = new Map<string, ImageInfo>();
 
-  async pull(image: string, _clusterId?: string): Promise<ImageInfo> {
+  public async pull(image: string, _clusterId?: string): Promise<ImageInfo> {
     const id = `sha256:${Array(64).fill(0).map(() => Math.random().toString(16)[2]).join('')}`;
     const info: ImageInfo = { id, tags: [image], created: Date.now(), size: 1024 * 1024 * 100 };
     this.images.set(image, info);
@@ -11,32 +11,32 @@ export class StubImageProvider implements IImageProvider {
     return info;
   }
 
-  async list(_options?: ListImagesOptions): Promise<readonly ImageInfo[]> {
+  public async list(_options?: ListImagesOptions): Promise<readonly ImageInfo[]> {
     return [...this.images.values()];
   }
 
-  async inspect(id: string): Promise<ImageInfo | null> {
+  public async inspect(id: string): Promise<ImageInfo | null> {
     return this.images.get(id) ?? null;
   }
 
-  async remove(id: string): Promise<void> {
+  public async remove(id: string): Promise<void> {
     this.images.delete(id);
     for (const [k, v] of this.images) {
       if (v.id === id || v.tags.includes(id)) this.images.delete(k);
     }
   }
 
-  async push(imageOrId: string): Promise<ImageInfo> {
+  public async push(imageOrId: string): Promise<ImageInfo> {
     const info = await this.inspect(imageOrId);
     if (!info) throw new Error(`Image ${imageOrId} not found`);
     return info;
   }
 
-  async search(term: string): Promise<readonly { name: string; description?: string; isOfficial?: boolean }[]> {
+  public async search(term: string): Promise<readonly { name: string; description?: string; isOfficial?: boolean }[]> {
     return [{ name: `library/${term}`, description: `Stub ${term} image`, isOfficial: true }];
   }
 
-  async tag(id: string, tag: string): Promise<void> {
+  public async tag(id: string, tag: string): Promise<void> {
     const info = await this.inspect(id);
     if (!info) throw new Error(`Image ${id} not found`);
     const tagged = { ...info, tags: [...info.tags, tag] };
@@ -44,17 +44,17 @@ export class StubImageProvider implements IImageProvider {
     this.images.set(info.id, tagged);
   }
 
-  async history(id: string): Promise<readonly { id: string; created?: number | undefined; createdBy?: string | undefined; size?: number | undefined }[]> {
+  public async history(id: string): Promise<readonly { id: string; created?: number | undefined; createdBy?: string | undefined; size?: number | undefined }[]> {
     const info = await this.inspect(id);
     if (!info) throw new Error(`Image ${id} not found`);
     return [{ id: info.id, ...(info.created ? { created: info.created } : {}), createdBy: '/bin/sh -c #(nop) CMD', ...(info.size ? { size: info.size } : {}) }];
   }
 
-  async prune(): Promise<{ reclaimed: number }> {
+  public async prune(): Promise<{ reclaimed: number }> {
     return { reclaimed: 0 };
   }
 
-  async build(_context: unknown, options?: { dockerfile?: string; tag?: string }): Promise<ImageInfo> {
+  public async build(_context: unknown, options?: { dockerfile?: string; tag?: string }): Promise<ImageInfo> {
     const tag = options?.tag ?? 'dockerfile:latest';
     return this.pull(tag);
   }

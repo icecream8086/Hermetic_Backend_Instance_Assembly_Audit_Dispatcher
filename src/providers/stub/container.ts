@@ -27,7 +27,7 @@ export class StubContainerProvider implements IContainerProvider {
   #nameToOciId = new Map<string, ContainerId>();
   #nextProviderId = 1;
 
-  async create(input: CreateContainerGroupInput): Promise<{ providerId: string }> {
+  public async create(input: CreateContainerGroupInput): Promise<{ providerId: string }> {
     const providerId = `stub-eci-${this.#nextProviderId++}`;
 
     // Delegate container lifecycle to the OCI runtime
@@ -109,7 +109,7 @@ export class StubContainerProvider implements IContainerProvider {
     return { providerId };
   }
 
-  async describe(input: DescribeContainerGroupsInput): Promise<DescribeContainerGroupsResult> {
+  public async describe(input: DescribeContainerGroupsInput): Promise<DescribeContainerGroupsResult> {
     let items = [...this.#runtimes.values()];
 
     if (input.sandboxId) {
@@ -137,11 +137,11 @@ export class StubContainerProvider implements IContainerProvider {
     };
   }
 
-  async delete(input: DeleteContainerGroupInput): Promise<void> {
+  public async delete(input: DeleteContainerGroupInput): Promise<void> {
     this.#runtimes.delete(input.providerId);
   }
 
-  async getLogs(input: GetContainerLogInput): Promise<ContainerLogResult> {
+  public async getLogs(input: GetContainerLogInput): Promise<ContainerLogResult> {
     const ociId = this.#nameToOciId.get(input.containerName);
     if (ociId) {
       const tail = input.limitBytes ? Math.min(input.limitBytes, 100) : undefined;
@@ -157,7 +157,7 @@ export class StubContainerProvider implements IContainerProvider {
 
   // ─── Container lifecycle operations ───
 
-  async stop(providerId: string, timeoutSeconds?: number): Promise<void> {
+  public async stop(providerId: string, timeoutSeconds?: number): Promise<void> {
     const run = this.#runtimes.get(providerId);
     if (run?.containers[0]) {
       const c = run.containers[0];
@@ -165,7 +165,7 @@ export class StubContainerProvider implements IContainerProvider {
     }
   }
 
-  async start(providerId: string): Promise<void> {
+  public async start(providerId: string): Promise<void> {
     const run = this.#runtimes.get(providerId);
     if (run?.containers[0]) {
       const c = run.containers[0];
@@ -173,7 +173,7 @@ export class StubContainerProvider implements IContainerProvider {
     }
   }
 
-  async restart(providerId: string): Promise<void> {
+  public async restart(providerId: string): Promise<void> {
     const run = this.#runtimes.get(providerId);
     if (!run) throw new Error(`Container ${providerId} not found`);
     const c = run.containers[0];
@@ -182,36 +182,36 @@ export class StubContainerProvider implements IContainerProvider {
     await this.#oci.startContainer(c.id);
   }
 
-  async kill(providerId: string, signal?: string): Promise<void> {
+  public async kill(providerId: string, signal?: string): Promise<void> {
     const run = this.#runtimes.get(providerId);
     if (run?.containers[0]) {
       await this.#oci.killContainer(run.containers[0].id, signal);
     }
   }
 
-  async pause(providerId: string): Promise<void> {
+  public async pause(providerId: string): Promise<void> {
     const run = this.#runtimes.get(providerId);
     if (run?.containers[0]) {
       await this.#oci.pauseContainer(run.containers[0].id);
     }
   }
 
-  async unpause(providerId: string): Promise<void> {
+  public async unpause(providerId: string): Promise<void> {
     const run = this.#runtimes.get(providerId);
     if (run?.containers[0]) {
       await this.#oci.unpauseContainer(run.containers[0].id);
     }
   }
 
-  async wait(_providerId: string): Promise<{ statusCode: number }> {
+  public async wait(_providerId: string): Promise<{ statusCode: number }> {
     return { statusCode: 0 };
   }
 
-  async exec(_providerId: string, cmd: readonly string[]): Promise<{ execId: string; webSocketUri?: string | undefined }> {
+  public async exec(_providerId: string, cmd: readonly string[]): Promise<{ execId: string; webSocketUri?: string | undefined }> {
     return { execId: `exec_${cmd.join('_')}` };
   }
 
-  async rename(providerId: string, newName: string): Promise<void> {
+  public async rename(providerId: string, newName: string): Promise<void> {
     const run = this.#runtimes.get(providerId);
     if (run) {
       this.#runtimes.set(newName, { ...run, name: newName });
@@ -219,7 +219,7 @@ export class StubContainerProvider implements IContainerProvider {
     }
   }
 
-  async stats(providerId: string): Promise<{ cpuUsage: number; memoryUsage: number; networkIO?: { rx: number; tx: number } }> {
+  public async stats(providerId: string): Promise<{ cpuUsage: number; memoryUsage: number; networkIO?: { rx: number; tx: number } }> {
     const run = this.#runtimes.get(providerId);
     if (!run) return { cpuUsage: 0, memoryUsage: 0 };
     return {
@@ -229,7 +229,7 @@ export class StubContainerProvider implements IContainerProvider {
     };
   }
 
-  async top(_providerId: string): Promise<{ processes: readonly (readonly string[])[] }> {
+  public async top(_providerId: string): Promise<{ processes: readonly (readonly string[])[] }> {
     return { processes: [['PID', 'USER', 'TIME', 'COMMAND'], ['1', 'root', '0:00', '/sbin/init']] };
   }
 }

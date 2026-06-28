@@ -77,9 +77,9 @@ function generateBucketId(): string {
 // ─── Service ───
 
 export class BucketService {
-  constructor(private readonly atomic: IAtomicStore) {}
+  public constructor(private readonly atomic: IAtomicStore) {}
 
-  async create(input: CreateBucketInput): Promise<RegionBucket> {
+  public async create(input: CreateBucketInput): Promise<RegionBucket> {
     // Resolve platform/region/endpoint/credentialRef from bound ComputeInstance
     const instSvc = new InstanceService(this.atomic);
     const inst = await instSvc.get(input.instanceId as InstanceId);
@@ -108,12 +108,12 @@ export class BucketService {
     return bucket;
   }
 
-  async get(id: string): Promise<RegionBucket | null> {
+  public async get(id: string): Promise<RegionBucket | null> {
     const entry = await this.atomic.get<RegionBucket>(BUCKET_PREFIX + id);
     return entry?.value ?? null;
   }
 
-  async list(filter?: { platform?: string | undefined; region?: string | undefined }): Promise<RegionBucket[]> {
+  public async list(filter?: { platform?: string | undefined; region?: string | undefined }): Promise<RegionBucket[]> {
     const all = await this.#listAll();
     if (!filter) return all;
     return all.filter(b => {
@@ -123,7 +123,7 @@ export class BucketService {
     });
   }
 
-  async update(id: string, input: UpdateBucketInput): Promise<RegionBucket> {
+  public async update(id: string, input: UpdateBucketInput): Promise<RegionBucket> {
     const entry = await this.atomic.get<RegionBucket>(BUCKET_PREFIX + id);
     if (!entry) throw new AppError(404, 'BUCKET_NOT_FOUND', 'Bucket not found');
 
@@ -154,7 +154,7 @@ export class BucketService {
     return updated;
   }
 
-  async delete(id: string): Promise<void> {
+  public async delete(id: string): Promise<void> {
     const entry = await this.atomic.get<RegionBucket>(BUCKET_PREFIX + id);
     if (!entry) throw new AppError(404, 'BUCKET_NOT_FOUND', 'Bucket not found');
     await this.atomic.set(BUCKET_PREFIX + id, null, entry.version);
@@ -163,19 +163,19 @@ export class BucketService {
 
   // ─── Internal helpers ───
 
-  async #listAll(): Promise<RegionBucket[]> {
+  public async #listAll(): Promise<RegionBucket[]> {
     const idx = await this.atomic.get<string[]>(BUCKET_INDEX_KEY);
     if (!idx) return [];
     const entries = await Promise.all(idx.value.map(id => this.atomic.get<RegionBucket>(BUCKET_PREFIX + id)));
     return entries.filter(e => e).map(e => e!.value);
   }
 
-  async #addToIndex(id: string): Promise<void> {
+  public async #addToIndex(id: string): Promise<void> {
     const idx = await this.atomic.get<string[]>(BUCKET_INDEX_KEY);
     await this.atomic.set(BUCKET_INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
   }
 
-  async #removeFromIndex(id: string): Promise<void> {
+  public async #removeFromIndex(id: string): Promise<void> {
     const idx = await this.atomic.get<string[]>(BUCKET_INDEX_KEY);
     if (!idx) return;
     await this.atomic.set(BUCKET_INDEX_KEY, idx.value.filter((i: string) => i !== id), idx.version);

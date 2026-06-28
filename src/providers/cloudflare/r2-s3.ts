@@ -15,7 +15,7 @@ export class CloudflareR2S3Provider extends S3ClientBase {
   readonly #credentials: SigV4Credentials;
   #clockOffset = 0;
 
-  constructor(credentials: SigV4Credentials, accountId: string, config?: S3ProviderConfig) {
+  public constructor(credentials: SigV4Credentials, accountId: string, config?: S3ProviderConfig) {
     super(config);
     this.#credentials = credentials;
     this.#accountId = accountId;
@@ -43,7 +43,7 @@ export class CloudflareR2S3Provider extends S3ClientBase {
     throw new Error(`R2 ${method} failed after ${CLOCK_SKEW_RETRIES} retries`);
   }
 
-  async getPresignedUrl(bucket: string, key: string, expiresInSeconds = 3600): Promise<string> {
+  public async getPresignedUrl(bucket: string, key: string, expiresInSeconds = 3600): Promise<string> {
     const now = this.#signingTime();
     const canonicalUri = `/${this.#bucketMapping(bucket)}/${key.split('/').map(encodeURIComponent).join('/')}`;
     const host = `${this.#accountId}.r2.cloudflarestorage.com`;
@@ -51,7 +51,7 @@ export class CloudflareR2S3Provider extends S3ClientBase {
     return url.toString();
   }
 
-  async putPresignedUrl(bucket: string, key: string, expiresInSeconds = 3600): Promise<string> {
+  public async putPresignedUrl(bucket: string, key: string, expiresInSeconds = 3600): Promise<string> {
     const now = this.#signingTime();
     const canonicalUri = `/${this.#bucketMapping(bucket)}/${key.split('/').map(encodeURIComponent).join('/')}`;
     const host = `${this.#accountId}.r2.cloudflarestorage.com`;

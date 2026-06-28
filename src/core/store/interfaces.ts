@@ -23,7 +23,7 @@ export interface IStoreTransaction {
  *   const result = await withRetry(() => atomic.transact(fn));
  */
 export class TransactRetryExhausted extends Error {
-  constructor(retries: number, cause?: unknown) {
+  public constructor(retries: number, cause?: unknown) {
     super(`Transaction failed after ${retries} retries`);
     this.name = 'TransactRetryExhausted';
     this.cause = cause;
@@ -91,7 +91,7 @@ export type QueryParams = Record<string, unknown> | unknown[];
  * The caller should catch this and retry the transaction if appropriate.
  */
 export class TransactConflictError extends Error {
-  constructor(message?: string) {
+  public constructor(message?: string) {
     super(message ?? 'Transaction conflict detected. One or more keys were modified concurrently.');
     this.name = 'TransactConflictError';
   }

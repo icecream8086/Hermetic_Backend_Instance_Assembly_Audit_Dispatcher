@@ -20,7 +20,7 @@ interface StubRecord {
 export class StubDnsProvider implements IDnsProvider {
   #records = new Map<string, StubRecord>();
 
-  async updateRecord(input: UpdateDnsRecordInput): Promise<void> {
+  public async updateRecord(input: UpdateDnsRecordInput): Promise<void> {
     const now = Date.now();
     const existing = this.#records.get(input.providerRecordId);
 
@@ -37,7 +37,7 @@ export class StubDnsProvider implements IDnsProvider {
     });
   }
 
-  async deleteRecord(input: DeleteDnsRecordInput): Promise<void> {
+  public async deleteRecord(input: DeleteDnsRecordInput): Promise<void> {
     this.#records.delete(input.providerRecordId);
   }
 

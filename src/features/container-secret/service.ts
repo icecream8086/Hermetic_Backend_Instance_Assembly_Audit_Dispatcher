@@ -21,7 +21,7 @@ export interface IContainerSecretService {
 }
 
 export class ContainerSecretService implements IContainerSecretService {
-  constructor(
+  public constructor(
     private readonly atomic: IAtomicStore,
     private readonly blob?: IBlobStore,
     private readonly encryption?: SecretEncryption,
@@ -30,7 +30,7 @@ export class ContainerSecretService implements IContainerSecretService {
 
   #encId(id: string): string { return PREFIX + id; }
 
-  async create(input: CreateContainerSecretInput): Promise<ContainerSecret> {
+  public async create(input: CreateContainerSecretInput): Promise<ContainerSecret> {
     const id = `ctsec_${crypto.randomUUID()}`;
     const now = Date.now();
 
@@ -71,14 +71,14 @@ export class ContainerSecretService implements IContainerSecretService {
     return secret;
   }
 
-  async get(id: string): Promise<ContainerSecret | null> {
+  public async get(id: string): Promise<ContainerSecret | null> {
     const entry = await this.atomic.get<ContainerSecret>(this.#encId(id));
     if (!entry) return null;
     const s = await this.#decryptFields(entry.value);
     return normalizeSecret(s);
   }
 
-  async list(scopeId?: string): Promise<ContainerSecret[]> {
+  public async list(scopeId?: string): Promise<ContainerSecret[]> {
     const idx = await this.atomic.get<string[]>(INDEX_KEY);
     if (!idx) return [];
     const entries = await Promise.all(idx.value.map(id => this.atomic.get<ContainerSecret>(this.#encId(id))));
@@ -91,7 +91,7 @@ export class ContainerSecretService implements IContainerSecretService {
     return secrets;
   }
 
-  async update(id: string, input: UpdateContainerSecretInput): Promise<ContainerSecret> {
+  public async update(id: string, input: UpdateContainerSecretInput): Promise<ContainerSecret> {
     const entry = await this.atomic.get<ContainerSecret>(this.#encId(id));
     if (!entry) throw new AppError(404, 'SECRET_NOT_FOUND', 'Container secret not found');
 
@@ -117,7 +117,7 @@ export class ContainerSecretService implements IContainerSecretService {
     return updated;
   }
 
-  async delete(id: string): Promise<void> {
+  public async delete(id: string): Promise<void> {
     const entry = await this.atomic.get<ContainerSecret>(this.#encId(id));
     if (!entry) throw new AppError(404, 'SECRET_NOT_FOUND', 'Container secret not found');
 
@@ -129,7 +129,7 @@ export class ContainerSecretService implements IContainerSecretService {
     await this.#removeFromIndex(id);
   }
 
-  async uploadBlob(id: string, filename: string, body: ReadableStream | ArrayBuffer, mimeType?: string): Promise<ContainerSecret> {
+  public async uploadBlob(id: string, filename: string, body: ReadableStream | ArrayBuffer, mimeType?: string): Promise<ContainerSecret> {
     const entry = await this.atomic.get<ContainerSecret>(this.#encId(id));
     if (!entry) throw new AppError(404, 'SECRET_NOT_FOUND', 'Container secret not found');
     if (!this.blob) throw new AppError(500, 'BLOB_STORE_UNAVAILABLE', 'Blob store not configured');
@@ -154,7 +154,7 @@ export class ContainerSecretService implements IContainerSecretService {
     return updated;
   }
 
-  async resolveData(id: string): Promise<string> {
+  public async resolveData(id: string): Promise<string> {
     const entry = await this.atomic.get<ContainerSecret>(this.#encId(id));
     if (!entry) throw new AppError(404, 'SECRET_NOT_FOUND', 'Container secret not found');
 
@@ -186,27 +186,27 @@ export class ContainerSecretService implements IContainerSecretService {
     throw new AppError(500, 'SECRET_INVALID_TYPE', `Unknown secret type: ${secret.type}`);
   }
 
-  async canAccess(id: string, scopeId: string): Promise<boolean> {
+  public async canAccess(id: string, scopeId: string): Promise<boolean> {
     const secret = await this.get(id);
     if (!secret) return false;
     return visibleTo(secret, scopeId);
   }
 
-  async getPublicKey(userId: string): Promise<string | null> {
+  public async getPublicKey(userId: string): Promise<string | null> {
     if (!this.keyring) return null;
     return this.keyring.getPublicKey(userId);
   }
 
   // ─── Encryption helpers ───
 
-  async #encryptFields(s: ContainerSecret): Promise<ContainerSecret> {
+  public async #encryptFields(s: ContainerSecret): Promise<ContainerSecret> {
     if (s.keyType === 'sealed-box') return s; // already sealed
     const enc = this.encryption;
     if (!enc || !s.value) return s;
     return { ...s, value: await enc.encrypt(s.value) };
   }
 
-  async #decryptFields(s: ContainerSecret): Promise<ContainerSecret> {
+  public async #decryptFields(s: ContainerSecret): Promise<ContainerSecret> {
     if (s.keyType === 'sealed-box' && s.sealedForUserId && this.keyring) {
       const kp = await this.keyring.ensureSealedBox(s.sealedForUserId);
       const opened = await SealedBox.open(kp.privateKey, s.value!);
@@ -219,12 +219,12 @@ export class ContainerSecretService implements IContainerSecretService {
 
   // ─── Index helpers ───
 
-  async #addToIndex(id: string): Promise<void> {
+  public async #addToIndex(id: string): Promise<void> {
     const idx = await this.atomic.get<string[]>(INDEX_KEY);
     await this.atomic.set(INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
   }
 
-  async #removeFromIndex(id: string): Promise<void> {
+  public async #removeFromIndex(id: string): Promise<void> {
     const idx = await this.atomic.get<string[]>(INDEX_KEY);
     if (!idx) return;
     await this.atomic.set(INDEX_KEY, idx.value.filter((i: string) => i !== id), idx.version);

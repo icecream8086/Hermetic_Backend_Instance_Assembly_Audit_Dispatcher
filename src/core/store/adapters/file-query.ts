@@ -10,11 +10,11 @@ import type { IQueryStore, QueryParams } from '../interfaces.ts';
 export class FileQueryStore implements IQueryStore {
   #dataDir: string;
 
-  constructor(basePath: string) {
+  public constructor(basePath: string) {
     this.#dataDir = resolve(basePath, 'query');
   }
 
-  async #ensureDir(): Promise<void> {
+  public async #ensureDir(): Promise<void> {
     await mkdir(this.#dataDir, { recursive: true });
   }
 
@@ -22,7 +22,7 @@ export class FileQueryStore implements IQueryStore {
     return join(this.#dataDir, `${table}.json`);
   }
 
-  async #readTable(table: string): Promise<Record<string, unknown>[]> {
+  public async #readTable(table: string): Promise<Record<string, unknown>[]> {
     try {
       const raw = await readFile(this.#tablePath(table), 'utf-8');
       return JSON.parse(raw) as Record<string, unknown>[];
@@ -31,11 +31,11 @@ export class FileQueryStore implements IQueryStore {
     }
   }
 
-  async #writeTable(table: string, rows: Record<string, unknown>[]): Promise<void> {
+  public async #writeTable(table: string, rows: Record<string, unknown>[]): Promise<void> {
     await writeFile(this.#tablePath(table), JSON.stringify(rows), 'utf-8');
   }
 
-  async execute<T = unknown>(sql: string, params?: QueryParams): Promise<T[]> {
+  public async execute<T = unknown>(sql: string, params?: QueryParams): Promise<T[]> {
     await this.#ensureDir();
 
     // Minimal SQL parser: supports SELECT * FROM <table> WHERE <col> = <val>

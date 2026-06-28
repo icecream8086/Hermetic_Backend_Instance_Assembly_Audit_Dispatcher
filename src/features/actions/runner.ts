@@ -50,9 +50,9 @@ export interface WorkflowRunnerDeps {
 }
 
 export class WorkflowRunner {
-  constructor(private readonly deps: WorkflowRunnerDeps) {}
+  public constructor(private readonly deps: WorkflowRunnerDeps) {}
 
-  async startRun(
+  public async startRun(
     workflowDef: WorkflowDef,
     trigger: WorkflowRun['trigger'],
     triggerPayload?: unknown,
@@ -104,7 +104,7 @@ export class WorkflowRunner {
     return updated;
   }
 
-  async executeJob(jobRunId: JobRunId): Promise<JobRun> {
+  public async executeJob(jobRunId: JobRunId): Promise<JobRun> {
     const { atomic } = this.deps.stores;
     const entry = await atomic.get<JobRun>(PFX_JOB_RUN + jobRunId);
     if (!entry) throw new Error(`JobRun ${jobRunId} not found`);
@@ -231,7 +231,7 @@ export class WorkflowRunner {
 
   // ─── Private ───
 
-  async #createJobRuns(wf: WorkflowDef, wfRunId: WorkflowRunId): Promise<WorkflowRun['jobRunRefs']> {
+  public async #createJobRuns(wf: WorkflowDef, wfRunId: WorkflowRunId): Promise<WorkflowRun['jobRunRefs']> {
     const refs: { jobName: string; jobRunId: JobRunId }[] = [];
     const expander = new MatrixExpander();
 
@@ -311,7 +311,7 @@ export class WorkflowRunner {
     };
   }
 
-  async #enqueueReadyJobs(wf: WorkflowDef, run: WorkflowRun): Promise<void> {
+  public async #enqueueReadyJobs(wf: WorkflowDef, run: WorkflowRun): Promise<void> {
     const { atomic } = this.deps.stores;
 
     for (const ref of run.jobRunRefs) {
@@ -363,7 +363,7 @@ export class WorkflowRunner {
     }
   }
 
-  async #checkWorkflowCompletion(run: WorkflowRun): Promise<void> {
+  public async #checkWorkflowCompletion(run: WorkflowRun): Promise<void> {
     const { atomic } = this.deps.stores;
     const statuses: JobRunStatus[] = [];
     for (const ref of run.jobRunRefs) {
@@ -394,7 +394,7 @@ export class WorkflowRunner {
     }
   }
 
-  async #provisionJobSandbox(
+  public async #provisionJobSandbox(
     jobDef: JobDef,
     env: Record<string, string>,
     jobName: string,
@@ -474,7 +474,7 @@ export class WorkflowRunner {
     };
   }
 
-  async #executeSteps(
+  public async #executeSteps(
     steps: readonly StepDef[],
     env: Record<string, string>,
     sandboxId: string,
@@ -538,7 +538,7 @@ export class WorkflowRunner {
   }
 
   /** Execute a `run:` step inside the container via provider.exec(). */
-  async #executeRunStep(
+  public async #executeRunStep(
     step: RunStepDef,
     env: Record<string, string>,
     sandboxId: string,
@@ -572,7 +572,7 @@ export class WorkflowRunner {
   }
 
   /** Execute a `uses:` step by resolving the action reference and running it. */
-  async #executeUsesStep(
+  public async #executeUsesStep(
     step: UsesStepDef,
     env: Record<string, string>,
     sandboxId: string,
@@ -625,7 +625,7 @@ export class WorkflowRunner {
     return { name, status: 'Queued' };
   }
 
-  async #addToIndex(indexKey: string, id: string): Promise<void> {
+  public async #addToIndex(indexKey: string, id: string): Promise<void> {
     const { atomic } = this.deps.stores;
     const idx = await atomic.get<string[]>(indexKey);
     await atomic.set(indexKey, [...(idx?.value ?? []), id], idx?.version ?? null);

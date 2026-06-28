@@ -17,7 +17,7 @@ export abstract class S3ClientBase implements IS3Provider {
   abstract readonly type: S3ProviderType;
   protected readonly config: S3ProviderConfig;
 
-  constructor(config?: S3ProviderConfig) {
+  public constructor(config?: S3ProviderConfig) {
     this.config = config ?? {};
   }
 
@@ -29,7 +29,7 @@ export abstract class S3ClientBase implements IS3Provider {
     return this.config.bucketNameMapping?.[bucket] ?? bucket;
   }
 
-  async putObject(input: S3PutObjectInput): Promise<{ etag: string }> {
+  public async putObject(input: S3PutObjectInput): Promise<{ etag: string }> {
     const bodyBuf = await toArrayBuffer(input.body);
     const bodyHash = input.contentType === 'application/octet-stream' ? '' : await payloadHash(bodyBuf);
     const bucket = this.bucketMapping(input.bucket);
@@ -42,11 +42,11 @@ export abstract class S3ClientBase implements IS3Provider {
     return { etag: (res.headers.get('etag') ?? '').replace(/"/g, '') };
   }
 
-  async getObject(bucket: string, key: string): Promise<S3GetObjectResult | null> {
+  public async getObject(bucket: string, key: string): Promise<S3GetObjectResult | null> {
     return this.fetchObject('GET', bucket, key);
   }
 
-  async deleteObject(bucket: string, key: string): Promise<void> {
+  public async deleteObject(bucket: string, key: string): Promise<void> {
     const path = `/${this.bucketMapping(bucket)}/${encodeKey(key)}`;
     const url = `${this.endpointFor(bucket)}${path}`;
     const amzHeaders: Record<string, string> = { host: new URL(url).host };
@@ -56,7 +56,7 @@ export abstract class S3ClientBase implements IS3Provider {
     }
   }
 
-  async headObject(bucket: string, key: string): Promise<S3ObjectInfo | null> {
+  public async headObject(bucket: string, key: string): Promise<S3ObjectInfo | null> {
     try {
       const path = `/${this.bucketMapping(bucket)}/${encodeKey(key)}`;
       const url = `${this.endpointFor(bucket)}${path}`;
@@ -67,7 +67,7 @@ export abstract class S3ClientBase implements IS3Provider {
     } catch { return null; }
   }
 
-  async listObjects(
+  public async listObjects(
     bucket: string,
     options?: { prefix?: string; delimiter?: string; maxKeys?: number; continuationToken?: string },
   ): Promise<S3ListObjectsResult> {
@@ -86,7 +86,7 @@ export abstract class S3ClientBase implements IS3Provider {
 
   // ─── Multi-part upload ───
 
-  async createMultipartUpload(input: { bucket: string; key: string; contentType?: string }): Promise<{ uploadId: string; key: string; bucket: string }> {
+  public async createMultipartUpload(input: { bucket: string; key: string; contentType?: string }): Promise<{ uploadId: string; key: string; bucket: string }> {
     const path = `/${this.bucketMapping(input.bucket)}/${encodeKey(input.key)}?uploads`;
     const url = `${this.endpointFor(input.bucket)}${path}`;
     const amzHeaders: Record<string, string> = { host: new URL(url).host };
@@ -97,7 +97,7 @@ export abstract class S3ClientBase implements IS3Provider {
     return { uploadId, key: input.key, bucket: input.bucket };
   }
 
-  async uploadPart(input: { bucket: string; key: string; uploadId: string; partNumber: number }, body: Uint8Array): Promise<{ etag: string; partNumber: number }> {
+  public async uploadPart(input: { bucket: string; key: string; uploadId: string; partNumber: number }, body: Uint8Array): Promise<{ etag: string; partNumber: number }> {
     const path = `/${this.bucketMapping(input.bucket)}/${encodeKey(input.key)}?partNumber=${input.partNumber}&uploadId=${encodeURIComponent(input.uploadId)}`;
     const url = `${this.endpointFor(input.bucket)}${path}`;
     const amzHeaders: Record<string, string> = { host: new URL(url).host };
@@ -107,7 +107,7 @@ export abstract class S3ClientBase implements IS3Provider {
     return { etag: (res.headers.get('etag') ?? '').replace(/"/g, ''), partNumber: input.partNumber };
   }
 
-  async completeMultipartUpload(input: { bucket: string; key: string; uploadId: string; parts: readonly { partNumber: number; etag: string }[] }): Promise<{ location?: string }> {
+  public async completeMultipartUpload(input: { bucket: string; key: string; uploadId: string; parts: readonly { partNumber: number; etag: string }[] }): Promise<{ location?: string }> {
     const path = `/${this.bucketMapping(input.bucket)}/${encodeKey(input.key)}?uploadId=${encodeURIComponent(input.uploadId)}`;
     const url = `${this.endpointFor(input.bucket)}${path}`;
     const body = buildCompleteXml(input.parts);
@@ -118,14 +118,14 @@ export abstract class S3ClientBase implements IS3Provider {
     return { ...(location ? { location } : {}) };
   }
 
-  async abortMultipartUpload(input: { bucket: string; key: string; uploadId: string }): Promise<void> {
+  public async abortMultipartUpload(input: { bucket: string; key: string; uploadId: string }): Promise<void> {
     const path = `/${this.bucketMapping(input.bucket)}/${encodeKey(input.key)}?uploadId=${encodeURIComponent(input.uploadId)}`;
     const url = `${this.endpointFor(input.bucket)}${path}`;
     const amzHeaders: Record<string, string> = { host: new URL(url).host };
     await this.authFetch(url, 'DELETE', `/${this.bucketMapping(input.bucket)}/${encodeKey(input.key)}`, `uploadId=${encodeURIComponent(input.uploadId)}`, amzHeaders, '');
   }
 
-  async listParts(bucket: string, key: string, uploadId: string): Promise<{ parts: readonly { partNumber: number; size: number; etag: string }[]; uploadId: string; isTruncated: boolean; nextPartNumberMarker?: number }> {
+  public async listParts(bucket: string, key: string, uploadId: string): Promise<{ parts: readonly { partNumber: number; size: number; etag: string }[]; uploadId: string; isTruncated: boolean; nextPartNumberMarker?: number }> {
     const path = `/${this.bucketMapping(bucket)}/${encodeKey(key)}?uploadId=${encodeURIComponent(uploadId)}`;
     const url = `${this.endpointFor(bucket)}${path}`;
     const amzHeaders: Record<string, string> = { host: new URL(url).host };

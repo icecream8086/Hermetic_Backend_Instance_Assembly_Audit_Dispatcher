@@ -25,7 +25,7 @@ export class GroupManager {
   readonly pgStore: CrudStore<PermissionGroup>;
   readonly templates: Template[];
 
-  constructor(
+  public constructor(
     _atomic: IAtomicStore,
     private readonly logger: ILogWriter,
     private readonly audit?: IAuditWriter,
@@ -38,7 +38,7 @@ export class GroupManager {
 
   // ── User Groups ──
 
-  async createUserGroup(input: CreateUserGroupInput, actor?: AuditActor): Promise<UserGroup> {
+  public async createUserGroup(input: CreateUserGroupInput, actor?: AuditActor): Promise<UserGroup> {
     const id = generateUserGroupId();
     const memberIds = input.memberIds ?? [];
     const adminIds = input.adminIds ?? (actor?.userId ? [actor.userId] : []);
@@ -59,11 +59,11 @@ export class GroupManager {
     return group;
   }
 
-  async listUserGroups() { return this.ugStore.list(); }
-  async listUserGroupsPaginated(page?: number, limit?: number, filter?: (item: UserGroup) => boolean) { return this.ugStore.listPaginated(page, limit, filter); }
-  async getUserGroup(id: string) { return this.ugStore.get(id); }
+  public async listUserGroups() { return this.ugStore.list(); }
+  public async listUserGroupsPaginated(page?: number, limit?: number, filter?: (item: UserGroup) => boolean) { return this.ugStore.listPaginated(page, limit, filter); }
+  public async getUserGroup(id: string) { return this.ugStore.get(id); }
 
-  async updateUserGroup(id: string, input: UpdateUserGroupInput, actor?: AuditActor): Promise<UserGroup> {
+  public async updateUserGroup(id: string, input: UpdateUserGroupInput, actor?: AuditActor): Promise<UserGroup> {
     const old = await this.ugStore.get(id);
     if (!old) throw new AppError(404, 'USERGROUP_NOT_FOUND', 'User group not found');
     const updated: UserGroup = applyUpdate(old, {
@@ -75,21 +75,21 @@ export class GroupManager {
     return updated;
   }
 
-  async deleteUserGroup(id: string, actor?: AuditActor): Promise<void> {
+  public async deleteUserGroup(id: string, actor?: AuditActor): Promise<void> {
     const old = await this.ugStore.get(id);
     if (!old) throw new AppError(404, 'USERGROUP_NOT_FOUND', 'User group not found');
     await this.ugStore.delete(id);
     permLogAudit(this.logger, this.audit, 'perm.userGroup.deleted', actor, { entityType: 'userGroup', entityId: id, oldValue: old }, KernLevel.NOTICE);
   }
 
-  async getGroupByUserId(userId: string): Promise<UserGroup[]> {
+  public async getGroupByUserId(userId: string): Promise<UserGroup[]> {
     const all = await this.ugStore.list();
     return all.filter(g => g.memberIds.includes(userId));
   }
 
   // ── Permission Groups ──
 
-  async createPermGroup(input: CreatePermGroupInput, actor?: AuditActor): Promise<PermissionGroup> {
+  public async createPermGroup(input: CreatePermGroupInput, actor?: AuditActor): Promise<PermissionGroup> {
     const id = generatePermGroupId();
     const group: PermissionGroup = {
       id, name: input.name,
@@ -109,11 +109,11 @@ export class GroupManager {
     return group;
   }
 
-  async listPermGroups() { return this.pgStore.list(); }
-  async listPermGroupsPaginated(page?: number, limit?: number, filter?: (item: PermissionGroup) => boolean) { return this.pgStore.listPaginated(page, limit, filter); }
-  async getPermGroup(id: string) { return this.pgStore.get(id); }
+  public async listPermGroups() { return this.pgStore.list(); }
+  public async listPermGroupsPaginated(page?: number, limit?: number, filter?: (item: PermissionGroup) => boolean) { return this.pgStore.listPaginated(page, limit, filter); }
+  public async getPermGroup(id: string) { return this.pgStore.get(id); }
 
-  async updatePermGroup(id: string, input: UpdatePermGroupInput, actor?: AuditActor): Promise<PermissionGroup> {
+  public async updatePermGroup(id: string, input: UpdatePermGroupInput, actor?: AuditActor): Promise<PermissionGroup> {
     const old = await this.pgStore.get(id);
     if (!old) throw new AppError(404, 'PERMGROUP_NOT_FOUND', 'Permission group not found');
     const updated: PermissionGroup = applyUpdate(old, {
@@ -125,7 +125,7 @@ export class GroupManager {
     return updated;
   }
 
-  async deletePermGroup(id: string, actor?: AuditActor): Promise<void> {
+  public async deletePermGroup(id: string, actor?: AuditActor): Promise<void> {
     const old = await this.pgStore.get(id);
     if (!old) throw new AppError(404, 'PERMGROUP_NOT_FOUND', 'Permission group not found');
     if (this.templates.some(t => t.id === old.name?.toLowerCase())) {
@@ -135,7 +135,7 @@ export class GroupManager {
     permLogAudit(this.logger, this.audit, 'perm.permissionGroup.deleted', actor, { entityType: 'permissionGroup', entityId: id, oldValue: old }, KernLevel.NOTICE);
   }
 
-  async createFromTemplate(templateId: string, overrides: {
+  public async createFromTemplate(templateId: string, overrides: {
     name: string; description?: string | null | undefined; userGroupIds?: string[] | undefined; userIds?: string[] | undefined;
   }, actor?: AuditActor): Promise<PermissionGroup> {
     const template = this.templates.find(t => t.id === templateId);
@@ -151,7 +151,7 @@ export class GroupManager {
 
   // ── Compare (reuses original logic) ──
 
-  async comparePermGroups(idA: string, idB: string) {
+  public async comparePermGroups(idA: string, idB: string) {
     const a = await this.pgStore.get(idA);
     const b = await this.pgStore.get(idB);
     if (!a) throw new AppError(404, 'NOT_FOUND', `Permission group ${idA} not found`);
@@ -159,7 +159,7 @@ export class GroupManager {
     return buildCompareResult(a, b);
   }
 
-  async compareUserGroups(idA: string, idB: string) {
+  public async compareUserGroups(idA: string, idB: string) {
     const a = await this.ugStore.get(idA);
     const b = await this.ugStore.get(idB);
     if (!a) throw new AppError(404, 'NOT_FOUND', `User group ${idA} not found`);

@@ -38,9 +38,9 @@ export class LogStreamDO implements DurableObject {
   readonly #sessions = new Set<WebSocket>();
   #abortController: AbortController | null = null;
 
-  constructor(readonly ctx: DurableObjectState, readonly _env: unknown) {}
+  public constructor(readonly ctx: DurableObjectState, readonly _env: unknown) {}
 
-  async fetch(request: Request): Promise<Response> {
+  public async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const providerId = url.searchParams.get('providerId');
     const endpoint = url.searchParams.get('endpoint');
@@ -102,7 +102,7 @@ export class LogStreamDO implements DurableObject {
     this.#stop();
   }
 
-  async #streamFromPodman(endpoint: string, containerId: string, tail?: number, since?: number): Promise<void> {
+  public async #streamFromPodman(endpoint: string, containerId: string, tail?: number, since?: number): Promise<void> {
     this.#abortController = new AbortController();
     try {
       const url = podmanLogsUrl(endpoint, containerId, tail, since);
@@ -135,7 +135,7 @@ export class LogStreamDO implements DurableObject {
     }
   }
 
-  async #checkContainer(endpoint: string, containerId: string): Promise<void> {
+  public async #checkContainer(endpoint: string, containerId: string): Promise<void> {
     try {
       const resp = await fetch(podmanInspectUrl(endpoint, containerId));
       if (resp.status === 404) {
@@ -164,7 +164,7 @@ export class LogStreamDO implements DurableObject {
     this.#abortController = null;
   }
 
-  async alarm(): Promise<void> {
+  public async alarm(): Promise<void> {
     this.#stop();
     for (const ws of this.#sessions) {
       try { ws.close(1001, 'DO idle timeout'); } catch { /* already closed */ }

@@ -41,7 +41,7 @@ export interface KeyPair {
 
 export class SealedBox {
   /** Generate a new ECDH P-256 keypair. */
-  static async generateKeyPair(): Promise<KeyPair> {
+  public static async generateKeyPair(): Promise<KeyPair> {
     const kp = await crypto.subtle.generateKey(KEY_ALGO, true, ['deriveBits']);
     const pubRaw = await crypto.subtle.exportKey('raw', kp.publicKey);
     const privRaw = await crypto.subtle.exportKey('pkcs8', kp.privateKey);
@@ -52,12 +52,12 @@ export class SealedBox {
   }
 
   /** Export public key from raw base64. */
-  static async importPublicKey(rawB64: string): Promise<CryptoKey> {
+  public static async importPublicKey(rawB64: string): Promise<CryptoKey> {
     return crypto.subtle.importKey('raw', b64ToBuf(rawB64), KEY_ALGO, false, []);
   }
 
   /** Import private key from PKCS8 base64. */
-  static async importPrivateKey(rawB64: string): Promise<CryptoKey> {
+  public static async importPrivateKey(rawB64: string): Promise<CryptoKey> {
     return crypto.subtle.importKey('pkcs8', b64ToBuf(rawB64), KEY_ALGO, false, ['deriveBits']);
   }
 
@@ -65,7 +65,7 @@ export class SealedBox {
    * Seal plaintext to a recipient's public key.
    * Returns base64(ephemeralPublicKey || IV || ciphertext).
    */
-  static async seal(recipientPubKeyB64: string, plaintext: string): Promise<string> {
+  public static async seal(recipientPubKeyB64: string, plaintext: string): Promise<string> {
     const recipientKey = await SealedBox.importPublicKey(recipientPubKeyB64);
 
     // Generate ephemeral keypair
@@ -96,7 +96,7 @@ export class SealedBox {
    * Open a sealed message using the recipient's private key.
    * Expects input as base64(ephemeralPublicKey || IV || ciphertext).
    */
-  static async open(recipientPrivKeyB64: string, sealedB64: string): Promise<string> {
+  public static async open(recipientPrivKeyB64: string, sealedB64: string): Promise<string> {
     const privKey = await SealedBox.importPrivateKey(recipientPrivKeyB64);
     const sealed = b64ToBuf(sealedB64);
 

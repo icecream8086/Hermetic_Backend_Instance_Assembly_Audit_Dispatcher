@@ -20,7 +20,7 @@ export class EventBus {
   readonly #handlers = new Map<string, Set<EventHandler>>();
   readonly #onError: (error: unknown, event: Event) => void;
 
-  constructor(config?: EventBusConfig) {
+  public constructor(config?: EventBusConfig) {
     this.#onError = config?.onError ?? ((err, _event) => { throw err; });
   }
 
@@ -68,7 +68,7 @@ export class EventBus {
    * All handlers are awaited. If any handler throws, the error is forwarded
    * to the configured `onError` callback, and remaining handlers still run.
    */
-  async dispatch(event: Event): Promise<void> {
+  public async dispatch(event: Event): Promise<void> {
     const handlers = this.#handlers.get(event.type);
     if (!handlers || handlers.size === 0) return;
 

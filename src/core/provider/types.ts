@@ -357,3 +357,23 @@ export interface CreateContainerGroupInput {
   readonly tags?: readonly { key: string; value: string }[] | undefined;
   readonly providerOverrides?: Record<string, unknown> | undefined;
 }
+
+/** Explicit partial update input — avoids the banned `Partial<T>` utility type. */
+export interface CreateContainerGroupUpdateInput {
+  readonly name?: string | undefined;
+  readonly description?: string | undefined;
+  readonly region?: string | undefined;
+  readonly instanceId?: InstanceId | undefined;
+  readonly zoneId?: string | undefined;
+  readonly cpu?: number | undefined;
+  readonly memory?: number | undefined;
+  readonly gpu?: number | undefined;
+  readonly gpuType?: string | undefined;
+  readonly restartPolicy?: string | undefined;
+  readonly containers?: readonly ContainerCreateConfig[] | undefined;
+  readonly volumes?: readonly VolumeConfigInput[] | undefined;
+  readonly secretMounts?: readonly SecretMountConfig[] | undefined;
+  readonly network?: ContainerGroupNetworkInput | undefined;
+  readonly tags?: readonly { key: string; value: string }[] | undefined;
+  readonly providerOverrides?: Record<string, unknown> | undefined;
+}

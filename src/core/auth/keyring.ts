@@ -33,17 +33,17 @@ export interface UserKeyringEntry {
 }
 
 export class UserKeyring {
-  constructor(private readonly atomic: IAtomicStore) {}
+  public constructor(private readonly atomic: IAtomicStore) {}
 
   #key(userId: string): string { return USER_KEYRING_PREFIX + userId; }
 
-  async get(userId: string): Promise<UserKeyringEntry | null> {
+  public async get(userId: string): Promise<UserKeyringEntry | null> {
     const entry = await this.atomic.get<UserKeyringEntry>(this.#key(userId));
     return entry?.value ?? null;
   }
 
   /** Ensure a SealedBox keypair exists for this user. Creates one if missing. */
-  async ensureSealedBox(userId: string): Promise<KeyPair> {
+  public async ensureSealedBox(userId: string): Promise<KeyPair> {
     const entry = await this.get(userId);
     if (entry?.sealedBox?.publicKey) {
       return { publicKey: entry.sealedBox.publicKey, privateKey: entry.sealedBox.privateKey };
@@ -60,13 +60,13 @@ export class UserKeyring {
   }
 
   /** Get public key for a user (returns null if not yet created). */
-  async getPublicKey(userId: string): Promise<string | null> {
+  public async getPublicKey(userId: string): Promise<string | null> {
     const entry = await this.get(userId);
     return entry?.sealedBox?.publicKey ?? null;
   }
 
   /** Rotate the SealedBox keypair. Returns new keypair. Old secrets must be re-encrypted. */
-  async rotateSealedBox(userId: string): Promise<KeyPair> {
+  public async rotateSealedBox(userId: string): Promise<KeyPair> {
     const kp = await SealedBox.generateKeyPair();
     const entry = await this.get(userId);
     const now = Date.now();
@@ -91,7 +91,7 @@ export class SessionKeyring {
   readonly #keys = new Map<string, SessionKeyringEntry>();
 
   /** Create a session-scoped keypair with TTL. */
-  async create(sessionId: string, ttlMs = 3_600_000): Promise<KeyPair> {
+  public async create(sessionId: string, ttlMs = 3_600_000): Promise<KeyPair> {
     const existing = this.#keys.get(sessionId);
     if (existing && Date.now() < existing.expiresAt) return existing.keypair;
 

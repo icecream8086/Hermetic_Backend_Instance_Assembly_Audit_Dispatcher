@@ -37,9 +37,9 @@ export interface IWorkspaceStore {
 }
 
 export class BlobWorkspaceStore implements IWorkspaceStore {
-  constructor(private readonly blob: IBlobStore) {}
+  public constructor(private readonly blob: IBlobStore) {}
 
-  async save(
+  public async save(
     workflowRunId: string,
     jobName: string,
     data: Uint8Array,
@@ -67,7 +67,7 @@ export class BlobWorkspaceStore implements IWorkspaceStore {
     return wsMeta;
   }
 
-  async load(workflowRunId: string, jobName: string): Promise<{ data: Uint8Array; meta: WorkspaceMeta } | null> {
+  public async load(workflowRunId: string, jobName: string): Promise<{ data: Uint8Array; meta: WorkspaceMeta } | null> {
     const key = `${WS_PREFIX}${workflowRunId}/${jobName}`;
     const stream = await this.blob.get(key);
     if (!stream) return null;
@@ -93,7 +93,7 @@ export class BlobWorkspaceStore implements IWorkspaceStore {
     };
   }
 
-  async list(_workflowRunId: string): Promise<WorkspaceMeta[]> {
+  public async list(_workflowRunId: string): Promise<WorkspaceMeta[]> {
     // IBlobStore has no list — callers track workspace keys via metadata
     return [];
   }

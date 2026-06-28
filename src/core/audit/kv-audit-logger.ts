@@ -12,22 +12,22 @@ export class KvAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
   readonly #entries: StoredAuditEntry[] = [];
   readonly #capacity: number;
 
-  constructor(
+  public constructor(
     private readonly atomic: IAtomicStore,
     capacity = MAX_INDEX_ENTRIES,
   ) {
     this.#capacity = capacity;
   }
 
-  async write(entry: AuditEntry): Promise<void> {
+  public async write(entry: AuditEntry): Promise<void> {
     await this.#store(entry);
   }
 
-  async writeSync(entry: AuditEntry): Promise<LogId> {
+  public async writeSync(entry: AuditEntry): Promise<LogId> {
     return this.#store(entry);
   }
 
-  async #store(entry: AuditEntry): Promise<LogId> {
+  public async #store(entry: AuditEntry): Promise<LogId> {
     const id = generateLogId();
     const now = Date.now();
     const facilityCode = resolveFacility(entry.facility);
@@ -45,7 +45,7 @@ export class KvAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
     return id;
   }
 
-  async query(params?: LogQuery): Promise<{ entries: StoredAuditEntry[]; nextCursor?: string; total?: number }> {
+  public async query(params?: LogQuery): Promise<{ entries: StoredAuditEntry[]; nextCursor?: string; total?: number }> {
     let f = [...this.#entries];
     if (params?.facility) f = f.filter(e => e.facility === params.facility);
     if (params?.startTs !== undefined) f = f.filter(e => e.timestamp >= params.startTs!);
@@ -55,16 +55,16 @@ export class KvAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
     return { entries: f, total };
   }
 
-  async getById(id: LogId): Promise<StoredAuditEntry | null> {
+  public async getById(id: LogId): Promise<StoredAuditEntry | null> {
     return this.#entries.find(e => e.id === id) ?? null;
   }
 
   // ─── IAuditAdmin ───
-  async forceSetTail(_facility: any, _tailId: any): Promise<void> {}
+  public async forceSetTail(_facility: any, _tailId: any): Promise<void> {}
 
 
 
-  async prune(beforeTs: number): Promise<number> {
+  public async prune(beforeTs: number): Promise<number> {
     const idx = await this.atomic.get<string[]>(AUDIT_PREFIX + 'ids');
     if (!idx) return 0;
     let removed = 0;
@@ -82,7 +82,7 @@ export class KvAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
     return removed;
   }
 
-  async pruneByIds(ids: readonly string[]): Promise<number> {
+  public async pruneByIds(ids: readonly string[]): Promise<number> {
     const idx = await this.atomic.get<string[]>(AUDIT_PREFIX + 'ids');
     if (!idx) return 0;
     let removed = 0;

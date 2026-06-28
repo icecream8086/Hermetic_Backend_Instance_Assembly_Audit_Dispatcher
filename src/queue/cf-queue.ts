@@ -13,7 +13,7 @@ import type { TaskMessage, TaskType, ImagePullPayload, SandboxGcPayload, Sandbox
 export class CfQueueProducer implements IMessageQueue {
   readonly #queue: Queue<TaskMessage> | null;
 
-  constructor(queueBinding?: Queue<TaskMessage>) {
+  public constructor(queueBinding?: Queue<TaskMessage>) {
     this.#queue = queueBinding ?? null;
   }
 
@@ -21,27 +21,27 @@ export class CfQueueProducer implements IMessageQueue {
     return this.#queue !== null;
   }
 
-  async sendImagePull(payload: ImagePullPayload): Promise<boolean> {
+  public async sendImagePull(payload: ImagePullPayload): Promise<boolean> {
     return this.#send(this.#message('image:pull', payload));
   }
 
-  async sendSandboxGc(payload: SandboxGcPayload): Promise<boolean> {
+  public async sendSandboxGc(payload: SandboxGcPayload): Promise<boolean> {
     return this.#send(this.#message('sandbox:gc', payload));
   }
 
-  async sendSandboxProvision(payload: SandboxProvisionPayload): Promise<boolean> {
+  public async sendSandboxProvision(payload: SandboxProvisionPayload): Promise<boolean> {
     return this.#send(this.#message('sandbox:provision', payload));
   }
 
-  async sendBucketKeyRotate(payload: BucketKeyRotatePayload): Promise<boolean> {
+  public async sendBucketKeyRotate(payload: BucketKeyRotatePayload): Promise<boolean> {
     return this.#send(this.#message('bucket-key:rotate', payload));
   }
 
-  async send(message: TaskMessage): Promise<boolean> {
+  public async send(message: TaskMessage): Promise<boolean> {
     return this.#send(message);
   }
 
-  async sendBatch(messages: TaskMessage[]): Promise<number> {
+  public async sendBatch(messages: TaskMessage[]): Promise<number> {
     if (!this.#queue || messages.length === 0) return 0;
     try {
       const batch = messages.map(m => ({ body: m }));
@@ -55,7 +55,7 @@ export class CfQueueProducer implements IMessageQueue {
 
   // ─── Internal ───
 
-  async #send(message: TaskMessage): Promise<boolean> {
+  public async #send(message: TaskMessage): Promise<boolean> {
     if (!this.#queue) return false;
     try {
       await this.#queue.send(message);

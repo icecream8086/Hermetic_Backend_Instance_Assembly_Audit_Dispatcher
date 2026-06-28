@@ -44,7 +44,7 @@ export class SubnetPool {
    * @param supernet  - e.g. "10.2.0.0/16"
    * @param prefixLen - allocation prefix length (default 24)
    */
-  constructor(atomic: IAtomicStore, supernet: string, prefixLen = 24) {
+  public constructor(atomic: IAtomicStore, supernet: string, prefixLen = 24) {
     this.#atomic = atomic;
     this.#supernet = parseCidr(supernet);
     this.#prefixLen = prefixLen;
@@ -55,7 +55,7 @@ export class SubnetPool {
    * Returns the CIDR string on success.
    * Throws if no free subnets remain.
    */
-  async allocate(tenantId: string): Promise<string> {
+  public async allocate(tenantId: string): Promise<string> {
     const allocations = await this.#listAllocations();
 
     // Build set of already-allocated CIDRs
@@ -90,7 +90,7 @@ export class SubnetPool {
   /**
    * Release a previously allocated subnet back to the pool.
    */
-  async release(cidr: string): Promise<void> {
+  public async release(cidr: string): Promise<void> {
     const block = parseCidr(cidr);
     if (!contains(this.#supernet, block)) {
       throw new Error(`CIDR ${cidr} is not within the pool supernet ${formatCidr(this.#supernet)}`);
@@ -113,7 +113,7 @@ export class SubnetPool {
   /**
    * Get pool status: supernet, total/used counts, all allocations.
    */
-  async status(): Promise<PoolStatus> {
+  public async status(): Promise<PoolStatus> {
     const allocations = await this.#listAllocations();
     return {
       supernet: formatCidr(this.#supernet),
@@ -126,7 +126,7 @@ export class SubnetPool {
   /**
    * List all current allocations.
    */
-  async #listAllocations(): Promise<SubnetAllocation[]> {
+  public async #listAllocations(): Promise<SubnetAllocation[]> {
     const idxEntry = await this.#atomic.get<string[]>(INDEX_KEY);
     if (!idxEntry) return [];
 

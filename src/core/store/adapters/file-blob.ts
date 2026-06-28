@@ -11,11 +11,11 @@ import type { IBlobStore, BlobMetadata } from '../interfaces.ts';
 export class FileBlobStore implements IBlobStore {
   #dataDir: string;
 
-  constructor(basePath: string) {
+  public constructor(basePath: string) {
     this.#dataDir = resolve(basePath, 'blob');
   }
 
-  async #ensureDir(): Promise<void> {
+  public async #ensureDir(): Promise<void> {
     await mkdir(this.#dataDir, { recursive: true });
   }
 
@@ -24,7 +24,7 @@ export class FileBlobStore implements IBlobStore {
     return join(this.#dataDir, safe);
   }
 
-  async put(key: string, body: ReadableStream | ArrayBuffer, _metadata?: BlobMetadata): Promise<void> {
+  public async put(key: string, body: ReadableStream | ArrayBuffer, _metadata?: BlobMetadata): Promise<void> {
     await this.#ensureDir();
     const fp = this.#filePath(key);
 
@@ -47,7 +47,7 @@ export class FileBlobStore implements IBlobStore {
     }
   }
 
-  async get(key: string): Promise<ReadableStream | null> {
+  public async get(key: string): Promise<ReadableStream | null> {
     await this.#ensureDir();
     try {
       const fp = this.#filePath(key);
@@ -60,7 +60,7 @@ export class FileBlobStore implements IBlobStore {
     }
   }
 
-  async delete(key: string): Promise<void> {
+  public async delete(key: string): Promise<void> {
     try {
       await unlink(this.#filePath(key));
     } catch {

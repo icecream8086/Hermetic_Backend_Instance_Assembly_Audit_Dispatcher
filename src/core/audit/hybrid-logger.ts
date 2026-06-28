@@ -33,7 +33,7 @@ export class HybridAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmi
   readonly #bootId: string;
   readonly #machineHash: string;
 
-  constructor(atomic?: IAtomicStore, maxInMemory = MAX_IN_MEMORY) {
+  public constructor(atomic?: IAtomicStore, maxInMemory = MAX_IN_MEMORY) {
     this.#atomic = atomic;
     this.#maxInMemory = maxInMemory;
     // Derive machine hash from boot ID (stable within a process lifetime).
@@ -41,15 +41,15 @@ export class HybridAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmi
     this.#machineHash = hashBootId(this.#bootId);
   }
 
-  async write(entry: AuditEntry): Promise<void> {
+  public async write(entry: AuditEntry): Promise<void> {
     await this.#store(entry);
   }
 
-  async writeSync(entry: AuditEntry): Promise<LogId> {
+  public async writeSync(entry: AuditEntry): Promise<LogId> {
     return this.#store(entry);
   }
 
-  async #store(entry: AuditEntry): Promise<LogId> {
+  public async #store(entry: AuditEntry): Promise<LogId> {
     const id = generateLogId();
     const now = Date.now();
     const facilityCode = resolveFacility(entry.facility);
@@ -87,7 +87,7 @@ export class HybridAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmi
     return id;
   }
 
-  async query(params?: LogQuery): Promise<{ entries: StoredAuditEntry[]; nextCursor?: string; total?: number }> {
+  public async query(params?: LogQuery): Promise<{ entries: StoredAuditEntry[]; nextCursor?: string; total?: number }> {
     let all = this.#filterEntries(params);
     if (this.#atomic) {
       const fromKV = await this.#queryFromStore(params ?? {});
@@ -119,11 +119,11 @@ export class HybridAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmi
     return c.x === expected;
   }
 
-  async getById(id: LogId): Promise<StoredAuditEntry | null> {
+  public async getById(id: LogId): Promise<StoredAuditEntry | null> {
     return this.#memory.find(e => e.id === id) ?? null;
   }
 
-  async queryAsync(params: LogQuery): Promise<{ entries: StoredAuditEntry[]; nextCursor?: string; total?: number }> {
+  public async queryAsync(params: LogQuery): Promise<{ entries: StoredAuditEntry[]; nextCursor?: string; total?: number }> {
     return this.query(params);
   }
 
@@ -135,7 +135,7 @@ export class HybridAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmi
     return f;
   }
 
-  async #persistToStore(e: StoredAuditEntry): Promise<void> {
+  public async #persistToStore(e: StoredAuditEntry): Promise<void> {
     if (!this.#atomic) return;
     const idx = await this.#atomic.get<string[]>(IDX_AUDIT);
     const ids = idx?.value ?? [];
@@ -145,7 +145,7 @@ export class HybridAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmi
     await this.#atomic.set(IDX_AUDIT, ids, idx?.version ?? null);
   }
 
-  async #queryFromStore(params: LogQuery): Promise<StoredAuditEntry[]> {
+  public async #queryFromStore(params: LogQuery): Promise<StoredAuditEntry[]> {
     if (!this.#atomic) return [];
     const idx = await this.#atomic.get<string[]>(IDX_AUDIT);
     if (!idx) return [];
@@ -161,9 +161,9 @@ export class HybridAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmi
 
   // ─── IAuditAdmin ───
 
-  async forceSetTail(_facility: any, _tailId: any): Promise<void> {}
+  public async forceSetTail(_facility: any, _tailId: any): Promise<void> {}
 
-  async prune(beforeTs: number): Promise<number> {
+  public async prune(beforeTs: number): Promise<number> {
     // Filter in-memory
     const kept = this.#memory.filter(e => e.timestamp >= beforeTs);
     this.#memory.length = 0;
@@ -186,7 +186,7 @@ export class HybridAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmi
     return 0;
   }
 
-  async pruneByIds(ids: readonly string[]): Promise<number> {
+  public async pruneByIds(ids: readonly string[]): Promise<number> {
     const idSet = new Set(ids);
     const kept = this.#memory.filter(e => !idSet.has(e.id));
     this.#memory.length = 0;

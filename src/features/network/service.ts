@@ -26,7 +26,7 @@ export interface ISecurityGroupService extends ICrudService<SecurityGroup, Creat
 }
 
 export class SecurityGroupService implements ISecurityGroupService {
-  constructor(
+  public constructor(
     private readonly atomic: IAtomicStore,
     private readonly logger: ILogWriter,
     private readonly audit?: IAuditWriter,
@@ -34,7 +34,7 @@ export class SecurityGroupService implements ISecurityGroupService {
     private readonly instanceSvc?: InstanceService | undefined,
   ) {}
 
-  async create(input: CreateSecurityGroupInput, actorId?: string): Promise<SecurityGroup> {
+  public async create(input: CreateSecurityGroupInput, actorId?: string): Promise<SecurityGroup> {
     const inst = this.instanceSvc ? await this.instanceSvc.get(input.instanceId) : null;
     if (!inst) throw new AppError(400, 'INSTANCE_NOT_FOUND', `ComputeInstance ${input.instanceId} not found`);
 
@@ -74,18 +74,18 @@ export class SecurityGroupService implements ISecurityGroupService {
     return sg;
   }
 
-  async list(page = 1, limit = 20, name?: string): Promise<PaginatedResult<SecurityGroup>> {
+  public async list(page = 1, limit = 20, name?: string): Promise<PaginatedResult<SecurityGroup>> {
     let all = (await this.#listAll()).reverse();
     if (name) all = all.filter(sg => sg.name.toLowerCase().includes(name.toLowerCase()));
     return { items: all.slice((page - 1) * limit, page * limit), total: all.length, page, limit };
   }
 
-  async get(id: SecurityGroupId): Promise<SecurityGroup | null> {
+  public async get(id: SecurityGroupId): Promise<SecurityGroup | null> {
     const entry = await this.atomic.get<SecurityGroup>(PREFIX + id);
     return entry?.value ?? null;
   }
 
-  async update(id: SecurityGroupId, input: UpdateSecurityGroupInput, actorId?: string): Promise<SecurityGroup> {
+  public async update(id: SecurityGroupId, input: UpdateSecurityGroupInput, actorId?: string): Promise<SecurityGroup> {
     const entry = await this.atomic.get<SecurityGroup>(PREFIX + id);
     if (!entry) throw new AppError(404, 'SECGROUP_NOT_FOUND', 'Security group not found');
 
@@ -114,7 +114,7 @@ export class SecurityGroupService implements ISecurityGroupService {
     return updated;
   }
 
-  async delete(id: SecurityGroupId, actorId?: string): Promise<void> {
+  public async delete(id: SecurityGroupId, actorId?: string): Promise<void> {
     const entry = await this.atomic.get<SecurityGroup>(PREFIX + id);
     if (!entry) throw new AppError(404, 'SECGROUP_NOT_FOUND', 'Security group not found');
     if (entry.value.providerNetworkId && this.networkPolicy) {
@@ -125,17 +125,17 @@ export class SecurityGroupService implements ISecurityGroupService {
     this.audit?.write({ level: KernLevel.WARNING, facility: FACILITY, message: `Security group deleted — ${entry.value.name}`, actorId, metadata: { eventType: 'secgroup.deleted' } });
   }
 
-  async #listAll(): Promise<SecurityGroup[]> {
+  public async #listAll(): Promise<SecurityGroup[]> {
     const idx = await this.atomic.get<string[]>(INDEX_KEY);
     if (!idx) return [];
     const entries = await Promise.all(idx.value.map(id => this.atomic.get<SecurityGroup>(PREFIX + id)));
     return entries.filter(e => e).map(e => e!.value);
   }
-  async #addToIndex(id: SecurityGroupId): Promise<void> {
+  public async #addToIndex(id: SecurityGroupId): Promise<void> {
     const idx = await this.atomic.get<string[]>(INDEX_KEY);
     await this.atomic.set(INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
   }
-  async #removeFromIndex(id: SecurityGroupId): Promise<void> {
+  public async #removeFromIndex(id: SecurityGroupId): Promise<void> {
     const idx = await this.atomic.get<string[]>(INDEX_KEY);
     if (!idx) return;
     await this.atomic.set(INDEX_KEY, idx.value.filter((i: string) => i !== id), idx.version);

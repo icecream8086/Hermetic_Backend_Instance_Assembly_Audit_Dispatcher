@@ -36,12 +36,12 @@ export interface CreateSharedLinkInput {
 }
 
 export class SharedLinkService {
-  constructor(
+  public constructor(
     private readonly atomic: IAtomicStore,
     private readonly audit: IAuditWriter,
   ) {}
 
-  async create(ownerId: string, input: CreateSharedLinkInput): Promise<SharedLink> {
+  public async create(ownerId: string, input: CreateSharedLinkInput): Promise<SharedLink> {
     const id = `sl_${crypto.randomUUID()}`;
     const now = Date.now();
 
@@ -86,7 +86,7 @@ export class SharedLinkService {
    * Checks: enabled, expiry, maxUses, password.
    * Returns the link if access is granted, throws otherwise.
    */
-  async validate(id: string, password?: string): Promise<SharedLink> {
+  public async validate(id: string, password?: string): Promise<SharedLink> {
     const entry = await this.atomic.get<SharedLink>(PFX + id);
     if (!entry) throw new AppError(404, 'LINK_NOT_FOUND', 'Shared link not found');
 
@@ -109,7 +109,7 @@ export class SharedLinkService {
   }
 
   /** Record a use of the shared link (increment useCount). */
-  async recordUse(id: string): Promise<void> {
+  public async recordUse(id: string): Promise<void> {
     for (let attempt = 0; attempt < 3; attempt++) {
       const entry = await this.atomic.get<SharedLink>(PFX + id);
       if (!entry) return;
@@ -125,7 +125,7 @@ export class SharedLinkService {
     }
   }
 
-  async disable(id: string, ownerId: string): Promise<void> {
+  public async disable(id: string, ownerId: string): Promise<void> {
     const entry = await this.atomic.get<SharedLink>(PFX + id);
     if (!entry) throw new AppError(404, 'LINK_NOT_FOUND', 'Shared link not found');
     if (entry.value.ownerId !== ownerId) throw new AppError(403, 'FORBIDDEN', 'Not the owner');
@@ -135,7 +135,7 @@ export class SharedLinkService {
     if (!ver) throw new AppError(409, 'CONFLICT', 'Concurrent modification');
   }
 
-  async list(ownerId: string): Promise<SharedLink[]> {
+  public async list(ownerId: string): Promise<SharedLink[]> {
     const idx = await this.atomic.get<string[]>(IDX);
     if (!idx) return [];
     const entries = await Promise.all(
@@ -144,14 +144,14 @@ export class SharedLinkService {
     return entries.filter(e => e?.value.ownerId === ownerId).map(e => e!.value);
   }
 
-  async get(id: string): Promise<SharedLink | null> {
+  public async get(id: string): Promise<SharedLink | null> {
     const entry = await this.atomic.get<SharedLink>(PFX + id);
     return entry?.value ?? null;
   }
 
   // ─── Password helpers ───
 
-  async #hashPassword(password: string): Promise<string> {
+  public async #hashPassword(password: string): Promise<string> {
     const encoder = new TextEncoder();
     const salt = crypto.getRandomValues(new Uint8Array(16));
     const key = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits']);
@@ -164,7 +164,7 @@ export class SharedLinkService {
     return `$pbkdf2$${saltB64}$${hashB64}`;
   }
 
-  async #verifyPassword(password: string, stored: string): Promise<boolean> {
+  public async #verifyPassword(password: string, stored: string): Promise<boolean> {
     const parts = stored.split('$');
     if (parts.length !== 4 || parts[1] !== 'pbkdf2') return false;
     const salt = Uint8Array.from(atob(parts[2]!), c => c.charCodeAt(0));

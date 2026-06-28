@@ -137,7 +137,7 @@ export class PermissionService implements IPermissionService {
   readonly #checker: PermissionChecker;
   #macRules: PermissionRule[] = [];
 
-  constructor(
+  public constructor(
     private readonly atomic: IAtomicStore,
     _logger: ILogWriter,
     private readonly audit?: IAuditWriter,
@@ -151,7 +151,7 @@ export class PermissionService implements IPermissionService {
   }
 
   // ── Policy CRUD ──
-  async createPolicy(input: CreatePolicyInput, actor?: AuditActor) {
+  public async createPolicy(input: CreatePolicyInput, actor?: AuditActor) {
     const result = await this.#policyMgr.create(input, actor);
     this.#checker.invalidateCache();
     return result;
@@ -159,18 +159,18 @@ export class PermissionService implements IPermissionService {
   listPolicies() { return this.#policyMgr.list(); }
   listPoliciesPaginated(page?: number, limit?: number, filter?: (item: StoredPolicy) => boolean) { return this.#policyMgr.listPaginated(page, limit, filter); }
   getPolicy(id: string) { return this.#policyMgr.get(id); }
-  async updatePolicy(id: string, input: UpdatePolicyInput, actor?: AuditActor) {
+  public async updatePolicy(id: string, input: UpdatePolicyInput, actor?: AuditActor) {
     const result = await this.#policyMgr.update(id, input, actor);
     this.#checker.invalidateCache();
     return result;
   }
-  async deletePolicy(id: string, actor?: AuditActor) {
+  public async deletePolicy(id: string, actor?: AuditActor) {
     await this.#policyMgr.delete(id, actor);
     this.#checker.invalidateCache();
   }
 
   // ── User Groups ──
-  async createUserGroup(input: CreateUserGroupInput, actor?: AuditActor) {
+  public async createUserGroup(input: CreateUserGroupInput, actor?: AuditActor) {
     const result = await this.#groupMgr.createUserGroup(input, actor);
     this.#checker.invalidateCache();
     return result;
@@ -178,18 +178,18 @@ export class PermissionService implements IPermissionService {
   listUserGroups() { return this.#groupMgr.listUserGroups(); }
   listUserGroupsPaginated(page?: number, limit?: number, filter?: (item: UserGroup) => boolean) { return this.#groupMgr.listUserGroupsPaginated(page, limit, filter); }
   getUserGroup(id: string) { return this.#groupMgr.getUserGroup(id); }
-  async updateUserGroup(id: string, input: UpdateUserGroupInput, actor?: AuditActor) {
+  public async updateUserGroup(id: string, input: UpdateUserGroupInput, actor?: AuditActor) {
     const result = await this.#groupMgr.updateUserGroup(id, input, actor);
     this.#checker.invalidateCache();
     return result;
   }
-  async deleteUserGroup(id: string, actor?: AuditActor) {
+  public async deleteUserGroup(id: string, actor?: AuditActor) {
     await this.#groupMgr.deleteUserGroup(id, actor);
     this.#checker.invalidateCache();
   }
 
   // ── Permission Groups ──
-  async createPermGroup(input: CreatePermGroupInput, actor?: AuditActor) {
+  public async createPermGroup(input: CreatePermGroupInput, actor?: AuditActor) {
     const result = await this.#groupMgr.createPermGroup(input, actor);
     this.#checker.invalidateCache();
     return result;
@@ -197,12 +197,12 @@ export class PermissionService implements IPermissionService {
   listPermGroups() { return this.#groupMgr.listPermGroups(); }
   listPermGroupsPaginated(page?: number, limit?: number, filter?: (item: PermissionGroup) => boolean) { return this.#groupMgr.listPermGroupsPaginated(page, limit, filter); }
   getPermGroup(id: string) { return this.#groupMgr.getPermGroup(id); }
-  async updatePermGroup(id: string, input: UpdatePermGroupInput, actor?: AuditActor) {
+  public async updatePermGroup(id: string, input: UpdatePermGroupInput, actor?: AuditActor) {
     const result = await this.#groupMgr.updatePermGroup(id, input, actor);
     this.#checker.invalidateCache();
     return result;
   }
-  async deletePermGroup(id: string, actor?: AuditActor) {
+  public async deletePermGroup(id: string, actor?: AuditActor) {
     await this.#groupMgr.deletePermGroup(id, actor);
     this.#checker.invalidateCache();
   }
@@ -222,7 +222,7 @@ export class PermissionService implements IPermissionService {
   updateRouteAcl(id: string, input: UpdateRouteAclInput, actor?: AuditActor) { return this.#routeAclMgr.update(id, input, actor); }
   deleteRouteAcl(id: string, actor?: AuditActor) { return this.#routeAclMgr.delete(id, actor); }
 
-  async checkRouteAccess(method: string, path: string, userId: string): Promise<boolean> {
+  public async checkRouteAccess(method: string, path: string, userId: string): Promise<boolean> {
     const userEntry = await this.atomic.get<any>('user:' + userId);
     if (!userEntry) return false;
     // Root role bypasses all route ACLs (capability model still applies at permission gate)
@@ -237,13 +237,13 @@ export class PermissionService implements IPermissionService {
   compareUserGroups(idA: string, idB: string) { return this.#groupMgr.compareUserGroups(idA, idB); }
 
   // ── Log Policy ──
-  async getLogPolicy(): Promise<LogPolicy & { readonly exists: boolean }> {
+  public async getLogPolicy(): Promise<LogPolicy & { readonly exists: boolean }> {
     const entry = await this.atomic.get<LogPolicy>(LOG_POLICY_KEY);
     if (!entry) return { ...DEFAULT_POLICY, exists: false };
     return { ...entry.value, exists: true };
   }
 
-  async updateLogPolicy(input: Partial<LogPolicy>, actor?: AuditActor): Promise<LogPolicy> {
+  public async updateLogPolicy(input: Partial<LogPolicy>, actor?: AuditActor): Promise<LogPolicy> {
     const existing = await this.atomic.get<LogPolicy>(LOG_POLICY_KEY);
     const base = existing ? existing.value : DEFAULT_POLICY;
     const updated: LogPolicy = { ...base, ...input, updatedAt: Date.now() };
@@ -257,7 +257,7 @@ export class PermissionService implements IPermissionService {
   }
 
   // ── User Templates ──
-  async createUserTpl(input: CreateUserTplInput, actor?: AuditActor): Promise<UserTemplate> {
+  public async createUserTpl(input: CreateUserTplInput, actor?: AuditActor): Promise<UserTemplate> {
     const id = generateUserTplId();
     const tpl: UserTemplate = {
       id, name: input.name,
@@ -278,7 +278,7 @@ export class PermissionService implements IPermissionService {
   listUserTplsPaginated(page?: number, limit?: number, filter?: (item: UserTemplate) => boolean) { return this.userTplStore.listPaginated(page, limit, filter); }
   getUserTpl(id: string) { return this.userTplStore.get(id); }
 
-  async updateUserTpl(id: string, input: UpdateUserTplInput, actor?: AuditActor): Promise<UserTemplate> {
+  public async updateUserTpl(id: string, input: UpdateUserTplInput, actor?: AuditActor): Promise<UserTemplate> {
     const old = await this.userTplStore.get(id);
     if (!old) throw new AppError(404, 'USERTPL_NOT_FOUND', 'User template not found');
     const updated: UserTemplate = applyUpdate(old, {
@@ -293,7 +293,7 @@ export class PermissionService implements IPermissionService {
     return updated;
   }
 
-  async deleteUserTpl(id: string, actor?: AuditActor): Promise<void> {
+  public async deleteUserTpl(id: string, actor?: AuditActor): Promise<void> {
     const old = await this.userTplStore.get(id);
     if (!old) throw new AppError(404, 'USERTPL_NOT_FOUND', 'User template not found');
     await this.userTplStore.delete(id);
@@ -309,14 +309,14 @@ export class PermissionService implements IPermissionService {
   }
 
   // ── MAC Rules ──
-  async loadMacRules(): Promise<void> {
+  public async loadMacRules(): Promise<void> {
     try {
       const entry = await this.atomic.get<PermissionRule[]>(MAC_KEY);
       if (entry) this.#macRules = entry.value ?? [];
     } catch { this.#macRules = []; }
   }
 
-  async seedMacRules(rules: PermissionRule[]): Promise<void> {
+  public async seedMacRules(rules: PermissionRule[]): Promise<void> {
     const existing = await this.atomic.get<PermissionRule[]>(MAC_KEY);
     if (existing) return;
     await this.atomic.set(MAC_KEY, rules, null);
@@ -326,7 +326,7 @@ export class PermissionService implements IPermissionService {
   // ── Capability Management ──
 
   /** Set a user's capability bitmask. */
-  async setUserCaps(userId: string, caps: CapabilityValue, actor?: AuditActor): Promise<void> {
+  public async setUserCaps(userId: string, caps: CapabilityValue, actor?: AuditActor): Promise<void> {
     const existing = await this.atomic.get<CapabilityValue>(USER_CAP_KEY + userId);
     await this.atomic.set(USER_CAP_KEY + userId, caps, existing?.version ?? null);
     this.#checker.invalidateCache();
@@ -338,14 +338,14 @@ export class PermissionService implements IPermissionService {
   }
 
   /** Get a user's effective capabilities (own ∪ inherited). */
-  async getUserCaps(userId: string): Promise<{ own: CapabilityValue; caps: string[] }> {
+  public async getUserCaps(userId: string): Promise<{ own: CapabilityValue; caps: string[] }> {
     const entry = await this.atomic.get<CapabilityValue>(USER_CAP_KEY + userId);
     const own = entry?.value ?? 0;
     return { own, caps: formatCapabilities(own) };
   }
 
   /** Set a group's capability bitmask (inherited by members). */
-  async setGroupCaps(groupId: string, caps: CapabilityValue, actor?: AuditActor): Promise<void> {
+  public async setGroupCaps(groupId: string, caps: CapabilityValue, actor?: AuditActor): Promise<void> {
     const existing = await this.atomic.get<CapabilityValue>(GROUP_CAP_KEY + groupId);
     await this.atomic.set(GROUP_CAP_KEY + groupId, caps, existing?.version ?? null);
     this.#checker.invalidateCache();
@@ -357,7 +357,7 @@ export class PermissionService implements IPermissionService {
   }
 
   /** Get a group's capability bitmask. */
-  async getGroupCaps(groupId: string): Promise<{ caps: number; names: string[] }> {
+  public async getGroupCaps(groupId: string): Promise<{ caps: number; names: string[] }> {
     const entry = await this.atomic.get<CapabilityValue>(GROUP_CAP_KEY + groupId);
     const caps = entry?.value ?? 0;
     return { caps, names: formatCapabilities(caps) };
@@ -373,7 +373,7 @@ export class PermissionService implements IPermissionService {
    * @param durationMs  — how long (default 30 min)
    * @param capabilities — which capabilities to grant (default ALL)
    */
-  async grantTempElevation(userId: string, durationMs?: number, capabilities?: CapabilityValue): Promise<number> {
+  public async grantTempElevation(userId: string, durationMs?: number, capabilities?: CapabilityValue): Promise<number> {
     const dur = durationMs ?? 30 * 60 * 1000;
     const expiry = Date.now() + dur;
     const caps = capabilities ?? Cap.ALL;
@@ -394,7 +394,7 @@ export class PermissionService implements IPermissionService {
     });
   }
 
-  async revokeTempElevation(userId: string): Promise<void> {
+  public async revokeTempElevation(userId: string): Promise<void> {
     return this.#transactWithRetry(async (txn) => {
       const ids = await txn.get<string[]>('temp:elev:ids');
       const idList = ids ?? [];
@@ -403,7 +403,7 @@ export class PermissionService implements IPermissionService {
     });
   }
 
-  async listTempElevations(): Promise<{ userId: string; expiry: number; caps: number; capsNames: string[] }[]> {
+  public async listTempElevations(): Promise<{ userId: string; expiry: number; caps: number; capsNames: string[] }[]> {
     const idsEntry = await this.atomic.get<string[]>('temp:elev:ids');
     if (!idsEntry) return [];
     const ids = idsEntry.value;
@@ -425,7 +425,7 @@ export class PermissionService implements IPermissionService {
   }
 
   /** Check if a user has active temporary elevation with the required capability. */
-  async checkElevation(userId: string, requiredCap?: CapabilityValue): Promise<boolean> {
+  public async checkElevation(userId: string, requiredCap?: CapabilityValue): Promise<boolean> {
     const idsEntry = await this.atomic.get<string[]>('temp:elev:ids');
     if (!idsEntry) return false;
     const idList = idsEntry.value;
@@ -440,7 +440,7 @@ export class PermissionService implements IPermissionService {
 
   // ── Invitations ──
 
-  async sendInvite(input: CreateInviteInput, invitedBy: string): Promise<Invitation> {
+  public async sendInvite(input: CreateInviteInput, invitedBy: string): Promise<Invitation> {
     const group = await this.#groupMgr.getUserGroup(input.groupId);
     if (!group) throw new AppError(404, 'GROUP_NOT_FOUND', 'User group not found');
     if (!group.adminIds.includes(invitedBy)) throw new AppError(403, 'FORBIDDEN', 'Only group admins can send invitations');
@@ -465,7 +465,7 @@ export class PermissionService implements IPermissionService {
     return invite;
   }
 
-  async acceptInvite(inviteId: string, userId: string): Promise<void> {
+  public async acceptInvite(inviteId: string, userId: string): Promise<void> {
     const entry = await this.atomic.get<Invitation>(INVITE_PREFIX + inviteId);
     if (!entry) throw new AppError(404, 'INVITE_NOT_FOUND', 'Invitation not found');
     if (entry.value.inviteeId !== userId) throw new AppError(403, 'FORBIDDEN', 'Only the invitee can accept');
@@ -493,7 +493,7 @@ export class PermissionService implements IPermissionService {
     });
   }
 
-  async rejectInvite(inviteId: string, userId: string): Promise<void> {
+  public async rejectInvite(inviteId: string, userId: string): Promise<void> {
     const entry = await this.atomic.get<Invitation>(INVITE_PREFIX + inviteId);
     if (!entry) throw new AppError(404, 'INVITE_NOT_FOUND', 'Invitation not found');
     if (entry.value.inviteeId !== userId) throw new AppError(403, 'FORBIDDEN', 'Only the invitee can reject');
@@ -502,7 +502,7 @@ export class PermissionService implements IPermissionService {
     await this.atomic.set(INVITE_PREFIX + inviteId, { ...entry.value, status: 'rejected' }, entry.version);
   }
 
-  async listInvitations(userId: string): Promise<Invitation[]> {
+  public async listInvitations(userId: string): Promise<Invitation[]> {
     const idx = await this.atomic.get<string[]>(INVITE_INDEX_KEY);
     if (!idx) return [];
     const entries = await Promise.all(idx.value.map(id => this.atomic.get<Invitation>(INVITE_PREFIX + id)));
@@ -512,7 +512,7 @@ export class PermissionService implements IPermissionService {
       .filter(inv => inv.inviteeId === userId);
   }
 
-  async #transactWithRetry<T>(fn: (txn: IStoreTransaction) => Promise<T>, retries = 3): Promise<T> {
+  public async #transactWithRetry<T>(fn: (txn: IStoreTransaction) => Promise<T>, retries = 3): Promise<T> {
     for (let i = 0; i < retries; i++) {
       try {
         return await this.atomic.transact(fn);

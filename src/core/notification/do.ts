@@ -23,7 +23,7 @@ export class NotificationDO implements DurableObject {
   #sessions = new Set<WebSocket>();
   #filters = new Map<WebSocket, Set<string>>();
 
-  async fetch(request: Request): Promise<Response> {
+  public async fetch(request: Request): Promise<Response> {
     if (request.headers.get('Upgrade') === 'websocket') {
       return this.#handleUpgrade();
     }

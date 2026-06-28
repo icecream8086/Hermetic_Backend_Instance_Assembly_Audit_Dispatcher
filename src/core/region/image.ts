@@ -62,9 +62,9 @@ function generateImageId(): string {
 // ─── Service ───
 
 export class ImageRepositoryService {
-  constructor(private readonly atomic: IAtomicStore) {}
+  public constructor(private readonly atomic: IAtomicStore) {}
 
-  async create(input: CreateImageInput): Promise<ImageRepository> {
+  public async create(input: CreateImageInput): Promise<ImageRepository> {
     const instSvc = new InstanceService(this.atomic);
     const inst = await instSvc.get(input.instanceId as InstanceId);
     if (!inst) throw new AppError(400, 'INSTANCE_NOT_FOUND', `ComputeInstance ${input.instanceId} not found`);
@@ -93,12 +93,12 @@ export class ImageRepositoryService {
     return repo;
   }
 
-  async get(id: string): Promise<ImageRepository | null> {
+  public async get(id: string): Promise<ImageRepository | null> {
     const entry = await this.atomic.get<ImageRepository>(IMAGE_PREFIX + id);
     return entry?.value ?? null;
   }
 
-  async list(filter?: { platform?: string | undefined; status?: string | undefined }): Promise<ImageRepository[]> {
+  public async list(filter?: { platform?: string | undefined; status?: string | undefined }): Promise<ImageRepository[]> {
     const all = await this.#listAll();
     if (!filter) return all;
     return all.filter(r => {
@@ -108,7 +108,7 @@ export class ImageRepositoryService {
     });
   }
 
-  async update(id: string, input: UpdateImageInput): Promise<ImageRepository> {
+  public async update(id: string, input: UpdateImageInput): Promise<ImageRepository> {
     const entry = await this.atomic.get<ImageRepository>(IMAGE_PREFIX + id);
     if (!entry) throw new AppError(404, 'IMAGE_NOT_FOUND', 'ImageRepository not found');
 
@@ -129,7 +129,7 @@ export class ImageRepositoryService {
     return updated;
   }
 
-  async delete(id: string): Promise<void> {
+  public async delete(id: string): Promise<void> {
     const entry = await this.atomic.get<ImageRepository>(IMAGE_PREFIX + id);
     if (!entry) throw new AppError(404, 'IMAGE_NOT_FOUND', 'ImageRepository not found');
     await this.atomic.set(IMAGE_PREFIX + id, null, entry.version);
@@ -138,19 +138,19 @@ export class ImageRepositoryService {
 
   // ─── Internal helpers ───
 
-  async #listAll(): Promise<ImageRepository[]> {
+  public async #listAll(): Promise<ImageRepository[]> {
     const idx = await this.atomic.get<string[]>(IMAGE_INDEX_KEY);
     if (!idx) return [];
     const entries = await Promise.all(idx.value.map(id => this.atomic.get<ImageRepository>(IMAGE_PREFIX + id)));
     return entries.filter(e => e).map(e => e!.value);
   }
 
-  async #addToIndex(id: string): Promise<void> {
+  public async #addToIndex(id: string): Promise<void> {
     const idx = await this.atomic.get<string[]>(IMAGE_INDEX_KEY);
     await this.atomic.set(IMAGE_INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
   }
 
-  async #removeFromIndex(id: string): Promise<void> {
+  public async #removeFromIndex(id: string): Promise<void> {
     const idx = await this.atomic.get<string[]>(IMAGE_INDEX_KEY);
     if (!idx) return;
     await this.atomic.set(IMAGE_INDEX_KEY, idx.value.filter((i: string) => i !== id), idx.version);

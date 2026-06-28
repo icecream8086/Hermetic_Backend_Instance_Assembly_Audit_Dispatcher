@@ -27,7 +27,7 @@ class BloomFilter {
   static readonly #SEEDS = [0x9e3779b9, 0xabcdef01, 0x12345678];
   readonly #bits: Uint8Array;
 
-  constructor() {
+  public constructor() {
     this.#bits = new Uint8Array(Math.ceil(BloomFilter.#SIZE / 8));
   }
 
@@ -85,7 +85,7 @@ export class CachedAtomicStore implements IAtomicStore {
   readonly #storeVersion = new Map<string, VersionId | null>();
   readonly #bloom = new BloomFilter();
 
-  constructor(
+  public constructor(
     private readonly coordinator: IAtomicStore,
     private readonly store: IAtomicStore,
     private readonly readTtlMs: number = DEFAULT_CACHE_TTL_MS,
@@ -93,7 +93,7 @@ export class CachedAtomicStore implements IAtomicStore {
     readonly metrics?: AtomicStoreMetrics,
   ) {}
 
-  async get<T>(key: string): Promise<{ value: T; version: VersionId } | null> {
+  public async get<T>(key: string): Promise<{ value: T; version: VersionId } | null> {
     this.metrics?.recordGet();
 
     // Bloom gate: skip store read for keys we've never seen
@@ -125,7 +125,7 @@ export class CachedAtomicStore implements IAtomicStore {
     return miss;
   }
 
-  async set<T>(key: string, value: T, expectedVersion: VersionId | null, ttlSeconds?: number): Promise<VersionId | null> {
+  public async set<T>(key: string, value: T, expectedVersion: VersionId | null, ttlSeconds?: number): Promise<VersionId | null> {
     this.metrics?.recordSet();
     const version = await this.coordinator.set(key, value, expectedVersion, ttlSeconds);
     if (version !== null) {
@@ -146,11 +146,11 @@ export class CachedAtomicStore implements IAtomicStore {
     return version;
   }
 
-  async transact<T>(action: (txn: IStoreTransaction) => Promise<T>): Promise<T> {
+  public async transact<T>(action: (txn: IStoreTransaction) => Promise<T>): Promise<T> {
     return this.coordinator.transact(action);
   }
 
-  async invalidateCache(key: string): Promise<void> {
+  public async invalidateCache(key: string): Promise<void> {
     const current = await this.store.get<CacheEntry<unknown>>(key).catch(() => null);
     if (current !== null) {
       const ver = await this.store.set(

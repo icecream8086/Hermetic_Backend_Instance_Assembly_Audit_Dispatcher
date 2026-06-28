@@ -46,9 +46,9 @@ function originalKeyFromMarker(mk: string): string {
 export class AtomicStoreDO implements DurableObject {
   #alarmBootstrapped = false;
 
-  constructor(readonly ctx: DurableObjectState, _env: unknown) {}
+  public constructor(readonly ctx: DurableObjectState, _env: unknown) {}
 
-  async fetch(request: Request): Promise<Response> {
+  public async fetch(request: Request): Promise<Response> {
     // Lazy bootstrap alarm on first request
     if (!this.#alarmBootstrapped) {
       this.#alarmBootstrapped = true;
@@ -203,7 +203,7 @@ export class AtomicStoreDO implements DurableObject {
     }
   }
 
-  async alarm(): Promise<void> {
+  public async alarm(): Promise<void> {
     try {
       const now = Date.now();
       let start: string | undefined;
@@ -265,7 +265,7 @@ export class DurableObjectAtomicStore implements IAtomicStore {
   /** Cache idFromName() results per prefix — called on every get/set/transact */
   readonly #idCache = new Map<string, DurableObjectId>();
 
-  constructor(ns: DurableObjectNamespace) {
+  public constructor(ns: DurableObjectNamespace) {
     this.#ns = ns;
   }
 
@@ -282,7 +282,7 @@ export class DurableObjectAtomicStore implements IAtomicStore {
     return this.#ns.get(id);
   }
 
-  async get<T>(key: string): Promise<{ value: T; version: VersionId } | null> {
+  public async get<T>(key: string): Promise<{ value: T; version: VersionId } | null> {
     const resp = await this.#stubForKey(key).fetch('https://do/op', {
       method: 'POST',
       body: JSON.stringify({ op: 'get', key }),
@@ -293,7 +293,7 @@ export class DurableObjectAtomicStore implements IAtomicStore {
     return { value: body.value, version: body.version as VersionId };
   }
 
-  async set<T>(key: string, value: T, expectedVersion: VersionId | null, ttlSeconds?: number): Promise<VersionId | null> {
+  public async set<T>(key: string, value: T, expectedVersion: VersionId | null, ttlSeconds?: number): Promise<VersionId | null> {
     const resp = await this.#stubForKey(key).fetch('https://do/op', {
       method: 'POST',
       body: JSON.stringify({ op: 'set', key, value, expectedVersion, ttlSeconds }),
@@ -302,7 +302,7 @@ export class DurableObjectAtomicStore implements IAtomicStore {
     return body.version as VersionId | null;
   }
 
-  async transact<T>(action: (txn: IStoreTransaction) => Promise<T>): Promise<T> {
+  public async transact<T>(action: (txn: IStoreTransaction) => Promise<T>): Promise<T> {
     const readSet = new Map<string, string | null>();
     const deferredWrites: { key: string; value: unknown }[] = [];
 

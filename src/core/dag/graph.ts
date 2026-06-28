@@ -36,7 +36,7 @@ export class Dag<TId, TNode> {
   /** Reverse edges: to → Set{from}. */
   protected readonly incoming = new Map<TId, Set<TId>>();
 
-  constructor(getId: (node: TNode) => TId) {
+  public constructor(getId: (node: TNode) => TId) {
     this.getId = getId;
   }
 

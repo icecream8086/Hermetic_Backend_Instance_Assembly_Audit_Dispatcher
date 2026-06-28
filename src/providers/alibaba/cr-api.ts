@@ -17,7 +17,7 @@ const API = '2018-12-01';
 // ═══════════════════════════════════════════════════════════════
 
 export class AlibabaCrApiClient {
-  constructor(
+  public constructor(
     private readonly accessKeyId: string,
     private readonly accessKeySecret: string,
     private readonly endpoint = 'cr.cn-hangzhou.aliyuncs.com',

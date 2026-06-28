@@ -23,14 +23,14 @@ export interface ISubnetService extends ICrudService<Subnet, CreateSubnetInput, 
 }
 
 export class SubnetService implements ISubnetService {
-  constructor(
+  public constructor(
     private readonly atomic: IAtomicStore,
     private readonly logger: ILogWriter,
     private readonly audit?: IAuditWriter,
     private readonly instanceSvc?: InstanceService,
   ) {}
 
-  async create(input: CreateSubnetInput, actorId?: string): Promise<Subnet> {
+  public async create(input: CreateSubnetInput, actorId?: string): Promise<Subnet> {
     try { parseCidr(input.cidr); } catch { throw new AppError(400, 'INVALID_CIDR', `Invalid CIDR: ${input.cidr}`); }
 
     const inst = this.instanceSvc ? await this.instanceSvc.get(input.instanceId) : null;
@@ -57,7 +57,7 @@ export class SubnetService implements ISubnetService {
     return subnet;
   }
 
-  async list(page = 1, limit = 20, name?: string): Promise<PaginatedResult<Subnet>> {
+  public async list(page = 1, limit = 20, name?: string): Promise<PaginatedResult<Subnet>> {
     let all = (await this.#listAll()).reverse();
     if (name) all = all.filter(s => s.name.toLowerCase().includes(name.toLowerCase()));
     const total = all.length;
@@ -65,12 +65,12 @@ export class SubnetService implements ISubnetService {
     return { items: all.slice(start, start + limit), total, page, limit };
   }
 
-  async get(id: SubnetId): Promise<Subnet | null> {
+  public async get(id: SubnetId): Promise<Subnet | null> {
     const entry = await this.atomic.get<Subnet>(PREFIX + id);
     return entry?.value ?? null;
   }
 
-  async update(id: SubnetId, input: UpdateSubnetInput, _actorId?: string): Promise<Subnet> {
+  public async update(id: SubnetId, input: UpdateSubnetInput, _actorId?: string): Promise<Subnet> {
     const entry = await this.atomic.get<Subnet>(PREFIX + id);
     if (!entry) throw new AppError(404, 'SUBNET_NOT_FOUND', 'Subnet not found');
 
@@ -92,7 +92,7 @@ export class SubnetService implements ISubnetService {
     return updated;
   }
 
-  async delete(id: SubnetId, actorId?: string): Promise<void> {
+  public async delete(id: SubnetId, actorId?: string): Promise<void> {
     const entry = await this.atomic.get<Subnet>(PREFIX + id);
     if (!entry) throw new AppError(404, 'SUBNET_NOT_FOUND', 'Subnet not found');
     await this.atomic.set(PREFIX + id, null, entry.version);
@@ -100,17 +100,17 @@ export class SubnetService implements ISubnetService {
     this.audit?.write({ level: KernLevel.WARNING, facility: FACILITY, message: `Subnet deleted — ${entry.value.name}`, actorId, metadata: { eventType: 'subnet.deleted' } });
   }
 
-  async #listAll(): Promise<Subnet[]> {
+  public async #listAll(): Promise<Subnet[]> {
     const idx = await this.atomic.get<string[]>(INDEX_KEY);
     if (!idx) return [];
     const entries = await Promise.all(idx.value.map(id => this.atomic.get<Subnet>(PREFIX + id)));
     return entries.filter(e => e).map(e => e!.value);
   }
-  async #addToIndex(id: SubnetId): Promise<void> {
+  public async #addToIndex(id: SubnetId): Promise<void> {
     const idx = await this.atomic.get<string[]>(INDEX_KEY);
     await this.atomic.set(INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
   }
-  async #removeFromIndex(id: SubnetId): Promise<void> {
+  public async #removeFromIndex(id: SubnetId): Promise<void> {
     const idx = await this.atomic.get<string[]>(INDEX_KEY);
     if (!idx) return;
     await this.atomic.set(INDEX_KEY, idx.value.filter((i: string) => i !== id), idx.version);

@@ -14,16 +14,24 @@ import type {
   GetContainerLogInput,
   ContainerLogResult,
 } from '../../core/provider/interfaces.ts';
+import { z } from 'zod';
 import type {
   CreateContainerGroupInput,
+  CreateContainerGroupUpdateInput,
   ContainerGroupRuntime,
-  ContainerGroupStatus,
 } from '../../core/provider/types.ts';
+import type { ContainerGroupState } from '../../core/provider/container-lifecycle.ts';
 import { rpcCall } from './eci-signer.ts';
 import { createRegionId } from '../../core/region/types.ts';
 import { AppError } from '../../core/types.ts';
 import './eci-schema.ts'; // register Alibaba ECI extension fields
 import { buildCreateParams, parseContainerGroup, decStr, decStrOpt } from './eci-codec.ts';
+
+const cgArraySchema = z.array(z.record(z.string(), z.unknown())).optional();
+const metricRecordsSchema = z.array(z.record(z.string(), z.unknown())).optional();
+const metricDataSchema = z.record(z.string(), z.unknown()).optional();
+const numOptSchema = z.number().optional();
+function numberField(v: unknown): number | undefined { return numOptSchema.parse(v); }
 
 export class AlibabaEciContainerProvider implements IContainerProvider {
   public readonly lifecycle: ContainerLifecycle = { stopIsDelete: true, startable: false, healthProbes: false, asyncInit: true };
@@ -59,12 +67,13 @@ export class AlibabaEciContainerProvider implements IContainerProvider {
    * Update an existing ECI container group via UpdateContainerGroup API.
    * Same flat-parameter pattern as create(), but only maps fields present in the input.
    */
-  // eslint-disable-next-line @typescript-eslint/no-restricted-types
-  public async update(providerId: string, input: Partial<CreateContainerGroupInput>): Promise<void> {
-    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
-    const params = buildCreateParams(input as CreateContainerGroupInput, { partial: true });
-    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
-    params.RegionId = (input.region as string | undefined) ?? this.region;
+  public async update(providerId: string, input: CreateContainerGroupUpdateInput): Promise<void> {
+    const params = buildCreateParams(input, { partial: true });
+    if (input.region !== undefined) {
+      params.RegionId = input.region;
+    } else {
+      params.RegionId = this.region;
+    }
     params.ContainerGroupId = providerId;
     await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret,
       'UpdateContainerGroup', params);
@@ -86,13 +95,11 @@ export class AlibabaEciContainerProvider implements IContainerProvider {
       'DescribeContainerGroups', params,
     );
 
-    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
-    const list = (resp.ContainerGroups as Record<string, unknown>[] | undefined) ?? [];
+    const list = cgArraySchema.parse(resp.ContainerGroups) ?? [];
     return {
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
-      sandboxes: list.map(item => parseContainerGroup(item as Parameters<typeof parseContainerGroup>[0])),
+      sandboxes: list.map(item => parseContainerGroup(item)),
       nextToken: decStrOpt(resp.NextToken) ?? '',
-      ...(typeof resp.TotalCount === 'number' ? { totalCount: resp.TotalCount } : {}),
+      ...(numberField(resp.TotalCount) !== undefined ? { totalCount: numberField(resp.TotalCount) } : {}),
     };
   }
 
@@ -194,24 +201,23 @@ export class AlibabaEciContainerProvider implements IContainerProvider {
         ContainerGroupId: providerId,
         Period: '60',
       });
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
-      const records = (resp.Records as Record<string, unknown>[] | undefined) ?? [];
+      const records = metricRecordsSchema.parse(resp.Records) ?? [];
       if (records.length === 0) return { cpuUsage: 0, memoryUsage: 0 };
       const latest = records[records.length - 1];
       if (!latest) return { cpuUsage: 0, memoryUsage: 0 };
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
-      const cpu = latest.CPU as Record<string, unknown> | undefined;
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
-      const mem = latest.Memory as Record<string, unknown> | undefined;
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
-      const net = latest.Network as Record<string, unknown> | undefined;
-      const cpuUsage = typeof cpu?.UsageInNanocores === 'number' ? cpu.UsageInNanocores : 0;
-      const memoryUsage = typeof mem?.Rss === 'number' ? mem.Rss : 0;
+
+      const cpu = metricDataSchema.parse(latest.CPU);
+      const mem = metricDataSchema.parse(latest.Memory);
+      const net = metricDataSchema.parse(latest.Network);
+
+      const cpuUsage = numOptSchema.parse(cpu?.UsageInNanocores) ?? 0;
+      const memoryUsage = numOptSchema.parse(mem?.Rss) ?? 0;
       return net
-        ? { cpuUsage, memoryUsage, networkIO: { rx: typeof net.RxBytes === 'number' ? net.RxBytes : 0, tx: typeof net.TxBytes === 'number' ? net.TxBytes : 0 } }
+        ? { cpuUsage, memoryUsage, networkIO: { rx: numOptSchema.parse(net.RxBytes) ?? 0, tx: numOptSchema.parse(net.TxBytes) ?? 0 } }
         : { cpuUsage, memoryUsage };
-    } catch {
-      return { cpuUsage: 0, memoryUsage: 0 };
+    } catch (_e) {
+      const emptyStats: { cpuUsage: number; memoryUsage: number } = { cpuUsage: 0, memoryUsage: 0 };
+      return emptyStats;
     }
   }
 
@@ -224,20 +230,7 @@ export class AlibabaEciContainerProvider implements IContainerProvider {
 
 export { parseContainerGroup };
 
-function statusToAlibaba(status: ContainerGroupStatus): string {
-  switch (status) {
-    case 'Pending': return 'Pending';
-    case 'Scheduling': return 'Scheduling';
-    case 'ScheduleFailed': return 'ScheduleFailed';
-    case 'Running': return 'Running';
-    case 'Succeeded': return 'Succeeded';
-    case 'Failed': return 'Failed';
-    case 'Restarting': return 'Restarting';
-    case 'Updating': return 'Updating';
-    case 'Terminating': return 'Terminating';
-    case 'Expiring': return 'Expiring';
-    case 'Expired': return 'Expired';
-    case 'Deleted': return 'Deleted';
-    default: return 'Pending';
-  }
+function statusToAlibaba(status: ContainerGroupState): string {
+  // ContainerGroupState enum values are already their ECI API string representations
+  return status;
 }

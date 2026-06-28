@@ -55,7 +55,7 @@ export class RegionRegistry {
   /** Cluster-specific overrides applied on top of regional config. */
   readonly #clusterOverrides = new Map<string, RegionConfig>();
 
-  constructor(seed?: readonly { region: string; config: RegionConfig }[]) {
+  public constructor(seed?: readonly { region: string; config: RegionConfig }[]) {
     if (seed) {
       for (const { region, config } of seed) {
         this.#overrides.set(region, config);

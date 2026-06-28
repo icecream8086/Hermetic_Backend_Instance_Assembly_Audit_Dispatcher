@@ -50,7 +50,7 @@ export class PermissionChecker {
   } = { policies: null, userGroups: null, permGroups: null };
   readonly #CACHE_TTL = 5_000;
 
-  constructor(
+  public constructor(
     private readonly atomic: IAtomicStore,
     _logger: ILogWriter,
     private readonly audit?: IAuditWriter,
@@ -64,11 +64,11 @@ export class PermissionChecker {
 
   // ─── Public API ───
 
-  async check(input: PermissionCheckInput, macRules: PermissionRule[]): Promise<PolicyMatchResult> {
+  public async check(input: PermissionCheckInput, macRules: PermissionRule[]): Promise<PolicyMatchResult> {
     return this.checkAll(input, macRules);
   }
 
-  async checkAll(input: PermissionCheckInput, macRules: PermissionRule[]): Promise<PolicyMatchResult> {
+  public async checkAll(input: PermissionCheckInput, macRules: PermissionRule[]): Promise<PolicyMatchResult> {
     const { userId, action, resource, resourceOwnerId } = input;
 
     // Layer 1: DAC
@@ -121,7 +121,7 @@ export class PermissionChecker {
 
   // ─── Layer 1: DAC ───
 
-  async #checkDac(userId: string, _resource: string, resourceOwnerId?: string): Promise<PolicyMatchResult> {
+  public async #checkDac(userId: string, _resource: string, resourceOwnerId?: string): Promise<PolicyMatchResult> {
     const userEntry = await this.atomic.get<any>('user:' + userId);
     if (!userEntry) {
       return {
@@ -140,7 +140,7 @@ export class PermissionChecker {
 
   // ─── Layer 2: Capability ───
 
-  async #checkCap(userId: string, action: string): Promise<PolicyMatchResult> {
+  public async #checkCap(userId: string, action: string): Promise<PolicyMatchResult> {
     const required = actionToCapability(action);
     if (required === 0) return { allowed: true, reason: 'no capability required' };
 
@@ -157,7 +157,7 @@ export class PermissionChecker {
     };
   }
 
-  async #loadUserCapabilities(userId: string): Promise<UserCapabilities> {
+  public async #loadUserCapabilities(userId: string): Promise<UserCapabilities> {
     // Load own caps
     const ownEntry = await this.atomic.get<CapabilityValue>(USER_CAP_KEY + userId);
     const own = ownEntry?.value ?? 0;
@@ -192,7 +192,7 @@ export class PermissionChecker {
 
   // ─── Layer 3: MAC ───
 
-  async #checkMac(
+  public async #checkMac(
     userId: string, action: string, resource: string,
     resourceOwnerId: string | undefined, macRules: PermissionRule[],
   ): Promise<PolicyMatchResult> {
@@ -240,7 +240,7 @@ export class PermissionChecker {
 
   // ─── Cached loaders ───
 
-  async #cachedPolicyList(): Promise<StoredPolicy[]> {
+  public async #cachedPolicyList(): Promise<StoredPolicy[]> {
     const now = Date.now();
     if (this.#cache.policies && now - this.#cache.policies.ts < this.#CACHE_TTL) return this.#cache.policies.data;
     const data = await this.policyStore.list();
@@ -248,7 +248,7 @@ export class PermissionChecker {
     return data;
   }
 
-  async #cachedUserGroupList(): Promise<UserGroup[]> {
+  public async #cachedUserGroupList(): Promise<UserGroup[]> {
     const now = Date.now();
     if (this.#cache.userGroups && now - this.#cache.userGroups.ts < this.#CACHE_TTL) return this.#cache.userGroups.data;
     const data = await this.ugStore.list();
@@ -256,7 +256,7 @@ export class PermissionChecker {
     return data;
   }
 
-  async #cachedPermGroupList(): Promise<PermissionGroup[]> {
+  public async #cachedPermGroupList(): Promise<PermissionGroup[]> {
     const now = Date.now();
     if (this.#cache.permGroups && now - this.#cache.permGroups.ts < this.#CACHE_TTL) return this.#cache.permGroups.data;
     const data = await this.pgStore.list();

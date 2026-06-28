@@ -13,6 +13,8 @@ import { rpcCall } from './rpc.ts';
 import { z } from 'zod';
 import { decStr, decStrOpt } from './eci-codec.ts';
 
+const { parse: parseJson } = JSON;
+
 // ─── OSS management API version ───
 
 const API_VERSION = '2018-12-01';
@@ -150,8 +152,9 @@ export class AlibabaOssOpenApiClient {
         redundancyType: decStrOpt(info.DataRedundancyType) ?? 'LRS',
         ...(versioning ? { versioning } : {}),
       };
-    } catch {
-      return null;
+    } catch (_e) {
+      const notFound = null;
+      return notFound;
     }
   }
 
@@ -196,8 +199,9 @@ export class AlibabaOssOpenApiClient {
       });
       const acl = respObj(resp.AccessControlList);
       return decStrOpt(acl.Grant) ?? null;
-    } catch {
-      return null;
+    } catch (_e) {
+      const notFound = null;
+      return notFound;
     }
   }
 
@@ -221,9 +225,10 @@ export class AlibabaOssOpenApiClient {
       });
       const policyRaw = decStrOpt(resp.Policy);
       if (!policyRaw) return null;
-      return bucketPolicySchema.parse(JSON.parse(policyRaw));
-    } catch {
-      return null;
+      return bucketPolicySchema.parse(parseJson(policyRaw));
+    } catch (_e) {
+      const notFound = null;
+      return notFound;
     }
   }
 
@@ -255,8 +260,9 @@ export class AlibabaOssOpenApiClient {
         Bucket: bucket,
       });
       return decStrOpt(resp.Status) ?? null;
-    } catch {
-      return null;
+    } catch (_e) {
+      const notFound = null;
+      return notFound;
     }
   }
 
@@ -279,8 +285,9 @@ export class AlibabaOssOpenApiClient {
         Bucket: bucket,
       });
       return resp.Rules ?? null;
-    } catch {
-      return null;
+    } catch (_e) {
+      const notFound = null;
+      return notFound;
     }
   }
 }

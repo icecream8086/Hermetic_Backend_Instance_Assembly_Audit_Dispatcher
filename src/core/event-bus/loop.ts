@@ -131,7 +131,7 @@ export class EventLoop implements IEventLoopControl {
   #startTime = 0;
   #config: EventLoopConfig;
 
-  constructor(
+  public constructor(
     bus: EventBus,
     config?: Partial<EventLoopConfig>,
     timerBackend?: ITimerBackend,
@@ -257,7 +257,7 @@ export class EventLoop implements IEventLoopControl {
     return this.#queue.size;
   }
 
-  async triggerTick(): Promise<void> {
+  public async triggerTick(): Promise<void> {
     if (this.#ticking) return;
     this.#ticking = true;
     try {
@@ -275,7 +275,7 @@ export class EventLoop implements IEventLoopControl {
     this.#config.onError?.(err, context);
   }
 
-  async #tick(): Promise<void> {
+  public async #tick(): Promise<void> {
     if (this.#paused || this.#queue.isEmpty) return;
 
     const limit = this.#config.batchSize > 0
@@ -311,7 +311,7 @@ export class EventLoop implements IEventLoopControl {
   // ─── Store persistence ───
 
   /** Recover pending events from store after construction. */
-  async #recover(): Promise<void> {
+  public async #recover(): Promise<void> {
     try {
       await this.#store!.transact(async (txn) => {
         const pending = await txn.get<Event[]>(KEY_PENDING);
@@ -331,7 +331,7 @@ export class EventLoop implements IEventLoopControl {
   static #PERSISTED_TYPES = new Set(['image.pull']);
 
   /** Append one event to the persisted queue (transient events skipped). */
-  async #persistEnqueue(event: Event): Promise<void> {
+  public async #persistEnqueue(event: Event): Promise<void> {
     if (!EventLoop.#PERSISTED_TYPES.has(event.type)) return;
     await this.#store!.transact(async (txn) => {
       const pending = (await txn.get<Event[]>(KEY_PENDING)) ?? [];
@@ -341,7 +341,7 @@ export class EventLoop implements IEventLoopControl {
   }
 
   /** Remove dispatched events from the persisted queue. */
-  async #persistDequeue(events: Event[]): Promise<void> {
+  public async #persistDequeue(events: Event[]): Promise<void> {
     const dispatched = new Set(events.map(e => e.id));
     await this.#store!.transact(async (txn) => {
       const pending = (await txn.get<Event[]>(KEY_PENDING)) ?? [];

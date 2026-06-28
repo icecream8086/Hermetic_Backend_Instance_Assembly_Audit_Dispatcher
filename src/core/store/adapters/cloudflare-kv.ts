@@ -16,9 +16,9 @@ import { generateVersionId } from '../../brand.ts';
  * For strong consistency, use Durable Objects instead.
  */
 export class CloudflareKVAtomicStore implements IAtomicStore {
-  constructor(private readonly kv: KVNamespace) {}
+  public constructor(private readonly kv: KVNamespace) {}
 
-  async get<T>(key: string): Promise<{ value: T; version: VersionId } | null> {
+  public async get<T>(key: string): Promise<{ value: T; version: VersionId } | null> {
     const result = await this.kv.getWithMetadata<T>(key, 'json');
     if (result.value === null) return null;
     const version = (result.metadata as { v?: string } | null)?.v;
@@ -26,7 +26,7 @@ export class CloudflareKVAtomicStore implements IAtomicStore {
     return { value: result.value, version: version as VersionId };
   }
 
-  async set<T>(key: string, value: T, expectedVersion: VersionId | null, ttlSeconds?: number): Promise<VersionId | null> {
+  public async set<T>(key: string, value: T, expectedVersion: VersionId | null, ttlSeconds?: number): Promise<VersionId | null> {
     const existing = await this.kv.getWithMetadata(key, 'json');
     const currentVersion = (existing.metadata as { v?: string } | null)?.v;
 
@@ -41,7 +41,7 @@ export class CloudflareKVAtomicStore implements IAtomicStore {
     return newVersion;
   }
 
-  async transact<T>(action: (txn: IStoreTransaction) => Promise<T>): Promise<T> {
+  public async transact<T>(action: (txn: IStoreTransaction) => Promise<T>): Promise<T> {
     const readSet = new Map<string, string | null>();
     const deferredWrites = new Map<string, { value: unknown; version: VersionId; ttlSeconds?: number }>();
 

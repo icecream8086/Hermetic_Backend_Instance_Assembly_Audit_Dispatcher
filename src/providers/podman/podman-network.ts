@@ -19,11 +19,11 @@ function networkName(tenantId: string): string {
 export class PodmanNetworkPolicyProvider implements INetworkPolicyProvider {
   readonly #libpodApi: string;
 
-  constructor(endpoint = 'http://127.0.0.1:8080') {
+  public constructor(endpoint = 'http://127.0.0.1:8080') {
     this.#libpodApi = `${endpoint}/v5.0.0/libpod`;
   }
 
-  async ensureNetwork(tenantId: string): Promise<string> {
+  public async ensureNetwork(tenantId: string): Promise<string> {
     const name = networkName(tenantId);
 
     // Check if already exists
@@ -62,7 +62,7 @@ export class PodmanNetworkPolicyProvider implements INetworkPolicyProvider {
     return name;
   }
 
-  async removeNetwork(networkId: string): Promise<void> {
+  public async removeNetwork(networkId: string): Promise<void> {
     const resp = await fetch(`${this.#libpodApi}/networks/${encodeURIComponent(networkId)}`, {
       method: 'DELETE',
     });

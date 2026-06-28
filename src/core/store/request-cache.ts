@@ -18,11 +18,11 @@ export class RequestCachedAtomicStore implements IAtomicStore {
   readonly #inner: IAtomicStore;
   readonly #cache = new Map<string, { value: unknown; version: VersionId } | null>();
 
-  constructor(inner: IAtomicStore) {
+  public constructor(inner: IAtomicStore) {
     this.#inner = inner;
   }
 
-  async get<T>(key: string): Promise<{ value: T; version: VersionId } | null> {
+  public async get<T>(key: string): Promise<{ value: T; version: VersionId } | null> {
     const cached = this.#cache.get(key);
     if (cached !== undefined) return cached as { value: T; version: VersionId } | null;
 
@@ -31,12 +31,12 @@ export class RequestCachedAtomicStore implements IAtomicStore {
     return result;
   }
 
-  async set<T>(key: string, value: T, expectedVersion: VersionId | null, ttlSeconds?: number): Promise<VersionId | null> {
+  public async set<T>(key: string, value: T, expectedVersion: VersionId | null, ttlSeconds?: number): Promise<VersionId | null> {
     this.#cache.delete(key);
     return this.#inner.set(key, value, expectedVersion, ttlSeconds);
   }
 
-  async transact<T>(action: (txn: IStoreTransaction) => Promise<T>): Promise<T> {
+  public async transact<T>(action: (txn: IStoreTransaction) => Promise<T>): Promise<T> {
     const result = await this.#inner.transact(action);
     this.#cache.clear();
     return result;

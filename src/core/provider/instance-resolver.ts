@@ -34,14 +34,14 @@ import { AlibabaCrApiClient } from '../../providers/alibaba/cr-api.ts';
 import { AlibabaOssOpenApiClient } from '../../providers/alibaba/oss-openapi.ts';
 
 export class InstanceProviderResolver {
-  constructor(
+  public constructor(
     private readonly instanceService: InstanceService,
     private readonly credentialService: CredentialService,
   ) {}
 
   /** Resolve a container provider. If instanceId provided, uses that instance.
    *  Otherwise picks the first online instance with container capability. */
-  async resolveContainer(instanceId?: InstanceId): Promise<IContainerProvider> {
+  public async resolveContainer(instanceId?: InstanceId): Promise<IContainerProvider> {
     if (instanceId) {
       const inst = await this.instanceService.get(instanceId);
       if (inst) return this.#createContainerProvider(inst);
@@ -53,7 +53,7 @@ export class InstanceProviderResolver {
   }
 
   /** Resolve an image provider. */
-  async resolveImage(instanceId?: InstanceId): Promise<IImageProvider> {
+  public async resolveImage(instanceId?: InstanceId): Promise<IImageProvider> {
     if (instanceId) {
       const inst = await this.instanceService.get(instanceId);
       if (inst?.capabilities.image) return this.#createImageProvider(inst);
@@ -65,7 +65,7 @@ export class InstanceProviderResolver {
   }
 
   /** Resolve a container group provider. */
-  async resolveGroup(instanceId?: InstanceId): Promise<IContainerGroupProvider | undefined> {
+  public async resolveGroup(instanceId?: InstanceId): Promise<IContainerGroupProvider | undefined> {
     if (instanceId) {
       const inst = await this.instanceService.get(instanceId);
       if (inst?.capabilities.group) return this.#createGroupProvider(inst);
@@ -77,20 +77,20 @@ export class InstanceProviderResolver {
   }
 
   /** Resolve a specific instance and create its container provider. */
-  async resolveContainerByInstance(instanceId: InstanceId): Promise<IContainerProvider | null> {
+  public async resolveContainerByInstance(instanceId: InstanceId): Promise<IContainerProvider | null> {
     const inst = await this.instanceService.get(instanceId);
     return inst ? this.#createContainerProvider(inst) : null;
   }
 
   /** Resolve a network policy provider for a specific instance. */
-  async resolveNetworkPolicy(instanceId: InstanceId): Promise<INetworkPolicyProvider | undefined> {
+  public async resolveNetworkPolicy(instanceId: InstanceId): Promise<INetworkPolicyProvider | undefined> {
     const inst = await this.instanceService.get(instanceId);
     if (!inst?.capabilities.network) return undefined;
     return this.#createNetworkPolicyProvider(inst);
   }
 
   /** Resolve an S3 provider for a specific instance. */
-  async resolveS3(instanceId: InstanceId): Promise<IS3Provider | undefined> {
+  public async resolveS3(instanceId: InstanceId): Promise<IS3Provider | undefined> {
     const inst = await this.instanceService.get(instanceId);
     if (!inst?.capabilities.s3) return undefined;
     return this.#createS3Provider(inst);
@@ -98,7 +98,7 @@ export class InstanceProviderResolver {
 
   // ─── Provider factory methods ───
 
-  async #resolveCredential(credentialRef?: string, instanceId?: string): Promise<{
+  public async #resolveCredential(credentialRef?: string, instanceId?: string): Promise<{
     type?: string | undefined;
     accessKeyId: string | undefined;
     accessKeySecret: string | undefined;
@@ -139,7 +139,7 @@ export class InstanceProviderResolver {
     return { accessKeyId: undefined, accessKeySecret: undefined };
   }
 
-  async #createContainerProvider(instance: ComputeInstance): Promise<IContainerProvider> {
+  public async #createContainerProvider(instance: ComputeInstance): Promise<IContainerProvider> {
     switch (instance.platform) {
       case 'podman':
         return secureContainerProvider(new PodmanContainerProvider(instance.endpoint));
@@ -156,7 +156,7 @@ export class InstanceProviderResolver {
     }
   }
 
-  async #createImageProvider(instance: ComputeInstance): Promise<IImageProvider> {
+  public async #createImageProvider(instance: ComputeInstance): Promise<IImageProvider> {
     switch (instance.platform) {
       case 'podman':
         return new PodmanImageProvider(instance.endpoint);
@@ -175,7 +175,7 @@ export class InstanceProviderResolver {
     }
   }
 
-  async #createGroupProvider(instance: ComputeInstance): Promise<IContainerGroupProvider | undefined> {
+  public async #createGroupProvider(instance: ComputeInstance): Promise<IContainerGroupProvider | undefined> {
     switch (instance.platform) {
       case 'podman':
         return secureContainerGroupProvider(new PodmanContainerGroupProvider(instance.endpoint));
@@ -190,7 +190,7 @@ export class InstanceProviderResolver {
     }
   }
 
-  async #createNetworkPolicyProvider(instance: ComputeInstance): Promise<INetworkPolicyProvider | undefined> {
+  public async #createNetworkPolicyProvider(instance: ComputeInstance): Promise<INetworkPolicyProvider | undefined> {
     switch (instance.platform) {
       case 'podman':
         return new PodmanNetworkPolicyProvider(instance.endpoint);
@@ -202,7 +202,7 @@ export class InstanceProviderResolver {
     }
   }
 
-  async #createS3Provider(instance: ComputeInstance): Promise<IS3Provider | undefined> {
+  public async #createS3Provider(instance: ComputeInstance): Promise<IS3Provider | undefined> {
     const cred = await this.#resolveCredential(instance.credentialRef, instance.id);
     switch (instance.platform) {
       case 'podman':
@@ -222,7 +222,7 @@ export class InstanceProviderResolver {
   }
 
   /** Resolve a raw ECI API client for a specific instance. */
-  async resolveRawEciApi(instanceId: InstanceId): Promise<any | undefined> {
+  public async resolveRawEciApi(instanceId: InstanceId): Promise<any | undefined> {
     const inst = await this.instanceService.get(instanceId);
     if (inst?.platform !== 'alibaba') return undefined;
     const cred = await this.#resolveCredential(inst.credentialRef);
@@ -231,7 +231,7 @@ export class InstanceProviderResolver {
   }
 
   /** Resolve a CR (Container Registry) API client for a specific instance. */
-  async resolveCrApi(instanceId: InstanceId): Promise<any | undefined> {
+  public async resolveCrApi(instanceId: InstanceId): Promise<any | undefined> {
     const inst = await this.instanceService.get(instanceId);
     if (inst?.platform !== 'alibaba') return undefined;
     const cred = await this.#resolveCredential(inst.credentialRef);
@@ -240,7 +240,7 @@ export class InstanceProviderResolver {
   }
 
   /** Resolve an OSS management-plane API client for a specific instance. */
-  async resolveOssOpenApi(instanceId: InstanceId): Promise<any | undefined> {
+  public async resolveOssOpenApi(instanceId: InstanceId): Promise<any | undefined> {
     const inst = await this.instanceService.get(instanceId);
     if (inst?.platform !== 'alibaba') return undefined;
     const cred = await this.#resolveCredential(inst.credentialRef);

@@ -19,7 +19,7 @@ const FACILITY = createFacility('perm');
 export class PolicyManager {
   private readonly store: CrudStore<StoredPolicy>;
 
-  constructor(
+  public constructor(
     _atomic: IAtomicStore,
     private readonly logger: ILogWriter,
     private readonly audit?: IAuditWriter,
@@ -27,7 +27,7 @@ export class PolicyManager {
     this.store = new CrudStore<StoredPolicy>(_atomic, 'policy:', 'policy:ids', 'POLICY_NOT_FOUND');
   }
 
-  async create(input: CreatePolicyInput, actor?: AuditActor): Promise<StoredPolicy> {
+  public async create(input: CreatePolicyInput, actor?: AuditActor): Promise<StoredPolicy> {
     const id = createPolicyId(crypto.randomUUID());
     const policy: StoredPolicy = {
       id, name: input.name,
@@ -50,11 +50,11 @@ export class PolicyManager {
     return policy;
   }
 
-  async list(): Promise<StoredPolicy[]> { return this.store.list(); }
-  async listPaginated(page?: number, limit?: number, filter?: (item: StoredPolicy) => boolean) { return this.store.listPaginated(page, limit, filter); }
-  async get(id: string): Promise<StoredPolicy | null> { return this.store.get(id); }
+  public async list(): Promise<StoredPolicy[]> { return this.store.list(); }
+  public async listPaginated(page?: number, limit?: number, filter?: (item: StoredPolicy) => boolean) { return this.store.listPaginated(page, limit, filter); }
+  public async get(id: string): Promise<StoredPolicy | null> { return this.store.get(id); }
 
-  async update(id: string, input: UpdatePolicyInput, actor?: AuditActor): Promise<StoredPolicy> {
+  public async update(id: string, input: UpdatePolicyInput, actor?: AuditActor): Promise<StoredPolicy> {
     const old = await this.store.get(id);
     if (!old) throw new AppError(404, 'POLICY_NOT_FOUND', 'Policy not found');
     const updated: StoredPolicy = applyUpdate(old, {
@@ -70,7 +70,7 @@ export class PolicyManager {
     return updated;
   }
 
-  async delete(id: string, actor?: AuditActor): Promise<void> {
+  public async delete(id: string, actor?: AuditActor): Promise<void> {
     const old = await this.store.get(id);
     await this.store.delete(id);
     permLogAudit(this.logger, this.audit, 'perm.policy.deleted', actor, { entityType: 'policy', entityId: id, oldValue: old }, KernLevel.NOTICE);

@@ -17,21 +17,21 @@ export interface IVolumeService extends ICrudService<Volume, CreateVolumeInput, 
 }
 
 export class VolumeService implements IVolumeService {
-  constructor(
+  public constructor(
     private readonly atomic: IAtomicStore,
     private readonly logger: ILogWriter,
     _audit?: IAuditWriter,
   ) {}
 
   /** Validate that an instanceId refers to an existing ComputeInstance. */
-  async #validateInstance(instanceId: string): Promise<void> {
+  public async #validateInstance(instanceId: string): Promise<void> {
     const { InstanceService } = await import('../../core/region/instance.ts');
     const svc = new InstanceService(this.atomic);
     const inst = await svc.get(instanceId as any);
     if (!inst) throw new AppError(400, 'INSTANCE_NOT_FOUND', `ComputeInstance ${instanceId} not found`);
   }
 
-  async create(input: CreateVolumeInput): Promise<Volume> {
+  public async create(input: CreateVolumeInput): Promise<Volume> {
     // Validate that the target ComputeInstance exists
     if (input.instanceId) await this.#validateInstance(input.instanceId);
 
@@ -72,13 +72,13 @@ export class VolumeService implements IVolumeService {
     return volume;
   }
 
-  async get(id: string): Promise<Volume | null> {
+  public async get(id: string): Promise<Volume | null> {
     const entry = await this.atomic.get<Volume>(PREFIX + id);
     if (!entry) return null;
     return entry.value;
   }
 
-  async listPaginated(page = 1, limit = 50, filters?: Record<string, string>): Promise<PaginatedResult<Volume>> {
+  public async listPaginated(page = 1, limit = 50, filters?: Record<string, string>): Promise<PaginatedResult<Volume>> {
     const idsEntry = await this.atomic.get<string[]>(INDEX_KEY);
     const allIds = idsEntry?.value ?? [];
     const hasFilter = filters && (filters.name || filters.type || filters.status || filters.instanceId);
@@ -113,11 +113,11 @@ export class VolumeService implements IVolumeService {
     return { items, total, page, limit };
   }
 
-  async list(page?: number, limit?: number): Promise<PaginatedResult<Volume>> {
+  public async list(page?: number, limit?: number): Promise<PaginatedResult<Volume>> {
     return this.listPaginated(page, limit);
   }
 
-  async update(id: string, input: UpdateVolumeInput): Promise<Volume> {
+  public async update(id: string, input: UpdateVolumeInput): Promise<Volume> {
     const entry = await this.atomic.get<Volume>(PREFIX + id);
     if (!entry) throw new AppError(404, NOT_FOUND, `${NOT_FOUND}: ${id}`);
 
@@ -154,7 +154,7 @@ export class VolumeService implements IVolumeService {
     throw new AppError(409, 'CONFLICT', 'Concurrent modification detected after 3 retries');
   }
 
-  async delete(id: string): Promise<void> {
+  public async delete(id: string): Promise<void> {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         await this.atomic.transact<void>(async (txn) => {

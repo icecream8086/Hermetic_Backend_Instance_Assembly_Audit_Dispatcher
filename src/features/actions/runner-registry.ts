@@ -51,13 +51,13 @@ export interface RunnerHeartbeatInput {
  * modifying this class.
  */
 export class RunnerRegistry {
-  constructor(
+  public constructor(
     private readonly atomic: IAtomicStore,
     private readonly audit: IAuditWriter,
   ) {}
 
   /** Register a new runner or update heartbeat for an existing one. */
-  async heartbeat(input: RunnerHeartbeatInput): Promise<RunnerRegistration> {
+  public async heartbeat(input: RunnerHeartbeatInput): Promise<RunnerRegistration> {
     // Find existing runner by name
     const existing = await this.#findByName(input.name);
 
@@ -107,7 +107,7 @@ export class RunnerRegistry {
   }
 
   /** Mark runners that haven't sent a heartbeat recently as offline. */
-  async markStale(): Promise<number> {
+  public async markStale(): Promise<number> {
     const idx = await this.atomic.get<string[]>(IDX);
     if (!idx) return 0;
     const now = Date.now();
@@ -131,7 +131,7 @@ export class RunnerRegistry {
   }
 
   /** List online runners, optionally filtered by label requirements. */
-  async listOnline(requiredLabels?: Record<string, string>): Promise<RunnerRegistration[]> {
+  public async listOnline(requiredLabels?: Record<string, string>): Promise<RunnerRegistration[]> {
     const idx = await this.atomic.get<string[]>(IDX);
     if (!idx) return [];
 
@@ -150,7 +150,7 @@ export class RunnerRegistry {
   }
 
   /** Convert online runners to ResourceNode[] for the DagScheduler. */
-  async toResourceNodes(requiredLabels?: Record<string, string>): Promise<ResourceNode[]> {
+  public async toResourceNodes(requiredLabels?: Record<string, string>): Promise<ResourceNode[]> {
     const runners = await this.listOnline(requiredLabels);
     return runners.map(r => ({
       id: r.id,
@@ -160,7 +160,7 @@ export class RunnerRegistry {
   }
 
   /** Set a runner to draining (stop accepting new jobs). */
-  async drain(id: string): Promise<void> {
+  public async drain(id: string): Promise<void> {
     const entry = await this.atomic.get<RunnerRegistration>(PFX + id);
     if (!entry) throw new AppError(404, 'RUNNER_NOT_FOUND', 'Runner not found');
     const updated: RunnerRegistration = {
@@ -169,12 +169,12 @@ export class RunnerRegistry {
     await this.atomic.set(PFX + id, updated, entry.version);
   }
 
-  async get(id: string): Promise<RunnerRegistration | null> {
+  public async get(id: string): Promise<RunnerRegistration | null> {
     const entry = await this.atomic.get<RunnerRegistration>(PFX + id);
     return entry?.value ?? null;
   }
 
-  async list(): Promise<RunnerRegistration[]> {
+  public async list(): Promise<RunnerRegistration[]> {
     const idx = await this.atomic.get<string[]>(IDX);
     if (!idx) return [];
     const entries = await Promise.all(
@@ -183,7 +183,7 @@ export class RunnerRegistry {
     return entries.filter(e => e).map(e => e!.value);
   }
 
-  async #findByName(name: string): Promise<RunnerRegistration | null> {
+  public async #findByName(name: string): Promise<RunnerRegistration | null> {
     const idx = await this.atomic.get<string[]>(IDX);
     if (!idx) return null;
     for (const id of idx.value) {

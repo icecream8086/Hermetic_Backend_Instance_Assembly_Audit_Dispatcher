@@ -12,7 +12,7 @@ export class AlibabaOssProvider extends S3ClientBase {
   readonly #accessKeySecret: string;
   readonly #endpoint: string;
 
-  constructor(accessKeyId: string, accessKeySecret: string, region: string, endpoint?: string, config?: S3ProviderConfig) {
+  public constructor(accessKeyId: string, accessKeySecret: string, region: string, endpoint?: string, config?: S3ProviderConfig) {
     super(config);
     this.#accessKeyId = accessKeyId;
     this.#accessKeySecret = accessKeySecret;
@@ -63,15 +63,15 @@ export class AlibabaOssProvider extends S3ClientBase {
 
   // ─── Presigned URLs (OSS native scheme) ───
 
-  async getPresignedUrl(bucket: string, key: string, expiresInSeconds = 3600): Promise<string> {
+  public async getPresignedUrl(bucket: string, key: string, expiresInSeconds = 3600): Promise<string> {
     return this.#ossPresignedUrl('GET', bucket, key, expiresInSeconds);
   }
 
-  async putPresignedUrl(bucket: string, key: string, expiresInSeconds = 3600): Promise<string> {
+  public async putPresignedUrl(bucket: string, key: string, expiresInSeconds = 3600): Promise<string> {
     return this.#ossPresignedUrl('PUT', bucket, key, expiresInSeconds);
   }
 
-  async #ossPresignedUrl(method: string, bucket: string, key: string, expiresInSeconds: number): Promise<string> {
+  public async #ossPresignedUrl(method: string, bucket: string, key: string, expiresInSeconds: number): Promise<string> {
     const bucketName = this.#bucketMapping(bucket);
     const encodedKey = key.split('/').map(encodeURIComponent).join('/');
     const expires = Math.floor(Date.now() / 1000) + expiresInSeconds;

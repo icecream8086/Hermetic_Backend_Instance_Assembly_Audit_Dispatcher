@@ -18,7 +18,7 @@ const PFX_POOL = 'pool:';
 export class StoreSchedulerContext implements SchedulerContext {
   private readonly executorRegistry = new Map<string, ITaskExecutor>();
 
-  constructor(
+  public constructor(
     private readonly atomic: IAtomicStore,
   ) {}
 
@@ -29,12 +29,12 @@ export class StoreSchedulerContext implements SchedulerContext {
 
   // ─── DagDef ───
 
-  async getDagDef(dagId: DagId) {
+  public async getDagDef(dagId: DagId) {
     const entry = await this.atomic.get<DagDef>(PFX_DAG_DEF + dagId);
     return entry ?? null;
   }
 
-  async saveDagDef(dag: DagDef): Promise<boolean> {
+  public async saveDagDef(dag: DagDef): Promise<boolean> {
     const existing = await this.atomic.get<DagDef>(PFX_DAG_DEF + dag.id);
     const ok = await this.atomic.set(PFX_DAG_DEF + dag.id, dag, existing?.version ?? null);
     return ok !== null;
@@ -42,7 +42,7 @@ export class StoreSchedulerContext implements SchedulerContext {
 
   // ─── DagRun ───
 
-  async getActiveDagRuns(): Promise<DagRun[]> {
+  public async getActiveDagRuns(): Promise<DagRun[]> {
     // Scan for active runs (QUEUED or RUNNING). In production, use an index.
     // For now, we use a simple prefix scan via the known keys pattern.
     // Since IAtomicStore doesn't support scan, we rely on an index key.
@@ -59,17 +59,17 @@ export class StoreSchedulerContext implements SchedulerContext {
     return runs;
   }
 
-  async getDagRun(dagRunId: DagRunId) {
+  public async getDagRun(dagRunId: DagRunId) {
     const entry = await this.atomic.get<DagRun>(PFX_DAG_RUN + dagRunId);
     return entry ?? null;
   }
 
-  async updateDagRun(dagRun: DagRun, version: VersionId): Promise<boolean> {
+  public async updateDagRun(dagRun: DagRun, version: VersionId): Promise<boolean> {
     const ok = await this.atomic.set(PFX_DAG_RUN + dagRun.id, dagRun, version);
     return ok !== null;
   }
 
-  async saveNewDagRun(dagRun: DagRun): Promise<boolean> {
+  public async saveNewDagRun(dagRun: DagRun): Promise<boolean> {
     const ok = await this.atomic.set(PFX_DAG_RUN + dagRun.id, dagRun, null);
     if (ok) {
       const idx = await this.atomic.get<string[]>(PFX_DAG_RUN + 'idx');
@@ -81,7 +81,7 @@ export class StoreSchedulerContext implements SchedulerContext {
 
   // ─── TaskInstance ───
 
-  async getTaskInstances(dagRunId: DagRunId): Promise<TaskInstance[]> {
+  public async getTaskInstances(dagRunId: DagRunId): Promise<TaskInstance[]> {
     const idx = await this.atomic.get<string[]>(PFX_TASK_INST + dagRunId);
     if (!idx) return [];
 
@@ -93,7 +93,7 @@ export class StoreSchedulerContext implements SchedulerContext {
     return tis;
   }
 
-  async saveTaskInstance(ti: TaskInstance, version?: VersionId | null): Promise<boolean> {
+  public async saveTaskInstance(ti: TaskInstance, version?: VersionId | null): Promise<boolean> {
     const key = PFX_TASK_INST + ti.id;
     const ok = await this.atomic.set(key, ti, version ?? null);
 
@@ -109,19 +109,19 @@ export class StoreSchedulerContext implements SchedulerContext {
 
   // ─── Pool ───
 
-  async getPool(name: string): Promise<Pool | null> {
+  public async getPool(name: string): Promise<Pool | null> {
     const entry = await this.atomic.get<Pool>(PFX_POOL + name);
     return entry?.value ?? null;
   }
 
-  async updatePool(pool: Pool): Promise<boolean> {
+  public async updatePool(pool: Pool): Promise<boolean> {
     const ok = await this.atomic.set(PFX_POOL + pool.name, pool, null);
     return ok !== null;
   }
 
   // ─── Executor ───
 
-  async getExecutor(key: string): Promise<ITaskExecutor | null> {
+  public async getExecutor(key: string): Promise<ITaskExecutor | null> {
     return this.executorRegistry.get(key) ?? null;
   }
 }

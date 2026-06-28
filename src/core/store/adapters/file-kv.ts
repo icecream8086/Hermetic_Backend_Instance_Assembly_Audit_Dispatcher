@@ -23,7 +23,7 @@ export class FileKVAtomicStore implements IAtomicStore {
   #dataDir: string;
   #lock: Promise<void> = Promise.resolve();
 
-  constructor(basePath: string) {
+  public constructor(basePath: string) {
     this.#dataDir = resolve(basePath);
   }
 
@@ -40,7 +40,7 @@ export class FileKVAtomicStore implements IAtomicStore {
     });
   }
 
-  async #ensureDir(): Promise<void> {
+  public async #ensureDir(): Promise<void> {
     await mkdir(this.#dataDir, { recursive: true });
   }
 
@@ -49,7 +49,7 @@ export class FileKVAtomicStore implements IAtomicStore {
     return join(this.#dataDir, `${safe}.json`);
   }
 
-  async get<T>(key: string): Promise<{ value: T; version: VersionId } | null> {
+  public async get<T>(key: string): Promise<{ value: T; version: VersionId } | null> {
     return this.#serialise(async () => {
       await this.#ensureDir();
       try {
@@ -69,7 +69,7 @@ export class FileKVAtomicStore implements IAtomicStore {
     });
   }
 
-  async set<T>(key: string, value: T, expectedVersion: VersionId | null, ttlSeconds?: number): Promise<VersionId | null> {
+  public async set<T>(key: string, value: T, expectedVersion: VersionId | null, ttlSeconds?: number): Promise<VersionId | null> {
     return this.#serialise(async () => {
       await this.#ensureDir();
       const fp = this.#filePath(key);
@@ -93,7 +93,7 @@ export class FileKVAtomicStore implements IAtomicStore {
     });
   }
 
-  async transact<T>(action: (txn: IStoreTransaction) => Promise<T>): Promise<T> {
+  public async transact<T>(action: (txn: IStoreTransaction) => Promise<T>): Promise<T> {
     return this.#serialise(async () => {
       await this.#ensureDir();
       const readSet = new Map<string, string | null>(); // null = key didn't exist

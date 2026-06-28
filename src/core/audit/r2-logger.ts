@@ -71,7 +71,7 @@ export class R2AuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
   readonly #bootId: string;
   readonly #machineHash: string;
 
-  constructor(
+  public constructor(
     private readonly bucket: R2Bucket,
     config: Partial<R2LoggerConfig> = {},
   ) {
@@ -82,15 +82,15 @@ export class R2AuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
 
   // ─── IAuditWriter ───
 
-  async write(entry: AuditEntry): Promise<void> {
+  public async write(entry: AuditEntry): Promise<void> {
     await this.#process(entry);
   }
 
-  async writeSync(entry: AuditEntry): Promise<LogId> {
+  public async writeSync(entry: AuditEntry): Promise<LogId> {
     return this.#process(entry);
   }
 
-  async #process(entry: AuditEntry): Promise<LogId> {
+  public async #process(entry: AuditEntry): Promise<LogId> {
     const id = generateLogId();
     const now = Date.now();
     const facility = entry.facility ?? 'audit';
@@ -151,7 +151,7 @@ export class R2AuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
 
   // ─── Flush ───
 
-  async flush(): Promise<void> {
+  public async flush(): Promise<void> {
     if (this.#buffer.length === 0) return;
     const batch = this.#buffer.splice(0);
     const now = Date.now();
@@ -161,7 +161,7 @@ export class R2AuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
 
   // ─── IAuditReader ───
 
-  async query(params?: LogQuery): Promise<{ entries: StoredAuditEntry[]; nextCursor?: string; total?: number }> {
+  public async query(params?: LogQuery): Promise<{ entries: StoredAuditEntry[]; nextCursor?: string; total?: number }> {
     const limit = params?.limit ?? 100;
     const prefix = this.#config.prefix;
     const listResult = await this.bucket.list({
@@ -217,7 +217,7 @@ export class R2AuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
     return { entries: page, total };
   }
 
-  async getById(id: LogId): Promise<StoredAuditEntry | null> {
+  public async getById(id: LogId): Promise<StoredAuditEntry | null> {
     const buf = this.#buffer.find(e => e.id === id);
     if (buf) return buf;
 
@@ -236,9 +236,9 @@ export class R2AuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
 
   // ─── IAuditAdmin ───
 
-  async forceSetTail(_facility: any, _tailId: any): Promise<void> {}
+  public async forceSetTail(_facility: any, _tailId: any): Promise<void> {}
 
-  async prune(beforeTs: number): Promise<number> {
+  public async prune(beforeTs: number): Promise<number> {
     const result = await this.bucket.list({ prefix: this.#config.prefix, limit: 500 });
     let removed = 0;
     for (const obj of result.objects) {
@@ -251,7 +251,7 @@ export class R2AuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
     return removed;
   }
 
-  async pruneByIds(_ids: readonly string[]): Promise<number> {
+  public async pruneByIds(_ids: readonly string[]): Promise<number> {
     return 0; // R2 delete is per-key; full implementation would need an index
   }
 
@@ -270,7 +270,7 @@ export class R2AuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
     }
   }
 
-  async dispose(): Promise<void> {
+  public async dispose(): Promise<void> {
     this.stopAutoFlush();
     await this.flush();
   }

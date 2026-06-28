@@ -22,11 +22,11 @@ export const CF_API_BASE_URL = 'https://api.cloudflare.com/client/v4';
 export class CloudflareDnsProvider implements IDnsProvider {
   readonly #auth: BearerTokenProvider;
 
-  constructor(apiToken: string) {
+  public constructor(apiToken: string) {
     this.#auth = new BearerTokenProvider(apiToken);
   }
 
-  async updateRecord(input: UpdateDnsRecordInput): Promise<void> {
+  public async updateRecord(input: UpdateDnsRecordInput): Promise<void> {
     const res = await this.#fetch('PUT',
       `${CF_API_BASE_URL}/zones/${input.zoneId}/dns_records/${input.providerRecordId}`,
       input,
@@ -44,7 +44,7 @@ export class CloudflareDnsProvider implements IDnsProvider {
     }
   }
 
-  async deleteRecord(input: DeleteDnsRecordInput): Promise<void> {
+  public async deleteRecord(input: DeleteDnsRecordInput): Promise<void> {
     const res = await this.#fetch('DELETE',
       `${CF_API_BASE_URL}/zones/${input.zoneId}/dns_records/${input.providerRecordId}`,
     );
@@ -57,7 +57,7 @@ export class CloudflareDnsProvider implements IDnsProvider {
     }
   }
 
-  async #createRecord(input: UpdateDnsRecordInput): Promise<void> {
+  public async #createRecord(input: UpdateDnsRecordInput): Promise<void> {
     const res = await this.#fetch('POST',
       `${CF_API_BASE_URL}/zones/${input.zoneId}/dns_records`,
       input,
@@ -69,7 +69,7 @@ export class CloudflareDnsProvider implements IDnsProvider {
     }
   }
 
-  async #fetch(method: string, url: string, bodyInput?: UpdateDnsRecordInput): Promise<Response> {
+  public async #fetch(method: string, url: string, bodyInput?: UpdateDnsRecordInput): Promise<Response> {
     const headers = await this.#headers();
     const init: RequestInit = { method, headers };
     if (bodyInput) {
@@ -84,7 +84,7 @@ export class CloudflareDnsProvider implements IDnsProvider {
     return fetch(url, init);
   }
 
-  async #headers(): Promise<Record<string, string>> {
+  public async #headers(): Promise<Record<string, string>> {
     const base = { 'Content-Type': 'application/json' };
     const { headers } = await this.#auth.sign({ method: 'GET', url: '', headers: base });
     return headers;

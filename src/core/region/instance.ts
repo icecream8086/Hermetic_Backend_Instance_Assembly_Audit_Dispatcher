@@ -94,10 +94,10 @@ function defaultEndpoint(platform: Platform, region: string): string {
 // ─── Service ───
 
 export class InstanceService {
-  constructor(private readonly atomic: IAtomicStore) {}
+  public constructor(private readonly atomic: IAtomicStore) {}
   #rrCounter = 0;
 
-  async create(input: CreateInstanceInput): Promise<ComputeInstance> {
+  public async create(input: CreateInstanceInput): Promise<ComputeInstance> {
     const id = generateInstanceId();
     // Default zone: Podman → "local", Alibaba → region+"-g" (ECI auto-schedules, suffix is metadata)
     const zoneRaw = input.zone ?? (input.platform === 'podman' ? 'local' : (input.platform === 'alibaba' ? `${input.region}-g`.replace(/--/g, '-') : 'unknown'));
@@ -125,12 +125,12 @@ export class InstanceService {
     return instance;
   }
 
-  async get(id: InstanceId): Promise<ComputeInstance | null> {
+  public async get(id: InstanceId): Promise<ComputeInstance | null> {
     const entry = await this.atomic.get<ComputeInstance>(PREFIX + id);
     return entry?.value ?? null;
   }
 
-  async list(filter?: { region?: string | undefined; platform?: string | undefined; status?: string | undefined; zone?: string | undefined }): Promise<ComputeInstance[]> {
+  public async list(filter?: { region?: string | undefined; platform?: string | undefined; status?: string | undefined; zone?: string | undefined }): Promise<ComputeInstance[]> {
     const all = await this.#listAll();
     if (!filter) return all;
     return all.filter(inst => {
@@ -143,7 +143,7 @@ export class InstanceService {
   }
 
   /** Paginated list — avoids loading all instances at once. */
-  async listPaginated(page = 1, limit = 50): Promise<{ items: ComputeInstance[]; total: number; page: number; limit: number }> {
+  public async listPaginated(page = 1, limit = 50): Promise<{ items: ComputeInstance[]; total: number; page: number; limit: number }> {
     const idx = await this.atomic.get<string[]>(INDEX_KEY);
     if (!idx) return { items: [], total: 0, page, limit };
     const start = (page - 1) * limit;
@@ -152,7 +152,7 @@ export class InstanceService {
     return { items: entries.filter(e => e?.value).map(e => e!.value), total: idx.value.length, page, limit };
   }
 
-  async update(id: InstanceId, input: UpdateInstanceInput): Promise<ComputeInstance> {
+  public async update(id: InstanceId, input: UpdateInstanceInput): Promise<ComputeInstance> {
     const entry = await this.atomic.get<ComputeInstance>(PREFIX + id);
     if (!entry) throw new AppError(404, 'INSTANCE_NOT_FOUND', 'Compute instance not found');
 
@@ -174,7 +174,7 @@ export class InstanceService {
   }
 
   /** Update instance capacity + status (heartbeat). Throws if instance not found. */
-  async heartbeat(id: InstanceId, capacity: InstanceCapacity, status: InstanceStatus = 'online'): Promise<void> {
+  public async heartbeat(id: InstanceId, capacity: InstanceCapacity, status: InstanceStatus = 'online'): Promise<void> {
     const entry = await this.atomic.get<ComputeInstance>(PREFIX + id);
     if (!entry) throw new AppError(404, 'INSTANCE_NOT_FOUND', `Instance ${id} not found`);
     await this.atomic.set(PREFIX + id, {
@@ -185,7 +185,7 @@ export class InstanceService {
     }, entry.version);
   }
 
-  async delete(id: InstanceId): Promise<void> {
+  public async delete(id: InstanceId): Promise<void> {
     const entry = await this.atomic.get<ComputeInstance>(PREFIX + id);
     if (!entry) throw new AppError(404, 'INSTANCE_NOT_FOUND', 'Compute instance not found');
 
@@ -206,7 +206,7 @@ export class InstanceService {
   }
 
   /** Find online instances with a specific capability. Round-robin across results. */
-  async resolveByCapability(capability: keyof InstanceCapabilities): Promise<ComputeInstance[]> {
+  public async resolveByCapability(capability: keyof InstanceCapabilities): Promise<ComputeInstance[]> {
     const all = await this.#listAll();
     return all.filter(inst => inst.capabilities[capability] && inst.status === 'online');
   }
@@ -215,7 +215,7 @@ export class InstanceService {
    * Pick one online instance with the given capability, round-robin.
    * Returns undefined if none available.
    */
-  async pickOne(capability: keyof InstanceCapabilities): Promise<ComputeInstance | undefined> {
+  public async pickOne(capability: keyof InstanceCapabilities): Promise<ComputeInstance | undefined> {
     const candidates = await this.resolveByCapability(capability);
     if (candidates.length === 0) return undefined;
     this.#rrCounter = (this.#rrCounter + 1) % candidates.length;
@@ -224,19 +224,19 @@ export class InstanceService {
 
   // ─── Internal helpers ───
 
-  async #listAll(): Promise<ComputeInstance[]> {
+  public async #listAll(): Promise<ComputeInstance[]> {
     const idx = await this.atomic.get<string[]>(INDEX_KEY);
     if (!idx) return [];
     const entries = await Promise.all(idx.value.map(id => this.atomic.get<ComputeInstance>(PREFIX + id)));
     return entries.filter(e => e).map(e => e!.value);
   }
 
-  async #addToIndex(id: InstanceId): Promise<void> {
+  public async #addToIndex(id: InstanceId): Promise<void> {
     const idx = await this.atomic.get<string[]>(INDEX_KEY);
     await this.atomic.set(INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
   }
 
-  async #removeFromIndex(id: InstanceId): Promise<void> {
+  public async #removeFromIndex(id: InstanceId): Promise<void> {
     const idx = await this.atomic.get<string[]>(INDEX_KEY);
     if (!idx) return;
     await this.atomic.set(INDEX_KEY, idx.value.filter((i: string) => i !== id), idx.version);

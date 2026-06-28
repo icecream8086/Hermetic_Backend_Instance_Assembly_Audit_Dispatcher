@@ -43,7 +43,7 @@ export interface EvictionResult {
 }
 
 export class ImageCacheTracker {
-  constructor(
+  public constructor(
     private readonly atomic: IAtomicStore,
     private readonly config: ImageCacheConfig = DEFAULT_IMAGE_CACHE_CONFIG,
   ) {}
@@ -51,7 +51,7 @@ export class ImageCacheTracker {
   #key(imageId: string): string { return CACHE_ENTRY_PREFIX + imageId; }
 
   /** Record an image pull or access. Creates or updates the cache entry. */
-  async recordAccess(imageId: string, tags: string[], sizeBytes: number): Promise<void> {
+  public async recordAccess(imageId: string, tags: string[], sizeBytes: number): Promise<void> {
     const now = Date.now();
     const existing = await this.atomic.get<ImageCacheEntry>(this.#key(imageId));
 
@@ -83,7 +83,7 @@ export class ImageCacheTracker {
   }
 
   /** Record an image removal. Removes the cache entry. */
-  async recordRemoval(imageId: string): Promise<void> {
+  public async recordRemoval(imageId: string): Promise<void> {
     const existing = await this.atomic.get<ImageCacheEntry>(this.#key(imageId));
     if (!existing) return;
     await this.#addToTotalSize(-existing.value.sizeBytes);
@@ -92,7 +92,7 @@ export class ImageCacheTracker {
   }
 
   /** Touch access time without changing other fields. */
-  async touch(imageId: string): Promise<void> {
+  public async touch(imageId: string): Promise<void> {
     const existing = await this.atomic.get<ImageCacheEntry>(this.#key(imageId));
     if (!existing) return;
     const updated = { ...existing.value, lastAccessedAt: Date.now() };
@@ -100,13 +100,13 @@ export class ImageCacheTracker {
   }
 
   /** Get the current total cached size in bytes. */
-  async totalSize(): Promise<number> {
+  public async totalSize(): Promise<number> {
     const entry = await this.atomic.get<number>(CACHE_TOTAL_SIZE_KEY);
     return entry?.value ?? 0;
   }
 
   /** List all cache entries sorted by lastAccessedAt (oldest first). */
-  async listByLastAccess(): Promise<ImageCacheEntry[]> {
+  public async listByLastAccess(): Promise<ImageCacheEntry[]> {
     const idx = await this.atomic.get<string[]>(CACHE_INDEX_KEY);
     if (!idx) return [];
     const entries = await Promise.all(
@@ -123,7 +123,7 @@ export class ImageCacheTracker {
    * Returns the list of evicted image IDs and total bytes reclaimed.
    * Does NOT perform the actual image removal — caller must call provider.remove().
    */
-  async computeEvictions(): Promise<EvictionResult> {
+  public async computeEvictions(): Promise<EvictionResult> {
     const now = Date.now();
     const staleThreshold = now - this.config.maxAgeMs;
     const entries = await this.listByLastAccess();
@@ -148,25 +148,25 @@ export class ImageCacheTracker {
   }
 
   /** Get a single cache entry. */
-  async get(imageId: string): Promise<ImageCacheEntry | null> {
+  public async get(imageId: string): Promise<ImageCacheEntry | null> {
     const entry = await this.atomic.get<ImageCacheEntry>(this.#key(imageId));
     return entry?.value ?? null;
   }
 
   // ─── Index helpers ───
 
-  async #addToIndex(id: string): Promise<void> {
+  public async #addToIndex(id: string): Promise<void> {
     const idx = await this.atomic.get<string[]>(CACHE_INDEX_KEY);
     await this.atomic.set(CACHE_INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
   }
 
-  async #removeFromIndex(id: string): Promise<void> {
+  public async #removeFromIndex(id: string): Promise<void> {
     const idx = await this.atomic.get<string[]>(CACHE_INDEX_KEY);
     if (!idx) return;
     await this.atomic.set(CACHE_INDEX_KEY, idx.value.filter(i => i !== id), idx.version);
   }
 
-  async #addToTotalSize(delta: number): Promise<void> {
+  public async #addToTotalSize(delta: number): Promise<void> {
     for (let attempt = 0; attempt < 3; attempt++) {
       const entry = await this.atomic.get<number>(CACHE_TOTAL_SIZE_KEY);
       const cur = entry?.value ?? 0;

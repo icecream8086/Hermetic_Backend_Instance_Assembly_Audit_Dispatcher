@@ -123,13 +123,13 @@ const INDEX_KEY = 'cred:ids';
 // ─── Service ───
 
 export class CredentialService {
-  constructor(
+  public constructor(
     private readonly atomic: IAtomicStore,
     private readonly encryption?: SecretEncryption,
   ) {}
 
   /** Encrypt sensitive fields before storage. */
-  async #encryptFields(cred: ManagedCredential): Promise<ManagedCredential> {
+  public async #encryptFields(cred: ManagedCredential): Promise<ManagedCredential> {
     const enc = this.encryption;
     if (!enc) return cred;
     return {
@@ -147,7 +147,7 @@ export class CredentialService {
   }
 
   /** Decrypt sensitive fields after read.  Plaintext fields pass through. */
-  async #decryptFields(cred: ManagedCredential): Promise<ManagedCredential> {
+  public async #decryptFields(cred: ManagedCredential): Promise<ManagedCredential> {
     const enc = this.encryption;
     if (!enc) return cred;
     return {
@@ -164,7 +164,7 @@ export class CredentialService {
     };
   }
 
-  async create(input: CreateCredentialInput): Promise<ManagedCredential> {
+  public async create(input: CreateCredentialInput): Promise<ManagedCredential> {
     const id = generateCredentialId();
     const now = Date.now();
 
@@ -191,14 +191,14 @@ export class CredentialService {
     return cred; // return plaintext
   }
 
-  async get(id: CredentialId): Promise<ManagedCredential | null> {
+  public async get(id: CredentialId): Promise<ManagedCredential | null> {
     const entry = await this.atomic.get<ManagedCredential>(PREFIX + id);
     if (!entry) return null;
     return this.#decryptFields(entry.value);
   }
 
   /** 按 name 查找凭证（provider resolver 用）。可传 instanceId 精确匹配。 */
-  async findByName(name: string, instanceId?: string): Promise<ManagedCredential | null> {
+  public async findByName(name: string, instanceId?: string): Promise<ManagedCredential | null> {
     const all = await this.#listAll();
     const decrypted = await Promise.all(all.map(c => this.#decryptFields(c)));
     // 先找 name + instanceId 精确匹配
@@ -210,14 +210,14 @@ export class CredentialService {
     return decrypted.find(c => c.name === name) ?? null;
   }
 
-  async list(filter?: { platform?: string | undefined }): Promise<ManagedCredential[]> {
+  public async list(filter?: { platform?: string | undefined }): Promise<ManagedCredential[]> {
     const all = await this.#listAll();
     const decrypted = await Promise.all(all.map(c => this.#decryptFields(c)));
     if (!filter?.platform) return decrypted;
     return decrypted.filter(c => c.platform === filter.platform);
   }
 
-  async update(id: CredentialId, input: UpdateCredentialInput): Promise<ManagedCredential> {
+  public async update(id: CredentialId, input: UpdateCredentialInput): Promise<ManagedCredential> {
     const entry = await this.atomic.get<ManagedCredential>(PREFIX + id);
     if (!entry) throw new AppError(404, 'CREDENTIAL_NOT_FOUND', 'Credential not found');
 
@@ -245,7 +245,7 @@ export class CredentialService {
     return updated; // plaintext
   }
 
-  async delete(id: CredentialId): Promise<void> {
+  public async delete(id: CredentialId): Promise<void> {
     const entry = await this.atomic.get<ManagedCredential>(PREFIX + id);
     if (!entry) throw new AppError(404, 'CREDENTIAL_NOT_FOUND', 'Credential not found');
     await this.atomic.set(PREFIX + id, null, entry.version);
@@ -254,19 +254,19 @@ export class CredentialService {
 
   // ─── Internal ───
 
-  async #listAll(): Promise<ManagedCredential[]> {
+  public async #listAll(): Promise<ManagedCredential[]> {
     const idx = await this.atomic.get<string[]>(INDEX_KEY);
     if (!idx) return [];
     const entries = await Promise.all(idx.value.map(id => this.atomic.get<ManagedCredential>(PREFIX + id)));
     return entries.filter(e => e).map(e => e!.value);
   }
 
-  async #addToIndex(id: CredentialId): Promise<void> {
+  public async #addToIndex(id: CredentialId): Promise<void> {
     const idx = await this.atomic.get<string[]>(INDEX_KEY);
     await this.atomic.set(INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
   }
 
-  async #removeFromIndex(id: CredentialId): Promise<void> {
+  public async #removeFromIndex(id: CredentialId): Promise<void> {
     const idx = await this.atomic.get<string[]>(INDEX_KEY);
     if (!idx) return;
     await this.atomic.set(INDEX_KEY, idx.value.filter((i: string) => i !== id), idx.version);

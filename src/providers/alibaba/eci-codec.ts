@@ -713,7 +713,7 @@ function toContainerCreateConfig(c: ContainerSpec, priority?: number): Container
     stdin: c.stdin ?? undefined,
     networkMode: c.networkMode ?? undefined,
     providerOverrides: c.providerOverrides ?? undefined,
-    resources: c.resources as ContainerCreateConfig['resources'],
+    resources: c.resources !== undefined ? { limits: c.resources.limits } : undefined,
   };
 }
 
@@ -830,7 +830,7 @@ export function buildPodCreateParams(spec: PodSpec, region: string): Record<stri
   // ── Extension fields (providerOverrides) ──
   if (spec.providerOverrides) {
     const raw = spec.providerOverrides;
-    const flat = z.record(z.string(), z.unknown()).optional().parse((raw as Record<string, unknown>).alibaba) ?? raw;
+    const flat = z.record(z.string(), z.unknown()).optional().parse(raw.alibaba) ?? raw;
     const ext = applyExtensionOverrides('alibaba', flat);
     for (const [k, v] of Object.entries(ext)) {
       p[k] = v;

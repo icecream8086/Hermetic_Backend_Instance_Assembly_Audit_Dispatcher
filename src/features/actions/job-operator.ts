@@ -21,7 +21,7 @@ import type { PodSpec } from '../../core/pod/types.ts';
 export class JobOperator implements ITaskExecutor {
   readonly key = 'sandbox';
 
-  constructor(
+  public constructor(
     private readonly deps: {
       stores: { blob: IBlobStore };
       providers: Pick<IProviderRegistry, 'resolveContainer' | 'dns'>;
@@ -32,7 +32,7 @@ export class JobOperator implements ITaskExecutor {
     },
   ) {}
 
-  async execute(_task: Task, ti: TaskInstance): Promise<TaskExecutionResult> {
+  public async execute(_task: Task, ti: TaskInstance): Promise<TaskExecutionResult> {
     const config = _task.config as {
       jobName: string;
       needs: string[];

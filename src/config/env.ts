@@ -1,24 +1,26 @@
+import { z } from 'zod';
 import type { Credential } from './types.ts';
+
+const { parse: parseJson } = JSON;
+
+const rawAccountSchema = z.array(z.object({
+  name: z.string().optional(),
+  ak: z.string().optional(),
+  sk: z.string().optional(),
+  accessKeyId: z.string().optional(),
+  accessKeySecret: z.string().optional(),
+  secretAccessKey: z.string().optional(),
+  region: z.string().optional(),
+  endpoint: z.string().optional(),
+  bucket: z.string().optional(),
+  extra: z.record(z.string(), z.unknown()).optional(),
+  registryCredentials: z.record(z.string(), z.unknown()).optional(),
+}));
 import { AuditTier } from '../core/audit/types.ts';
 import { createRegionId } from '../core/region/types.ts';
 import { AppConfigSchema } from './schema.ts';
 
 export type { AppConfig } from './types.ts';
-
-/** Parsed shape of an account entry from ALIBABA_ACCOUNTS / S3_ACCOUNTS JSON env var. */
-interface RawAccount {
-  name?: string;
-  ak?: string;
-  sk?: string;
-  accessKeyId?: string;
-  accessKeySecret?: string;
-  secretAccessKey?: string;
-  region?: string;
-  endpoint?: string;
-  bucket?: string;
-  extra?: Record<string, unknown>;
-  registryCredentials?: Record<string, unknown>;
-}
 
 /**
  * Load configuration from environment variables with strict validation.
@@ -65,8 +67,7 @@ export function loadConfig(overrides?: Record<string, unknown>): ReturnType<type
     const json = process.env.ALIBABA_ACCOUNTS;
     if (json) {
       try {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-        const parsed: RawAccount[] = JSON.parse(json);
+        const parsed = rawAccountSchema.parse(parseJson(json));
         return parsed.map(a => ({
           name: a.name ?? 'default',
           accessKeyId: a.ak ?? a.accessKeyId ?? '',
@@ -106,8 +107,7 @@ export function loadConfig(overrides?: Record<string, unknown>): ReturnType<type
     const json = process.env.S3_ACCOUNTS;
     if (json) {
       try {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-        const parsed: RawAccount[] = JSON.parse(json);
+        const parsed = rawAccountSchema.parse(parseJson(json));
         return parsed.map(a => ({
           name: a.name ?? 'default',
           accessKeyId: a.ak ?? a.accessKeyId ?? '',
@@ -184,14 +184,18 @@ export function loadConfig(overrides?: Record<string, unknown>): ReturnType<type
   };
 
   // ── Validate against Zod schema ──
-  const result = AppConfigSchema.safeParse(assembled);
-  if (!result.success) {
-    const issues = result.error.issues
-      .map(i => `  - ${i.path.join('.') || '(root)'}: ${i.message}`)
-      .join('\n');
-    console.error(`[config] Configuration validation failed:\n${issues}`);
-    throw new Error('Configuration validation failed — check the errors above.');
+  try {
+    return AppConfigSchema.parse(assembled);
+  } catch (e) {
+    if (e instanceof z.ZodError) {
+      const issues = e.issues
+        .map(i => `  - ${i.path.join('.') || '(root)'}: ${i.message}`)
+        .join('\n');
+      console.error(`[config] Configuration validation failed:\n${issues}`);
+      const wrapped = new Error('Configuration validation failed — check the errors above.');
+      wrapped.cause = e;
+      throw wrapped;
+    }
+    throw e;
   }
-
-  return result.data;
 }

@@ -23,7 +23,7 @@ export class SecretEncryption {
 
   readonly #keyPromise: Promise<CryptoKey>;
 
-  constructor(masterKeyBase64: string) {
+  public constructor(masterKeyBase64: string) {
     const raw = Uint8Array.from(atob(masterKeyBase64), c => c.charCodeAt(0));
     if (raw.byteLength !== 32) {
       throw new AppError(500, 'INVALID_MASTER_KEY', 'SECRET_MASTER_KEY must be 32 bytes encoded as base64');
@@ -31,7 +31,7 @@ export class SecretEncryption {
     this.#keyPromise = crypto.subtle.importKey('raw', raw, { name: ALGO }, false, ['encrypt', 'decrypt']);
   }
 
-  async encrypt(plaintext: string): Promise<string> {
+  public async encrypt(plaintext: string): Promise<string> {
     const key = await this.#keyPromise;
     const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
     const encoded = new TextEncoder().encode(plaintext);
@@ -42,7 +42,7 @@ export class SecretEncryption {
     return SecretEncryption.ENC_PREFIX + btoa(String.fromCharCode(...combined));
   }
 
-  async decrypt(encrypted: string): Promise<string> {
+  public async decrypt(encrypted: string): Promise<string> {
     if (!encrypted.startsWith(SecretEncryption.ENC_PREFIX)) {
       return encrypted; // not encrypted — backward compat with stored plaintext
     }

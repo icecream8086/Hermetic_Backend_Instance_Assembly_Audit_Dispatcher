@@ -6,7 +6,7 @@ import type {
 import type { MetricSnapshot } from '../../core/provider/types.ts';
 
 export class StubMetricsProvider implements IMetricsProvider {
-  async fetchMetrics(input: FetchMetricsInput): Promise<FetchMetricsResult> {
+  public async fetchMetrics(input: FetchMetricsInput): Promise<FetchMetricsResult> {
     const now = Date.now();
     const snapshots: MetricSnapshot[] = [];
 

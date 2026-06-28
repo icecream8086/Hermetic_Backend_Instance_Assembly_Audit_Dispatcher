@@ -19,7 +19,7 @@ export class AlibabaEciContainerGroupProvider implements IContainerGroupProvider
   private readonly endpoint: string;
   private readonly region: string;
 
-  constructor(accessKeyId: string, accessKeySecret: string, endpoint?: string) {
+  public constructor(accessKeyId: string, accessKeySecret: string, endpoint?: string) {
     this.accessKeyId = accessKeyId;
     this.accessKeySecret = accessKeySecret;
     this.endpoint = endpoint ?? 'eci.cn-hangzhou.aliyuncs.com';
@@ -27,7 +27,7 @@ export class AlibabaEciContainerGroupProvider implements IContainerGroupProvider
     this.region = m?.[1] ?? 'cn-hangzhou';
   }
 
-  async createPod(spec: PodSpec): Promise<{ providerId: string }> {
+  public async createPod(spec: PodSpec): Promise<{ providerId: string }> {
     const codec = new AlibabaPodCodec(this.region);
     const params = codec.encode(spec);
     const resp = await rpcCall(
@@ -39,16 +39,16 @@ export class AlibabaEciContainerGroupProvider implements IContainerGroupProvider
   }
 
   /** @deprecated Use createPod(PodSpec) instead. */
-  async createGroup(input: CreateContainerGroupInput): Promise<{ providerId: string }> {
+  public async createGroup(input: CreateContainerGroupInput): Promise<{ providerId: string }> {
     const { AlibabaEciContainerProvider: Inner } = await import('./eci-container.ts');
     return new Inner(this.accessKeyId, this.accessKeySecret, this.endpoint).create(input);
   }
 
-  async stopGroup(providerId: string): Promise<void> {
+  public async stopGroup(providerId: string): Promise<void> {
     return this.deleteGroup(providerId);
   }
 
-  async deleteGroup(providerId: string): Promise<void> {
+  public async deleteGroup(providerId: string): Promise<void> {
     const regions = ['cn-hangzhou', 'cn-shanghai', 'cn-beijing', 'cn-shenzhen'];
     for (const region of regions) {
       try {
@@ -59,12 +59,12 @@ export class AlibabaEciContainerGroupProvider implements IContainerGroupProvider
     }
   }
 
-  async getGroupStatus(providerId: string): Promise<ContainerGroupRuntime | null> {
+  public async getGroupStatus(providerId: string): Promise<ContainerGroupRuntime | null> {
     const { AlibabaEciContainerProvider: Inner } = await import('./eci-container.ts');
     return new Inner(this.accessKeyId, this.accessKeySecret, this.endpoint).getStatus(providerId);
   }
 
-  async describeGroups(input: DescribeContainerGroupsInput): Promise<DescribeContainerGroupsResult> {
+  public async describeGroups(input: DescribeContainerGroupsInput): Promise<DescribeContainerGroupsResult> {
     const { AlibabaEciContainerProvider: Inner } = await import('./eci-container.ts');
     return new Inner(this.accessKeyId, this.accessKeySecret, this.endpoint).describe(input);
   }

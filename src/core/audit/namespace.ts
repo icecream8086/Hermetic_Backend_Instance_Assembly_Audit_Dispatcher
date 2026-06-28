@@ -31,12 +31,12 @@ export interface LogNamespace {
 
 /** Create a namespaced view over an IAuditReader. */
 export class NamespacedAuditReader implements IAuditReader {
-  constructor(
+  public constructor(
     private readonly reader: IAuditReader,
     private readonly ns: LogNamespace,
   ) {}
 
-  async query(params?: LogQuery): Promise<{ entries: StoredAuditEntry[]; nextCursor?: string; total?: number }> {
+  public async query(params?: LogQuery): Promise<{ entries: StoredAuditEntry[]; nextCursor?: string; total?: number }> {
     const merged: LogQuery = {
       ...params,
       ...(this.ns.facility ? { facility: this.ns.facility } : {}),
@@ -65,7 +65,7 @@ export class NamespacedAuditReader implements IAuditReader {
     return { entries, ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}), total: entries.length };
   }
 
-  async getById(id: any): Promise<StoredAuditEntry | null> {
+  public async getById(id: any): Promise<StoredAuditEntry | null> {
     return this.reader.getById(id);
   }
 }

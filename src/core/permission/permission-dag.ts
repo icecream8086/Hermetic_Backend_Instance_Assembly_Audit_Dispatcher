@@ -20,7 +20,7 @@ import type { PolicyId, PolicyNode, PermissionCheck, EvaluationResult } from './
  * ```
  */
 export class PermissionDag extends Dag<PolicyId, PolicyNode> {
-  constructor() {
+  public constructor() {
     super(node => node.id);
   }
 

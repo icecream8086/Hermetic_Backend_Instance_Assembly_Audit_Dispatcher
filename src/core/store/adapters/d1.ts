@@ -3,9 +3,9 @@
 import type { IQueryStore, QueryParams } from '../interfaces.ts';
 
 export class D1QueryStore implements IQueryStore {
-  constructor(private readonly db: D1Database) {}
+  public constructor(private readonly db: D1Database) {}
 
-  async execute<T = unknown>(sql: string, params?: QueryParams): Promise<T[]> {
+  public async execute<T = unknown>(sql: string, params?: QueryParams): Promise<T[]> {
     const stmt = this.db.prepare(sql);
 
     let bound: D1PreparedStatement;

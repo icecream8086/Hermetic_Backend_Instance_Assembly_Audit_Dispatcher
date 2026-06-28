@@ -24,12 +24,12 @@ interface RawSearchItem {
 export class PodmanImageProvider implements IImageProvider {
   readonly #apiBase: string;
 
-  constructor(endpoint?: string) {
+  public constructor(endpoint?: string) {
     const ep = endpoint ?? ENDPOINT;
     this.#apiBase = `${ep}/v1.24`;
   }
 
-  async pull(image: string, _clusterId?: string): Promise<ImageInfo> {
+  public async pull(image: string, _clusterId?: string): Promise<ImageInfo> {
     // sha256 digest — pull by digest, not name:tag
     let url: string;
     if (image.startsWith('sha256:')) {
@@ -44,7 +44,7 @@ export class PodmanImageProvider implements IImageProvider {
     return this.inspect(image).then(r => r!);
   }
 
-  async list(options?: ListImagesOptions): Promise<readonly ImageInfo[]> {
+  public async list(options?: ListImagesOptions): Promise<readonly ImageInfo[]> {
     let url = `${this.#apiBase}/images/json`;
     if (options?.limit !== undefined || options?.offset !== undefined) {
       const params = new URLSearchParams();
@@ -62,7 +62,7 @@ export class PodmanImageProvider implements IImageProvider {
     }));
   }
 
-  async inspect(id: string): Promise<ImageInfo | null> {
+  public async inspect(id: string): Promise<ImageInfo | null> {
     const resp = await this.#fetch(`${this.#apiBase}/images/${encodeURIComponent(id)}/json`);
     if (!resp) return null;
     if (resp.status === 404) return null;
@@ -77,21 +77,21 @@ export class PodmanImageProvider implements IImageProvider {
     };
   }
 
-  async remove(id: string): Promise<void> {
+  public async remove(id: string): Promise<void> {
     const resp = await this.#fetch(`${this.#apiBase}/images/${encodeURIComponent(id)}`, { method: 'DELETE' });
     if (!resp) return;
     if (resp.status === 404) return;
     if (!resp.ok) throw new Error(`Podman remove failed: ${resp.status}`);
   }
 
-  async push(imageOrId: string): Promise<ImageInfo> {
+  public async push(imageOrId: string): Promise<ImageInfo> {
     const resp = await this.#fetch(`${this.#apiBase}/images/${encodeURIComponent(imageOrId)}/push`, { method: 'POST' });
     if (!resp) throw new Error('Podman daemon unreachable');
     if (!resp.ok) throw new Error(`Podman push failed (${resp.status}): ${await resp.text().catch(() => '')}`);
     return this.inspect(imageOrId).then(r => r!);
   }
 
-  async search(term: string): Promise<readonly { name: string; description?: string | undefined; isOfficial?: boolean | undefined }[]> {
+  public async search(term: string): Promise<readonly { name: string; description?: string | undefined; isOfficial?: boolean | undefined }[]> {
     const resp = await this.#fetch(`${this.#apiBase}/images/search?term=${encodeURIComponent(term)}`);
     if (!resp) return [];
     if (!resp.ok) return [];
@@ -99,14 +99,14 @@ export class PodmanImageProvider implements IImageProvider {
     return list.map(i => ({ name: i.Name, ...(i.Description ? { description: i.Description } : {}), ...(i.IsOfficial !== undefined ? { isOfficial: i.IsOfficial } : {}) }));
   }
 
-  async tag(id: string, tag: string): Promise<void> {
+  public async tag(id: string, tag: string): Promise<void> {
     const [repo, t] = tag.includes(':') ? tag.split(':') : [tag, 'latest'];
     const resp = await this.#fetch(`${this.#apiBase}/images/${encodeURIComponent(id)}/tag?repo=${encodeURIComponent(repo!)}&tag=${encodeURIComponent(t!)}`, { method: 'POST' });
     if (!resp) throw new Error('Podman daemon unreachable');
     if (!resp.ok) throw new Error(`Podman tag failed (${resp.status})`);
   }
 
-  async history(id: string): Promise<readonly { id: string; created?: number | undefined; createdBy?: string | undefined; size?: number | undefined }[]> {
+  public async history(id: string): Promise<readonly { id: string; created?: number | undefined; createdBy?: string | undefined; size?: number | undefined }[]> {
     const resp = await this.#fetch(`${this.#apiBase}/images/${encodeURIComponent(id)}/history`);
     if (!resp) return [];
     if (!resp.ok) return [];
@@ -114,7 +114,7 @@ export class PodmanImageProvider implements IImageProvider {
     return list.map(h => ({ id: h.Id, ...(h.Created !== undefined ? { created: h.Created } : {}), ...(h.CreatedBy ? { createdBy: h.CreatedBy } : {}), ...(h.Size !== undefined ? { size: h.Size } : {}) }));
   }
 
-  async prune(): Promise<{ reclaimed: number }> {
+  public async prune(): Promise<{ reclaimed: number }> {
     const resp = await this.#fetch(`${this.#apiBase}/images/prune`, { method: 'POST' });
     if (!resp) return { reclaimed: 0 };
     if (!resp.ok) return { reclaimed: 0 };
@@ -122,7 +122,7 @@ export class PodmanImageProvider implements IImageProvider {
     return { reclaimed: data.reclaimed ?? 0 };
   }
 
-  async build(_context: unknown, options?: { dockerfile?: string; tag?: string }): Promise<ImageInfo> {
+  public async build(_context: unknown, options?: { dockerfile?: string; tag?: string }): Promise<ImageInfo> {
     const params = new URLSearchParams();
     if (options?.dockerfile) params.set('dockerfile', options.dockerfile);
     if (options?.tag) params.set('t', options.tag);
@@ -140,7 +140,7 @@ export class PodmanImageProvider implements IImageProvider {
   }
 
   /** Fetch with connection error protection. Returns null when Podman is down. */
-  async #fetch(url: string, init?: RequestInit): Promise<Response | null> {
+  public async #fetch(url: string, init?: RequestInit): Promise<Response | null> {
     try {
       return await fetch(url, init);
     } catch {

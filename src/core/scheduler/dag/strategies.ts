@@ -44,7 +44,7 @@ export class CriticalPathStrategy implements ISchedulingStrategy {
    * @param allTasks  — all tasks in the workflow (needed to compute ranks).
    *                    Tasks with estimatedDuration = 0 get default 1ms.
    */
-  constructor(allTasks: readonly SchedulableTask[]) {
+  public constructor(allTasks: readonly SchedulableTask[]) {
     this.#ranks = computeUpwardRanks(allTasks);
   }
 
@@ -65,7 +65,7 @@ export class HeftTaskPriorityStrategy implements ISchedulingStrategy {
   readonly name = 'HEFT-Priority';
   readonly #ranks: Map<string, number>;
 
-  constructor(allTasks: readonly SchedulableTask[]) {
+  public constructor(allTasks: readonly SchedulableTask[]) {
     this.#ranks = computeUpwardRanks(allTasks);
   }
 

@@ -8,20 +8,20 @@ import type { LogId } from '../../core/brand.ts';
 const LINE_REGEX = /^\[(.+?)\]\s+(\w+):\s+\[(\w[\w-]*)\]\s+(.+)$/;
 
 export class CloudflareLogReader implements IAuditReader {
-  constructor(
+  public constructor(
     private readonly blob: IBlobStore,
     private readonly prefix = 'logs',
   ) {}
 
-  async query(params?: LogQuery): Promise<{ entries: StoredAuditEntry[]; nextCursor?: string; total?: number }> {
+  public async query(params?: LogQuery): Promise<{ entries: StoredAuditEntry[]; nextCursor?: string; total?: number }> {
     return this.queryAsync(params ?? { facility: 'logs' });
   }
 
-  async getById(_id: LogId): Promise<StoredAuditEntry | null> {
+  public async getById(_id: LogId): Promise<StoredAuditEntry | null> {
     return null; // Logpush logs are line-based, not id-indexed
   }
 
-  async queryAsync(params: LogQuery): Promise<{ entries: StoredAuditEntry[]; nextCursor?: string; total?: number }> {
+  public async queryAsync(params: LogQuery): Promise<{ entries: StoredAuditEntry[]; nextCursor?: string; total?: number }> {
     const since = params.startTs ?? 0;
     const until = params.endTs ?? Date.now();
     const facility = params.facility;

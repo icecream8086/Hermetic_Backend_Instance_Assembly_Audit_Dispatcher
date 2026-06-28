@@ -31,7 +31,7 @@ export class HashTable<K, V> {
   protected readonly _initialCapacity: number;
   protected readonly _loadFactor: number;
 
-  constructor(options?: HashTableOptions) {
+  public constructor(options?: HashTableOptions) {
     this._initialCapacity = options?.initialCapacity ?? DEFAULT_CAPACITY;
     this._loadFactor = options?.loadFactor ?? DEFAULT_LOAD_FACTOR;
     this.buckets = Array.from({ length: this._initialCapacity }, () => []);

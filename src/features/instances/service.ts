@@ -56,7 +56,7 @@ export interface IRunnerService {
 }
 
 export class RunnerService implements IRunnerService {
-  constructor(
+  public constructor(
     private readonly atomic: IAtomicStore,
     private readonly logger: ILogWriter,
     private readonly audit?: IAuditWriter,
@@ -64,7 +64,7 @@ export class RunnerService implements IRunnerService {
 
   // ─── Runner CRUD ───
 
-  async register(input: CreateRunnerInput): Promise<{ runner: RunnerInstance; token: RegistrationToken }> {
+  public async register(input: CreateRunnerInput): Promise<{ runner: RunnerInstance; token: RegistrationToken }> {
     const id = generateRunnerId();
     const now = Date.now();
     const runner: RunnerInstance = {
@@ -100,12 +100,12 @@ export class RunnerService implements IRunnerService {
     return { runner, token };
   }
 
-  async get(id: RunnerId): Promise<RunnerInstance | null> {
+  public async get(id: RunnerId): Promise<RunnerInstance | null> {
     const entry = await this.atomic.get<RunnerInstance>(RUNNER_PREFIX + id);
     return entry?.value ?? null;
   }
 
-  async list(status?: string): Promise<RunnerInstance[]> {
+  public async list(status?: string): Promise<RunnerInstance[]> {
     const idx = await this.atomic.get<string[]>(RUNNER_IDS_KEY);
     if (!idx) return [];
     const entries = await Promise.all(
@@ -116,7 +116,7 @@ export class RunnerService implements IRunnerService {
     return runners;
   }
 
-  async update(id: RunnerId, input: UpdateRunnerInput, _actorId?: string): Promise<RunnerInstance> {
+  public async update(id: RunnerId, input: UpdateRunnerInput, _actorId?: string): Promise<RunnerInstance> {
     const entry = await this.atomic.get<RunnerInstance>(RUNNER_PREFIX + id);
     if (!entry) throw new AppError(404, 'RUNNER_NOT_FOUND', 'Runner not found');
 
@@ -131,7 +131,7 @@ export class RunnerService implements IRunnerService {
     return updated;
   }
 
-  async delete(id: RunnerId, _actorId?: string): Promise<void> {
+  public async delete(id: RunnerId, _actorId?: string): Promise<void> {
     const entry = await this.atomic.get<RunnerInstance>(RUNNER_PREFIX + id);
     if (!entry) throw new AppError(404, 'RUNNER_NOT_FOUND', 'Runner not found');
     await this.atomic.set(RUNNER_PREFIX + id, null, entry.version);
@@ -146,7 +146,7 @@ export class RunnerService implements IRunnerService {
 
   // ─── Heartbeat ───
 
-  async heartbeat(id: RunnerId): Promise<RunnerInstance> {
+  public async heartbeat(id: RunnerId): Promise<RunnerInstance> {
     const entry = await this.atomic.get<RunnerInstance>(RUNNER_PREFIX + id);
     if (!entry) throw new AppError(404, 'RUNNER_NOT_FOUND', 'Runner not found');
 
@@ -159,7 +159,7 @@ export class RunnerService implements IRunnerService {
     return updated;
   }
 
-  async markStaleOffline(): Promise<number> {
+  public async markStaleOffline(): Promise<number> {
     const threshold = Date.now() - HEARTBEAT_TIMEOUT_MS;
     const runners = await this.list('online');
     let count = 0;
@@ -183,7 +183,7 @@ export class RunnerService implements IRunnerService {
 
   // ─── Runner groups ───
 
-  async createGroup(input: CreateRunnerGroupInput, _actorId?: string): Promise<RunnerGroup> {
+  public async createGroup(input: CreateRunnerGroupInput, _actorId?: string): Promise<RunnerGroup> {
     const id = generateRunnerGroupId();
     const now = Date.now();
     const group: RunnerGroup = {
@@ -198,12 +198,12 @@ export class RunnerService implements IRunnerService {
     return group;
   }
 
-  async getGroup(id: RunnerGroupId): Promise<RunnerGroup | null> {
+  public async getGroup(id: RunnerGroupId): Promise<RunnerGroup | null> {
     const entry = await this.atomic.get<RunnerGroup>(RUNNER_GROUP_PREFIX + id);
     return entry?.value ?? null;
   }
 
-  async listGroups(): Promise<RunnerGroup[]> {
+  public async listGroups(): Promise<RunnerGroup[]> {
     const idx = await this.atomic.get<string[]>(RUNNER_GROUP_IDS_KEY);
     if (!idx) return [];
     const entries = await Promise.all(
@@ -212,7 +212,7 @@ export class RunnerService implements IRunnerService {
     return entries.filter(e => e).map(e => e!.value);
   }
 
-  async deleteGroup(id: RunnerGroupId, _actorId?: string): Promise<void> {
+  public async deleteGroup(id: RunnerGroupId, _actorId?: string): Promise<void> {
     const entry = await this.atomic.get<RunnerGroup>(RUNNER_GROUP_PREFIX + id);
     if (!entry) throw new AppError(404, 'RUNNER_GROUP_NOT_FOUND', 'Runner group not found');
     await this.atomic.set(RUNNER_GROUP_PREFIX + id, null, entry.version);
@@ -221,7 +221,7 @@ export class RunnerService implements IRunnerService {
 
   // ─── Registration tokens ───
 
-  async createRegistrationToken(): Promise<RegistrationToken> {
+  public async createRegistrationToken(): Promise<RegistrationToken> {
     const token: RegistrationToken = {
       token: `rtok_${crypto.randomUUID()}`,
       expiresAt: Date.now() + REG_TOKEN_TTL_MS,
@@ -231,7 +231,7 @@ export class RunnerService implements IRunnerService {
     return token;
   }
 
-  async validateRegistrationToken(tok: string): Promise<boolean> {
+  public async validateRegistrationToken(tok: string): Promise<boolean> {
     const entry = await this.atomic.get<RegistrationToken>(REG_TOKEN_PREFIX + tok);
     if (!entry) return false;
     if (Date.now() >= entry.value.expiresAt) {
@@ -245,23 +245,23 @@ export class RunnerService implements IRunnerService {
 
   // ─── Index helpers ───
 
-  async #addRunnerToIndex(id: string): Promise<void> {
+  public async #addRunnerToIndex(id: string): Promise<void> {
     const idx = await this.atomic.get<string[]>(RUNNER_IDS_KEY);
     await this.atomic.set(RUNNER_IDS_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
   }
 
-  async #removeRunnerFromIndex(id: string): Promise<void> {
+  public async #removeRunnerFromIndex(id: string): Promise<void> {
     const idx = await this.atomic.get<string[]>(RUNNER_IDS_KEY);
     if (!idx) return;
     await this.atomic.set(RUNNER_IDS_KEY, idx.value.filter(i => i !== id), idx.version);
   }
 
-  async #addGroupToIndex(id: string): Promise<void> {
+  public async #addGroupToIndex(id: string): Promise<void> {
     const idx = await this.atomic.get<string[]>(RUNNER_GROUP_IDS_KEY);
     await this.atomic.set(RUNNER_GROUP_IDS_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
   }
 
-  async #removeGroupFromIndex(id: string): Promise<void> {
+  public async #removeGroupFromIndex(id: string): Promise<void> {
     const idx = await this.atomic.get<string[]>(RUNNER_GROUP_IDS_KEY);
     if (!idx) return;
     await this.atomic.set(RUNNER_GROUP_IDS_KEY, idx.value.filter(i => i !== id), idx.version);

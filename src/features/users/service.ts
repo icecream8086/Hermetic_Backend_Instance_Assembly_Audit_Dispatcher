@@ -215,13 +215,13 @@ export interface IUserService {
 }
 
 export class UserService implements IUserService {
-  constructor(
+  public constructor(
     private readonly atomic: IAtomicStore,
     private readonly logger: ILogWriter,
     private readonly audit?: IAuditWriter,
   ) {}
 
-  async #transactWithRetry<T>(fn: (txn: IStoreTransaction) => Promise<T>, maxRetries = 3): Promise<T> {
+  public async #transactWithRetry<T>(fn: (txn: IStoreTransaction) => Promise<T>, maxRetries = 3): Promise<T> {
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
         return await this.atomic.transact(fn);
@@ -233,7 +233,7 @@ export class UserService implements IUserService {
     throw new AppError(409, 'CONFLICT', 'Transaction failed after retries');
   }
 
-  async register(input: RegisterInput): Promise<{ user: User; token: SessionToken }> {
+  public async register(input: RegisterInput): Promise<{ user: User; token: SessionToken }> {
     const id = generateUserId();
     const uid = await this.#nextUid();
     const passwordHash = await hashPassword(input.password);
@@ -301,7 +301,7 @@ export class UserService implements IUserService {
     return { user, token };
   }
 
-  async login(input: LoginInput, ctx?: LoginContext): Promise<{ user: User; token: SessionToken }> {
+  public async login(input: LoginInput, ctx?: LoginContext): Promise<{ user: User; token: SessionToken }> {
     const email = input.email;
     const ip = ctx?.ip;
 
@@ -374,7 +374,7 @@ export class UserService implements IUserService {
     return { user, token };
   }
 
-  async loginNoPassword(input: NoPasswordLoginInput, ctx?: LoginContext): Promise<{ user: User; token: SessionToken }> {
+  public async loginNoPassword(input: NoPasswordLoginInput, ctx?: LoginContext): Promise<{ user: User; token: SessionToken }> {
     const email = input.email;
     const ip = ctx?.ip;
 
@@ -478,25 +478,25 @@ export class UserService implements IUserService {
     return { user, token };
   }
 
-  async getById(id: UserId): Promise<User | null> {
+  public async getById(id: UserId): Promise<User | null> {
     const entry = await this.atomic.get<User>(USER_PREFIX + id);
     if (!entry) return null;
     return normalizeUser(entry.value);
   }
 
-  async getByUid(uid: Uid): Promise<User | null> {
+  public async getByUid(uid: Uid): Promise<User | null> {
     const idEntry = await this.atomic.get<string>(UID_INDEX_PREFIX + uid);
     if (!idEntry) return null;
     return this.getById(createUserId(idEntry.value));
   }
 
-  async refresh(id: UserId): Promise<User | null> {
+  public async refresh(id: UserId): Promise<User | null> {
     // Evict KV cache → next getById() misses cache and re-fetches from DO
     await this.atomic.invalidateCache?.(USER_PREFIX + id);
     return this.getById(id);
   }
 
-  async update(id: UserId, input: UpdateUserInput, actorId?: string): Promise<User> {
+  public async update(id: UserId, input: UpdateUserInput, actorId?: string): Promise<User> {
     const entry = await this.atomic.get<User>(USER_PREFIX + id);
     if (!entry) throw new AppError(404, 'USER_NOT_FOUND', 'User not found');
     const existing = normalizeUser(entry.value);
@@ -545,7 +545,7 @@ export class UserService implements IUserService {
     return updated;
   }
 
-  async delete(id: UserId, actorId?: string): Promise<void> {
+  public async delete(id: UserId, actorId?: string): Promise<void> {
     const entry = await this.atomic.get<User>(USER_PREFIX + id);
     if (!entry) throw new AppError(404, 'USER_NOT_FOUND', 'User not found');
 
@@ -582,7 +582,7 @@ export class UserService implements IUserService {
   }
 
   /** Increment user count — best-effort, OCC retry ×3. */
-  async #incrCounter(): Promise<void> {
+  public async #incrCounter(): Promise<void> {
     for (let attempt = 0; attempt < 3; attempt++) {
       const entry = await this.atomic.get<number>(USER_COUNT_KEY);
       const ver = await this.atomic.set(USER_COUNT_KEY, (entry?.value ?? 0) + 1, entry?.version ?? null);
@@ -591,7 +591,7 @@ export class UserService implements IUserService {
   }
 
   /** Decrement user count — best-effort, OCC retry ×3. */
-  async #decrCounter(): Promise<void> {
+  public async #decrCounter(): Promise<void> {
     for (let attempt = 0; attempt < 3; attempt++) {
       const entry = await this.atomic.get<number>(USER_COUNT_KEY);
       const cur = entry?.value ?? 0;
@@ -601,7 +601,7 @@ export class UserService implements IUserService {
     }
   }
 
-  async list(): Promise<User[]> {
+  public async list(): Promise<User[]> {
     // Read all shards in parallel, then merge.
     const shardKeys = Array.from(
       { length: USER_IDS_SHARDS },
@@ -615,7 +615,7 @@ export class UserService implements IUserService {
     return users.filter((u): u is NonNullable<typeof u> => u !== null).map(u => normalizeUser(u.value));
   }
 
-  async listPaginated(page = 1, limit = 50): Promise<{ items: User[]; total: number }> {
+  public async listPaginated(page = 1, limit = 50): Promise<{ items: User[]; total: number }> {
     // Read total from counter (1 I/O) — avoids reading all 16 shard indices.
     const countEntry = await this.atomic.get<number>(USER_COUNT_KEY);
     const total = countEntry?.value ?? 0;
@@ -652,7 +652,7 @@ export class UserService implements IUserService {
     return { items, total };
   }
 
-  async clearLoginPolicy(id: UserId, actorId?: string): Promise<User> {
+  public async clearLoginPolicy(id: UserId, actorId?: string): Promise<User> {
     const entry = await this.atomic.get<User>(USER_PREFIX + id);
     if (!entry) throw new AppError(404, 'USER_NOT_FOUND', 'User not found');
 
@@ -674,7 +674,7 @@ export class UserService implements IUserService {
     return updated;
   }
 
-  async clearPublicKey(id: UserId, actorId?: string): Promise<User> {
+  public async clearPublicKey(id: UserId, actorId?: string): Promise<User> {
     const entry = await this.atomic.get<User>(USER_PREFIX + id);
     if (!entry) throw new AppError(404, 'USER_NOT_FOUND', 'User not found');
     const { publicKeyEd25519: _k, ...rest } = entry.value;
@@ -694,7 +694,7 @@ export class UserService implements IUserService {
     return updated;
   }
 
-  async getLoginInfo(email: string): Promise<LoginInfo> {
+  public async getLoginInfo(email: string): Promise<LoginInfo> {
     const entry = await this.atomic.get<User>(EMAIL_INDEX_PREFIX + email);
     if (!entry) return { exists: false, methods: [] };
 
@@ -718,7 +718,7 @@ export class UserService implements IUserService {
     };
   }
 
-  async validateToken(token: SessionToken): Promise<User | null> {
+  public async validateToken(token: SessionToken): Promise<User | null> {
     const entry = await this.atomic.get<Session>(TOKEN_PREFIX + token);
     if (!entry) return null;
     const expiresAt = entry.value.expiresAt ?? entry.value.createdAt + SESSION_TTL_MS;
@@ -763,7 +763,7 @@ export class UserService implements IUserService {
     return token;
   }
 
-  async listSessions(userId: UserId): Promise<readonly SessionToken[]> {
+  public async listSessions(userId: UserId): Promise<readonly SessionToken[]> {
     const entry = await this.atomic.get<string[]>(USER_SESSIONS_PREFIX + userId);
     if (!entry) return [];
     const live: SessionToken[] = [];
@@ -788,7 +788,7 @@ export class UserService implements IUserService {
     return live;
   }
 
-  async revokeSession(token: SessionToken, actorId?: string): Promise<void> {
+  public async revokeSession(token: SessionToken, actorId?: string): Promise<void> {
     // Read session before deleting to find userId for index cleanup
     const entry = await this.atomic.get<Session>(TOKEN_PREFIX + token);
     if (!entry) return;
@@ -816,7 +816,7 @@ export class UserService implements IUserService {
   }
 
   /** Allocate next available UID — RHEL §1 UID auto-increment from 1000. */
-  async #nextUid(): Promise<Uid> {
+  public async #nextUid(): Promise<Uid> {
     for (let attempt = 0; attempt < 3; attempt++) {
       const entry = await this.atomic.get<number>(UID_COUNTER_KEY);
       const next = entry?.value ?? UID_MIN;
@@ -828,7 +828,7 @@ export class UserService implements IUserService {
 
   // ─── Supplementary group management (RHEL §1 supp_groups) ───
 
-  async addSupplementaryGroup(userId: UserId, gid: Gid, actorId?: string): Promise<User> {
+  public async addSupplementaryGroup(userId: UserId, gid: Gid, actorId?: string): Promise<User> {
     const entry = await this.atomic.get<User>(USER_PREFIX + userId);
     if (!entry) throw new AppError(404, 'USER_NOT_FOUND', 'User not found');
     const existing = normalizeUser(entry.value);
@@ -851,7 +851,7 @@ export class UserService implements IUserService {
     return updated;
   }
 
-  async removeSupplementaryGroup(userId: UserId, gid: Gid, actorId?: string): Promise<User> {
+  public async removeSupplementaryGroup(userId: UserId, gid: Gid, actorId?: string): Promise<User> {
     const entry = await this.atomic.get<User>(USER_PREFIX + userId);
     if (!entry) throw new AppError(404, 'USER_NOT_FOUND', 'User not found');
     const existing = normalizeUser(entry.value);
@@ -874,19 +874,19 @@ export class UserService implements IUserService {
     return updated;
   }
 
-  async listSupplementaryGroups(userId: UserId): Promise<Gid[]> {
+  public async listSupplementaryGroups(userId: UserId): Promise<Gid[]> {
     const user = await this.getById(userId);
     if (!user) throw new AppError(404, 'USER_NOT_FOUND', 'User not found');
     return user.supplementaryGids;
   }
 
   /** Auto-join "users" group on registration (Linux-style). */
-  async #joinDefaultGroup(userId: UserId): Promise<void> {
+  public async #joinDefaultGroup(userId: UserId): Promise<void> {
     return this.#joinNamedGroup(userId, 'users');
   }
 
   /** Add a user to a named user group by group name. */
-  async #joinNamedGroup(userId: UserId, groupName: string): Promise<void> {
+  public async #joinNamedGroup(userId: UserId, groupName: string): Promise<void> {
     try {
       const ugEntry = await this.atomic.get<string[]>('usergroup:ids');
       if (!ugEntry) return;

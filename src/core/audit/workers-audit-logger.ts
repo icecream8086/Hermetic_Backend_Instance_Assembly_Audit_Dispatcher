@@ -34,16 +34,16 @@ export class WorkersAuditLogger implements IAuditWriter, IAuditReader, IAuditAdm
   readonly #bootId: string;
   readonly #machineHash: string;
 
-  constructor() {
+  public constructor() {
     this.#bootId = getBootId() ?? '00000000-0000-0000-0000-000000000000';
     this.#machineHash = hashBootIdStr(this.#bootId);
   }
 
-  async write(entry: AuditEntry): Promise<void> {
+  public async write(entry: AuditEntry): Promise<void> {
     this.#output(entry);
   }
 
-  async writeSync(entry: AuditEntry): Promise<LogId> {
+  public async writeSync(entry: AuditEntry): Promise<LogId> {
     this.#output(entry);
     return (entry as any).__id ?? generateLogId();
   }
@@ -95,7 +95,7 @@ export class WorkersAuditLogger implements IAuditWriter, IAuditReader, IAuditAdm
     if (this.#memory.length > MAX_IN_MEMORY) this.#memory.shift();
   }
 
-  async query(params?: LogQuery): Promise<{ entries: StoredAuditEntry[]; nextCursor?: string; total?: number }> {
+  public async query(params?: LogQuery): Promise<{ entries: StoredAuditEntry[]; nextCursor?: string; total?: number }> {
     let f = [...this.#memory].reverse(); // newest first
     if (params?.facility) f = f.filter(e => e.facility === params.facility);
     if (params?.startTs !== undefined) f = f.filter(e => e.timestamp >= params.startTs!);
@@ -120,13 +120,13 @@ export class WorkersAuditLogger implements IAuditWriter, IAuditReader, IAuditAdm
     return { entries: f, total, ...(lastCursor ? { nextCursor: lastCursor } : {}) };
   }
 
-  async getById(id: LogId): Promise<StoredAuditEntry | null> {
+  public async getById(id: LogId): Promise<StoredAuditEntry | null> {
     return this.#memory.find(e => e.id === id) ?? null;
   }
 
-  async forceSetTail(_facility: any, _tailId: any): Promise<void> {}
-  async prune(_beforeTs: number): Promise<number> { return 0; }
-  async pruneByIds(_ids: readonly string[]): Promise<number> { return 0; }
+  public async forceSetTail(_facility: any, _tailId: any): Promise<void> {}
+  public async prune(_beforeTs: number): Promise<number> { return 0; }
+  public async pruneByIds(_ids: readonly string[]): Promise<number> { return 0; }
 }
 
 /** Validate cursor integrity via xor_hash. Returns false if tampered. */

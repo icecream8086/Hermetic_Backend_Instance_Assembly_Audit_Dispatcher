@@ -17,11 +17,11 @@ export class ConsoleLogger implements IAuditLogger {
   readonly auditTier = AuditTier.BEST_EFFORT;
   #entries: AuditEntry[] = [];
 
-  async write(entry: AuditEntry): Promise<void> {
+  public async write(entry: AuditEntry): Promise<void> {
     await this.log(entry);
   }
 
-  async writeSync(entry: AuditEntry): Promise<LogId> {
+  public async writeSync(entry: AuditEntry): Promise<LogId> {
     return this.log(entry);
   }
 
@@ -45,7 +45,7 @@ export class ConsoleLogger implements IAuditLogger {
     return id;
   }
 
-  async query(params?: LogQuery): Promise<{ entries: StoredAuditEntry[]; nextCursor?: string; total?: number }> {
+  public async query(params?: LogQuery): Promise<{ entries: StoredAuditEntry[]; nextCursor?: string; total?: number }> {
     let result: StoredAuditEntry[] = this.#entries as StoredAuditEntry[];
     if (params?.facility) result = result.filter(e => e.facility === params.facility);
     if (params?.startTs !== undefined) result = result.filter(e => e.timestamp >= params.startTs!);
@@ -55,16 +55,16 @@ export class ConsoleLogger implements IAuditLogger {
     return { entries: result, total };
   }
 
-  async getById(id: LogId): Promise<StoredAuditEntry | null> {
+  public async getById(id: LogId): Promise<StoredAuditEntry | null> {
     return (this.#entries as StoredAuditEntry[]).find(e => e.id === id) ?? null;
   }
 
-  async flush(): Promise<void> { /* noop */ }
-  async dispose(): Promise<void> { this.#entries = []; }
+  public async flush(): Promise<void> { /* noop */ }
+  public async dispose(): Promise<void> { this.#entries = []; }
 
-  async forceSetTail(_facility: any, _tailId: any): Promise<void> {}
-  async prune(_beforeTs: number): Promise<number> { return 0; }
-  async pruneByIds(_ids: readonly string[]): Promise<number> { return 0; }
+  public async forceSetTail(_facility: any, _tailId: any): Promise<void> {}
+  public async prune(_beforeTs: number): Promise<number> { return 0; }
+  public async pruneByIds(_ids: readonly string[]): Promise<number> { return 0; }
 
   #print(entry: AuditEntry & { timestamp: number }): void {
     const actorId = entry.actorId ?? (entry.metadata?.actorId as string | undefined);

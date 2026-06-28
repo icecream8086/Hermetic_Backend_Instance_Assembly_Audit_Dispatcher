@@ -40,7 +40,7 @@ export class CircularQueue<T> {
   protected tail = 0;
   protected readonly fixed: boolean;
 
-  constructor(options?: CircularQueueOptions) {
+  public constructor(options?: CircularQueueOptions) {
     const cap = options?.capacity ?? 0;
     this.fixed = cap > 0;
     this._capacity = this.fixed ? cap : 16;

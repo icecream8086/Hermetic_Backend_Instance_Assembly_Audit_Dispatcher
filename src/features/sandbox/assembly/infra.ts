@@ -29,13 +29,13 @@ export class InfraManager implements IInfraManager {
    * @param noop - When true (ECI), infra is implicit and createInfra() is a no-op.
    *               When false (Podman), actually creates a pause container.
    */
-  constructor(containerProvider: IContainerProvider, region?: RegionId, _instanceId?: InstanceId, noop = false) {
+  public constructor(containerProvider: IContainerProvider, region?: RegionId, _instanceId?: InstanceId, noop = false) {
     this.#containerProvider = containerProvider;
     this.#region = region ?? LOCAL_REGION;
     this.#noop = noop;
   }
 
-  async createInfra(podName: string, infraImage?: string): Promise<string> {
+  public async createInfra(podName: string, infraImage?: string): Promise<string> {
     if (this.#noop) {
       return `${podName}-infra-noop`;
     }
@@ -67,7 +67,7 @@ export class InfraManager implements IInfraManager {
     return providerId;
   }
 
-  async removeInfra(infraId: string): Promise<void> {
+  public async removeInfra(infraId: string): Promise<void> {
     if (this.#noop) return;
     await this.#containerProvider.delete({
       region: LOCAL_REGION,
@@ -75,7 +75,7 @@ export class InfraManager implements IInfraManager {
     });
   }
 
-  async isInfraAlive(infraId: string): Promise<boolean> {
+  public async isInfraAlive(infraId: string): Promise<boolean> {
     if (this.#noop) return true; // infra is implicit, always alive
     try {
       const status = await this.#containerProvider.getStatus?.(infraId);

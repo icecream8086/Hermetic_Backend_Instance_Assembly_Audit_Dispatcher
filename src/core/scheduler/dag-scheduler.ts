@@ -61,7 +61,7 @@ export class DagScheduler {
   private tickCount = 0;
   private readonly executorCache = new Map<string, ITaskExecutor>();
 
-  constructor(
+  public constructor(
     private readonly ctx: SchedulerContext,
     private readonly timer: ITimerBackend,
     config: Partial<DagSchedulerConfig> = {},
@@ -109,7 +109,7 @@ export class DagScheduler {
 
   // ─── Main tick ───
 
-  async tick(): Promise<void> {
+  public async tick(): Promise<void> {
     if (!this.running || this.paused) return;
     this.tickCount++;
 

@@ -20,7 +20,7 @@ function parseImageRef(image: string): { name: string; tag: string } {
 }
 
 export class AlibabaEciImageProvider implements IImageProvider {
-  constructor(
+  public constructor(
     private readonly accessKeyId: string,
     private readonly accessKeySecret: string,
     private readonly endpoint = 'eci.cn-hangzhou.aliyuncs.com',
@@ -28,7 +28,7 @@ export class AlibabaEciImageProvider implements IImageProvider {
     private readonly registryCredentials?: { server: string; userName: string; password: string }[],
   ) {}
 
-  async pull(image: string, registryCredentialOrClusterId?: { server: string; userName: string; password: string } | string): Promise<ImageInfo> {
+  public async pull(image: string, registryCredentialOrClusterId?: { server: string; userName: string; password: string } | string): Promise<ImageInfo> {
     const { name } = parseImageRef(image);
     const params: Record<string, string | undefined> = {
       RegionId: this.region,
@@ -61,7 +61,7 @@ export class AlibabaEciImageProvider implements IImageProvider {
     };
   }
 
-  async list(options?: ListImagesOptions): Promise<readonly ImageInfo[]> {
+  public async list(options?: ListImagesOptions): Promise<readonly ImageInfo[]> {
     try {
       const params: Record<string, string | undefined> = {
         RegionId: this.region,
@@ -82,7 +82,7 @@ export class AlibabaEciImageProvider implements IImageProvider {
     }
   }
 
-  async inspect(id: string): Promise<ImageInfo | null> {
+  public async inspect(id: string): Promise<ImageInfo | null> {
     try {
       const resp = await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret, 'DescribeImageCaches', {
         RegionId: this.region,
@@ -102,7 +102,7 @@ export class AlibabaEciImageProvider implements IImageProvider {
     }
   }
 
-  async remove(id: string): Promise<void> {
+  public async remove(id: string): Promise<void> {
     await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret, 'DeleteImageCache', {
       RegionId: this.region,
       ImageCacheId: id,
@@ -111,27 +111,27 @@ export class AlibabaEciImageProvider implements IImageProvider {
 
   // ─── ECI-unsupported operations ───
 
-  async push(_imageOrId: string): Promise<ImageInfo> {
+  public async push(_imageOrId: string): Promise<ImageInfo> {
     throw new AppError(501, 'NOT_IMPLEMENTED', 'push is not supported by Alibaba ECI');
   }
 
-  async search(_term: string): Promise<readonly { name: string; description?: string; isOfficial?: boolean }[]> {
+  public async search(_term: string): Promise<readonly { name: string; description?: string; isOfficial?: boolean }[]> {
     throw new AppError(501, 'NOT_IMPLEMENTED', 'search is not supported by Alibaba ECI');
   }
 
-  async tag(_id: string, _tag: string): Promise<void> {
+  public async tag(_id: string, _tag: string): Promise<void> {
     throw new AppError(501, 'NOT_IMPLEMENTED', 'tag is not supported by Alibaba ECI');
   }
 
-  async history(_id: string): Promise<readonly { id: string; created?: number; createdBy?: string; size?: number }[]> {
+  public async history(_id: string): Promise<readonly { id: string; created?: number; createdBy?: string; size?: number }[]> {
     throw new AppError(501, 'NOT_IMPLEMENTED', 'history is not supported by Alibaba ECI');
   }
 
-  async prune(): Promise<{ reclaimed: number }> {
+  public async prune(): Promise<{ reclaimed: number }> {
     throw new AppError(501, 'NOT_IMPLEMENTED', 'prune is not supported by Alibaba ECI');
   }
 
-  async build(_context: unknown): Promise<ImageInfo> {
+  public async build(_context: unknown): Promise<ImageInfo> {
     throw new AppError(501, 'NOT_IMPLEMENTED', 'build is not supported by Alibaba ECI');
   }
 }

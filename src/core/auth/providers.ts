@@ -4,11 +4,11 @@ import type { IAuthProvider, AuthRequest, SignResult } from './interfaces.ts';
 
 export class NoAuthProvider implements IAuthProvider {
   readonly type = 'none';
-  async sign(_req: AuthRequest): Promise<SignResult> {
+  public async sign(_req: AuthRequest): Promise<SignResult> {
     return { headers: {} };
   }
   isExpired(): boolean { return false; }
-  async refresh(): Promise<void> {}
+  public async refresh(): Promise<void> {}
 }
 
 // ─── Bearer token (Cloudflare, OAuth2) ───
@@ -21,18 +21,18 @@ export class BearerTokenProvider implements IAuthProvider {
   private readonly _clientId: string | undefined;
   private readonly _clientSecret: string | undefined;
 
-  constructor(token: string, opts?: { tokenUrl?: string; clientId?: string; clientSecret?: string }) {
+  public constructor(token: string, opts?: { tokenUrl?: string; clientId?: string; clientSecret?: string }) {
     this.token = token;
     this._tokenUrl = opts?.tokenUrl;
     this._clientId = opts?.clientId;
     this._clientSecret = opts?.clientSecret;
   }
 
-  async sign(req: AuthRequest): Promise<SignResult> {
+  public async sign(req: AuthRequest): Promise<SignResult> {
     return { headers: { ...req.headers, Authorization: `Bearer ${this.token}` } };
   }
 
-  async getToken(): Promise<{ token: string; expiresAt?: number | undefined } | null> {
+  public async getToken(): Promise<{ token: string; expiresAt?: number | undefined } | null> {
     return { token: this.token, expiresAt: this.expiresAt || undefined };
   }
 
@@ -40,7 +40,7 @@ export class BearerTokenProvider implements IAuthProvider {
     return this.expiresAt > 0 && Date.now() >= this.expiresAt;
   }
 
-  async refresh(): Promise<void> {
+  public async refresh(): Promise<void> {
     if (!this._tokenUrl || !this._clientId) return;
     const resp = await fetch(this._tokenUrl, {
       method: 'POST',
@@ -114,7 +114,7 @@ export class AkSkProvider implements IAuthProvider {
     return p;
   }
 
-  constructor(
+  public constructor(
     readonly _accessKeyId: string,
     readonly _accessKeySecret: string,
     /** Region for endpoint resolution (e.g. 'cn-hangzhou'). */
@@ -124,14 +124,14 @@ export class AkSkProvider implements IAuthProvider {
   ) {}
 
   isExpired(): boolean { return false; }
-  async refresh(): Promise<void> {}
+  public async refresh(): Promise<void> {}
 
   /**
    * Sign an Alibaba Cloud RPC request.
    * Embeds the signature into the query string (URL override).
    * For non-Alibaba requests, returns headers as-is.
    */
-  async sign(req: AuthRequest): Promise<SignResult> {
+  public async sign(req: AuthRequest): Promise<SignResult> {
     // Parse existing query params from URL
     const urlObj = new URL(req.url);
     const existingParams: Record<string, string> = {};

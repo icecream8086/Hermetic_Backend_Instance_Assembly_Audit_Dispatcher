@@ -16,7 +16,7 @@ export class AwsS3Provider extends S3ClientBase {
   readonly #credentials: SigV4Credentials;
   #clockOffset = 0;
 
-  constructor(credentials: SigV4Credentials, region: string, endpoint?: string, config?: S3ProviderConfig) {
+  public constructor(credentials: SigV4Credentials, region: string, endpoint?: string, config?: S3ProviderConfig) {
     super(config);
     this.#credentials = credentials;
     this.#region = region;
@@ -54,14 +54,14 @@ export class AwsS3Provider extends S3ClientBase {
     throw new Error(`S3 ${method} failed after ${CLOCK_SKEW_RETRIES} retries`);
   }
 
-  async getPresignedUrl(bucket: string, key: string, expiresInSeconds = 3600): Promise<string> {
+  public async getPresignedUrl(bucket: string, key: string, expiresInSeconds = 3600): Promise<string> {
     const path = `/${this.bucketMapping(bucket)}/${encodeKey(key)}`;
     const hostname = new URL(this.#endpoint).hostname;
     const url = await signPresignedUrl('GET', path, this.#credentials, this.#region, 's3', expiresInSeconds, this.#signingTime(), hostname);
     return url.toString();
   }
 
-  async putPresignedUrl(bucket: string, key: string, expiresInSeconds = 3600): Promise<string> {
+  public async putPresignedUrl(bucket: string, key: string, expiresInSeconds = 3600): Promise<string> {
     const path = `/${this.bucketMapping(bucket)}/${encodeKey(key)}`;
     const hostname = new URL(this.#endpoint).hostname;
     const url = await signPresignedUrl('PUT', path, this.#credentials, this.#region, 's3', expiresInSeconds, this.#signingTime(), hostname);

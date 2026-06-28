@@ -47,9 +47,9 @@ export interface CreateActionInput {
  *   2. Container fallback: if name contains '/', treat as image reference directly
  */
 export class ActionRegistry {
-  constructor(private readonly atomic: IAtomicStore) {}
+  public constructor(private readonly atomic: IAtomicStore) {}
 
-  async register(input: CreateActionInput): Promise<ActionDef> {
+  public async register(input: CreateActionInput): Promise<ActionDef> {
     const id = `act_${crypto.randomUUID()}`;
     const def: ActionDef = {
       id,
@@ -70,12 +70,12 @@ export class ActionRegistry {
     return def;
   }
 
-  async get(id: string): Promise<ActionDef | null> {
+  public async get(id: string): Promise<ActionDef | null> {
     const entry = await this.atomic.get<ActionDef>(PFX + id);
     return entry?.value ?? null;
   }
 
-  async list(): Promise<ActionDef[]> {
+  public async list(): Promise<ActionDef[]> {
     const idx = await this.atomic.get<string[]>(IDX);
     if (!idx) return [];
     const entries = await Promise.all(
@@ -89,7 +89,7 @@ export class ActionRegistry {
    *
    * @returns { image, entrypoint } for container actions, or null if not found.
    */
-  async resolve(uses: string): Promise<{
+  public async resolve(uses: string): Promise<{
     image: string;
     entrypoint?: string[];
     env?: Record<string, string>;

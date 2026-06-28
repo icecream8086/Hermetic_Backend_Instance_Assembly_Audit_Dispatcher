@@ -28,22 +28,22 @@ export interface QuotaUsage {
  * Usage counters are tracked via OCC in the same key.
  */
 export class QuotaService {
-  constructor(
+  public constructor(
     private readonly atomic: IAtomicStore,
     private readonly audit?: IAuditWriter,
   ) {}
 
-  async getQuota(userId: string): Promise<UserQuota> {
+  public async getQuota(userId: string): Promise<UserQuota> {
     const entry = await this.atomic.get<UserQuota>(QUOTA_KEY + userId);
     return entry?.value ?? {};
   }
 
-  async getUsage(userId: string): Promise<QuotaUsage> {
+  public async getUsage(userId: string): Promise<QuotaUsage> {
     const entry = await this.atomic.get<QuotaUsage>(`${QUOTA_KEY}${userId}:usage`);
     return entry?.value ?? { sandboxes: 0, cpu: 0, memory: 0 };
   }
 
-  async setQuota(userId: string, quota: UserQuota): Promise<void> {
+  public async setQuota(userId: string, quota: UserQuota): Promise<void> {
     const entry = await this.atomic.get<any>(QUOTA_KEY + userId);
     await this.atomic.set(QUOTA_KEY + userId, quota, entry?.version ?? null);
     this.audit?.write({
@@ -58,7 +58,7 @@ export class QuotaService {
    * Check if a user has capacity to create a sandbox with the given resources.
    * Throws an error with `status` property if quota would be exceeded.
    */
-  async checkQuota(userId: string, cpu: number, memory: number): Promise<void> {
+  public async checkQuota(userId: string, cpu: number, memory: number): Promise<void> {
     const quota = await this.getQuota(userId);
     if (!quota.maxSandboxes && !quota.maxCpu && !quota.maxMemory) return; // unlimited
 
@@ -84,7 +84,7 @@ export class QuotaService {
   /**
    * Record a sandbox creation (increment counters).
    */
-  async recordCreate(userId: string, cpu: number, memory: number): Promise<void> {
+  public async recordCreate(userId: string, cpu: number, memory: number): Promise<void> {
     const key = `${QUOTA_KEY}${userId}:usage`;
     const entry = await this.atomic.get<QuotaUsage>(key);
     const current = entry?.value ?? { sandboxes: 0, cpu: 0, memory: 0 };
@@ -98,7 +98,7 @@ export class QuotaService {
   /**
    * Record a sandbox deletion (decrement counters).
    */
-  async recordDelete(userId: string, cpu: number, memory: number): Promise<void> {
+  public async recordDelete(userId: string, cpu: number, memory: number): Promise<void> {
     const key = `${QUOTA_KEY}${userId}:usage`;
     const entry = await this.atomic.get<QuotaUsage>(key);
     if (!entry) return;

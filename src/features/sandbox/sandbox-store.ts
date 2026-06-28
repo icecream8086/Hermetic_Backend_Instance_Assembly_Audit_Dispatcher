@@ -11,14 +11,14 @@ const INDEX_KEY = 'sandbox:ids';
 
 /** Pure data access for sandbox entities — no provider logic. */
 export class SandboxStore {
-  constructor(private readonly atomic: IAtomicStore) {}
+  public constructor(private readonly atomic: IAtomicStore) {}
 
-  async getById(id: SandboxId): Promise<Sandbox | null> {
+  public async getById(id: SandboxId): Promise<Sandbox | null> {
     const validated = await getValidated(this.atomic, `${KEY_PREFIX}${id}`, SandboxSchema);
     return validated as unknown as Sandbox | null;
   }
 
-  async list(status?: SandboxStatus, limit = 50, cursor?: string): Promise<{ items: Sandbox[]; nextCursor?: string }> {
+  public async list(status?: SandboxStatus, limit = 50, cursor?: string): Promise<{ items: Sandbox[]; nextCursor?: string }> {
     const idx = await this.atomic.get<string[]>(INDEX_KEY);
     if (!idx) return { items: [] };
 
@@ -42,18 +42,18 @@ export class SandboxStore {
     return { items, ...(nextCursorVal !== undefined ? { nextCursor: nextCursorVal } : {}) };
   }
 
-  async addToIndex(id: string): Promise<void> {
+  public async addToIndex(id: string): Promise<void> {
     const idx = await this.atomic.get<string[]>(INDEX_KEY);
     await this.atomic.set(INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
   }
 
-  async removeFromIndex(id: string): Promise<void> {
+  public async removeFromIndex(id: string): Promise<void> {
     const idx = await this.atomic.get<string[]>(INDEX_KEY);
     if (idx) await this.atomic.set(INDEX_KEY, idx.value.filter((i: string) => i !== id), idx.version);
   }
 
   /** Perform an OCC-guarded status transition. Returns the updated sandbox. */
-  async transition(id: SandboxId, to: SandboxStatus, _reason?: string, _actorId?: string): Promise<Sandbox> {
+  public async transition(id: SandboxId, to: SandboxStatus, _reason?: string, _actorId?: string): Promise<Sandbox> {
     const entry = await this.atomic.get<Sandbox>(`${KEY_PREFIX}${id}`);
     if (!entry) throw new AppError(404, 'SANDBOX_NOT_FOUND', `Sandbox ${id} not found`);
 

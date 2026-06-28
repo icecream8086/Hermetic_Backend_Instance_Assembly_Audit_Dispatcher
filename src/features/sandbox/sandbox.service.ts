@@ -58,7 +58,7 @@ const KEY_PREFIX = 'sandbox:';
 export class SandboxService implements ISandboxService {
   private readonly store: SandboxStore;
 
-  constructor(
+  public constructor(
     private readonly atomic: IAtomicStore,
     private readonly logger: ILogWriter,
     _containerProvider: IContainerProvider, // deprecated — retained for constructor signature compat, unused
@@ -74,7 +74,7 @@ export class SandboxService implements ISandboxService {
     this.store = new SandboxStore(atomic);
   }
 
-  async #enqueueGcRetry(id: string, sandbox: Sandbox): Promise<void> {
+  public async #enqueueGcRetry(id: string, sandbox: Sandbox): Promise<void> {
     if (!this.queueProducer?.sendSandboxGc) return;
     await this.queueProducer.sendSandboxGc({
       sandboxId: id,
@@ -89,7 +89,7 @@ export class SandboxService implements ISandboxService {
   }
 
   /** Resolve the container provider for a specific instance. Never silently falls back when instanceId is set. */
-  async #resolveProvider(instanceId?: string): Promise<IContainerProvider> {
+  public async #resolveProvider(instanceId?: string): Promise<IContainerProvider> {
     if (instanceId) {
       if (!this.providerRegistry?.resolveContainer) {
         throw new ProviderResolutionError(
@@ -114,7 +114,7 @@ export class SandboxService implements ISandboxService {
     );
   }
 
-  async provision(input: CreateSandboxInput, idempotencyKey?: string): Promise<Sandbox> {
+  public async provision(input: CreateSandboxInput, idempotencyKey?: string): Promise<Sandbox> {
     if (idempotencyKey) {
       const existing = await this.atomic.get<Sandbox>(`${KEY_PREFIX}idem:${idempotencyKey}`);
       if (existing) return existing.value;
@@ -315,15 +315,15 @@ export class SandboxService implements ISandboxService {
     return provisioned;
   }
 
-  async getById(id: SandboxId): Promise<Sandbox | null> {
+  public async getById(id: SandboxId): Promise<Sandbox | null> {
     return this.store.getById(id);
   }
 
-  async list(status?: SandboxStatus, limit = 50, cursor?: string): Promise<{ items: Sandbox[]; nextCursor?: string }> {
+  public async list(status?: SandboxStatus, limit = 50, cursor?: string): Promise<{ items: Sandbox[]; nextCursor?: string }> {
     return this.store.list(status, limit, cursor);
   }
 
-  async stop(id: SandboxId): Promise<Sandbox> {
+  public async stop(id: SandboxId): Promise<Sandbox> {
     const sandbox = await this.getById(id);
     if (!sandbox) throw new AppError(404, 'SANDBOX_NOT_FOUND', `Sandbox ${id} not found`);
 
@@ -346,7 +346,7 @@ export class SandboxService implements ISandboxService {
     return this.transition(id, SandboxStatus.Succeeded, 'user requested stop');
   }
 
-  async start(id: SandboxId): Promise<Sandbox> {
+  public async start(id: SandboxId): Promise<Sandbox> {
     const sandbox = await this.getById(id);
     if (!sandbox) throw new AppError(404, 'SANDBOX_NOT_FOUND', `Sandbox ${id} not found`);
 
@@ -373,7 +373,7 @@ export class SandboxService implements ISandboxService {
    * immediate state change to Terminating, but Deleted is only reached after
    * the cloud resource is confirmed gone.
    */
-  async terminate(id: SandboxId, actorId?: string): Promise<void> {
+  public async terminate(id: SandboxId, actorId?: string): Promise<void> {
     const sandbox = await this.getById(id);
     if (!sandbox) throw new AppError(404, 'SANDBOX_NOT_FOUND', `Sandbox ${id} not found`);
 
@@ -454,11 +454,11 @@ export class SandboxService implements ISandboxService {
     });
   }
 
-  async forceTransition(id: SandboxId, to: SandboxStatus, reason: string, actorId?: string): Promise<Sandbox> {
+  public async forceTransition(id: SandboxId, to: SandboxStatus, reason: string, actorId?: string): Promise<Sandbox> {
     return this.transition(id, to, reason, actorId);
   }
 
-  async pollForIp(sandboxId: SandboxId, timeoutMs: number, pollIntervalMs: number): Promise<string | null> {
+  public async pollForIp(sandboxId: SandboxId, timeoutMs: number, pollIntervalMs: number): Promise<string | null> {
     const deadline = Date.now() + timeoutMs;
 
     while (Date.now() < deadline) {
@@ -472,7 +472,7 @@ export class SandboxService implements ISandboxService {
     return null;
   }
 
-  async getHealth(id: SandboxId): Promise<readonly ContainerHealth[]> {
+  public async getHealth(id: SandboxId): Promise<readonly ContainerHealth[]> {
     const sandbox = await this.getById(id);
     if (!sandbox) throw new AppError(404, 'SANDBOX_NOT_FOUND', `Sandbox ${id} not found`);
 
@@ -697,12 +697,12 @@ export class SandboxService implements ISandboxService {
 // ─── Metrics service ───
 
 export class SandboxMetricsService implements ISandboxMetricsService {
-  constructor(
+  public constructor(
     private readonly metricsProvider: IMetricsProvider,
     private readonly defaultRegion: RegionId = createRegionId('unknown'),
   ) {}
 
-  async collect(sandboxId: SandboxId): Promise<readonly MetricSnapshot[]> {
+  public async collect(sandboxId: SandboxId): Promise<readonly MetricSnapshot[]> {
     const result = await this.metricsProvider.fetchMetrics({
       region: this.defaultRegion,
       providerId: String(sandboxId),
@@ -710,7 +710,7 @@ export class SandboxMetricsService implements ISandboxMetricsService {
     return result.snapshots;
   }
 
-  async query(_sandboxId: SandboxId, _range: MetricTimeRange): Promise<readonly MetricSnapshot[]> {
+  public async query(_sandboxId: SandboxId, _range: MetricTimeRange): Promise<readonly MetricSnapshot[]> {
     throw new AppError(501, 'NOT_IMPLEMENTED', 'MetricSnapshot query is not yet implemented');
   }
 }
@@ -718,12 +718,12 @@ export class SandboxMetricsService implements ISandboxMetricsService {
 // ─── Log service ───
 
 export class SandboxLogService implements ISandboxLogService {
-  constructor(
+  public constructor(
     private readonly containerProvider: IContainerProvider,
     private readonly defaultRegion: RegionId = createRegionId('unknown'),
   ) {}
 
-  async getLogs(
+  public async getLogs(
     sandboxId: SandboxId,
     containerName: string,
     options?: LogQueryOptions,

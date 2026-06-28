@@ -11,7 +11,7 @@ import type { EventBus } from './bus.ts';
  * 现有代码完全不感知此桥接的存在——EventBus 的 on() 是标准 pub/sub 接口。
  */
 export class DoBridge {
-  constructor(
+  public constructor(
     bus: EventBus,
     private readonly notifDO: DurableObjectNamespace,
   ) {

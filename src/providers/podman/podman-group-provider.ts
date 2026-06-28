@@ -91,14 +91,14 @@ export class PodmanContainerGroupProvider implements IContainerGroupProvider {
   readonly #dockerApi: string;   // Docker-compatible v1.24 (for per-container inspect)
   readonly #libpodApi: string;   // Libpod v5 (for pod operations)
 
-  constructor(endpoint = 'http://127.0.0.1:8080') {
+  public constructor(endpoint = 'http://127.0.0.1:8080') {
     this.#dockerApi = `${endpoint}/v1.24`;
     this.#libpodApi = `${endpoint}/v5.0.0/libpod`;
   }
 
   // ─── IContainerGroupProvider ───
 
-  async createPod(spec: import('../../core/pod/types.ts').PodSpec): Promise<{ providerId: string }> {
+  public async createPod(spec: import('../../core/pod/types.ts').PodSpec): Promise<{ providerId: string }> {
     // Podman codec not yet implemented — convert PodSpec → CreateContainerGroupInput as bridge
     const input: CreateContainerGroupInput = {
       name: spec.metadata.name,
@@ -129,7 +129,7 @@ export class PodmanContainerGroupProvider implements IContainerGroupProvider {
   }
 
   /** @deprecated Use createPod(PodSpec) instead. */
-  async createGroup(input: CreateContainerGroupInput): Promise<{ providerId: string }> {
+  public async createGroup(input: CreateContainerGroupInput): Promise<{ providerId: string }> {
     const podName = input.name;
     const portMappings = this.#collectPortMappings(input);
 
@@ -210,7 +210,7 @@ export class PodmanContainerGroupProvider implements IContainerGroupProvider {
     return { providerId: pod.Id };
   }
 
-  async stopGroup(providerId: string): Promise<void> {
+  public async stopGroup(providerId: string): Promise<void> {
     // Podman: stop pod but keep metadata — 与 ECI 不同，Podman pod stop 可逆
     const resp = await fetch(`${this.#libpodApi}/pods/${encodeURIComponent(providerId)}/stop`, {
       method: 'POST',
@@ -221,15 +221,15 @@ export class PodmanContainerGroupProvider implements IContainerGroupProvider {
     }
   }
 
-  async deleteGroup(providerId: string): Promise<void> {
+  public async deleteGroup(providerId: string): Promise<void> {
     await this.#forceDeletePod(providerId);
   }
 
-  async getGroupStatus(providerId: string): Promise<ContainerGroupRuntime | null> {
+  public async getGroupStatus(providerId: string): Promise<ContainerGroupRuntime | null> {
     return this.#inspectPod(providerId);
   }
 
-  async describeGroups(input: DescribeContainerGroupsInput): Promise<DescribeContainerGroupsResult> {
+  public async describeGroups(input: DescribeContainerGroupsInput): Promise<DescribeContainerGroupsResult> {
     const pods = await this.#listPods();
     let filtered = pods;
 
@@ -293,7 +293,7 @@ export class PodmanContainerGroupProvider implements IContainerGroupProvider {
     return hc;
   }
 
-  async #inspectPod(idOrName: string): Promise<ContainerGroupRuntime | null> {
+  public async #inspectPod(idOrName: string): Promise<ContainerGroupRuntime | null> {
     const resp = await fetch(`${this.#libpodApi}/pods/${encodeURIComponent(idOrName)}/json`);
     if (resp.status === 404) return null;
     if (!resp.ok) return null;
@@ -301,7 +301,7 @@ export class PodmanContainerGroupProvider implements IContainerGroupProvider {
     return this.#podToRuntime(info);
   }
 
-  async #podToRuntime(
+  public async #podToRuntime(
     pod: PodmanPodInspectResult | PodmanPodListItem,
   ): Promise<ContainerGroupRuntime | null> {
     let detail: PodmanPodInspectResult;
@@ -375,13 +375,13 @@ export class PodmanContainerGroupProvider implements IContainerGroupProvider {
     };
   }
 
-  async #listPods(): Promise<PodmanPodListItem[]> {
+  public async #listPods(): Promise<PodmanPodListItem[]> {
     const resp = await fetch(`${this.#libpodApi}/pods/json`);
     if (!resp.ok) return [];
     return resp.json();
   }
 
-  async #forceDeletePod(idOrName: string): Promise<void> {
+  public async #forceDeletePod(idOrName: string): Promise<void> {
     const resp = await fetch(`${this.#libpodApi}/pods/${encodeURIComponent(idOrName)}?force=true`, {
       method: 'DELETE',
     });

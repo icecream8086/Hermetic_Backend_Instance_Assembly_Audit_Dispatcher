@@ -63,7 +63,7 @@ class LazyProviderRegistry implements IProviderRegistry {
   private _instanceResolver?: InstanceProviderResolver;
   private _resolverPromise: Promise<void> | null = null;
 
-  constructor(
+  public constructor(
     private readonly config: ProviderConfig,
     private readonly s3Config: S3Config | undefined,
     private readonly atomicStore: IAtomicStore | undefined,
@@ -225,7 +225,7 @@ class LazyProviderRegistry implements IProviderRegistry {
     this._instanceResolver = new InstanceProviderResolver(instanceService, credService);
   }
 
-  async resolveContainer(instanceId?: InstanceId): Promise<IContainerProvider> {
+  public async resolveContainer(instanceId?: InstanceId): Promise<IContainerProvider> {
     await this._ensureResolver();
     if (this._instanceResolver) {
       return this._instanceResolver.resolveContainer(instanceId);
@@ -233,7 +233,7 @@ class LazyProviderRegistry implements IProviderRegistry {
     throw new Error('InstanceProviderResolver not available — atomicStore is required for provider resolution');
   }
 
-  async resolveImage(instanceId?: InstanceId): Promise<IImageProvider> {
+  public async resolveImage(instanceId?: InstanceId): Promise<IImageProvider> {
     await this._ensureResolver();
     if (this._instanceResolver) {
       return this._instanceResolver.resolveImage(instanceId);
@@ -241,7 +241,7 @@ class LazyProviderRegistry implements IProviderRegistry {
     throw new Error('InstanceProviderResolver not available — atomicStore is required for provider resolution');
   }
 
-  async resolveGroup(instanceId?: InstanceId): Promise<IContainerGroupProvider | undefined> {
+  public async resolveGroup(instanceId?: InstanceId): Promise<IContainerGroupProvider | undefined> {
     await this._ensureResolver();
     if (!this._instanceResolver) {
       throw new Error('InstanceProviderResolver not available — atomicStore is required for provider resolution');
@@ -249,7 +249,7 @@ class LazyProviderRegistry implements IProviderRegistry {
     return this._instanceResolver.resolveGroup(instanceId);
   }
 
-  async resolveRawEciApi(instanceId?: InstanceId): Promise<any | undefined> {
+  public async resolveRawEciApi(instanceId?: InstanceId): Promise<any | undefined> {
     await this._ensureResolver();
     if (this._instanceResolver && instanceId) {
       return this._instanceResolver.resolveRawEciApi(instanceId);
@@ -257,7 +257,7 @@ class LazyProviderRegistry implements IProviderRegistry {
     return this.rawEciApi;
   }
 
-  async resolveCrApi(instanceId?: InstanceId): Promise<any | undefined> {
+  public async resolveCrApi(instanceId?: InstanceId): Promise<any | undefined> {
     await this._ensureResolver();
     if (this._instanceResolver && instanceId) {
       return this._instanceResolver.resolveCrApi(instanceId);
@@ -265,7 +265,7 @@ class LazyProviderRegistry implements IProviderRegistry {
     return this.crApi;
   }
 
-  async resolveOssOpenApi(instanceId?: InstanceId): Promise<any | undefined> {
+  public async resolveOssOpenApi(instanceId?: InstanceId): Promise<any | undefined> {
     await this._ensureResolver();
     if (this._instanceResolver && instanceId) {
       return this._instanceResolver.resolveOssOpenApi(instanceId);

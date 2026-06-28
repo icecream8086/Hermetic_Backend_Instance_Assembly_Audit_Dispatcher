@@ -26,7 +26,7 @@ export class ConcurrencyMap {
   private readonly counts = new Map<string, ConcurrencyCounts>();
 
   /** Build the map from a list of active (non-terminal) TaskInstances. */
-  constructor(activeTis: readonly TaskInstance[]) {
+  public constructor(activeTis: readonly TaskInstance[]) {
     for (const ti of activeTis) {
       this.add(ti);
     }

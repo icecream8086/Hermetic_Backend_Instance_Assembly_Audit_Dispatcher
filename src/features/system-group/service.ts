@@ -40,13 +40,13 @@ export interface ISysGroupService extends ICrudService<SysGroup, CreateSysGroupI
 }
 
 export class SysGroupService implements ISysGroupService {
-  constructor(
+  public constructor(
     private readonly atomic: IAtomicStore,
     private readonly logger: ILogWriter,
     private readonly audit?: IAuditWriter,
   ) {}
 
-  async create(input: CreateSysGroupInput, _actorId?: string): Promise<SysGroup> {
+  public async create(input: CreateSysGroupInput, _actorId?: string): Promise<SysGroup> {
     const id = generateSysGroupId();
     const gid = await this.#nextGid();
     const now = Date.now();
@@ -65,15 +65,15 @@ export class SysGroupService implements ISysGroupService {
     return group;
   }
 
-  async list(page = 1, limit = 50): Promise<PaginatedResult<SysGroup>> {
+  public async list(page = 1, limit = 50): Promise<PaginatedResult<SysGroup>> {
     return this.listPaginated(page, limit);
   }
 
-  async listAll(): Promise<SysGroup[]> {
+  public async listAll(): Promise<SysGroup[]> {
     return this.#listAll();
   }
 
-  async listPaginated(page = 1, limit = 50, name?: string): Promise<PaginatedResult<SysGroup>> {
+  public async listPaginated(page = 1, limit = 50, name?: string): Promise<PaginatedResult<SysGroup>> {
     // When filtering by name, fall back to loading all items in memory
     if (name) {
       const all = await this.#listAll();
@@ -119,12 +119,12 @@ export class SysGroupService implements ISysGroupService {
     return { items, total, page, limit };
   }
 
-  async get(id: string): Promise<SysGroup | null> {
+  public async get(id: string): Promise<SysGroup | null> {
     const entry = await this.atomic.get<SysGroup>(PREFIX + id);
     return entry?.value ?? null;
   }
 
-  async update(id: string, input: UpdateSysGroupInput, _actorId?: string): Promise<SysGroup> {
+  public async update(id: string, input: UpdateSysGroupInput, _actorId?: string): Promise<SysGroup> {
     const entry = await this.atomic.get<SysGroup>(PREFIX + id);
     if (!entry) throw new AppError(404, 'SYSGROUP_NOT_FOUND', 'System group not found');
     const updated: SysGroup = {
@@ -147,7 +147,7 @@ export class SysGroupService implements ISysGroupService {
     return updated;
   }
 
-  async delete(id: string, _actorId?: string): Promise<void> {
+  public async delete(id: string, _actorId?: string): Promise<void> {
     const entry = await this.atomic.get<SysGroup>(PREFIX + id);
     if (!entry) throw new AppError(404, 'SYSGROUP_NOT_FOUND', 'System group not found');
     await this.atomic.set(PREFIX + id, null, entry.version);
@@ -162,7 +162,7 @@ export class SysGroupService implements ISysGroupService {
     });
   }
 
-  async #listAll(): Promise<SysGroup[]> {
+  public async #listAll(): Promise<SysGroup[]> {
     const shardKeys = Array.from({ length: IDS_SHARDS }, (_, i) => IDS_SHARD_PREFIX + i);
     const shards = await Promise.all(shardKeys.map(k => this.atomic.get<string[]>(k)));
     const allIds = shards.flatMap(s => s?.value ?? []);
@@ -171,7 +171,7 @@ export class SysGroupService implements ISysGroupService {
     return entries.filter((e): e is NonNullable<typeof e> => e !== null).map(e => e.value);
   }
 
-  async #addToIndex(id: string): Promise<void> {
+  public async #addToIndex(id: string): Promise<void> {
     const shardKey = IDS_SHARD_PREFIX + sysgroupShard(id);
     const entry = await this.atomic.get<string[]>(shardKey);
     const ids = entry?.value ?? [];
@@ -179,7 +179,7 @@ export class SysGroupService implements ISysGroupService {
     await this.atomic.set(shardKey, ids, entry?.version ?? null);
   }
 
-  async #removeFromIndex(id: string): Promise<void> {
+  public async #removeFromIndex(id: string): Promise<void> {
     const shardKey = IDS_SHARD_PREFIX + sysgroupShard(id);
     const entry = await this.atomic.get<string[]>(shardKey);
     if (!entry) return;
@@ -188,7 +188,7 @@ export class SysGroupService implements ISysGroupService {
   }
 
   /** Best-effort counter increment. */
-  async #incrCounter(): Promise<void> {
+  public async #incrCounter(): Promise<void> {
     for (let attempt = 0; attempt < 3; attempt++) {
       const entry = await this.atomic.get<number>(COUNT_KEY);
       const ver = await this.atomic.set(COUNT_KEY, (entry?.value ?? 0) + 1, entry?.version ?? null);
@@ -197,7 +197,7 @@ export class SysGroupService implements ISysGroupService {
   }
 
   /** Best-effort counter decrement. */
-  async #decrCounter(): Promise<void> {
+  public async #decrCounter(): Promise<void> {
     for (let attempt = 0; attempt < 3; attempt++) {
       const entry = await this.atomic.get<number>(COUNT_KEY);
       const cur = entry?.value ?? 0;
@@ -208,7 +208,7 @@ export class SysGroupService implements ISysGroupService {
   }
 
   /** Allocate next available GID — RHEL §1 GID auto-increment. */
-  async #nextGid(): Promise<Gid> {
+  public async #nextGid(): Promise<Gid> {
     for (let attempt = 0; attempt < 3; attempt++) {
       const entry = await this.atomic.get<number>(GID_COUNTER_KEY);
       const next = entry?.value ?? GID_MIN;
@@ -218,7 +218,7 @@ export class SysGroupService implements ISysGroupService {
     throw new AppError(409, 'CONFLICT', 'Failed to allocate GID after retries');
   }
 
-  async getByGid(gid: Gid): Promise<SysGroup | null> {
+  public async getByGid(gid: Gid): Promise<SysGroup | null> {
     const idEntry = await this.atomic.get<string>(GID_INDEX_PREFIX + gid);
     if (!idEntry) return null;
     return this.get(idEntry.value);

@@ -34,9 +34,9 @@ const CPU_COST_PER_SEC = 0.0001;
 const MEM_COST_PER_MB_SEC = 0.000001;
 
 export class DashboardService {
-  constructor(private readonly atomic: IAtomicStore) {}
+  public constructor(private readonly atomic: IAtomicStore) {}
 
-  async getMetrics(userId?: string): Promise<DashboardMetrics> {
+  public async getMetrics(userId?: string): Promise<DashboardMetrics> {
     const idx = await this.atomic.get<string[]>(IDX_WORKFLOW_RUN_IDS);
     const empty = { totalWorkflows: 0, totalRuns: 0, activeRuns: 0, successRate: 0, avgDurationMs: 0, runnersOnline: 0, byTrigger: {}, byStatus: {} };
     if (!idx) return empty;
@@ -87,7 +87,7 @@ export class DashboardService {
     return result;
   }
 
-  async recordJobBilling(jobRun: JobRun, jobDef?: { cpu?: number; memory?: number }): Promise<void> {
+  public async recordJobBilling(jobRun: JobRun, jobDef?: { cpu?: number; memory?: number }): Promise<void> {
     if (!jobRun.startedAt || !jobRun.completedAt) return;
 
     const durationMs = jobRun.completedAt - jobRun.startedAt;
@@ -113,7 +113,7 @@ export class DashboardService {
     await this.atomic.set(`${BILL_PFX}${jobRun.id}`, billing, null);
   }
 
-  async getBilling(projectId?: string, orgId?: string): Promise<BillingEntry[]> {
+  public async getBilling(projectId?: string, orgId?: string): Promise<BillingEntry[]> {
     const idx = await this.atomic.get<string[]>('action:job-run:ids');
     if (!idx) return [];
     const entries = (await Promise.all(

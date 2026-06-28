@@ -86,13 +86,13 @@ export class PodmanContainerProvider implements IContainerProvider {
   /** Tracks created Podman secret IDs for cleanup on container delete. */
   readonly #createdSecrets = new Map<string, string[]>();
 
-  constructor(endpoint = 'http://127.0.0.1:8080') {
+  public constructor(endpoint = 'http://127.0.0.1:8080') {
     this.#apiBase = `${endpoint}/v1.24`;
   }
 
   // ─── IContainerProvider ───
 
-  async create(input: CreateContainerGroupInput): Promise<{ providerId: string }> {
+  public async create(input: CreateContainerGroupInput): Promise<{ providerId: string }> {
     const c = input.containers[0]!;
 
     // Env: flatten to KEY=VALUE strings
@@ -240,7 +240,7 @@ export class PodmanContainerProvider implements IContainerProvider {
     return { providerId: data.Id };
   }
 
-  async describe(input: DescribeContainerGroupsInput): Promise<DescribeContainerGroupsResult> {
+  public async describe(input: DescribeContainerGroupsInput): Promise<DescribeContainerGroupsResult> {
     let url = `${this.#apiBase}/containers/json?all=true`;
     if (input.limit) url += `&limit=${input.limit}`;
 
@@ -269,7 +269,7 @@ export class PodmanContainerProvider implements IContainerProvider {
     };
   }
 
-  async delete(input: DeleteContainerGroupInput): Promise<void> {
+  public async delete(input: DeleteContainerGroupInput): Promise<void> {
     // Clean up Podman secrets created for this container
     const secretIds = this.#createdSecrets.get(input.providerId);
     if (secretIds?.length) {
@@ -290,7 +290,7 @@ export class PodmanContainerProvider implements IContainerProvider {
     }
   }
 
-  async getLogs(input: GetContainerLogInput): Promise<ContainerLogResult> {
+  public async getLogs(input: GetContainerLogInput): Promise<ContainerLogResult> {
     let url = `${this.#apiBase}/containers/${input.providerId}/logs?stdout=true&stderr=true`;
     if (input.limitBytes) url += `&tail=${input.limitBytes}`;
     if (input.sinceSeconds) url += `&since=${Math.floor(Date.now() / 1000) - input.sinceSeconds}`;
@@ -307,13 +307,13 @@ export class PodmanContainerProvider implements IContainerProvider {
   }
 
   /** Get a single container's full state. */
-  async getStatus(providerId: string): Promise<ContainerGroupRuntime | null> {
+  public async getStatus(providerId: string): Promise<ContainerGroupRuntime | null> {
     return this.#toRuntime(providerId);
   }
 
   // ─── Container lifecycle operations ───
 
-  async stop(providerId: string, timeoutSeconds?: number): Promise<void> {
+  public async stop(providerId: string, timeoutSeconds?: number): Promise<void> {
     let url = `${this.#apiBase}/containers/${encodeURIComponent(providerId)}/stop`;
     if (timeoutSeconds !== undefined) url += `?t=${timeoutSeconds}`;
     const resp = await this.#fetch(url, { method: 'POST' });
@@ -325,7 +325,7 @@ export class PodmanContainerProvider implements IContainerProvider {
     }
   }
 
-  async start(providerId: string): Promise<void> {
+  public async start(providerId: string): Promise<void> {
     const url = `${this.#apiBase}/containers/${encodeURIComponent(providerId)}/start`;
     const resp = await this.#fetch(url, { method: 'POST' });
     if (!resp) throw new Error('Podman daemon unreachable');
@@ -336,7 +336,7 @@ export class PodmanContainerProvider implements IContainerProvider {
     }
   }
 
-  async restart(providerId: string, timeoutSeconds?: number): Promise<void> {
+  public async restart(providerId: string, timeoutSeconds?: number): Promise<void> {
     let url = `${this.#apiBase}/containers/${encodeURIComponent(providerId)}/restart`;
     if (timeoutSeconds !== undefined) url += `?t=${timeoutSeconds}`;
     const resp = await this.#fetch(url, { method: 'POST' });
@@ -348,7 +348,7 @@ export class PodmanContainerProvider implements IContainerProvider {
     }
   }
 
-  async kill(providerId: string, signal?: string): Promise<void> {
+  public async kill(providerId: string, signal?: string): Promise<void> {
     let url = `${this.#apiBase}/containers/${encodeURIComponent(providerId)}/kill`;
     if (signal) url += `?signal=${encodeURIComponent(signal)}`;
     const resp = await this.#fetch(url, { method: 'POST' });
@@ -360,19 +360,19 @@ export class PodmanContainerProvider implements IContainerProvider {
     }
   }
 
-  async pause(providerId: string): Promise<void> {
+  public async pause(providerId: string): Promise<void> {
     const resp = await this.#fetch(`${this.#apiBase}/containers/${encodeURIComponent(providerId)}/pause`, { method: 'POST' });
     if (!resp) throw new Error('Podman daemon unreachable');
     if (!resp.ok) throw new Error(`Podman pause failed (${resp.status})`);
   }
 
-  async unpause(providerId: string): Promise<void> {
+  public async unpause(providerId: string): Promise<void> {
     const resp = await this.#fetch(`${this.#apiBase}/containers/${encodeURIComponent(providerId)}/unpause`, { method: 'POST' });
     if (!resp) throw new Error('Podman daemon unreachable');
     if (!resp.ok) throw new Error(`Podman unpause failed (${resp.status})`);
   }
 
-  async wait(providerId: string, _condition?: 'not-running' | 'next-exit'): Promise<{ statusCode: number }> {
+  public async wait(providerId: string, _condition?: 'not-running' | 'next-exit'): Promise<{ statusCode: number }> {
     const resp = await this.#fetch(`${this.#apiBase}/containers/${encodeURIComponent(providerId)}/wait`, { method: 'POST' });
     if (!resp) throw new Error('Podman daemon unreachable');
     if (!resp.ok) throw new Error(`Podman wait failed (${resp.status})`);
@@ -380,7 +380,7 @@ export class PodmanContainerProvider implements IContainerProvider {
     return { statusCode: data.StatusCode ?? -1 };
   }
 
-  async exec(providerId: string, cmd: readonly string[], _containerName?: string): Promise<{ execId: string; webSocketUri?: string }> {
+  public async exec(providerId: string, cmd: readonly string[], _containerName?: string): Promise<{ execId: string; webSocketUri?: string }> {
     // Step 1: Create exec instance
     const createResp = await this.#fetch(`${this.#apiBase}/containers/${encodeURIComponent(providerId)}/exec`, {
       method: 'POST',
@@ -403,13 +403,13 @@ export class PodmanContainerProvider implements IContainerProvider {
     return { execId };
   }
 
-  async rename(providerId: string, newName: string): Promise<void> {
+  public async rename(providerId: string, newName: string): Promise<void> {
     const resp = await this.#fetch(`${this.#apiBase}/containers/${encodeURIComponent(providerId)}/rename?name=${encodeURIComponent(newName)}`, { method: 'POST' });
     if (!resp) throw new Error('Podman daemon unreachable');
     if (!resp.ok) throw new Error(`Podman rename failed (${resp.status})`);
   }
 
-  async stats(providerId: string): Promise<{ cpuUsage: number; memoryUsage: number; networkIO?: { rx: number; tx: number } }> {
+  public async stats(providerId: string): Promise<{ cpuUsage: number; memoryUsage: number; networkIO?: { rx: number; tx: number } }> {
     const resp = await this.#fetch(`${this.#apiBase}/containers/${encodeURIComponent(providerId)}/stats?stream=false`);
     if (!resp) throw new Error('Podman daemon unreachable');
     if (!resp.ok) throw new Error(`Podman stats failed (${resp.status})`);
@@ -422,7 +422,7 @@ export class PodmanContainerProvider implements IContainerProvider {
     };
   }
 
-  async top(providerId: string, psArgs?: string): Promise<{ processes: readonly (readonly string[])[] }> {
+  public async top(providerId: string, psArgs?: string): Promise<{ processes: readonly (readonly string[])[] }> {
     let url = `${this.#apiBase}/containers/${encodeURIComponent(providerId)}/top`;
     if (psArgs) url += `?ps_args=${encodeURIComponent(psArgs)}`;
     const resp = await this.#fetch(url);
@@ -433,7 +433,7 @@ export class PodmanContainerProvider implements IContainerProvider {
   }
 
   /** Fetch with connection error protection. Returns null when Podman is down. */
-  async #fetch(url: string, init?: RequestInit): Promise<Response | null> {
+  public async #fetch(url: string, init?: RequestInit): Promise<Response | null> {
     try {
       return await fetch(url, init);
     } catch {
@@ -441,7 +441,7 @@ export class PodmanContainerProvider implements IContainerProvider {
     }
   }
 
-  async #toRuntime(containerId: string): Promise<ContainerGroupRuntime | null> {
+  public async #toRuntime(containerId: string): Promise<ContainerGroupRuntime | null> {
     const resp = await fetch(`${this.#apiBase}/containers/${containerId}/json`);
     if (resp.status === 404) return null;
     if (!resp.ok) return null;

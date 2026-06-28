@@ -15,7 +15,7 @@ const API_VERSION = '2018-08-08';
 // ─── ECI OpenAPI client ───
 
 export class AlibabaEciApiClient {
-  constructor(
+  public constructor(
     private readonly accessKeyId: string,
     private readonly accessKeySecret: string,
     private readonly endpoint = 'eci.cn-hangzhou.aliyuncs.com',
@@ -26,7 +26,7 @@ export class AlibabaEciApiClient {
   // ═══════════════════════════════════════════════
 
   /** List available ECI regions and zones. */
-  async describeRegions(params?: RpcParams): Promise<readonly any[]> {
+  public async describeRegions(params?: RpcParams): Promise<readonly any[]> {
     const resp = await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret,
       'DescribeRegions', API_VERSION, params ?? {});
     return resp.Regions ?? [];
@@ -37,20 +37,20 @@ export class AlibabaEciApiClient {
   // ═══════════════════════════════════════════════
 
   /** Create a container group. */
-  async createContainerGroup(params: RpcParams): Promise<{ containerGroupId: string }> {
+  public async createContainerGroup(params: RpcParams): Promise<{ containerGroupId: string }> {
     const resp = await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret,
       'CreateContainerGroup', API_VERSION, params);
     return { containerGroupId: resp.ContainerGroupId ?? '' };
   }
 
   /** Update a container group spec. */
-  async updateContainerGroup(params: RpcParams): Promise<void> {
+  public async updateContainerGroup(params: RpcParams): Promise<void> {
     await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret,
       'UpdateContainerGroup', API_VERSION, params);
   }
 
   /** Describe container groups with filters. */
-  async describeContainerGroups(params: RpcParams): Promise<{
+  public async describeContainerGroups(params: RpcParams): Promise<{
     containerGroups: readonly any[];
     nextToken?: string;
     totalCount?: number;
@@ -68,7 +68,7 @@ export class AlibabaEciApiClient {
    * Lightweight batch status query — returns status only, no full detail.
    * Supports SinceSecond for polling.
    */
-  async describeContainerGroupStatus(params: RpcParams): Promise<{
+  public async describeContainerGroupStatus(params: RpcParams): Promise<{
     groups: readonly any[];
     nextToken?: string;
   }> {
@@ -81,14 +81,14 @@ export class AlibabaEciApiClient {
   }
 
   /** Describe container group events. */
-  async describeContainerGroupEvents(params: RpcParams): Promise<readonly any[]> {
+  public async describeContainerGroupEvents(params: RpcParams): Promise<readonly any[]> {
     const resp = await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret,
       'DescribeContainerGroupEvents', API_VERSION, params);
     return resp.Events ?? [];
   }
 
   /** Resize a volume attached to a container group (currently cloud disk only). */
-  async resizeContainerGroupVolume(
+  public async resizeContainerGroupVolume(
     containerGroupId: string, volumeName: string, newSize: number, clientToken?: string,
   ): Promise<void> {
     const params: Record<string, string> = {
@@ -102,13 +102,13 @@ export class AlibabaEciApiClient {
   }
 
   /** Restart a container group. */
-  async restartContainerGroup(containerGroupId: string): Promise<void> {
+  public async restartContainerGroup(containerGroupId: string): Promise<void> {
     await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret,
       'RestartContainerGroup', API_VERSION, { ContainerGroupId: containerGroupId });
   }
 
   /** Delete a container group. */
-  async deleteContainerGroup(containerGroupId: string): Promise<void> {
+  public async deleteContainerGroup(containerGroupId: string): Promise<void> {
     await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret,
       'DeleteContainerGroup', API_VERSION, { ContainerGroupId: containerGroupId });
   }
@@ -118,7 +118,7 @@ export class AlibabaEciApiClient {
   // ═══════════════════════════════════════════════
 
   /** Execute a command in a container — returns HTTP/WebSocket URIs. */
-  async execContainerCommand(
+  public async execContainerCommand(
     containerGroupId: string, command: string, containerName: string,
   ): Promise<{ httpUrl: string; webSocketUri?: string }> {
     const resp = await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret,
@@ -134,7 +134,7 @@ export class AlibabaEciApiClient {
   }
 
   /** Describe container logs. */
-  async describeContainerLog(params: RpcParams): Promise<{ content: string; containerName?: string }> {
+  public async describeContainerLog(params: RpcParams): Promise<{ content: string; containerName?: string }> {
     const resp = await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret,
       'DescribeContainerLog', API_VERSION, params);
     return {
@@ -144,14 +144,14 @@ export class AlibabaEciApiClient {
   }
 
   /** Commit a container to an image. */
-  async commitContainer(params: RpcParams): Promise<{ taskId: string }> {
+  public async commitContainer(params: RpcParams): Promise<{ taskId: string }> {
     const resp = await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret,
       'CommitContainer', API_VERSION, params);
     return { taskId: resp.TaskId ?? '' };
   }
 
   /** Describe commit container task status. */
-  async describeCommitContainerTask(params: RpcParams): Promise<{
+  public async describeCommitContainerTask(params: RpcParams): Promise<{
     tasks: readonly any[];
     nextToken?: string;
   }> {
@@ -168,20 +168,20 @@ export class AlibabaEciApiClient {
   // ═══════════════════════════════════════════════
 
   /** Create an image cache. */
-  async createImageCache(params: RpcParams): Promise<{ imageCacheId: string }> {
+  public async createImageCache(params: RpcParams): Promise<{ imageCacheId: string }> {
     const resp = await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret,
       'CreateImageCache', API_VERSION, params);
     return { imageCacheId: resp.ImageCacheId ?? '' };
   }
 
   /** Update image cache attributes. */
-  async updateImageCache(params: RpcParams): Promise<void> {
+  public async updateImageCache(params: RpcParams): Promise<void> {
     await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret,
       'UpdateImageCache', API_VERSION, params);
   }
 
   /** Describe image caches. */
-  async describeImageCaches(params: RpcParams): Promise<{
+  public async describeImageCaches(params: RpcParams): Promise<{
     imageCaches: readonly any[];
     totalCount?: number;
   }> {
@@ -194,7 +194,7 @@ export class AlibabaEciApiClient {
   }
 
   /** Delete an image cache. */
-  async deleteImageCache(imageCacheId: string): Promise<void> {
+  public async deleteImageCache(imageCacheId: string): Promise<void> {
     await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret,
       'DeleteImageCache', API_VERSION, { ImageCacheId: imageCacheId });
   }
@@ -204,14 +204,14 @@ export class AlibabaEciApiClient {
   // ═══════════════════════════════════════════════
 
   /** Create a data cache. */
-  async createDataCache(params: RpcParams): Promise<{ dataCacheId: string }> {
+  public async createDataCache(params: RpcParams): Promise<{ dataCacheId: string }> {
     const resp = await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret,
       'CreateDataCache', API_VERSION, params);
     return { dataCacheId: resp.DataCacheId ?? '' };
   }
 
   /** Describe data caches. */
-  async describeDataCaches(params: RpcParams): Promise<{
+  public async describeDataCaches(params: RpcParams): Promise<{
     dataCaches: readonly any[];
     totalCount?: number;
   }> {
@@ -224,20 +224,20 @@ export class AlibabaEciApiClient {
   }
 
   /** Update a data cache. */
-  async updateDataCache(params: RpcParams): Promise<void> {
+  public async updateDataCache(params: RpcParams): Promise<void> {
     await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret,
       'UpdateDataCache', API_VERSION, params);
   }
 
   /** Copy a data cache across regions. */
-  async copyDataCache(params: RpcParams): Promise<{ dataCacheId: string }> {
+  public async copyDataCache(params: RpcParams): Promise<{ dataCacheId: string }> {
     const resp = await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret,
       'CopyDataCache', API_VERSION, params);
     return { dataCacheId: resp.DataCacheId ?? '' };
   }
 
   /** Delete a data cache. */
-  async deleteDataCache(dataCacheId: string): Promise<void> {
+  public async deleteDataCache(dataCacheId: string): Promise<void> {
     await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret,
       'DeleteDataCache', API_VERSION, { DataCacheId: dataCacheId });
   }
@@ -247,20 +247,20 @@ export class AlibabaEciApiClient {
   // ═══════════════════════════════════════════════
 
   /** Create a virtual node. */
-  async createVirtualNode(params: RpcParams): Promise<{ virtualNodeId: string }> {
+  public async createVirtualNode(params: RpcParams): Promise<{ virtualNodeId: string }> {
     const resp = await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret,
       'CreateVirtualNode', API_VERSION, params);
     return { virtualNodeId: resp.VirtualNodeId ?? '' };
   }
 
   /** Update a virtual node. */
-  async updateVirtualNode(params: RpcParams): Promise<void> {
+  public async updateVirtualNode(params: RpcParams): Promise<void> {
     await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret,
       'UpdateVirtualNode', API_VERSION, params);
   }
 
   /** Describe virtual nodes. */
-  async describeVirtualNodes(params: RpcParams): Promise<{
+  public async describeVirtualNodes(params: RpcParams): Promise<{
     virtualNodes: readonly any[];
     totalCount?: number;
   }> {
@@ -273,7 +273,7 @@ export class AlibabaEciApiClient {
   }
 
   /** Delete a virtual node. */
-  async deleteVirtualNode(virtualNodeId: string): Promise<void> {
+  public async deleteVirtualNode(virtualNodeId: string): Promise<void> {
     await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret,
       'DeleteVirtualNode', API_VERSION, { VirtualNodeId: virtualNodeId });
   }
@@ -283,13 +283,13 @@ export class AlibabaEciApiClient {
   // ═══════════════════════════════════════════════
 
   /** Describe container group metrics (CPU, memory, network). */
-  async describeContainerGroupMetric(params: RpcParams): Promise<any> {
+  public async describeContainerGroupMetric(params: RpcParams): Promise<any> {
     return rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret,
       'DescribeContainerGroupMetric', API_VERSION, params);
   }
 
   /** Describe multi-dimensional metrics for a container group. */
-  async describeMultiContainerGroupMetric(params: RpcParams): Promise<any> {
+  public async describeMultiContainerGroupMetric(params: RpcParams): Promise<any> {
     return rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret,
       'DescribeMultiContainerGroupMetric', API_VERSION, params);
   }
@@ -299,14 +299,14 @@ export class AlibabaEciApiClient {
   // ═══════════════════════════════════════════════
 
   /** Create an instance ops task (coredump / tcpdump). */
-  async createInstanceOpsTask(params: RpcParams): Promise<{ opsTaskId: string }> {
+  public async createInstanceOpsTask(params: RpcParams): Promise<{ opsTaskId: string }> {
     const resp = await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret,
       'CreateInstanceOpsTask', API_VERSION, params);
     return { opsTaskId: resp.OpsTaskId ?? '' };
   }
 
   /** Describe instance ops records. */
-  async describeInstanceOpsRecords(params: RpcParams): Promise<readonly any[]> {
+  public async describeInstanceOpsRecords(params: RpcParams): Promise<readonly any[]> {
     const resp = await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret,
       'DescribeInstanceOpsRecords', API_VERSION, params);
     return resp.OpsRecords ?? [];
@@ -317,19 +317,19 @@ export class AlibabaEciApiClient {
   // ═══════════════════════════════════════════════
 
   /** Tag resources. */
-  async tagResources(params: RpcParams): Promise<void> {
+  public async tagResources(params: RpcParams): Promise<void> {
     await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret,
       'TagResources', API_VERSION, params);
   }
 
   /** Untag resources. */
-  async untagResources(params: RpcParams): Promise<void> {
+  public async untagResources(params: RpcParams): Promise<void> {
     await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret,
       'UntagResources', API_VERSION, params);
   }
 
   /** List tagged resources. */
-  async listTagResources(params: RpcParams): Promise<{ tagResources: readonly any[]; nextToken?: string }> {
+  public async listTagResources(params: RpcParams): Promise<{ tagResources: readonly any[]; nextToken?: string }> {
     const resp = await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret,
       'ListTagResources', API_VERSION, params);
     return {
@@ -343,19 +343,19 @@ export class AlibabaEciApiClient {
   // ═══════════════════════════════════════════════
 
   /** Query ECI usage quota. */
-  async listUsage(params?: RpcParams): Promise<any> {
+  public async listUsage(params?: RpcParams): Promise<any> {
     return rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret,
       'ListUsage', API_VERSION, params ?? {});
   }
 
   /** Get price for a container group spec. */
-  async describeContainerGroupPrice(params: RpcParams): Promise<any> {
+  public async describeContainerGroupPrice(params: RpcParams): Promise<any> {
     return rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret,
       'DescribeContainerGroupPrice', API_VERSION, params);
   }
 
   /** Query available resource quotas per zone. */
-  async describeAvailableResource(params: RpcParams): Promise<any> {
+  public async describeAvailableResource(params: RpcParams): Promise<any> {
     return rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret,
       'DescribeAvailableResource', API_VERSION, params);
   }

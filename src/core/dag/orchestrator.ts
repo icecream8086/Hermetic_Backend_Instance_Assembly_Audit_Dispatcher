@@ -45,7 +45,7 @@ export class DagOrchestrator<T extends OrchestratedTask> {
    * @param executor - Async function that performs the actual work for a task.
    *                   If it throws, the task is marked as failed.
    */
-  async execute(
+  public async execute(
     tasks: readonly T[],
     executor: (task: T) => Promise<void>,
   ): Promise<OrchestrationResult> {

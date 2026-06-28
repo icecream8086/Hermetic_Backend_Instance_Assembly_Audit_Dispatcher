@@ -6,9 +6,9 @@ const PREFIX = 's3-policy:';
 const INDEX_KEY = 's3-policy:ids';
 
 export class S3PolicyManager {
-  constructor(private readonly atomic: IAtomicStore) {}
+  public constructor(private readonly atomic: IAtomicStore) {}
 
-  async create(bucketId: string, input: CreateS3PolicyInput): Promise<S3Policy> {
+  public async create(bucketId: string, input: CreateS3PolicyInput): Promise<S3Policy> {
     const id = `sp_${crypto.randomUUID()}`;
     const now = Date.now();
     const policy: S3Policy = {
@@ -30,12 +30,12 @@ export class S3PolicyManager {
     return policy;
   }
 
-  async get(id: string): Promise<S3Policy | null> {
+  public async get(id: string): Promise<S3Policy | null> {
     const entry = await this.atomic.get<S3Policy>(PREFIX + id);
     return entry?.value ?? null;
   }
 
-  async list(bucketId?: string): Promise<S3Policy[]> {
+  public async list(bucketId?: string): Promise<S3Policy[]> {
     const idx = await this.atomic.get<string[]>(INDEX_KEY);
     if (!idx) return [];
     const entries = await Promise.all(idx.value.map(id => this.atomic.get<S3Policy>(PREFIX + id)));
@@ -44,7 +44,7 @@ export class S3PolicyManager {
     return policies;
   }
 
-  async update(id: string, input: UpdateS3PolicyInput): Promise<S3Policy> {
+  public async update(id: string, input: UpdateS3PolicyInput): Promise<S3Policy> {
     const entry = await this.atomic.get<S3Policy>(PREFIX + id);
     if (!entry) throw new AppError(404, 'S3_POLICY_NOT_FOUND', 'S3 policy not found');
 
@@ -65,7 +65,7 @@ export class S3PolicyManager {
     return updated;
   }
 
-  async delete(id: string): Promise<void> {
+  public async delete(id: string): Promise<void> {
     const entry = await this.atomic.get<S3Policy>(PREFIX + id);
     if (!entry) throw new AppError(404, 'S3_POLICY_NOT_FOUND', 'S3 policy not found');
     await this.atomic.set(PREFIX + id, null, entry.version);
@@ -77,7 +77,7 @@ export class S3PolicyManager {
    * Collects all policies with applyToAutoKeys=true, sorts by priority (desc),
    * Deny overrides Allow.  Returns null when no policies exist (no restriction).
    */
-  async resolve(bucketId: string): Promise<{ effect: 'Allow' | 'Deny'; actions: string[]; pathPrefix: string } | null> {
+  public async resolve(bucketId: string): Promise<{ effect: 'Allow' | 'Deny'; actions: string[]; pathPrefix: string } | null> {
     const all = await this.list(bucketId);
     const autoPolicies = all.filter(p => p.applyToAutoKeys).sort((a, b) => b.priority - a.priority);
 
@@ -92,12 +92,12 @@ export class S3PolicyManager {
     return { effect: 'Allow', actions: [...allow.actions], pathPrefix: allow.pathPrefix };
   }
 
-  async #addToIndex(id: string): Promise<void> {
+  public async #addToIndex(id: string): Promise<void> {
     const idx = await this.atomic.get<string[]>(INDEX_KEY);
     await this.atomic.set(INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
   }
 
-  async #removeFromIndex(id: string): Promise<void> {
+  public async #removeFromIndex(id: string): Promise<void> {
     const idx = await this.atomic.get<string[]>(INDEX_KEY);
     if (!idx) return;
     await this.atomic.set(INDEX_KEY, idx.value.filter((i: string) => i !== id), idx.version);

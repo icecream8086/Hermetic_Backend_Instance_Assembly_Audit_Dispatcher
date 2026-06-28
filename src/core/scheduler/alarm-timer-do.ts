@@ -26,7 +26,7 @@
  * ```
  */
 export class AlarmTimerDO implements DurableObject {
-  constructor(readonly ctx: DurableObjectState, _env: unknown) {}
+  public constructor(readonly ctx: DurableObjectState, _env: unknown) {}
 
   /** Minimum interval safety floor (1s). DO alarms below this risk instability. */
   static readonly MIN_INTERVAL = 1000;
@@ -38,7 +38,7 @@ export class AlarmTimerDO implements DurableObject {
   /** Absolute timestamp of the first alarm (set on /start). Used for algebraic re-scheduling. */
   _firstAlarmAt = 0;
 
-  async fetch(request: Request): Promise<Response> {
+  public async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
 
     if (url.pathname.endsWith('/start')) {
@@ -79,7 +79,7 @@ export class AlarmTimerDO implements DurableObject {
     return new Response('not found', { status: 404 });
   }
 
-  async alarm(): Promise<void> {
+  public async alarm(): Promise<void> {
     if (!this._running) return;
     this._tickCount++;
     console.log(`[${new Date().toISOString()}] INFO: [scheduler] Tick #${this._tickCount} (interval=${this._intervalMs}ms)`);

@@ -10,10 +10,10 @@ import type { IMessageQueue } from './interfaces.ts';
 export class NoopMessageQueue implements IMessageQueue {
   get available(): boolean { return false; }
 
-  async sendImagePull(): Promise<boolean> { return false; }
-  async sendSandboxGc(): Promise<boolean> { return false; }
-  async sendSandboxProvision(): Promise<boolean> { return false; }
-  async sendBucketKeyRotate(): Promise<boolean> { return false; }
-  async send(): Promise<boolean> { return false; }
-  async sendBatch(_messages: any[]): Promise<number> { return 0; }
+  public async sendImagePull(): Promise<boolean> { return false; }
+  public async sendSandboxGc(): Promise<boolean> { return false; }
+  public async sendSandboxProvision(): Promise<boolean> { return false; }
+  public async sendBucketKeyRotate(): Promise<boolean> { return false; }
+  public async send(): Promise<boolean> { return false; }
+  public async sendBatch(_messages: any[]): Promise<number> { return 0; }
 }
