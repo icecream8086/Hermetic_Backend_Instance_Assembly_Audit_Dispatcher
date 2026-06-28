@@ -20,12 +20,11 @@
  *   This file         buildCreateParams() / parseContainerGroup()
  */
 
+import { z } from 'zod';
 import type {
   CreateContainerGroupInput,
   ContainerCreateConfig,
   ContainerGroupRuntime,
-  ContainerGroupStatus,
-  OciContainerStatus,
   VolumeConfigInput,
   VolumeRuntimeInfo,
   ProbeSpec,
@@ -54,8 +53,8 @@ type ScalarKeys<T> = {
 interface EciFieldCodec<TEncode, TDecode = TEncode> {
   readonly param: string;
   readonly responsePath: string;
-  readonly encode: (v: TEncode) => string;
-  readonly decode: (v: unknown) => TDecode;
+  encode(v: TEncode): string;
+  decode(v: unknown): TDecode;
 }
 
 /** Derive precise codec table type from an interface.
@@ -66,18 +65,26 @@ type CodecTable<T, K extends keyof T = ScalarKeys<T>> = {
   [P in K]: EciFieldCodec<NonNullable<T[P]>, T[P]>;
 };
 
+// ── method-syntax interface eliminates `any` from NestedSpec
+//     Methods are bivariant so narrower encode/decode impls are accepted.
+
+interface NestedCodec {
+  readonly param: string;
+  readonly responsePath: string;
+  encode(v: unknown): string;
+  decode(v: unknown): unknown;
+}
+
 /** Describes how to map an array from CreateContainerGroupInput into indexed RPC params. */
-interface NestedSpec<TItem> {
-  /** Prefix generator, e.g. i => `Container.${i + 1}`. 1-indexed. */
+interface NestedSpec<TItem, TScalars extends Record<string, NestedCodec> = Record<string, NestedCodec>> {
+  /** Prefix generator, e.g. i => `Container.${String(i + 1)}`. 1-indexed. */
   readonly prefix: (idx: number) => string;
   /** Extract the collection from the input. */
   readonly collection: (input: CreateContainerGroupInput) => readonly TItem[] | undefined;
   /** Scalar fields on each item, keyed by their property name on TItem. */
-  readonly scalars: Record<string, EciFieldCodec<any>>;
+  readonly scalars: TScalars;
   /** Per-item compound builders — called for each item, return extra params. */
   readonly compound?: (item: TItem, pfx: string) => Record<string, string>;
-  /** Sub-arrays nested inside each item (e.g. env, ports inside a container). */
-  readonly subArrays?: Record<string, NestedSpec<any>>;
 }
 
 /** Alibaba ECI DescribeContainerGroups response shape (subset). */
@@ -164,73 +171,73 @@ interface EciAssociatedResource {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// Codec decode helpers — Zod-validated, fail-fast on bad API data
+// ═══════════════════════════════════════════════════════════════
+
+const decStrSch = z.string();
+const decNumSch = z.number();
+const decStrOptSch = z.string().optional();
+const decNumOptSch = z.number().optional();
+
+export function decStr(v: unknown): string { return decStrSch.parse(v); }
+export function decNum(v: unknown): number { return decNumSch.parse(v); }
+export function decStrOpt(v: unknown): string | undefined { return decStrOptSch.parse(v); }
+export function decNumOpt(v: unknown): number | undefined { return decNumOptSch.parse(v); }
+
+// ═══════════════════════════════════════════════════════════════
 // Top-level scalar codecs
 // ═══════════════════════════════════════════════════════════════
-//
-// Key union DERIVED from CreateContainerGroupInput — add a scalar field
-// there and TS immediately errors here with missing property.
 
 type TopScalarKey = Exclude<
   ScalarKeys<CreateContainerGroupInput>,
-  'region'   // → RegionId (always set, handled in create())
-  | 'instanceId' // → routing only, not an ECI param
-  | 'description' // → metadata only
+  'region' | 'instanceId' | 'description'
 >;
 
-// Compiler guarantee: every TopScalarKey MUST have an entry here,
-// and each entry's T must match the field type from CreateContainerGroupInput.
-const TOP_SCALARS: CodecTable<CreateContainerGroupInput, TopScalarKey> = {
+const TOP_SCALARS = {
   name: {
     param: 'ContainerGroupName',
     responsePath: 'ContainerGroupName',
     encode: v => v,
-    decode: v => String(v ?? ''),
+    decode: decStr,
   },
   zoneId: {
     param: 'ZoneId',
     responsePath: 'ZoneId',
     encode: v => v,
-    decode: v => String(v ?? ''),
+    decode: decStr,
   },
   cpu: {
     param: 'Cpu',
     responsePath: 'Cpu',
     encode: String,
-    decode: v => Number(v ?? 0),
+    decode: decNum,
   },
   memory: {
     param: 'Memory',
     responsePath: 'Memory',
     encode: String,
-    decode: v => Number(v ?? 0),
+    decode: decNum,
   },
   restartPolicy: {
     param: 'RestartPolicy',
     responsePath: 'RestartPolicy',
     encode: v => v,
-    decode: v => String(v ?? 'Always'),
+    decode: v => z.string().parse(v ?? 'Always'),
   },
-  // gpu and gpuType are compound — encoded as GpuSpecs JSON together.
-  // They appear in TopScalarKey (derived from the interface) so the table
-  // forces us to acknowledge them.  They are handled in buildGpuParam() below;
-  // the encode/decode entries here are no-ops that satisfy the type system.
   gpu: {
     param: 'GpuSpecs',
     responsePath: 'Gpu',
-    encode: _v => undefined!,
-    decode: v => v != null ? Number(v) : undefined,
+    encode: () => { throw new Error('GPU encode must go through buildGpuParam()'); },
+    decode: decNumOpt,
   },
   gpuType: {
     param: 'GpuSpecs',
     responsePath: 'InstanceType',
-    encode: _v => undefined!,
-    decode: v => String(v ?? ''),
+    encode: () => { throw new Error('GPU encode must go through buildGpuParam()'); },
+    decode: decStr,
   },
-};
-// Verify: the Record<KeyUnion, ...> constraint above ensures all keys are covered.
-// The type of TOP_SCALARS satisfies `Record<TopScalarKey, EciFieldCodec<any>>`.
+} satisfies CodecTable<CreateContainerGroupInput, TopScalarKey>;
 
-/** GPU is compound: gpu + gpuType → GpuSpecs JSON. */
 function buildGpuParam(input: CreateContainerGroupInput): Record<string, string> {
   if (!input.gpu || input.gpu <= 0) return {};
   return {
@@ -245,30 +252,26 @@ function buildGpuParam(input: CreateContainerGroupInput): Record<string, string>
 // Container scalar codecs
 // ═══════════════════════════════════════════════════════════════
 
-// ScalarKeys<> naturally excludes array/object fields (command, args, env, ports,
-// volumeMounts, resources, probes, providerOverrides).  No manual Exclude needed.
 type ContainerScalarKey = ScalarKeys<ContainerCreateConfig>;
 
-const CONTAINER_SCALARS: CodecTable<ContainerCreateConfig, ContainerScalarKey> = {
+const CONTAINER_SCALARS = {
   name: {
     param: 'Name',
     responsePath: 'Name',
     encode: v => v,
-    decode: v => String(v ?? ''),
+    decode: decStr,
   },
   image: {
     param: 'Image',
     responsePath: 'Image',
     encode: v => v,
-    decode: v => String(v ?? ''),
+    decode: decStr,
   },
-  // command/args: excluded from ContainerScalarKey by ScalarKeys<> (string[] is not a scalar).
-  // Handled in buildCreateParams() compound section.
   imagePullPolicy: {
     param: 'ImagePullPolicy',
     responsePath: 'ImagePullPolicy',
     encode: v => v,
-    decode: v => String(v ?? ''),
+    decode: decStr,
   },
   tty: {
     param: 'Tty',
@@ -286,21 +289,12 @@ const CONTAINER_SCALARS: CodecTable<ContainerCreateConfig, ContainerScalarKey> =
     param: 'NetworkMode',
     responsePath: 'NetworkMode',
     encode: v => v,
-    decode: v => String(v ?? ''),
+    decode: decStr,
   },
-};
-// NOTE: command, args, env, ports, volumeMounts are excluded from ContainerScalarKey
-// by ScalarKeys<> derivation — they are non-scalar arrays/objects.  They are handled
-// in the compound/nested builders below (buildContainerCompound, buildEnvParams, etc.).
+} satisfies CodecTable<ContainerCreateConfig, ContainerScalarKey>;
 
-// Verify compile-time completeness: the Record<ContainerScalarKey, ...> annotation
-// on CONTAINER_SCALARS ensures every ScalarKeys<ContainerCreateConfig> field
-// (minus the explicit Exclude above) has a codec entry.
-
-/** Container compound fields: command/args special handling, resources sub-object. */
 function buildContainerCompound(c: ContainerCreateConfig, pfx: string): Record<string, string> {
   const p: Record<string, string> = {};
-  // Resources
   if (c.resources?.limits) {
     p[`${pfx}.Cpu`] = String(c.resources.limits.cpu);
     p[`${pfx}.Memory`] = String(c.resources.limits.memory);
@@ -318,32 +312,36 @@ interface EnvItem {
   readonly valueFrom?: EnvVar['valueFrom'] | undefined;
 }
 
-const ENV_SPEC: NestedSpec<EnvItem> = {
-  prefix: (j) => `EnvironmentVar.${j + 1}`,
-  collection: (_input) => undefined!, // filled per-container
-  scalars: {
-    name: {
-      param: 'Key',
-      responsePath: 'Key',
-      encode: v => v,
-      decode: v => String(v ?? ''),
-    },
-    value: {
-      param: 'Value',
-      responsePath: 'Value',
-      encode: v => v,
-      decode: v => String(v ?? ''),
-    },
-    valueFrom: {
-      param: 'FieldRefFieldPath',
-      responsePath: 'FieldRefFieldPath',
-      encode: (v: EnvVar['valueFrom']) => v?.fieldRef?.fieldPath ?? '',
-      decode: v => v ? String(v) : '',
-    },
+const ENV_SCALARS = {
+  name: {
+    param: 'Key',
+    responsePath: 'Key',
+    encode: (v: unknown): string => z.string().parse(v),
+    decode: decStr,
   },
+  value: {
+    param: 'Value',
+    responsePath: 'Value',
+    encode: (v: unknown): string => z.string().parse(v),
+    decode: decStr,
+  },
+  valueFrom: {
+    param: 'FieldRefFieldPath',
+    responsePath: 'FieldRefFieldPath',
+    encode: (v: unknown): string => {
+      const parsed = z.object({ fieldRef: z.object({ fieldPath: z.string() }).optional() }).parse(v);
+      return parsed.fieldRef?.fieldPath ?? '';
+    },
+    decode: v => v ? z.string().parse(v) : '',
+  },
+} satisfies Record<string, NestedCodec>;
+
+const ENV_SPEC: NestedSpec<EnvItem, typeof ENV_SCALARS> = {
+  prefix: (j) => `EnvironmentVar.${String(j + 1)}`,
+  collection: (_input) => undefined,
+  scalars: ENV_SCALARS,
 };
 
-/** Build env params: for each env var, Key/Value if direct value, or Key/FieldRefFieldPath. */
 function buildEnvParams(env: readonly EnvVar[] | undefined, basePfx: string): Record<string, string> {
   const p: Record<string, string> = {};
   if (!env?.length) return p;
@@ -359,7 +357,6 @@ function buildEnvParams(env: readonly EnvVar[] | undefined, basePfx: string): Re
   return p;
 }
 
-/** Parse env from ECI response back to record. */
 function parseEnv(vars: EciEnvItem[] | undefined): Record<string, string> {
   if (!vars?.length) return {};
   const out: Record<string, string> = {};
@@ -375,32 +372,32 @@ function parseEnv(vars: EciEnvItem[] | undefined): Record<string, string> {
 
 type PortScalarKey = ScalarKeys<ContainerPortConfig>;
 
-const PORT_SCALARS: CodecTable<ContainerPortConfig, PortScalarKey> = {
+const PORT_SCALARS = {
   containerPort: {
     param: 'Port',
     responsePath: 'Port',
     encode: String,
-    decode: v => Number(v ?? 0),
+    decode: decNum,
   },
   hostPort: {
     param: 'HostPort',
     responsePath: 'HostPort',
     encode: String,
-    decode: v => Number(v ?? 0),
+    decode: decNum,
   },
   protocol: {
     param: 'Protocol',
     responsePath: 'Protocol',
-    encode: v => v ?? 'tcp',
-    decode: v => String(v ?? 'tcp'),
+    encode: v => v,
+    decode: v => z.string().optional().parse(v) ?? 'tcp',
   },
-};
+} satisfies CodecTable<ContainerPortConfig, PortScalarKey>;
 
 function buildPortParams(ports: readonly ContainerPortConfig[] | undefined, basePfx: string): Record<string, string> {
   const p: Record<string, string> = {};
   if (!ports?.length) return p;
   ports.forEach((port, i) => {
-    const ppfx = `${basePfx}.Port.${i + 1}`;
+    const ppfx = `${basePfx}.Port.${String(i + 1)}`;
     p[`${ppfx}.Port`] = String(port.containerPort);
     if (port.protocol) p[`${ppfx}.Protocol`] = port.protocol;
     if (port.hostPort !== undefined) p[`${ppfx}.HostPort`] = String(port.hostPort);
@@ -414,40 +411,39 @@ function buildPortParams(ports: readonly ContainerPortConfig[] | undefined, base
 
 type ProbeScalarKey = Exclude<ScalarKeys<ProbeSpec>, 'httpGet' | 'exec' | 'tcpSocket'>;
 
-const PROBE_SCALARS: CodecTable<ProbeSpec, ProbeScalarKey> = {
+const PROBE_SCALARS = {
   initialDelaySeconds: {
     param: 'InitialDelaySeconds',
     responsePath: 'InitialDelaySeconds',
     encode: String,
-    decode: v => Number(v ?? 0),
+    decode: decNum,
   },
   timeoutSeconds: {
     param: 'TimeoutSeconds',
     responsePath: 'TimeoutSeconds',
     encode: String,
-    decode: v => Number(v ?? 0),
+    decode: decNum,
   },
   periodSeconds: {
     param: 'PeriodSeconds',
     responsePath: 'PeriodSeconds',
     encode: String,
-    decode: v => Number(v ?? 0),
+    decode: decNum,
   },
   successThreshold: {
     param: 'SuccessThreshold',
     responsePath: 'SuccessThreshold',
     encode: String,
-    decode: v => Number(v ?? 0),
+    decode: decNum,
   },
   failureThreshold: {
     param: 'FailureThreshold',
     responsePath: 'FailureThreshold',
     encode: String,
-    decode: v => Number(v ?? 0),
+    decode: decNum,
   },
-};
+} satisfies CodecTable<ProbeSpec, ProbeScalarKey>;
 
-/** Build a single probe's RPC params. probeType = 'LivenessProbe' | 'ReadinessProbe' | 'StartupProbe'. */
 function buildProbeParams(
   probe: ProbeSpec | undefined,
   pfx: string,
@@ -476,23 +472,19 @@ function buildProbeParams(
   return p;
 }
 
-/** Parse a single ECI probe item from response. Uses mutable accumulator then casts to readonly. */
 export function parseProbe(raw: EciProbeItem | undefined): ProbeSpec | undefined {
   if (!raw) return undefined;
-  const spec: Record<string, unknown> = {};
-  if (raw.InitialDelaySeconds !== undefined) spec.initialDelaySeconds = raw.InitialDelaySeconds;
-  if (raw.PeriodSeconds !== undefined) spec.periodSeconds = raw.PeriodSeconds;
-  if (raw.TimeoutSeconds !== undefined) spec.timeoutSeconds = raw.TimeoutSeconds;
-  if (raw.FailureThreshold !== undefined) spec.failureThreshold = raw.FailureThreshold;
-  if (raw.SuccessThreshold !== undefined) spec.successThreshold = raw.SuccessThreshold;
-  if (raw.TcpSocket?.Port !== undefined) spec.tcpSocket = { port: raw.TcpSocket.Port };
-  if (raw.HttpGet) {
-    const hg: Record<string, unknown> = { path: raw.HttpGet.Path ?? '/', port: raw.HttpGet.Port ?? 80 };
-    if (raw.HttpGet.Scheme) hg.scheme = raw.HttpGet.Scheme;
-    spec.httpGet = hg;
-  }
-  if (raw.Exec?.Commands?.length) spec.exec = { command: raw.Exec.Commands };
-  return Object.keys(spec).length > 0 ? (spec) : undefined;
+  const result: ProbeSpec = {
+    ...(raw.InitialDelaySeconds !== undefined ? { initialDelaySeconds: raw.InitialDelaySeconds } : {}),
+    ...(raw.PeriodSeconds !== undefined ? { periodSeconds: raw.PeriodSeconds } : {}),
+    ...(raw.TimeoutSeconds !== undefined ? { timeoutSeconds: raw.TimeoutSeconds } : {}),
+    ...(raw.FailureThreshold !== undefined ? { failureThreshold: raw.FailureThreshold } : {}),
+    ...(raw.SuccessThreshold !== undefined ? { successThreshold: raw.SuccessThreshold } : {}),
+    ...(raw.TcpSocket?.Port !== undefined ? { tcpSocket: { port: raw.TcpSocket.Port } } : {}),
+    ...(raw.HttpGet ? { httpGet: { path: raw.HttpGet.Path ?? '/', port: raw.HttpGet.Port ?? 80, ...(raw.HttpGet.Scheme ? { scheme: raw.HttpGet.Scheme } : {}) } } : {}),
+    ...(raw.Exec?.Commands?.length ? { exec: { command: raw.Exec.Commands } } : {}),
+  };
+  return Object.keys(result).length > 0 ? result : undefined;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -501,82 +493,81 @@ export function parseProbe(raw: EciProbeItem | undefined): ProbeSpec | undefined
 
 type VolumeScalarKey = ScalarKeys<VolumeConfigInput>;
 
-const VOLUME_SCALARS: CodecTable<VolumeConfigInput, VolumeScalarKey> = {
+const VOLUME_SCALARS = {
   id: {
     param: 'Name',
     responsePath: 'Name',
     encode: v => v,
-    decode: v => String(v ?? ''),
+    decode: decStr,
   },
   type: {
     param: 'Type',
     responsePath: 'Type',
     encode: v => v,
-    decode: v => String(v ?? ''),
+    decode: decStr,
   },
-};
-// NOTE: options is excluded from VolumeScalarKey by ScalarKeys<> derivation
-// (Record<string, unknown> is not a scalar).  Handled in buildVolumeCompound().
+} satisfies CodecTable<VolumeConfigInput, VolumeScalarKey>;
 
-/** Volume compound builder — dispatches options by type. */
+function strVal(val: unknown): string {
+  return z.string().parse(val);
+}
+
 function buildVolumeCompound(v: VolumeConfigInput, pfx: string): Record<string, string> {
   const p: Record<string, string> = {};
   const opts = (v.options ?? {});
 
   if (opts.server) {
-    // NFS volume
-    p[`${pfx}.NFSVolume.Server`] = String(opts.server);
-    p[`${pfx}.NFSVolume.Path`] = String(opts.path ?? '');
+    p[`${pfx}.NFSVolume.Server`] = strVal(opts.server);
+    p[`${pfx}.NFSVolume.Path`] = strVal(opts.path ?? '');
     if (opts.readOnly) p[`${pfx}.NFSVolume.ReadOnly`] = 'true';
   }
   if (opts.bucket) {
-    // OSS volume (S3-compatible)
     p[`${pfx}.Type`] = 'OSSVolume';
-    p[`${pfx}.OSSVolume.Bucket`] = String(opts.bucket);
-    if (opts.path) p[`${pfx}.OSSVolume.Path`] = String(opts.path);
+    p[`${pfx}.OSSVolume.Bucket`] = strVal(opts.bucket);
+    if (opts.path) p[`${pfx}.OSSVolume.Path`] = strVal(opts.path);
     if (opts.readOnly) p[`${pfx}.OSSVolume.ReadOnly`] = 'true';
-    if (opts.endpoint) p[`${pfx}.OSSVolume.Endpoint`] = String(opts.endpoint);
+    if (opts.endpoint) p[`${pfx}.OSSVolume.Endpoint`] = strVal(opts.endpoint);
   }
   if (opts.diskId) {
-    // Cloud disk (云盘)
-    p[`${pfx}.DiskVolume.DiskId`] = String(opts.diskId);
-    p[`${pfx}.DiskVolume.FsType`] = String(opts.fsType ?? 'ext4');
-    if (opts.sizeGiB !== undefined) p[`${pfx}.DiskVolume.DiskSize`] = String(opts.sizeGiB);
-    if (opts.diskCategory) p[`${pfx}.DiskVolume.DiskCategory`] = String(opts.diskCategory);
+    p[`${pfx}.DiskVolume.DiskId`] = strVal(opts.diskId);
+    p[`${pfx}.DiskVolume.FsType`] = strVal(opts.fsType ?? 'ext4');
+    if (opts.sizeGiB !== undefined) p[`${pfx}.DiskVolume.DiskSize`] = String(z.number().parse(opts.sizeGiB));
+    if (opts.diskCategory) p[`${pfx}.DiskVolume.DiskCategory`] = strVal(opts.diskCategory);
     if (opts.readOnly) p[`${pfx}.DiskVolume.ReadOnly`] = 'true';
     if (opts.deleteWithInstance) p[`${pfx}.DiskVolume.DeleteWithInstance`] = 'true';
   }
   if (v.type === 'ConfigMapVolume' || opts.configMapName) {
-    const name = String(opts.configMapName ?? opts.name ?? '');
-    const items = (opts.items as { key: string; path: string; mode?: number }[] | undefined) ?? [];
+    const name = strVal(opts.configMapName ?? opts.name ?? '');
+    const itemsSchema = z.array(z.object({ key: z.string(), path: z.string(), mode: z.number().optional() })).optional();
+    const items = itemsSchema.parse(opts.items) ?? [];
     p[`${pfx}.ConfigMapVolume.Name`] = name;
     items.forEach((item, j) => {
-      p[`${pfx}.ConfigMapVolume.Items.${j + 1}.Key`] = item.key;
-      p[`${pfx}.ConfigMapVolume.Items.${j + 1}.Path`] = item.path;
-      if (item.mode !== undefined) p[`${pfx}.ConfigMapVolume.Items.${j + 1}.Mode`] = String(item.mode);
+      p[`${pfx}.ConfigMapVolume.Items.${String(j + 1)}.Key`] = item.key;
+      p[`${pfx}.ConfigMapVolume.Items.${String(j + 1)}.Path`] = item.path;
+      if (item.mode !== undefined) p[`${pfx}.ConfigMapVolume.Items.${String(j + 1)}.Mode`] = String(item.mode);
     });
   }
   if (v.type === 'SecretVolume' || opts.secretName) {
-    const name = String(opts.secretName ?? opts.name ?? '');
-    const items = (opts.items as { key: string; path: string; mode?: number }[] | undefined) ?? [];
+    const name = strVal(opts.secretName ?? opts.name ?? '');
+    const itemsSchema = z.array(z.object({ key: z.string(), path: z.string(), mode: z.number().optional() })).optional();
+    const items = itemsSchema.parse(opts.items) ?? [];
     p[`${pfx}.SecretVolume.SecretName`] = name;
     items.forEach((item, j) => {
-      p[`${pfx}.SecretVolume.Items.${j + 1}.Key`] = item.key;
-      p[`${pfx}.SecretVolume.Items.${j + 1}.Path`] = item.path;
-      if (item.mode !== undefined) p[`${pfx}.SecretVolume.Items.${j + 1}.Mode`] = String(item.mode);
+      p[`${pfx}.SecretVolume.Items.${String(j + 1)}.Key`] = item.key;
+      p[`${pfx}.SecretVolume.Items.${String(j + 1)}.Path`] = item.path;
+      if (item.mode !== undefined) p[`${pfx}.SecretVolume.Items.${String(j + 1)}.Mode`] = String(item.mode);
     });
   }
   return p;
 }
 
-/** Parse volumes from ECI response. */
 function parseVolumes(vols: EciVolumeItem[] | undefined): VolumeRuntimeInfo[] {
   if (!vols?.length) return [];
   return vols.map(v => ({
     name: v.Name ?? '',
     type: v.Type ?? '',
     ...(v.NFSVolume ? {
-      nfs: { server: v.NFSVolume.Server ?? '', path: v.NFSVolume.Path ?? '', readOnly: !!v.NFSVolume.ReadOnly },
+      nfs: { server: v.NFSVolume.Server ?? '', path: v.NFSVolume.Path ?? '', readOnly: v.NFSVolume.ReadOnly === true },
     } : {}),
   }));
 }
@@ -589,8 +580,8 @@ function buildTagParams(input: CreateContainerGroupInput): Record<string, string
   const p: Record<string, string> = {};
   if (!input.tags?.length) return p;
   input.tags.forEach((t, i) => {
-    p[`Tag.${i + 1}.Key`] = t.key;
-    p[`Tag.${i + 1}.Value`] = t.value;
+    p[`Tag.${String(i + 1)}.Key`] = t.key;
+    p[`Tag.${String(i + 1)}.Value`] = t.value;
   });
   return p;
 }
@@ -604,84 +595,66 @@ function parseTags(tags: EciTagItem[] | undefined): { key: string; value: string
 // Write engine: CreateContainerGroupInput → flat RPC params
 // ═══════════════════════════════════════════════════════════════
 
-/**
- * Build the full flat parameter map for Alibaba ECI CreateContainerGroup.
- * Called by `create()` and `update()` (with `partial` flag).
- */
 export function buildCreateParams(
   input: CreateContainerGroupInput,
   opts?: { partial?: boolean },
 ): Record<string, string> {
   const partial = opts?.partial ?? false;
-  const p: Record<string, string> = {};
+  let p: Record<string, string> = {};
 
-  // ── Region (always set except partial without region) ──
-  if (!partial || input.region != null) {
+  if (!partial) {
     p.RegionId = String(input.region);
   }
 
-  // ── Top-level scalars ──
-  // Object.entries loses key-codec correlation (TS limitation).
-  // Cast is safe: CodecTable<> verified field-type match at definition.
-  for (const [key, codec] of Object.entries(TOP_SCALARS as Record<string, EciFieldCodec<any>>)) {
-    // Skip GPU fields — handled as compound below
-    if (key === 'gpu' || key === 'gpuType') continue;
-    const val = input[key as TopScalarKey];
-    if (val !== undefined && val !== null) {
-      p[codec.param] = codec.encode(val);
-    }
-  }
+  // ── Top-level scalars (explicit per-field — type-safe, no casts) ──
+  p[TOP_SCALARS.name.param] = TOP_SCALARS.name.encode(input.name);
+  if (input.zoneId !== undefined) p[TOP_SCALARS.zoneId.param] = TOP_SCALARS.zoneId.encode(input.zoneId);
+  p[TOP_SCALARS.cpu.param] = TOP_SCALARS.cpu.encode(input.cpu);
+  p[TOP_SCALARS.memory.param] = TOP_SCALARS.memory.encode(input.memory);
+  p[TOP_SCALARS.restartPolicy.param] = TOP_SCALARS.restartPolicy.encode(input.restartPolicy);
 
-  // ── GPU (compound) ──
   if (!partial || input.gpu !== undefined) {
-    Object.assign(p, buildGpuParam(input));
+    p = { ...p, ...buildGpuParam(input) };
   }
 
   // ── Containers ──
-  if (input.containers?.length) {
+  if (input.containers.length > 0) {
     input.containers.forEach((c, i) => {
-      const cpfx = `Container.${i + 1}`;
+      const cpfx = `Container.${String(i + 1)}`;
 
-      // Container scalars — see note above on Object.entries cast
-      for (const [key, codec] of Object.entries(CONTAINER_SCALARS as Record<string, EciFieldCodec<any>>)) {
-        const val = c[key as ContainerScalarKey];
-        if (val !== undefined && val !== null) {
-          p[`${cpfx}.${codec.param}`] = codec.encode(val);
-        }
-      }
+      // Container scalars — explicit per-field, type-safe no casts
+      p[`${cpfx}.${CONTAINER_SCALARS.name.param}`] = CONTAINER_SCALARS.name.encode(c.name);
+      p[`${cpfx}.${CONTAINER_SCALARS.image.param}`] = CONTAINER_SCALARS.image.encode(c.image);
+      if (c.imagePullPolicy !== undefined) p[`${cpfx}.${CONTAINER_SCALARS.imagePullPolicy.param}`] = CONTAINER_SCALARS.imagePullPolicy.encode(c.imagePullPolicy);
+      if (c.networkMode !== undefined) p[`${cpfx}.${CONTAINER_SCALARS.networkMode.param}`] = CONTAINER_SCALARS.networkMode.encode(c.networkMode);
+      if (c.tty !== undefined) p[`${cpfx}.${CONTAINER_SCALARS.tty.param}`] = CONTAINER_SCALARS.tty.encode(c.tty);
+      if (c.stdin !== undefined) p[`${cpfx}.${CONTAINER_SCALARS.stdin.param}`] = CONTAINER_SCALARS.stdin.encode(c.stdin);
 
-      // command / args (compound: array → space-joined string)
       if (c.command?.length) p[`${cpfx}.Command`] = c.command.join(' ');
       if (c.args?.length) p[`${cpfx}.Args`] = c.args.join(' ');
 
-      // resources (compound)
-      Object.assign(p, buildContainerCompound(c, cpfx));
+      p = { ...p, ...buildContainerCompound(c, cpfx) };
+      p = { ...p, ...buildEnvParams(c.env, cpfx) };
+      p = { ...p, ...buildPortParams(c.ports, cpfx) };
 
-      // env (sub-array)
-      Object.assign(p, buildEnvParams(c.env, cpfx));
-
-      // ports (sub-array)
-      Object.assign(p, buildPortParams(c.ports, cpfx));
-
-      // probes (liveness / readiness / startup)
-      Object.assign(p, buildProbeParams(c.livenessProbe, cpfx, 'LivenessProbe'));
-      Object.assign(p, buildProbeParams(c.readinessProbe, cpfx, 'ReadinessProbe'));
-      Object.assign(p, buildProbeParams(c.startupProbe, cpfx, 'StartupProbe'));
+      p = { ...p, ...buildProbeParams(c.livenessProbe, cpfx, 'LivenessProbe') };
+      p = { ...p, ...buildProbeParams(c.readinessProbe, cpfx, 'ReadinessProbe') };
+      p = { ...p, ...buildProbeParams(c.startupProbe, cpfx, 'StartupProbe') };
     });
   }
 
   // ── Volumes ──
   if (input.volumes?.length) {
     input.volumes.forEach((v, i) => {
-      const vpfx = `Volume.${i + 1}`;
+      const vpfx = `Volume.${String(i + 1)}`;
       p[`${vpfx}.Name`] = v.id;
       p[`${vpfx}.Type`] = v.type;
-      Object.assign(p, buildVolumeCompound(v, vpfx));
+      p = { ...p, ...buildVolumeCompound(v, vpfx) };
     });
   }
 
   // ── Network ──
-  if (!partial || input.network) {
+  if (!partial) {
     p.SecurityGroupId = input.network.securityGroupId ?? '';
     if (input.network.subnetIds?.length) {
       p.VSwitchId = input.network.subnetIds.join(',');
@@ -690,20 +663,18 @@ export function buildCreateParams(
     }
   }
 
-  // ── Image cache (hardcoded default) ──
   if (!partial) {
     p.AutoMatchImageCache = 'true';
   }
 
-  // ── Tags ──
   if (!partial || input.tags) {
-    Object.assign(p, buildTagParams(input));
+    p = { ...p, ...buildTagParams(input) };
   }
 
   // ── Extension fields (providerOverrides) ──
   if (input.providerOverrides) {
     const raw = input.providerOverrides;
-    const flat = (raw.alibaba as Record<string, unknown> | undefined) ?? raw;
+    const flat = z.record(z.string(), z.unknown()).optional().parse(raw.alibaba) ?? raw;
     const ext = applyExtensionOverrides('alibaba', flat);
     for (const [k, v] of Object.entries(ext)) {
       p[k] = v;
@@ -717,7 +688,6 @@ export function buildCreateParams(
 // Read engine: ECI DescribeContainerGroups response → ContainerGroupRuntime
 // ═══════════════════════════════════════════════════════════════
 
-/** Map Alibaba ECS GPU instance type prefix to human-readable GPU model. */
 function gpuModelFromInstanceType(instanceType: string | undefined): string | undefined {
   if (!instanceType) return undefined;
   const prefix = instanceType.split('.')[0] ?? '';
@@ -736,7 +706,7 @@ function gpuModelFromInstanceType(instanceType: string | undefined): string | un
 function parseAssociatedResources(raw: EciAssociatedResource[] | undefined): AssociatedResource[] {
   if (!raw?.length) return [];
   return raw.map(r => ({
-    type: (r.ResourceType === 'EIP' ? 'eip' : r.ResourceType?.toLowerCase()) as AssociatedResource['type'],
+    type: 'eip',
     resourceId: r.ResourceId ?? '',
     ...(r.Ip !== undefined ? { ip: r.Ip } : {}),
     ...(r.Bandwidth !== undefined ? { bandwidth: r.Bandwidth } : {}),
@@ -756,26 +726,32 @@ function parseEvents(raw: EciEventItem[] | undefined): ContainerGroupRuntimeEven
   }));
 }
 
-/**
- * Parse Alibaba DescribeContainerGroups response into provider-agnostic runtime.
- * Uses the same codec tables that drive create() — only the responsePath is used.
- */
+const containerGroupStatusSchema = z.enum([
+  'Pending', 'Scheduling', 'ScheduleFailed', 'Running',
+  'Succeeded', 'Failed', 'Restarting', 'Updating', 'Terminating',
+  'Expiring', 'Expired', 'Deleted',
+]);
+
+const ociContainerStatusSchema = z.enum([
+  'creating', 'created', 'running', 'stopped', 'paused', 'error', 'deleted',
+]);
+
 export function parseContainerGroup(item: EciDescribeResponse): ContainerGroupRuntime {
   const containers: EciContainerItem[] = item.Containers ?? [];
   const zoneId = item.ZoneId ? createZoneId(item.ZoneId, 'alibaba') : undefined;
-  const gpu = item.Gpu ? Number(item.Gpu) : undefined;
+  const gpu = item.Gpu ? z.coerce.number().parse(item.Gpu) : undefined;
   const gpuModel = gpuModelFromInstanceType(item.InstanceType);
-  const ephemeral = item.EphemeralStorage ? Number(item.EphemeralStorage) : undefined;
+  const ephemeral = item.EphemeralStorage ? z.number().parse(item.EphemeralStorage) : undefined;
 
   return {
     providerId: item.ContainerGroupId ?? '',
     name: item.ContainerGroupName ?? '',
-    status: (item.Status ?? 'Pending') as ContainerGroupStatus,
+    status: containerGroupStatusSchema.parse(item.Status ?? 'Pending'),
     regionId: createRegionId(item.RegionId ?? 'cn-hangzhou'),
     cpu: item.Cpu ?? 0,
     memory: item.Memory ?? 0,
     network: {
-      ...(item.IntranetIp ?? item.PrivateIp ? { privateIp: (item.IntranetIp ?? item.PrivateIp)! } : {}),
+      ...(item.IntranetIp ?? item.PrivateIp ? { privateIp: item.IntranetIp ?? item.PrivateIp ?? '' } : {}),
       ...(item.VpcId ? { vpcId: item.VpcId } : {}),
       ...(item.VSwitchId ? { subnetId: item.VSwitchId } : {}),
       ...(item.SecurityGroupId ? { securityGroupId: item.SecurityGroupId } : {}),
@@ -784,34 +760,31 @@ export function parseContainerGroup(item: EciDescribeResponse): ContainerGroupRu
     associatedResources: parseAssociatedResources(item.AssociatedResources),
     restartPolicy: item.RestartPolicy ?? 'Always',
     containers: containers.map(c => ({
-      id: createContainerId(c.ContainerId || 'ctr-unknown'),
+      id: createContainerId(c.ContainerId ?? 'ctr-unknown'),
       name: c.Name ?? '',
       image: c.Image ?? '',
       args: c.Args ?? [],
       env: parseEnv(c.EnvironmentVars),
       workingDir: c.WorkingDir ?? '',
-      status: (c.Status?.toLowerCase() ?? 'creating') as OciContainerStatus,
+      status: ociContainerStatusSchema.parse(c.Status?.toLowerCase() ?? 'creating'),
       alive: c.Status === 'Running',
       createdAt: c.CreationTime ?? '',
-      ...(c.StartedAt ? { startedAt: c.StartedAt } : {}),
-      ...(c.FinishedAt ? { finishedAt: c.FinishedAt } : {}),
-      ...(c.ExitCode !== undefined ? { exitCode: c.ExitCode } : {}),
+      startedAt: c.StartedAt ?? undefined,
+      finishedAt: c.FinishedAt ?? undefined,
+      exitCode: c.ExitCode ?? undefined,
       labels: {},
       annotations: {},
       mounts: [],
-      ...(c.Cpu || c.Memory || c.Gpu ? {
-        resources: {
-          cpu: c.Cpu ?? 0,
-          memory: c.Memory ?? 0,
-          ...(c.Gpu ? { gpu: Number(c.Gpu) } : {}),
-        },
-      } : {}),
+      resources: (c.Cpu || c.Memory || c.Gpu) ? {
+        cpu: c.Cpu ?? 0,
+        memory: c.Memory ?? 0,
+        ...(c.Gpu ? { gpu: z.coerce.number().parse(c.Gpu) } : {}),
+      } : undefined,
       health: { status: c.Status === 'Running' ? 'healthy' : 'starting' },
     })),
     volumes: parseVolumes(item.Volumes),
     events: parseEvents(item.Events),
     tags: parseTags(item.Tags),
-    // Optional fields via spread (exactOptionalPropertyTypes)
     ...(zoneId ? { zoneId } : {}),
     ...(item.CreationTime ? { creationTime: item.CreationTime } : {}),
     ...(item.ExpiredTime ? { expiredTime: item.ExpiredTime } : {}),
@@ -827,19 +800,7 @@ export function parseContainerGroup(item: EciDescribeResponse): ContainerGroupRu
 // ═══════════════════════════════════════════════════════════════
 // Compile-time + init-time codec integrity
 // ═══════════════════════════════════════════════════════════════
-// Compile-time (3 layers):
-//   1. ScalarKeys<T>         — auto-derives field union from interface
-//   2. Record<ScalarKeys, …> — no missing keys, no extra keys
-//   3. CodecTable<Interface> — each codec's T must match field type
-//
-// Init-time: validateCodecIntegrity() verifies every codec entry has
-// actual encode/decode functions.  Catches `as any` bypasses and
-// malformed codec objects that compile-time can't detect.
 
-/** Runtime validation: ensure every codec entry has actual encode/decode
- *  functions.  Key-set correctness is guaranteed at compile time by
- *  Record<ScalarKeys, ...> — this check only guards against runtime
- *  corruption and `as any` type-system bypasses. */
 export function validateCodecIntegrity(): { ok: boolean; broken: string[] } {
   const tables: Record<string, Record<string, unknown>> = {
     TOP_SCALARS,
@@ -849,19 +810,18 @@ export function validateCodecIntegrity(): { ok: boolean; broken: string[] } {
     VOLUME_SCALARS,
   };
 
+  const codecSchema = z.object({ encode: z.function(), decode: z.function(), param: z.string() });
+
   const broken: string[] = [];
   for (const [name, table] of Object.entries(tables)) {
     for (const [key, codec] of Object.entries(table)) {
-      const c = codec as Record<string, unknown> | undefined;
-      if (!c || typeof c.encode !== 'function') {
-        broken.push(`${name}.${key}: encode is not a function`);
+      if (typeof codec !== 'object' || codec === null) {
+        broken.push(`${name}.${key}: not an object`);
+        continue;
       }
-      if (!c || typeof c.decode !== 'function') {
-        broken.push(`${name}.${key}: decode is not a function`);
-      }
-      if (c && typeof c.param !== 'string') {
-        broken.push(`${name}.${key}: param is not a string`);
-      }
+      try { codecSchema.pick({ encode: true }).parse(codec); } catch { broken.push(`${name}.${key}: encode is not a function`); }
+      try { codecSchema.pick({ decode: true }).parse(codec); } catch { broken.push(`${name}.${key}: decode is not a function`); }
+      try { codecSchema.pick({ param: true }).parse(codec); } catch { broken.push(`${name}.${key}: param is not a string`); }
     }
   }
 
@@ -871,7 +831,6 @@ export function validateCodecIntegrity(): { ok: boolean; broken: string[] } {
   return { ok: broken.length === 0, broken };
 }
 
-// Run at module load
 const _INTEGRITY = validateCodecIntegrity();
 void _INTEGRITY;
 

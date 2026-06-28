@@ -11,16 +11,9 @@
 // OCI Runtime containers (same object, different abstraction layers).
 
 /** Real-time status from the cloud provider. */
-export type ContainerGroupStatus =
-  | 'Pending'
-  | 'Scheduling'
-  | 'ScheduleFailed'
-  | 'Running'
-  | 'Succeeded'
-  | 'Failed'
-  | 'Expiring'
-  | 'Expired'
-  | 'Restarting';
+import { ContainerGroupState } from './container-lifecycle.ts';
+/** @deprecated Use ContainerGroupState enum directly. Kept as alias for migration. */
+export type ContainerGroupStatus = ContainerGroupState;
 
 // ─── OCI Container types (core) ───
 
@@ -205,7 +198,7 @@ export interface ProbeSpec {
 export interface ContainerGroupRuntime {
   readonly providerId: string;
   readonly name: string;
-  readonly status: ContainerGroupStatus;
+  readonly status: ContainerGroupState;
   readonly regionId: RegionId;
   readonly zoneId?: ZoneId | undefined;
   readonly instanceId?: InstanceId | undefined;

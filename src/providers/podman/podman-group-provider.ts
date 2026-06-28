@@ -98,6 +98,37 @@ export class PodmanContainerGroupProvider implements IContainerGroupProvider {
 
   // ─── IContainerGroupProvider ───
 
+  async createPod(spec: import('../../core/pod/types.ts').PodSpec): Promise<{ providerId: string }> {
+    // Podman codec not yet implemented — convert PodSpec → CreateContainerGroupInput as bridge
+    const input: CreateContainerGroupInput = {
+      name: spec.metadata.name,
+      region: (spec.providerOverrides?.['region'] as string | undefined) ?? 'local' as any,
+      cpu: spec.spec.containers.reduce((s, c) => s + (c.resources?.limits?.cpu ?? 0), 0) || 1,
+      memory: spec.spec.containers.reduce((s, c) => s + (c.resources?.limits?.memory ?? 0), 0) || 512,
+      restartPolicy: spec.spec.restartPolicy,
+      containers: spec.spec.containers.map(c => ({
+        name: c.name,
+        image: c.image,
+        command: c.command,
+        args: c.args,
+        env: c.env,
+        ports: c.ports,
+        volumeMounts: c.volumeMounts,
+        livenessProbe: c.livenessProbe,
+        readinessProbe: c.readinessProbe,
+        startupProbe: c.startupProbe,
+        imagePullPolicy: c.imagePullPolicy ?? undefined,
+        tty: c.tty ?? undefined,
+        stdin: c.stdin ?? undefined,
+        networkMode: c.networkMode ?? undefined,
+        ...(c.resources?.limits ? { resources: { limits: { cpu: c.resources.limits.cpu, memory: c.resources.limits.memory, ...(c.resources.limits.gpu !== undefined ? { gpu: c.resources.limits.gpu } : {}) } } } : {}),
+      })),
+      network: { allocatePublicIp: false },
+    };
+    return this.createGroup(input);
+  }
+
+  /** @deprecated Use createPod(PodSpec) instead. */
   async createGroup(input: CreateContainerGroupInput): Promise<{ providerId: string }> {
     const podName = input.name;
     const portMappings = this.#collectPortMappings(input);

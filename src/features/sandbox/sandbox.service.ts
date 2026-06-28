@@ -18,8 +18,6 @@ import type {
   SandboxId,
   Sandbox,
   CreateSandboxInput,
-  ContainerConfig,
-  NetworkInfo,
   ContainerRuntime,
   ContainerEvent,
 } from './types.ts';
@@ -37,6 +35,10 @@ import { createFacility, generateVersionId } from '../../core/brand.ts';
 import type { RegionId } from '../../core/region/types.ts';
 import { createRegionId } from '../../core/region/types.ts';
 import type { InstanceId } from '../../core/region/instance.ts';
+import { ContainerGroupState, toSandboxStatus } from '../../core/provider/container-lifecycle.ts';
+import { PodService } from '../../core/pod/service.ts';
+import { createPodId } from '../../core/pod/types.ts';
+import type { PodSpec } from '../../core/pod/types.ts';
 import { AppError } from '../../core/types.ts';
 import { ProviderResolutionError, ProviderOperationError } from '../../core/provider/errors.ts';
 import type { EventBus } from '../../core/event-bus/bus.ts';
@@ -64,11 +66,11 @@ export class SandboxService implements ISandboxService {
     private readonly providerRegistry?: IProviderRegistry | undefined,
     private readonly eventBus?: EventBus,
     private readonly audit?: IAuditWriter,
-    /** Optional: resolve a VirtualNetwork by ID to inherit security settings. */
     private readonly resolveNetwork?: NetworkResolverFn | undefined,
-    /** Optional: resolve ComputeInstance by ID to get endpoint/capabilities. */
     private readonly instanceService?: InstanceService | undefined,
     private readonly queueProducer?: IMessageQueue,
+    /** Optional: PodService for unified lifecycle. When set, provision delegates to PodService. */
+    private readonly podService?: PodService,
   ) {
     this.store = new SandboxStore(atomic);
   }
@@ -585,29 +587,23 @@ export class SandboxService implements ISandboxService {
       throw new AppError(404, 'RUNTIME_NOT_FOUND', `No runtime found for sandbox ${id} from provider`);
     }
 
-    const mapped = mapProviderStatus(runtime.status);
-    let finalStatus = mapped && mapped !== sandbox.status && isValidTransition(sandbox.status, mapped)
+    const mapped = toSandboxStatus(runtime.status);
+    let finalStatus = mapped !== sandbox.status && isValidTransition(sandbox.status, mapped)
       ? mapped
       : sandbox.status;
 
-    // asyncInit providers (ECI): Scheduling → Running when provider confirms Running
-    if (sandbox.status === SandboxStatus.Scheduling && runtime.status === 'Running') {
-      finalStatus = SandboxStatus.Running;
+    // Transient → Running convergence (provider confirms Running before SandboxStatus caught up)
+    if (runtime.status === ContainerGroupState.Running) {
+      if (sandbox.status === SandboxStatus.Scheduling || sandbox.status === SandboxStatus.Pending) {
+        finalStatus = SandboxStatus.Running;
+      } else if (sandbox.status === SandboxStatus.Restarting || sandbox.status === SandboxStatus.Updating) {
+        finalStatus = SandboxStatus.Running;
+      }
     }
 
-    // Restarting → Running when restart completes
-    if (sandbox.status === SandboxStatus.Restarting && runtime.status === 'Running') {
-      finalStatus = SandboxStatus.Running;
-    }
-
-    // Updating → Running when update completes (both T13 success and T14 rollback)
-    if (sandbox.status === SandboxStatus.Updating && runtime.status === 'Running') {
-      finalStatus = SandboxStatus.Running;
-    }
-
-    // Pending → Running for async init completion after restart
-    if (sandbox.status === SandboxStatus.Pending && runtime.status === 'Running') {
-      finalStatus = SandboxStatus.Running;
+    // Terminating → Deleted when provider confirms cleanup (T15)
+    if (sandbox.status === SandboxStatus.Terminating && runtime.status === ContainerGroupState.Deleted) {
+      finalStatus = SandboxStatus.Deleted;
     }
 
     // Persist clusterId from runtime if provider reported it back
@@ -930,21 +926,6 @@ function toPartialContainerGroupInput(
     ...(input.providerOverrides ? { providerOverrides: input.providerOverrides } : {}),
     ...(input.zoneId ? { zoneId: input.zoneId } : {}),
   };
-}
-
-function mapProviderStatus(providerStatus: ContainerGroupRuntime['status']): SandboxStatus | null {
-  switch (providerStatus) {
-    case 'Running': return null;
-    case 'Failed':
-    case 'ScheduleFailed': return SandboxStatus.Failed;
-    case 'Expired':
-    case 'Expiring': return SandboxStatus.Expired;
-    case 'Succeeded': return SandboxStatus.Succeeded;
-    case 'Restarting': return null; // transient — resolved by syncRuntime special cases
-    case 'Pending':
-    case 'Scheduling':
-    default: return null;
-  }
 }
 
 /** 将云厂商错误翻译为用户可读的 AppError */

@@ -363,13 +363,16 @@ export interface IProviderRegistry {
 // because the data shape is identical. The semantic difference is in how
 // the provider groups the containers (pod vs. container group vs. individual).
 
+import type { PodSpec } from '../pod/types.ts';
+
 export interface IContainerGroupProvider {
   /**
-   * Create a container group (pod) from a multi-container spec.
-   * All containers in the input are included in the group/pod.
-   * - Podman: creates a Podman pod with shared net/uts/ipc namespaces.
-   * - ECI: creates an Alibaba ContainerGroup (natively supports multi-container).
+   * Create a pod from the K8s-aligned PodSpec (v3, preferred).
+   * Provider selects the appropriate codec internally.
    */
+  createPod(spec: PodSpec): Promise<{ providerId: string }>;
+
+  /** @deprecated Use createPod(PodSpec) instead. */
   createGroup(input: CreateContainerGroupInput): Promise<{ providerId: string }>;
 
   /**

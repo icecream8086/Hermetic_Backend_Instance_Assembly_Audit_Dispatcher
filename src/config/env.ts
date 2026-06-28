@@ -1,4 +1,4 @@
-import type { AppConfig } from './types.ts';
+import type { Credential } from './types.ts';
 import type { StorageConfig } from '../core/store/config.ts';
 import type { SchedulerBackendType } from '../core/scheduler/interfaces.ts';
 import { AuditTier } from '../core/audit/types.ts';
@@ -6,6 +6,31 @@ import { createRegionId } from '../core/region/types.ts';
 import { AppConfigSchema } from './schema.ts';
 
 export type { AppConfig } from './types.ts';
+
+/** Parsed shape of an account entry from ALIBABA_ACCOUNTS / S3_ACCOUNTS JSON env var. */
+interface RawAccount {
+  name?: string;
+  ak?: string;
+  sk?: string;
+  accessKeyId?: string;
+  accessKeySecret?: string;
+  secretAccessKey?: string;
+  region?: string;
+  endpoint?: string;
+  bucket?: string;
+  extra?: Record<string, unknown>;
+  registryCredentials?: Record<string, unknown>;
+}
+
+/**
+ * Narrow a value from `Record<string, unknown>` to an optional shape.
+ * Used for config overrides — all assertions live here so callers are clean.
+ */
+// eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters
+function narrowOverride<T>(val: unknown): T | undefined {
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+  return val as T | undefined;
+}
 
 /**
  * Load configuration from environment variables with strict validation.
@@ -15,11 +40,11 @@ export type { AppConfig } from './types.ts';
  * the Zod schema at the end. Any missing required field or invalid
  * value → clear error message at startup (not a silent null-pointer later).
  */
-export function loadConfig(overrides?: Partial<AppConfig>): AppConfig {
+export function loadConfig(overrides?: Record<string, unknown>): ReturnType<typeof AppConfigSchema.parse> {
   const envAuditTier = process.env.LOG_AUDIT_TIER;
   const auditTier = envAuditTier === AuditTier.AUDITABLE ? AuditTier.AUDITABLE : AuditTier.BEST_EFFORT;
 
-  const logConfig = overrides?.log ?? {
+  const logConfig = narrowOverride<{ auditTier: string; defaultFacility: string; storage: { backend: string } }>(overrides?.log) ?? {
     auditTier,
     defaultFacility: 'app',
     storage: {
@@ -27,10 +52,18 @@ export function loadConfig(overrides?: Partial<AppConfig>): AppConfig {
     },
   };
 
-  const storageConfig: StorageConfig = overrides?.storage ?? {
-    stateBackend: (process.env.STATE_BACKEND as StorageConfig['stateBackend']) ?? 'file',
-    queryBackend: (process.env.QUERY_BACKEND as StorageConfig['queryBackend']) ?? 'none',
-    blobBackend: (process.env.BLOB_BACKEND as StorageConfig['blobBackend']) ?? 'none',
+  // ── Env var → string-literal-union casts are validated by Zod schema below ──
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+  const stateBackend = (process.env.STATE_BACKEND ?? 'file') as StorageConfig['stateBackend'];
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+  const queryBackend = (process.env.QUERY_BACKEND ?? 'none') as StorageConfig['queryBackend'];
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+  const blobBackend = (process.env.BLOB_BACKEND ?? 'none') as StorageConfig['blobBackend'];
+
+  const storageConfig = narrowOverride<StorageConfig>(overrides?.storage) ?? {
+    stateBackend,
+    queryBackend,
+    blobBackend,
     connections: {
       filePath: process.env.STATE_FILE_PATH ?? '.data',
       kvNamespace: process.env.KV_NAMESPACE ?? 'KV_STORE',
@@ -40,13 +73,12 @@ export function loadConfig(overrides?: Partial<AppConfig>): AppConfig {
     },
   };
 
-  const providerContainer = (process.env.PROVIDER_CONTAINER as any) ?? 'stub';
-
-  function loadAccounts(): any[] {
+  function loadAccounts(): Credential[] {
     const json = process.env.ALIBABA_ACCOUNTS;
     if (json) {
       try {
-        const parsed: any[] = JSON.parse(json);
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const parsed: RawAccount[] = JSON.parse(json);
         return parsed.map(a => ({
           name: a.name ?? 'default',
           accessKeyId: a.ak ?? a.accessKeyId ?? '',
@@ -71,21 +103,22 @@ export function loadConfig(overrides?: Partial<AppConfig>): AppConfig {
     return [{ name: 'default', accessKeyId: '', accessKeySecret: '' }];
   }
 
-  const providerConfig = overrides?.provider ?? {
-    container: providerContainer,
+  const providerConfig = narrowOverride<Record<string, unknown>>(overrides?.provider) ?? {
+    container: process.env.PROVIDER_CONTAINER ?? 'stub',
     region: createRegionId(process.env.ALIBABA_REGION ?? 'cn-hangzhou'),
     accounts: loadAccounts(),
     defaultAccount: process.env.ALIBABA_DEFAULT_ACCOUNT ?? 'default',
     cfApiToken: process.env.CF_API_TOKEN,
-    dns: (process.env.PROVIDER_DNS as any) ?? 'stub',
-    metrics: (process.env.PROVIDER_METRICS as any) ?? 'stub',
+    dns: process.env.PROVIDER_DNS ?? 'stub',
+    metrics: process.env.PROVIDER_METRICS ?? 'stub',
   };
 
-  function loadS3Accounts(): any[] {
+  function loadS3Accounts(): Credential[] {
     const json = process.env.S3_ACCOUNTS;
     if (json) {
       try {
-        const parsed: any[] = JSON.parse(json);
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const parsed: RawAccount[] = JSON.parse(json);
         return parsed.map(a => ({
           name: a.name ?? 'default',
           accessKeyId: a.ak ?? a.accessKeyId ?? '',
@@ -111,16 +144,19 @@ export function loadConfig(overrides?: Partial<AppConfig>): AppConfig {
     return [{ name: 'default', accessKeyId: '', accessKeySecret: '' }];
   }
 
-  const s3Config = overrides?.s3 ?? {
-    backend: (process.env.S3_BACKEND as any) ?? 'none',
+  const s3Config = narrowOverride<Record<string, unknown>>(overrides?.s3) ?? {
+    backend: process.env.S3_BACKEND ?? 'none',
     region: process.env.S3_REGION ?? 'auto',
     endpoint: process.env.S3_ENDPOINT ?? process.env.MINIO_ENDPOINT ?? undefined,
     accounts: loadS3Accounts(),
     defaultAccount: process.env.S3_DEFAULT_ACCOUNT ?? 'default',
   };
 
-  const schedulerConfig = overrides?.scheduler ?? {
-    backend: (process.env.SCHEDULER_BACKEND as SchedulerBackendType) ?? 'worker',
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+  const schedulerBackend = (process.env.SCHEDULER_BACKEND ?? 'worker') as SchedulerBackendType;
+
+  const schedulerConfig = narrowOverride<Record<string, unknown>>(overrides?.scheduler) ?? {
+    backend: schedulerBackend,
     intervalMs: Number(process.env.SCHEDULER_INTERVAL_MS ?? 60000),
     batchSize: Number(process.env.SCHEDULER_BATCH_SIZE ?? 0),
     callbackUrl: process.env.WORKER_URL
@@ -132,7 +168,7 @@ export function loadConfig(overrides?: Partial<AppConfig>): AppConfig {
 
   const rateLimitEnabled = process.env.RATE_LIMIT_ENABLED;
   const rateLimitBypassIpsRaw = process.env.RATE_LIMIT_BYPASS_IPS;
-  const rateLimitBypassToken = process.env.RATE_LIMIT_BYPASS_TOKEN || undefined;
+  const rateLimitBypassToken = process.env.RATE_LIMIT_BYPASS_TOKEN ?? undefined;
 
   const assembled = {
     storage: storageConfig,
@@ -141,15 +177,15 @@ export function loadConfig(overrides?: Partial<AppConfig>): AppConfig {
     s3: s3Config,
     scheduler: schedulerConfig,
     audit: {
-      backend: (process.env.AUDIT_BACKEND as any) ?? (storageConfig.stateBackend === 'file' ? 'hybrid' : 'hybrid'),
+      backend: process.env.AUDIT_BACKEND ?? (storageConfig.stateBackend === 'file' ? 'hybrid' : 'hybrid'),
     },
     server: {
       port: Number(process.env.PORT ?? 3000),
-      ...overrides?.server,
+      ...narrowOverride<Record<string, unknown>>(overrides?.server),
     },
-    features: overrides?.features ?? {},
-    authz: overrides?.authz,
-    cors: overrides?.cors ?? { origins: corsOriginsRaw.split(',').map(s => s.trim()).filter(Boolean) },
+    features: narrowOverride<Record<string, boolean>>(overrides?.features) ?? {},
+    authz: narrowOverride<{ enabled: boolean }>(overrides?.authz),
+    cors: narrowOverride<{ origins: string[] }>(overrides?.cors) ?? { origins: corsOriginsRaw.split(',').map(s => s.trim()).filter(Boolean) },
     rateLimit: {
       ...(rateLimitEnabled !== undefined ? { enabled: rateLimitEnabled !== 'false' } : {}),
       ...(rateLimitBypassIpsRaw !== undefined ? { bypassIps: rateLimitBypassIpsRaw.split(/[\s,]+/).map(s => s.trim()).filter(Boolean) } : {}),
@@ -157,7 +193,7 @@ export function loadConfig(overrides?: Partial<AppConfig>): AppConfig {
     },
   };
 
-  // ─── Validate against Zod schema ───
+  // ── Validate against Zod schema ──
   const result = AppConfigSchema.safeParse(assembled);
   if (!result.success) {
     const issues = result.error.issues
@@ -167,5 +203,5 @@ export function loadConfig(overrides?: Partial<AppConfig>): AppConfig {
     throw new Error('Configuration validation failed — check the errors above.');
   }
 
-  return result.data as AppConfig;
+  return result.data;
 }

@@ -21,7 +21,12 @@
     "tail": "wrangler tail --format pretty",
     "lint": "eslint src --ext .ts",
     "lint:fix": "eslint src --ext .ts --fix",
-    "reset": "node scripts/reset.mjs"
+    "reset": "node scripts/reset.mjs",
+    "map": "npm run map:deps && npm run map:calls && npm run map:class && npm run map:deadcode",
+    "map:deps": "npx madge --ts-config tsconfig.json --extensions ts --json --no-spinner --no-color src/index.ts > dependency-graph.json && npx tsx scripts/gen-module-metrics.ts",
+    "map:calls": "npx tsx scripts/callgraph.ts",
+    "map:class": "npx tsx scripts/metrics.ts",
+    "map:deadcode": "npx knip --no-exit-code"
   },
   "hbi-aad": {
     "features": {

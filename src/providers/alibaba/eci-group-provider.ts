@@ -1,14 +1,6 @@
 /**
- * Alibaba ECI container group provider — implements IContainerGroupProvider
- * via the ECI CreateContainerGroup API.
- *
- * ECI natively supports container groups — all containers in a group share
- * the same network namespace (infra is implicit). This provider maps
- * CreateContainerGroupInput directly to ECI's API parameters.
- *
- * Uses the existing AlibabaEciContainerProvider internally for the actual
- * API calls, since the single-container and multi-container paths are
- * identical in ECI.
+ * Alibaba ECI container group provider — implements IContainerGroupProvider.
+ * Uses AlibabaPodCodec (CEA) for v3 PodSpec, delegates to inner provider for legacy operations.
  */
 
 import type {
@@ -17,43 +9,63 @@ import type {
   DescribeContainerGroupsResult,
 } from '../../core/provider/interfaces.ts';
 import type { CreateContainerGroupInput, ContainerGroupRuntime } from '../../core/provider/types.ts';
-import { AlibabaEciContainerProvider } from './eci-container.ts';
+import type { PodSpec } from '../../core/pod/types.ts';
+import { AlibabaPodCodec } from './pod-codec.ts';
+import { rpcCall } from './eci-signer.ts';
 
 export class AlibabaEciContainerGroupProvider implements IContainerGroupProvider {
-  readonly #inner: AlibabaEciContainerProvider;
+  private readonly accessKeyId: string;
+  private readonly accessKeySecret: string;
+  private readonly endpoint: string;
+  private readonly region: string;
 
   constructor(accessKeyId: string, accessKeySecret: string, endpoint?: string) {
-    this.#inner = new AlibabaEciContainerProvider(accessKeyId, accessKeySecret, endpoint);
+    this.accessKeyId = accessKeyId;
+    this.accessKeySecret = accessKeySecret;
+    this.endpoint = endpoint ?? 'eci.cn-hangzhou.aliyuncs.com';
+    const m = /eci\.([^.]+)\./.exec(this.endpoint);
+    this.region = m?.[1] ?? 'cn-hangzhou';
   }
 
+  async createPod(spec: PodSpec): Promise<{ providerId: string }> {
+    const codec = new AlibabaPodCodec(this.region);
+    const params = codec.encode(spec);
+    const resp = await rpcCall(
+      this.endpoint, this.accessKeyId, this.accessKeySecret,
+      'CreateContainerGroup', params,
+    );
+    const rawId = resp.ContainerGroupId;
+    return { providerId: typeof rawId === 'string' ? rawId : '' };
+  }
+
+  /** @deprecated Use createPod(PodSpec) instead. */
   async createGroup(input: CreateContainerGroupInput): Promise<{ providerId: string }> {
-    // ECI natively supports multi-container groups — delegate directly
-    return this.#inner.create(input);
+    const { AlibabaEciContainerProvider: Inner } = await import('./eci-container.ts');
+    return new Inner(this.accessKeyId, this.accessKeySecret, this.endpoint).create(input);
   }
 
   async stopGroup(providerId: string): Promise<void> {
-    // ECI: stop = terminal（释放资源），等同于 delete
     return this.deleteGroup(providerId);
   }
 
   async deleteGroup(providerId: string): Promise<void> {
-    // Best-effort: try all known regions to find and delete the group
     const regions = ['cn-hangzhou', 'cn-shanghai', 'cn-beijing', 'cn-shenzhen'];
     for (const region of regions) {
       try {
-        await this.#inner.delete({ region: region as any, providerId });
+        const { AlibabaEciContainerProvider: Inner } = await import('./eci-container.ts');
+        await new Inner(this.accessKeyId, this.accessKeySecret, this.endpoint).delete({ region: region as any, providerId });
         return;
-      } catch {
-        continue;
-      }
+      } catch { continue; }
     }
   }
 
   async getGroupStatus(providerId: string): Promise<ContainerGroupRuntime | null> {
-    return this.#inner.getStatus(providerId);
+    const { AlibabaEciContainerProvider: Inner } = await import('./eci-container.ts');
+    return new Inner(this.accessKeyId, this.accessKeySecret, this.endpoint).getStatus(providerId);
   }
 
   async describeGroups(input: DescribeContainerGroupsInput): Promise<DescribeContainerGroupsResult> {
-    return this.#inner.describe(input);
+    const { AlibabaEciContainerProvider: Inner } = await import('./eci-container.ts');
+    return new Inner(this.accessKeyId, this.accessKeySecret, this.endpoint).describe(input);
   }
 }

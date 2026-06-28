@@ -21,3 +21,5 @@ note.txt
 log.md
 AGENTS.md
 .profiles.profiles/
+dependency-graph.json
+module-metrics.txt

@@ -25,11 +25,17 @@ import { AppError } from '../../core/types.ts';
 import './eci-schema.ts'; // register Alibaba ECI extension fields
 import { buildCreateParams, parseContainerGroup } from './eci-codec.ts';
 
+/** Narrow a `Record<string, unknown>` value to string. */
+function strVal(resp: Record<string, unknown>, key: string, fallback = ''): string {
+  const v = resp[key];
+  return typeof v === 'string' ? v : fallback;
+}
+
 export class AlibabaEciContainerProvider implements IContainerProvider {
-  readonly lifecycle: ContainerLifecycle = { stopIsDelete: true, startable: false, healthProbes: false, asyncInit: true };
+  public readonly lifecycle: ContainerLifecycle = { stopIsDelete: true, startable: false, healthProbes: false, asyncInit: true };
   private readonly region: string;
 
-  constructor(
+  public constructor(
     private readonly accessKeyId: string,
     private readonly accessKeySecret: string,
     private readonly endpoint = 'eci.cn-hangzhou.aliyuncs.com',
@@ -45,29 +51,32 @@ export class AlibabaEciContainerProvider implements IContainerProvider {
    * The API responds immediately with a ContainerGroupId, but the actual
    * instance may still be Pending/Scheduling.  Call describe() to poll.
    */
-  async create(input: CreateContainerGroupInput): Promise<{ providerId: string }> {
+  public async create(input: CreateContainerGroupInput): Promise<{ providerId: string }> {
     const params = buildCreateParams(input);
     console.log('[eci] CreateContainerGroup params:', JSON.stringify(params, null, 2));
     const resp = await rpcCall(
       this.endpoint, this.accessKeyId, this.accessKeySecret,
       'CreateContainerGroup', params,
     );
-    return { providerId: resp.ContainerGroupId };
+    return { providerId: strVal(resp, 'ContainerGroupId') };
   }
 
   /**
    * Update an existing ECI container group via UpdateContainerGroup API.
    * Same flat-parameter pattern as create(), but only maps fields present in the input.
    */
-  async update(providerId: string, input: Partial<CreateContainerGroupInput>): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-restricted-types
+  public async update(providerId: string, input: Partial<CreateContainerGroupInput>): Promise<void> {
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
     const params = buildCreateParams(input as CreateContainerGroupInput, { partial: true });
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
     params.RegionId = (input.region as string | undefined) ?? this.region;
     params.ContainerGroupId = providerId;
     await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret,
       'UpdateContainerGroup', params);
   }
 
-  async describe(input: DescribeContainerGroupsInput): Promise<DescribeContainerGroupsResult> {
+  public async describe(input: DescribeContainerGroupsInput): Promise<DescribeContainerGroupsResult> {
     const params: Record<string, string> = {
       RegionId: input.region,
     };
@@ -83,15 +92,17 @@ export class AlibabaEciContainerProvider implements IContainerProvider {
       'DescribeContainerGroups', params,
     );
 
-    const list: any[] = resp.ContainerGroups ?? [];
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+    const list = (resp.ContainerGroups as Record<string, unknown>[] | undefined) ?? [];
     return {
-      sandboxes: list.map(item => parseContainerGroup(item)),
-      nextToken: resp.NextToken,
-      totalCount: resp.TotalCount,
+      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+      sandboxes: list.map(item => parseContainerGroup(item as Parameters<typeof parseContainerGroup>[0])),
+      nextToken: strVal(resp, 'NextToken'),
+      ...(typeof resp.TotalCount === 'number' ? { totalCount: resp.TotalCount } : {}),
     };
   }
 
-  async delete(input: DeleteContainerGroupInput): Promise<void> {
+  public async delete(input: DeleteContainerGroupInput): Promise<void> {
     await rpcCall(
       this.endpoint, this.accessKeyId, this.accessKeySecret,
       'DeleteContainerGroup',
@@ -99,7 +110,7 @@ export class AlibabaEciContainerProvider implements IContainerProvider {
     );
   }
 
-  async getLogs(input: GetContainerLogInput): Promise<ContainerLogResult> {
+  public async getLogs(input: GetContainerLogInput): Promise<ContainerLogResult> {
     const params: Record<string, string> = {
       RegionId: input.region,
       ContainerGroupId: input.providerId,
@@ -116,13 +127,13 @@ export class AlibabaEciContainerProvider implements IContainerProvider {
 
     return {
       containerName: input.containerName,
-      content: resp.Content ?? '',
-      timestamp: resp.Time,
+      content: strVal(resp, 'Content'),
+      timestamp: strVal(resp, 'Time'),
     };
   }
 
   /** Get status of a single container group by provider ID. */
-  async getStatus(providerId: string): Promise<ContainerGroupRuntime | null> {
+  public async getStatus(providerId: string): Promise<ContainerGroupRuntime | null> {
     const result = await this.describe({
       region: createRegionId(this.region),
       sandboxId: providerId,
@@ -132,38 +143,38 @@ export class AlibabaEciContainerProvider implements IContainerProvider {
 
   // ─── Container lifecycle operations ───
 
-  async stop(providerId: string): Promise<void> {
+  public async stop(providerId: string): Promise<void> {
     await this.delete({ region: createRegionId(this.region), providerId });
   }
 
-  async start(_providerId: string): Promise<void> {
+  public start(_providerId: string): Promise<void> {
     throw new AppError(501, 'NOT_IMPLEMENTED', 'start is not supported by Alibaba ECI (restart instead)');
   }
 
-  async restart(providerId: string): Promise<void> {
+  public async restart(providerId: string): Promise<void> {
     await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret, 'RestartContainerGroup', {
       RegionId: this.region,
       ContainerGroupId: providerId,
     });
   }
 
-  async kill(providerId: string): Promise<void> {
+  public async kill(providerId: string): Promise<void> {
     await this.delete({ region: createRegionId(this.region), providerId });
   }
 
-  async pause(_providerId: string): Promise<void> {
+  public pause(_providerId: string): Promise<void> {
     throw new AppError(501, 'NOT_IMPLEMENTED', 'pause is not supported by Alibaba ECI');
   }
 
-  async unpause(_providerId: string): Promise<void> {
+  public unpause(_providerId: string): Promise<void> {
     throw new AppError(501, 'NOT_IMPLEMENTED', 'unpause is not supported by Alibaba ECI');
   }
 
-  async wait(_providerId: string): Promise<{ statusCode: number }> {
+  public wait(_providerId: string): Promise<{ statusCode: number }> {
     throw new AppError(501, 'NOT_IMPLEMENTED', 'wait is not supported by Alibaba ECI');
   }
 
-  async exec(providerId: string, cmd: readonly string[], containerName?: string): Promise<{ execId: string; webSocketUri?: string }> {
+  public async exec(providerId: string, cmd: readonly string[], containerName?: string): Promise<{ execId: string; webSocketUri?: string }> {
     const params: Record<string, string | undefined> = {
       RegionId: 'cn-hangzhou',
       ContainerGroupId: providerId,
@@ -172,37 +183,44 @@ export class AlibabaEciContainerProvider implements IContainerProvider {
     if (containerName) params.ContainerName = containerName;
     const resp = await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret, 'ExecContainerCommand', params);
     return {
-      execId: resp.HttpUrl ?? '',
-      webSocketUri: resp.WebSocketUri,
+      execId: strVal(resp, 'HttpUrl'),
+      ...(strVal(resp, 'WebSocketUri') ? { webSocketUri: strVal(resp, 'WebSocketUri') } : {}),
     };
   }
 
-  async rename(_providerId: string): Promise<void> {
+  public rename(_providerId: string): Promise<void> {
     throw new AppError(501, 'NOT_IMPLEMENTED', 'rename is not supported by Alibaba ECI');
   }
 
-  async stats(providerId: string): Promise<{ cpuUsage: number; memoryUsage: number; networkIO?: { rx: number; tx: number } }> {
+  public async stats(providerId: string): Promise<{ cpuUsage: number; memoryUsage: number; networkIO?: { rx: number; tx: number } }> {
     try {
       const resp = await rpcCall(this.endpoint, this.accessKeyId, this.accessKeySecret, 'DescribeContainerGroupMetric', {
         RegionId: 'cn-hangzhou',
         ContainerGroupId: providerId,
         Period: '60',
       });
-      const records: any[] = resp.Records ?? [];
+      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+      const records = (resp.Records as Record<string, unknown>[] | undefined) ?? [];
       if (records.length === 0) return { cpuUsage: 0, memoryUsage: 0 };
-      const latest = records[records.length - 1]!;
-      const cpuUsage = latest.CPU?.UsageInNanocores ?? 0;
-      const memoryUsage = latest.Memory?.Rss ?? 0;
-      const net = latest.Network;
+      const latest = records[records.length - 1];
+      if (!latest) return { cpuUsage: 0, memoryUsage: 0 };
+      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+      const cpu = latest.CPU as Record<string, unknown> | undefined;
+      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+      const mem = latest.Memory as Record<string, unknown> | undefined;
+      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+      const net = latest.Network as Record<string, unknown> | undefined;
+      const cpuUsage = typeof cpu?.UsageInNanocores === 'number' ? cpu.UsageInNanocores : 0;
+      const memoryUsage = typeof mem?.Rss === 'number' ? mem.Rss : 0;
       return net
-        ? { cpuUsage, memoryUsage, networkIO: { rx: net.RxBytes ?? 0, tx: net.TxBytes ?? 0 } }
+        ? { cpuUsage, memoryUsage, networkIO: { rx: typeof net.RxBytes === 'number' ? net.RxBytes : 0, tx: typeof net.TxBytes === 'number' ? net.TxBytes : 0 } }
         : { cpuUsage, memoryUsage };
     } catch {
       return { cpuUsage: 0, memoryUsage: 0 };
     }
   }
 
-  async top(_providerId: string): Promise<{ processes: readonly (readonly string[])[] }> {
+  public top(_providerId: string): Promise<{ processes: readonly (readonly string[])[] }> {
     throw new AppError(501, 'NOT_IMPLEMENTED', 'top is not supported by Alibaba ECI');
   }
 }
@@ -219,9 +237,12 @@ function statusToAlibaba(status: ContainerGroupStatus): string {
     case 'Running': return 'Running';
     case 'Succeeded': return 'Succeeded';
     case 'Failed': return 'Failed';
+    case 'Restarting': return 'Restarting';
+    case 'Updating': return 'Updating';
+    case 'Terminating': return 'Terminating';
     case 'Expiring': return 'Expiring';
     case 'Expired': return 'Expired';
-    case 'Restarting': return 'Restarting';
+    case 'Deleted': return 'Deleted';
     default: return 'Pending';
   }
 }

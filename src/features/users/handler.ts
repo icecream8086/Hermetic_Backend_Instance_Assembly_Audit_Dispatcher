@@ -251,14 +251,11 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
   router.put('/:id/public-key', async (c) => {
     const id = createUserId(c.req.param('id'));
     const body: unknown = await c.req.json();
-    const parsed = z.object({ publicKey: PublicKeySchema }).safeParse(body);
-    if (!parsed.success) {
-      return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
-    }
+    const data = z.object({ publicKey: PublicKeySchema }).parse(body);
     { const r = await requirePerm(c, permissionChecker, 'update', 'user', id); if (r) return r; }
     const user = await userService.update(id, {
       name: undefined, password: undefined, role: undefined,
-      loginPolicy: undefined, publicKeyEd25519: parsed.data.publicKey,
+      loginPolicy: undefined, publicKeyEd25519: data.publicKey,
       gecos: undefined, directory: undefined, shell: undefined, supplementaryGids: undefined,
     });
     return c.json(ok(user.publicKeyEd25519 ?? null));
@@ -421,14 +418,11 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
   // ─── No-password login ───
   router.post('/no-password-login', async (c) => {
     const body: unknown = await c.req.json();
-    const parsed = NoPasswordLoginSchema.safeParse(body);
-    if (!parsed.success) {
-      return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
-    }
+    const data = NoPasswordLoginSchema.parse(body);
     const loginIp = c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ?? c.req.header('cf-connecting-ip');
     const siteContext = c.req.header('origin') ?? c.req.header('referer') ?? '';
     const { user, token } = await userService.loginNoPassword(
-      { email: parsed.data.email, oneTimeKey: parsed.data.oneTimeKey },
+      { email: data.email, oneTimeKey: data.oneTimeKey },
       { ip: loginIp, siteContext },
     );
     return c.json(ok(LoginResponseSchema.parse({ token, user: userToResponse(user) })));

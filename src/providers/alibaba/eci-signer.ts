@@ -20,7 +20,7 @@ export async function rpcCall(
   accessKeySecret: string,
   action: string,
   params: RpcParams,
-): Promise<any> {
+): Promise<Record<string, unknown>> {
   const aksk = AkSkProvider.getOrCreate(accessKeyId, accessKeySecret);
 
   // Build query params for the specific action
@@ -28,10 +28,11 @@ export async function rpcCall(
     Action: action,
     Version: '2018-08-08',
     ...params,
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- params values may be undefined
   }).filter(([_, v]) => v !== undefined);
 
   // Alibaba RPC expects commas in VSwitchId/InstanceType to be literal (not %2C)
-  const encodeVal = (v: string) => encodeURIComponent(v).replace(/%2C/g, ',');
+  const encodeVal = (v: string): string => encodeURIComponent(v).replace(/%2C/g, ',');
   const queryString = queryEntries.map(([k, v]) => `${encodeURIComponent(k)}=${encodeVal(v)}`).join('&');
   const baseUrl = `https://${endpoint}/?${queryString}`;
 
@@ -41,10 +42,10 @@ export async function rpcCall(
   const resp = await fetch(signedUrl, { method: 'POST' });
   if (!resp.ok) {
     const text = await resp.text().catch(() => '<unreadable>');
-    throw new Error(`Alibaba ECI ${action} HTTP ${resp.status}: ${text.slice(0, 500)}`);
+    throw new Error(`Alibaba ECI ${action} HTTP ${String(resp.status)}: ${text.slice(0, 500)}`);
   }
 
-  let body: any;
+  let body: Record<string, unknown>;
   try {
     body = await resp.json();
   } catch {
@@ -52,9 +53,11 @@ export async function rpcCall(
     throw new Error(`Alibaba ECI ${action} returned non-JSON response: ${text.slice(0, 500)}`);
   }
 
-  if (body?.Code) {
-    const requestId = body.RequestId ?? 'unknown';
-    throw new Error(`Alibaba ECI ${action} failed [${requestId}]: ${body.Code} — ${body.Message ?? '(no message)'}`);
+  if (body.Code) {
+    const requestId = typeof body.RequestId === 'string' ? body.RequestId : 'unknown';
+    const code = typeof body.Code === 'string' ? body.Code : JSON.stringify(body.Code);
+    const msg = typeof body.Message === 'string' ? body.Message : '(no message)';
+    throw new Error(`Alibaba ECI ${action} failed [${requestId}]: ${code} — ${msg}`);
   }
   return body;
 }

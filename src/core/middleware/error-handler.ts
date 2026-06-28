@@ -1,4 +1,5 @@
 import type { ErrorHandler } from 'hono';
+import { ZodError } from 'zod';
 import { AppError } from '../types.ts';
 import { fail } from '../response.ts';
 import type { IAuditWriter } from '../audit/types.ts';
@@ -9,10 +10,15 @@ const ERROR_FACILITY = 'http';
 /**
  * Global error handler.
  *
+ * - ZodError: return 400 with validation issue messages.
  * - AppError: return structured error response at the error's status code.
  * - 5xx unhandled errors: record as KERN_ERR audit log, then return 500.
  */
 export const globalErrorHandler: ErrorHandler = (err, c) => {
+  if (err instanceof ZodError) {
+    return c.json(fail('VALIDATION_ERROR', err.issues.map(i => i.message).join('; ')), 400);
+  }
+
   if (err instanceof AppError) {
     return c.json(fail(err.code, err.message), err.statusCode as any);
   }

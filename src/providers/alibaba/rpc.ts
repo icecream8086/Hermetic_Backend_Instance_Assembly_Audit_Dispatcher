@@ -31,13 +31,14 @@ export async function rpcCall(
   action: string,
   version: string,
   params: RpcParams,
-): Promise<any> {
+): Promise<Record<string, unknown>> {
   const aksk = AkSkProvider.getOrCreate(accessKeyId, accessKeySecret);
 
   const queryEntries = Object.entries({
     Action: action,
     Version: version,
     ...params,
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- params values may be undefined
   }).filter(([_, v]) => v !== undefined);
 
   const queryString = queryEntries.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
@@ -49,10 +50,10 @@ export async function rpcCall(
   const resp = await fetch(signedUrl, { method: 'POST' });
   if (!resp.ok) {
     const text = await resp.text().catch(() => '<unreadable>');
-    throw new Error(`Alibaba ${action} HTTP ${resp.status}: ${text.slice(0, 500)}`);
+    throw new Error(`Alibaba ${action} HTTP ${String(resp.status)}: ${text.slice(0, 500)}`);
   }
 
-  let body: any;
+  let body: Record<string, unknown>;
   try {
     body = await resp.json();
   } catch {
@@ -60,9 +61,11 @@ export async function rpcCall(
     throw new Error(`Alibaba ${action} returned non-JSON response: ${text.slice(0, 500)}`);
   }
 
-  if (body?.Code) {
-    const requestId = body.RequestId ?? 'unknown';
-    throw new Error(`Alibaba ${action} failed [${requestId}]: ${body.Code} — ${body.Message ?? '(no message)'}`);
+  if (body.Code) {
+    const requestId = typeof body.RequestId === 'string' ? body.RequestId : 'unknown';
+    const code = typeof body.Code === 'string' ? body.Code : JSON.stringify(body.Code);
+    const msg = typeof body.Message === 'string' ? body.Message : '(no message)';
+    throw new Error(`Alibaba ${action} failed [${requestId}]: ${code} — ${msg}`);
   }
   return body;
 }
