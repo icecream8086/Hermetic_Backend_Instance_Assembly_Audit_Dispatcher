@@ -18,6 +18,7 @@ import {
   CreateInviteSchema,
 } from './schema.ts';
 import { ok, fail } from '../../core/response.ts';
+import type { ErrorCode } from '../../core/error-codes.ts';
 import type { AuditActor } from './audit.ts';
 import { z, type ZodType } from 'zod';
 import type { CrudHandlerMap } from '../../core/crud/router.ts';
@@ -76,7 +77,7 @@ interface SubCrudOpts<T> {
   updateSchema: ZodType;
   updateFn: (id: string, data: any, actor: AuditActor | undefined) => Promise<T>;
   deleteFn: (id: string, actor: AuditActor | undefined) => Promise<void>;
-  notFoundCode: string;
+  notFoundCode: ErrorCode;
   notFoundMsg: string;
 }
 

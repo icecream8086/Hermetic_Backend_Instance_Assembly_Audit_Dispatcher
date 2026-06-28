@@ -11,6 +11,7 @@ import { createFacility } from './brand.ts';
 import { getFeatures } from '../features/generated.ts';
 import { createProviderRegistry } from './provider/factory.ts';
 import { createTimerBackend } from './scheduler/factory.ts';
+import { register as registerScheduler, stopAll } from './scheduler/registry.ts';
 import { EventBus } from './event-bus/bus.ts';
 import { EventLoop } from './event-bus/loop.ts';
 import { SecretEncryption } from './auth/secret-encryption.ts';
@@ -132,6 +133,8 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
     schedulerBackend,
     stores.atomic,
   );
+
+  registerScheduler('eventLoop', eventLoop);
 
   // 5b. 健康检查事件 — 委托到 src/core/events/health-check.ts
   registerHealthCheck({
@@ -473,7 +476,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
     eventLoop,
     audit,
     dispose: async () => {
-      eventLoop.stop();
+      stopAll();
     },
     seed: () => seedIfNeeded(stores.atomic),
   };

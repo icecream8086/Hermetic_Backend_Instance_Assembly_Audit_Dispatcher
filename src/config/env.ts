@@ -1,20 +1,25 @@
+import type { AppConfig } from './types.ts';
 import type { StorageConfig } from '../core/store/config.ts';
-import { AuditTier } from '../core/audit/types.ts';
 import type { SchedulerBackendType } from '../core/scheduler/interfaces.ts';
-import type { AppConfig, Credential, LogConfig, ProviderConfig, S3Config, SchedulerAppConfig } from './types.ts';
+import { AuditTier } from '../core/audit/types.ts';
 import { createRegionId } from '../core/region/types.ts';
+import { AppConfigSchema } from './schema.ts';
 
 export type { AppConfig } from './types.ts';
 
 /**
  * Load configuration from environment variables with strict validation.
  * All backends and credentials are wired through env, never hardcoded.
+ *
+ * Assembly is done with legacy env vars first, then validated against
+ * the Zod schema at the end. Any missing required field or invalid
+ * value → clear error message at startup (not a silent null-pointer later).
  */
 export function loadConfig(overrides?: Partial<AppConfig>): AppConfig {
   const envAuditTier = process.env['LOG_AUDIT_TIER'];
   const auditTier = envAuditTier === AuditTier.AUDITABLE ? AuditTier.AUDITABLE : AuditTier.BEST_EFFORT;
 
-  const logConfig: LogConfig = overrides?.log ?? {
+  const logConfig = overrides?.log ?? {
     auditTier,
     defaultFacility: 'app',
     storage: {
@@ -35,11 +40,9 @@ export function loadConfig(overrides?: Partial<AppConfig>): AppConfig {
     },
   };
 
-  const providerContainer = (process.env['PROVIDER_CONTAINER'] as ProviderConfig['container']) ?? 'stub';
+  const providerContainer = (process.env['PROVIDER_CONTAINER'] as any) ?? 'stub';
 
-  // Load Alibaba container accounts:
-  //   ALIBABA_ACCOUNTS=[{name,ak,sk,region,endpoint}] or ALIBABA_ACCESS_KEY_ID+ALIBABA_ACCESS_KEY_SECRET
-  function loadAccounts(): Credential[] {
+  function loadAccounts(): any[] {
     const json = process.env['ALIBABA_ACCOUNTS'];
     if (json) {
       try {
@@ -68,19 +71,17 @@ export function loadConfig(overrides?: Partial<AppConfig>): AppConfig {
     return [{ name: 'default', accessKeyId: '', accessKeySecret: '' }];
   }
 
-  const providerConfig: ProviderConfig = overrides?.provider ?? {
+  const providerConfig = overrides?.provider ?? {
     container: providerContainer,
     region: createRegionId(process.env['ALIBABA_REGION'] ?? 'cn-hangzhou'),
     accounts: loadAccounts(),
     defaultAccount: process.env['ALIBABA_DEFAULT_ACCOUNT'] ?? 'default',
     cfApiToken: process.env['CF_API_TOKEN'],
-    dns: (process.env['PROVIDER_DNS'] as ProviderConfig['dns']) ?? 'stub',
-    metrics: (process.env['PROVIDER_METRICS'] as ProviderConfig['metrics']) ?? 'stub',
+    dns: (process.env['PROVIDER_DNS'] as any) ?? 'stub',
+    metrics: (process.env['PROVIDER_METRICS'] as any) ?? 'stub',
   };
 
-  // Load S3 accounts:
-  //   S3_ACCOUNTS=[{name,ak,sk,region,endpoint,bucket}] or S3_ACCESS_KEY_ID+S3_SECRET_ACCESS_KEY
-  function loadS3Accounts(): Credential[] {
+  function loadS3Accounts(): any[] {
     const json = process.env['S3_ACCOUNTS'];
     if (json) {
       try {
@@ -110,15 +111,15 @@ export function loadConfig(overrides?: Partial<AppConfig>): AppConfig {
     return [{ name: 'default', accessKeyId: '', accessKeySecret: '' }];
   }
 
-  const s3Config: S3Config = overrides?.s3 ?? {
-    backend: (process.env['S3_BACKEND'] as S3Config['backend']) ?? 'none',
+  const s3Config = overrides?.s3 ?? {
+    backend: (process.env['S3_BACKEND'] as any) ?? 'none',
     region: process.env['S3_REGION'] ?? 'auto',
     endpoint: process.env['S3_ENDPOINT'] ?? process.env['MINIO_ENDPOINT'] ?? undefined,
     accounts: loadS3Accounts(),
     defaultAccount: process.env['S3_DEFAULT_ACCOUNT'] ?? 'default',
   };
 
-  const schedulerConfig: SchedulerAppConfig = overrides?.scheduler ?? {
+  const schedulerConfig = overrides?.scheduler ?? {
     backend: (process.env['SCHEDULER_BACKEND'] as SchedulerBackendType) ?? 'worker',
     intervalMs: Number(process.env['SCHEDULER_INTERVAL_MS'] ?? 60000),
     batchSize: Number(process.env['SCHEDULER_BATCH_SIZE'] ?? 0),
@@ -133,7 +134,7 @@ export function loadConfig(overrides?: Partial<AppConfig>): AppConfig {
   const rateLimitBypassIpsRaw = process.env['RATE_LIMIT_BYPASS_IPS'];
   const rateLimitBypassToken = process.env['RATE_LIMIT_BYPASS_TOKEN'] || undefined;
 
-  return {
+  const assembled = {
     storage: storageConfig,
     log: logConfig,
     provider: providerConfig,
@@ -155,4 +156,16 @@ export function loadConfig(overrides?: Partial<AppConfig>): AppConfig {
       ...(rateLimitBypassToken ? { bypassToken: rateLimitBypassToken } : {}),
     },
   };
+
+  // ─── Validate against Zod schema ───
+  const result = AppConfigSchema.safeParse(assembled);
+  if (!result.success) {
+    const issues = result.error.issues
+      .map(i => `  - ${i.path.join('.') || '(root)'}: ${i.message}`)
+      .join('\n');
+    console.error(`[config] Configuration validation failed:\n${issues}`);
+    throw new Error('Configuration validation failed — check the errors above.');
+  }
+
+  return result.data as AppConfig;
 }

@@ -74,25 +74,32 @@ export async function processMessages(
   return results;
 }
 
+/**
+ * Task handler registry — Record<TaskType, Handler> enforces at compile time
+ * that every task type has a handler. Add a new TaskType → must add entry here.
+ */
+type TaskHandler = (payload: any, instance: AppInstance) => Promise<TaskResult>;
+
+const taskHandlers: Record<TaskMessage['type'], TaskHandler> = {
+  'image:pull':       (p, i) => handleImagePull(p as ImagePullPayload, i),
+  'sandbox:gc':       (p, i) => handleSandboxGc(p as SandboxGcPayload, i),
+  'sandbox:provision': (p, i) => handleSandboxProvision(p as SandboxProvisionPayload, i),
+  'bucket-key:rotate': (p, i) => handleBucketKeyRotate(p as BucketKeyRotatePayload, i),
+  'workflow:job:run': (p, i) => handleWorkflowJobRun(p as WorkflowJobRunPayload, i),
+};
+
 /** Dispatch a single task to its handler by type. */
 export async function handleTask(
   msg: TaskMessage,
   instance: AppInstance,
 ): Promise<TaskResult> {
-  switch (msg.type) {
-    case 'image:pull':
-      return handleImagePull(msg.payload as ImagePullPayload, instance);
-    case 'sandbox:gc':
-      return handleSandboxGc(msg.payload as SandboxGcPayload, instance);
-    case 'sandbox:provision':
-      return handleSandboxProvision(msg.payload as SandboxProvisionPayload, instance);
-    case 'bucket-key:rotate':
-      return handleBucketKeyRotate(msg.payload as BucketKeyRotatePayload, instance);
-    case 'workflow:job:run':
-      return handleWorkflowJobRun(msg.payload as WorkflowJobRunPayload, instance);
-    default:
-      return { success: false, error: `Unknown task type: ${(msg as any).type}` };
+  const handler = taskHandlers[msg.type];
+  if (!handler) {
+    // Compile-time: Record<TaskType, Handler> guarantees all keys exist.
+    // This branch is runtime-only — triggers on corrupted/unknown messages.
+    return { success: false, error: `Unknown task type: ${msg.type}` };
   }
+  return handler(msg.payload, instance);
 }
 
 // ─── Task handlers ───

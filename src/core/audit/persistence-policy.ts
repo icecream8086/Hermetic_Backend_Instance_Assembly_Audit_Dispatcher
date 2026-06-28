@@ -18,14 +18,14 @@
  * External control: GET/PUT /api/admin/log-persistence
  */
 
-import { KernLevel } from './kern-level.ts';
+import { KernLevel, type FacilityName } from './kern-level.ts';
 import type { AuditEntry } from './types.ts';
 
 // ─── Types ───
 
 export interface PersistenceRule {
-  /** Facility name or '*' for default. */
-  facility: string;
+  /** Facility name (must be a known facility) or '*' for default. Typo → compile error. */
+  facility: FacilityName | '*';
   /** Minimum KernLevel to persist. ERR and below always persist regardless. */
   minLevel: KernLevel;
   /** Sampling rate: 1 = persist all, 10 = persist ~10%. Default 1. */

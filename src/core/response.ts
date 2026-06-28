@@ -1,3 +1,5 @@
+import type { ErrorCode } from './error-codes.ts';
+
 /**
  * Unified API response envelope.
  *
@@ -33,7 +35,13 @@ export function ok<T>(data: T): ApiSuccess<T> {
   return { success: true, data, error: null };
 }
 
-/** Wrap an error. */
-export function fail(code: string, message: string): ApiError {
+/**
+ * Wrap an error.
+ *
+ * @param code — must be a member of the central ErrorCode union.
+ *              Typos are caught at compile time.
+ * @param message — human-readable description for the client.
+ */
+export function fail(code: ErrorCode, message: string): ApiError {
   return { success: false, data: null, error: { code, message } };
 }

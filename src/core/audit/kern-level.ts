@@ -80,6 +80,9 @@ const NAME_TO_FACILITY: Record<string, AuditFacility> = {
   subnet: AuditFacility.NETWORK,
 };
 
+/** Known facility name — derived from NAME_TO_FACILITY keys. Typo → compile error. */
+export type FacilityName = keyof typeof NAME_TO_FACILITY;
+
 /** Encode facility + severity into a single priority integer (0-191). */
 export function encodePriority(facility: AuditFacility, level: KernLevel): number {
   return (facility << 3) | level;

@@ -1,6 +1,7 @@
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
 import { TransactConflictError } from '../../core/store/interfaces.ts';
 import { AppError } from '../../core/types.ts';
+import type { ErrorCode } from '../../core/error-codes.ts';
 
 export interface PaginatedResult<T> {
   items: T[];
@@ -17,7 +18,7 @@ export class CrudStore<T extends { id: string }> {
     private readonly atomic: IAtomicStore,
     private readonly prefix: string,
     private readonly indexKey: string,
-    private readonly notFoundCode: string,
+    private readonly notFoundCode: ErrorCode,
   ) {}
 
   /** Return all entities (unpaginated — for internal evaluation use). */

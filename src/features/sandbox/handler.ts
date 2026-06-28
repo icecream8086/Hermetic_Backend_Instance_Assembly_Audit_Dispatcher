@@ -8,13 +8,14 @@ import type { IContainerGroupProvider, IProviderRegistry } from '../../core/prov
 import type { RouteMeta } from '../../core/http-docs/types.ts';
 import type { AppContext } from '../../core/deps.ts';
 import { ok, fail } from '../../core/response.ts';
+import type { ErrorCode } from '../../core/error-codes.ts';
 
 type PermissionCheckFn = { check(params: { userId: string; action: string; resource: string; ip?: string }): Promise<{ allowed: boolean; reason: string }> };
 
 /** Extract HTTP status and error code from a caught error, respecting AppError subtypes. */
-function errorStatus(e: unknown, fallbackCode: string, fallbackStatus = 500): { code: string; status: any } {
+function errorStatus(e: unknown, fallbackCode: ErrorCode, fallbackStatus = 500): { code: ErrorCode; status: any } {
   const status: any = (e as any)?.statusCode ?? (e as any)?.status ?? fallbackStatus;
-  const code = (e as any)?.code ?? fallbackCode;
+  const code = ((e as any)?.code as ErrorCode | undefined) ?? fallbackCode;
   return { code, status };
 }
 
