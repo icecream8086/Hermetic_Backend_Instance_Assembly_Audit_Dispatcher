@@ -6,6 +6,8 @@
 import type { IDnsProvider, UpdateDnsRecordInput, DeleteDnsRecordInput } from '../../core/provider/interfaces.ts';
 import { BearerTokenProvider } from '../../core/auth/providers.ts';
 
+const { parse: parseJson } = JSON;
+
 interface CfError {
   readonly code: number;
   readonly message: string;
@@ -94,7 +96,7 @@ export class CloudflareDnsProvider implements IDnsProvider {
 async function parseCfResponse(res: Response): Promise<CfApiResponse> {
   const text = await res.text();
   try {
-    return JSON.parse(text) as CfApiResponse;
+    return parseJson(text) as CfApiResponse;
   } catch {
     return { success: false, errors: [{ code: res.status, message: text.slice(0, 200) }] };
   }

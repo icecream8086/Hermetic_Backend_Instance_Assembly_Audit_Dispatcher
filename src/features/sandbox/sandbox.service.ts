@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
 import type { ILogWriter } from '../../core/audit/types.ts';
 import type {
@@ -35,8 +36,9 @@ import { createFacility, generateVersionId } from '../../core/brand.ts';
 import type { RegionId } from '../../core/region/types.ts';
 import { createRegionId } from '../../core/region/types.ts';
 import type { InstanceId } from '../../core/region/instance.ts';
+import { createInstanceId } from '../../core/region/instance.ts';
 import { ContainerGroupState, toSandboxStatus } from '../../core/provider/container-lifecycle.ts';
-import { PodService } from '../../core/pod/service.ts';
+import type { PodService } from '../../core/pod/service.ts';
 import type { PodSpec } from '../../core/pod/types.ts';
 import { AppError } from '../../core/types.ts';
 import { ProviderResolutionError, ProviderOperationError } from '../../core/provider/errors.ts';
@@ -74,22 +76,24 @@ export class SandboxService implements ISandboxService {
     this.store = new SandboxStore(atomic);
   }
 
-  public async #enqueueGcRetry(id: string, sandbox: Sandbox): Promise<void> {
+  async #enqueueGcRetry(id: string, sandbox: Sandbox): Promise<void> {
     if (!this.queueProducer?.sendSandboxGc) return;
-    await this.queueProducer.sendSandboxGc({
-      sandboxId: id,
-      reason: 'manual',
-      providerId: sandbox.providerId ?? id,
-      region: sandbox.config.region,
-      ...(sandbox.config.instanceId ? { instanceId: sandbox.config.instanceId as any } : {}),
-      containerCount: sandbox.containers.length,
-      sandboxName: sandbox.name,
-      createdAt: sandbox.createdAt,
-    }).catch(() => {});
+    try {
+      await this.queueProducer.sendSandboxGc({
+        sandboxId: id,
+        reason: 'manual',
+        providerId: sandbox.providerId ?? id,
+        region: sandbox.config.region,
+        ...(sandbox.config.instanceId ? { instanceId: sandbox.config.instanceId } : {}),
+        containerCount: sandbox.containers.length,
+        sandboxName: sandbox.name,
+        createdAt: sandbox.createdAt,
+      });
+    } catch { /* fire-and-forget: queue may be unavailable */ }
   }
 
   /** Resolve the container provider for a specific instance. Never silently falls back when instanceId is set. */
-  public async #resolveProvider(instanceId?: string): Promise<IContainerProvider> {
+  async #resolveProvider(instanceId?: string): Promise<IContainerProvider> {
     if (instanceId) {
       if (!this.providerRegistry?.resolveContainer) {
         throw new ProviderResolutionError(
@@ -97,7 +101,7 @@ export class SandboxService implements ISandboxService {
           instanceId,
         );
       }
-      const p = await this.providerRegistry.resolveContainer(instanceId as any);
+      const p = await this.providerRegistry.resolveContainer(createInstanceId(instanceId));
       if (p) return p;
       throw new ProviderResolutionError(
         `Failed to resolve container provider for instance "${instanceId}". Check that the instance is online and its credential is valid.`,
@@ -179,22 +183,25 @@ export class SandboxService implements ISandboxService {
     await this.store.addToIndex(id);
 
     // 2. Build provider input (with merged VNet + cluster settings) and create cloud resource
-    const clusterEnriched = resolvedInst
-      ? { ...input, instanceId: resolvedInst.id as any, network: mergedNetwork, zoneId: resolvedInst.zone as string }
-      : { ...input, network: mergedNetwork };
-
     // 3. Resolve SecurityGroup system UID (sg_*) → cloud ID + bandwidth
+    let effectiveSecurityGroupId = mergedNetwork?.securityGroupId;
+    let effectiveBandwidth: number | undefined;
     if (mergedNetwork?.securityGroupId?.startsWith('sg_')) {
-      const sgEntry = await this.atomic.get<any>('secgroup:' + mergedNetwork.securityGroupId);
+      const sgEntry = await this.atomic.get<Record<string, unknown>>('secgroup:' + mergedNetwork.securityGroupId);
       if (sgEntry?.value) {
-        const sg = sgEntry.value;
-        (clusterEnriched as any).network = {
-          ...clusterEnriched.network,
-          securityGroupId: sg.securityGroupId ?? mergedNetwork.securityGroupId,
-          ...(sg.bandwidth ? { bandwidth: sg.bandwidth } : {}),
-        };
+        const sgSchema = z.object({ securityGroupId: z.string().optional(), bandwidth: z.number().optional() });
+        const sg = sgSchema.parse(sgEntry.value);
+        effectiveSecurityGroupId = sg.securityGroupId ?? mergedNetwork.securityGroupId;
+        effectiveBandwidth = sg.bandwidth;
       }
     }
+    const networkPatch: Record<string, unknown> = {};
+    if (effectiveSecurityGroupId !== mergedNetwork?.securityGroupId) networkPatch.securityGroupId = effectiveSecurityGroupId;
+    if (effectiveBandwidth !== undefined) networkPatch.bandwidth = effectiveBandwidth;
+
+    const clusterEnriched = resolvedInst
+      ? { ...input, instanceId: resolvedInst.id, network: { ...mergedNetwork, ...networkPatch }, zoneId: z.string().optional().parse(resolvedInst.zone) }
+      : { ...input, network: { ...mergedNetwork, ...networkPatch } };
 
     const baseInput = toContainerGroupInput(clusterEnriched);
 
@@ -246,10 +253,10 @@ export class SandboxService implements ISandboxService {
       const podSpec = toPodSpec(input);
       try {
         const pod = await this.podService.provision(podSpec);
-        providerId = pod.providerId ?? id as string;
-        podId = pod.podId as string;
+        providerId = pod.providerId ?? id;
+        podId = pod.podId;
       } catch (e) {
-        await this.atomic.set(`${KEY_PREFIX}${id}`, { ...initial, status: SandboxStatus.Failed, updatedAt: Date.now() }, created).catch(() => {});
+        try { await this.atomic.set(`${KEY_PREFIX}${id}`, { ...initial, status: SandboxStatus.Failed, updatedAt: Date.now() }, created); } catch { /* best-effort cleanup */ }
         throw translateProviderError(e, input.name);
       }
       createdStatus = SandboxStatus.Scheduling;
@@ -258,7 +265,7 @@ export class SandboxService implements ISandboxService {
       try {
         ({ providerId } = await containerProvider.create(providerInput));
       } catch (e) {
-        await this.atomic.set(`${KEY_PREFIX}${id}`, { ...initial, status: SandboxStatus.Failed, updatedAt: Date.now() }, created).catch(() => {});
+        try { await this.atomic.set(`${KEY_PREFIX}${id}`, { ...initial, status: SandboxStatus.Failed, updatedAt: Date.now() }, created); } catch { /* best-effort cleanup */ }
         throw translateProviderError(e, input.name);
       }
       createdStatus = containerProvider.lifecycle.asyncInit
@@ -765,7 +772,12 @@ export function podSpecToSandboxInput(spec: {
   const names = Object.keys(spec.services);
   const containers = names.map(name => {
     const svc = spec.services[name]!;
-    const args = typeof svc.command === 'string' ? [svc.command] : (svc.command as string[] | undefined);
+    let args: string[] | undefined;
+    if (typeof svc.command === 'string') {
+      args = [svc.command];
+    } else if (svc.command !== undefined) {
+      args = [...svc.command];
+    }
     const env = svc.environment
       ? Object.entries(svc.environment).map(([k, v]) => ({ name: k, value: v }))
       : undefined;
@@ -952,8 +964,8 @@ function toPodSpec(input: CreateSandboxInput): PodSpec {
       containers: input.containers.map(c => ({
         name: c.name,
         image: c.image,
-        command: c.command as readonly string[] | undefined,
-        args: c.args as readonly string[] | undefined,
+        command: c.command,
+        args: c.args,
         env: c.env,
         resources: c.resources?.limits ? { limits: { cpu: c.resources.limits.cpu, memory: c.resources.limits.memory, ...(c.resources.limits.gpu !== undefined ? { gpu: c.resources.limits.gpu } : {}) } } : undefined,
         ports: c.ports,
@@ -976,7 +988,7 @@ function toPodSpec(input: CreateSandboxInput): PodSpec {
           env: c.env,
         })),
       } : {}),
-      restartPolicy: input.restartPolicy as 'Always' | 'OnFailure' | 'Never',
+      restartPolicy: input.restartPolicy,
       // volumes: mapped via providerOverrides for now (sandbox Volume entity ≠ PodSpec VolumeSpec)
     },
     ...(input.providerOverrides ? { providerOverrides: input.providerOverrides } : {}),

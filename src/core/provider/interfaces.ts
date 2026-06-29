@@ -372,9 +372,6 @@ export interface IContainerGroupProvider {
    */
   createPod(spec: PodSpec): Promise<{ providerId: string }>;
 
-  /** @deprecated Use createPod(PodSpec) instead. */
-  createGroup(input: CreateContainerGroupInput): Promise<{ providerId: string }>;
-
   /**
    * Stop a container group.
    * - ECI: 停止即释放（terminal），等同于删除，资源不可恢复

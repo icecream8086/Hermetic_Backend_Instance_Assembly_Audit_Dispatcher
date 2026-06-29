@@ -2,6 +2,8 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import type { IQueryStore, QueryParams } from '../interfaces.ts';
 
+const { parse: parseJson } = JSON;
+
 /**
  * Local file-based query store for Node.js development.
  * Each "table" is a JSON file containing an array of objects.
@@ -25,7 +27,7 @@ export class FileQueryStore implements IQueryStore {
   public async #readTable(table: string): Promise<Record<string, unknown>[]> {
     try {
       const raw = await readFile(this.#tablePath(table), 'utf-8');
-      return JSON.parse(raw) as Record<string, unknown>[];
+      return parseJson(raw) as Record<string, unknown>[];
     } catch {
       return [];
     }

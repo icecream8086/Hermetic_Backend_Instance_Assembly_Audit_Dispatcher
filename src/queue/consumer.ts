@@ -114,7 +114,7 @@ const imagePullPayloadSchema = z.object({
 
 const sandboxGcPayloadSchema = z.object({
   sandboxId: z.string(),
-  reason: z.enum(['stopped-gc', 'provider-gone', 'exited-gc', 'unhealthy-gc', 'manual']),
+  reason: z.enum(['stopped-gc', 'provider-gone', 'exited-gc', 'unhealthy-gc', 'manual', 'failed-gc', 'expired-gc', 'stuck-gc']),
   providerId: z.string(),
   region: z.string(),
   instanceId: z.string().optional(),

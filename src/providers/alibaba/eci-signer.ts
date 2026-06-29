@@ -7,6 +7,7 @@
  * to the ECI-specific call pattern (POST with error parsing).
  */
 
+import { z } from 'zod';
 import { AkSkProvider } from '../../core/auth/providers.ts';
 
 export type RpcParams = Readonly<Record<string, string | undefined>>;
@@ -54,10 +55,16 @@ export async function rpcCall(
   }
 
   if (body.Code) {
-    const requestId = typeof body.RequestId === 'string' ? body.RequestId : 'unknown';
-    const code = typeof body.Code === 'string' ? body.Code : JSON.stringify(body.Code);
-    const msg = typeof body.Message === 'string' ? body.Message : '(no message)';
+    const requestId = z.string().optional().parse(body.RequestId) ?? 'unknown';
+    const rawCode = z.unknown().parse(body.Code);
+    const code = stringifyIfNeeded(rawCode);
+    const msg = z.string().optional().parse(body.Message) ?? '(no message)';
     throw new Error(`Alibaba ECI ${action} failed [${requestId}]: ${code} — ${msg}`);
   }
   return body;
+}
+
+function stringifyIfNeeded(v: unknown): string {
+  try { return z.string().parse(v); } catch { return JSON.stringify(v); }
+}
 }

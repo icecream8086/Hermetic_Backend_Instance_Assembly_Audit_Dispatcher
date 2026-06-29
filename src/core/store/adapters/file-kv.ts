@@ -5,6 +5,8 @@ import { TransactConflictError } from '../interfaces.ts';
 import type { VersionId } from '../../brand.ts';
 import { generateVersionId } from '../../brand.ts';
 
+const { parse: parseJson } = JSON;
+
 interface FileEntry<T = unknown> {
   value: T;
   metadata: { v: string; e?: number };
@@ -54,7 +56,7 @@ export class FileKVAtomicStore implements IAtomicStore {
       await this.#ensureDir();
       try {
         const raw = await readFile(this.#filePath(key), 'utf-8');
-        const entry = JSON.parse(raw) as FileEntry<T>;
+        const entry = parseJson(raw) as FileEntry<T>;
         if (entry.metadata.e && Date.now() > entry.metadata.e) {
           // TTL expired — delete file and return null
           try { await rm(this.#filePath(key), { force: true }); } catch {}
@@ -76,7 +78,7 @@ export class FileKVAtomicStore implements IAtomicStore {
 
       let current: FileEntry | null = null;
       try {
-        current = JSON.parse(await readFile(fp, 'utf-8')) as FileEntry;
+        current = parseJson(await readFile(fp, 'utf-8')) as FileEntry;
       } catch {
         // file doesn't exist
       }
@@ -106,7 +108,7 @@ export class FileKVAtomicStore implements IAtomicStore {
 
           try {
             const raw = await readFile(this.#filePath(key), 'utf-8');
-            const entry = JSON.parse(raw) as FileEntry<V>;
+            const entry = parseJson(raw) as FileEntry<V>;
             readSet.set(key, entry.metadata.v);
             return entry.value;
           } catch {
@@ -124,7 +126,7 @@ export class FileKVAtomicStore implements IAtomicStore {
             }
             try {
               const raw = await readFile(this.#filePath(key), 'utf-8');
-              const entry = JSON.parse(raw) as FileEntry<V>;
+              const entry = parseJson(raw) as FileEntry<V>;
               readSet.set(key, entry.metadata.v);
               results.push(entry.value);
             } catch {
@@ -149,7 +151,7 @@ export class FileKVAtomicStore implements IAtomicStore {
         let currentVersion: string | null;
         try {
           const raw = await readFile(this.#filePath(key), 'utf-8');
-          const entry = JSON.parse(raw) as FileEntry;
+          const entry = parseJson(raw) as FileEntry;
           currentVersion = entry.metadata.v;
         } catch {
           currentVersion = null;

@@ -1,5 +1,6 @@
 import type { IBlobStore } from '../../core/store/interfaces.ts';
 
+const { parse: parseJson } = JSON;
 const WS_PREFIX = 'action:workspace:';
 
 /**
@@ -86,7 +87,7 @@ export class BlobWorkspaceStore implements IWorkspaceStore {
     for (const c of chunks) { merged.set(c, offset); offset += c.byteLength; }
 
     const text = new TextDecoder().decode(merged);
-    const envelope = JSON.parse(text);
+    const envelope = parseJson(text);
     return {
       data: new Uint8Array(envelope.data as number[]),
       meta: envelope.meta as WorkspaceMeta,

@@ -32,7 +32,7 @@ export interface ImagePullPayload {
 export interface SandboxGcPayload {
   sandboxId: string;
   /** GC reason for audit trail. */
-  reason: 'stopped-gc' | 'provider-gone' | 'exited-gc' | 'unhealthy-gc' | 'manual';
+  reason: 'stopped-gc' | 'provider-gone' | 'exited-gc' | 'unhealthy-gc' | 'manual' | 'failed-gc' | 'expired-gc' | 'stuck-gc';
   providerId: string;
   region: string;
   /** Resolve per-instance provider for correct credential binding. */

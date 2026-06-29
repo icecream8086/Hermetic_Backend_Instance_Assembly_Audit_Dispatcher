@@ -18,6 +18,8 @@
     "deploy": "wrangler deploy",
     "docs:http": "tsx scripts/export-http.ts",
     "docs:openapi": "tsx scripts/export-openapi.ts",
+    "docs:arch": "npx tsx scripts/arch-doc.ts",
+    "docs:gen": "npx tsx scripts/gendoc.ts",
     "tail": "wrangler tail --format pretty",
     "lint": "eslint src --ext .ts",
     "lint:fix": "eslint src --ext .ts --fix",
@@ -26,7 +28,10 @@
     "map:deps": "npx madge --ts-config tsconfig.json --extensions ts --json --no-spinner --no-color src/index.ts > dependency-graph.json && npx tsx scripts/gen-module-metrics.ts",
     "map:calls": "npx tsx scripts/callgraph.ts",
     "map:class": "npx tsx scripts/metrics.ts",
-    "map:deadcode": "npx knip --no-exit-code"
+    "map:deadcode": "npx knip --no-exit-code",
+    "map:arch": "depcruise --output-type err-long src",
+    "stats": "cloc src --by-file --include-lang=TypeScript --exclude-dir=node_modules",
+    "stats:json": "cloc src --json --include-lang=TypeScript --exclude-dir=node_modules > code-stats.json"
   },
   "hbi-aad": {
     "features": {
@@ -62,6 +67,7 @@
     "@typescript-eslint/eslint-plugin": "^8.62.0",
     "@typescript-eslint/parser": "^8.62.0",
     "0x": "^6.0.0",
+    "cloc": "^2.6.0-cloc",
     "dependency-cruiser": "^17.4.3",
     "eslint": "^10.6.0",
     "fast-check": "^4.8.0",

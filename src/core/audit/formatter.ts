@@ -2,6 +2,8 @@ import type { StoredAuditEntry } from './types.ts';
 import type { SerializedBody } from '../brand.ts';
 import { createSerializedBody } from '../brand.ts';
 
+const { parse: parseJson } = JSON;
+
 export interface ILogFormatter {
   serialize(entry: StoredAuditEntry): SerializedBody;
   deserialize(body: SerializedBody): StoredAuditEntry;
@@ -13,6 +15,6 @@ export class JsonLogFormatter implements ILogFormatter {
   }
 
   public deserialize(body: SerializedBody): StoredAuditEntry {
-    return JSON.parse(body) as StoredAuditEntry;
+    return parseJson(body) as StoredAuditEntry;
   }
 }

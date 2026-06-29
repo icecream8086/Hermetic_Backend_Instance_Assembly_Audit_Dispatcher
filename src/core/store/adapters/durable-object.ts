@@ -1,9 +1,10 @@
 /// <reference types="@cloudflare/workers-types" />
 
+import { z } from 'zod';
 import type { IAtomicStore, IStoreTransaction } from '../interfaces.ts';
 import { TransactConflictError } from '../interfaces.ts';
 import type { VersionId } from '../../brand.ts';
-import { generateVersionId } from '../../brand.ts';
+import { createVersionId, generateVersionId } from '../../brand.ts';
 
 // ══════════════════════════════════════════════════════════════════
 // TTL system — every stored entry carries _expiresAt.
@@ -39,6 +40,33 @@ function originalKeyFromMarker(mk: string): string {
   return mk.substring(27);
 }
 
+// ─── Schemas (CEA: validate DO request/response envelopes) ───
+
+const getResponseSchema = z.object({ value: z.unknown(), version: z.string().nullable() });
+const setResponseSchema = z.object({ version: z.string().nullable() });
+const batchGetResponseSchema = z.object({
+  results: z.array(z.object({ key: z.string(), value: z.unknown(), version: z.string().nullable() })),
+});
+
+const txnOpSchema = z.object({
+  op: z.enum(['get', 'set', 'check']),
+  key: z.string(),
+  value: z.unknown().optional(),
+  expectedVersion: z.string().nullable().optional(),
+});
+
+const doRequestSchema = z.object({
+  op: z.enum(['get', 'set', 'batchGet', 'transact']),
+  key: z.string().optional(),
+  keys: z.array(z.string()).optional(),
+  value: z.unknown().optional(),
+  expectedVersion: z.string().nullable().optional(),
+  ttlSeconds: z.number().optional(),
+  txnOps: z.array(txnOpSchema).optional(),
+});
+
+type DoRequest = z.infer<typeof doRequestSchema>;
+
 // ═══════════════════════════════════════════════════════════
 // DO class — runs inside the Durable Object, uses ctx.storage
 // ═══════════════════════════════════════════════════════════
@@ -52,24 +80,24 @@ export class AtomicStoreDO implements DurableObject {
     // Lazy bootstrap alarm on first request
     if (!this.#alarmBootstrapped) {
       this.#alarmBootstrapped = true;
-      this.ctx.storage.setAlarm(Date.now() + IDLE_ALARM_MS).catch(() => {});
+      try { await this.ctx.storage.setAlarm(Date.now() + IDLE_ALARM_MS); } catch { /* alarm is best-effort */ }
     }
 
-    const { op, key, keys, value, expectedVersion, ttlSeconds, txnOps } = await request.json();
+    const req: DoRequest = doRequestSchema.parse(await request.json());
 
     try {
-      switch (op) {
+      switch (req.op) {
         case 'get': {
-          if (key === undefined) {
+          const entryKey = req.key;
+          if (entryKey === undefined) {
             return Response.json({ error: 'Missing key for get operation' }, { status: 400 });
           }
-          const entry = await this.ctx.storage.get<StoredValue>(key);
+          const entry = await this.ctx.storage.get<StoredValue>(entryKey);
           if (!entry) return Response.json({ value: null, version: null });
 
-          // Passive expiry — clean up expired entries on read
           if (entry._expiresAt !== null && entry._expiresAt <= Date.now()) {
-            const mk = markerKey(entry._expiresAt, key);
-            await this.ctx.storage.delete([key, mk]);
+            const mk = markerKey(entry._expiresAt, entryKey);
+            await this.ctx.storage.delete([entryKey, mk]);
             return Response.json({ value: null, version: null });
           }
 
@@ -77,32 +105,30 @@ export class AtomicStoreDO implements DurableObject {
         }
 
         case 'set': {
-          if (key === undefined) {
+          const setKey = req.key;
+          if (setKey === undefined) {
             return Response.json({ error: 'Missing key for set operation' }, { status: 400 });
           }
-          const current = await this.ctx.storage.get<StoredValue>(key);
+          const current = await this.ctx.storage.get<StoredValue>(setKey);
           const curVer = current?._ver ?? null;
-          if (expectedVersion !== curVer) return Response.json({ version: null, conflict: true });
+          if (req.expectedVersion !== curVer) return Response.json({ version: null, conflict: true });
 
           const newVersion = generateVersionId();
           const now = Date.now();
-          const newExpiresAt = ttlSeconds !== undefined ? now + ttlSeconds * 1000 : null;
+          const newExpiresAt = req.ttlSeconds !== undefined ? now + req.ttlSeconds * 1000 : null;
 
-          // Clean up old TTL marker if the entry had one
-          if (current?._expiresAt !== null && current?._expiresAt !== undefined) {
-            await this.ctx.storage.delete(markerKey(current._expiresAt, key));
+          if (current !== undefined && current._expiresAt !== null) {
+            await this.ctx.storage.delete(markerKey(current._expiresAt, setKey));
           }
 
-          // Store value with explicit expiry metadata
-          await this.ctx.storage.put(key, { v: value, _ver: newVersion, _expiresAt: newExpiresAt } satisfies StoredValue);
+          await this.ctx.storage.put(setKey, { v: req.value, _ver: newVersion, _expiresAt: newExpiresAt } satisfies StoredValue);
 
-          // Create TTL marker for non-permanent entries
           if (newExpiresAt !== null) {
-            const mk = markerKey(newExpiresAt, key);
+            const mk = markerKey(newExpiresAt, setKey);
             await this.ctx.storage.put(mk, { expiresAt: newExpiresAt });
 
-            // Advance alarm if this entry expires sooner than current schedule
-            const currentAlarm = await this.ctx.storage.getAlarm().catch(() => null);
+            let currentAlarm: number | null = null;
+            try { currentAlarm = await this.ctx.storage.getAlarm(); } catch { /* not available in all runtimes */ }
             if (currentAlarm === null || newExpiresAt < currentAlarm) {
               await this.ctx.storage.setAlarm(newExpiresAt);
             }
@@ -112,15 +138,16 @@ export class AtomicStoreDO implements DurableObject {
         }
 
         case 'batchGet': {
-          if (!keys || keys.length === 0) {
+          const batchKeys = req.keys;
+          if (!batchKeys || batchKeys.length === 0) {
             return Response.json({ error: 'Missing keys for batchGet operation' }, { status: 400 });
           }
-          const stored = await this.ctx.storage.get<StoredValue>(keys);
+          const stored = await this.ctx.storage.get<StoredValue>(batchKeys);
           const now = Date.now();
           const expiredKeys: string[] = [];
           const results: { key: string; value: unknown; version: string | null }[] = [];
 
-          for (const k of keys) {
+          for (const k of batchKeys) {
             const entry = stored.get(k);
             if (!entry) {
               results.push({ key: k, value: null, version: null });
@@ -142,31 +169,26 @@ export class AtomicStoreDO implements DurableObject {
         }
 
         case 'transact': {
-          if (!txnOps) return Response.json({ error: 'Missing txnOps' }, { status: 400 });
+          const ops = req.txnOps;
+          if (!ops) return Response.json({ error: 'Missing txnOps' }, { status: 400 });
 
-          // Phase 1: collect all keys to read (get / check ops)
           const readKeys = new Set<string>();
-          for (const op of txnOps) {
-            if (op.op === 'get' || op.op === 'check') readKeys.add(op.key);
+          for (const txnOp of ops) {
+            if (txnOp.op === 'get' || txnOp.op === 'check') readKeys.add(txnOp.key);
           }
 
-          // Phase 2: single batch read — 1 I/O instead of N
           const stored = readKeys.size > 0
             ? await this.ctx.storage.get<StoredValue>([...readKeys])
             : new Map<string, StoredValue>();
 
-          // Phase 3: process ops in memory; collect writes.
-          // Reads check in-memory writes first so a set → get to the same
-          // key within one transaction sees the just-written value.
           const results: unknown[] = [];
           const writes = new Map<string, StoredValue>();
 
-          for (const txnOp of txnOps) {
+          for (const txnOp of ops) {
             if (txnOp.op === 'get') {
               const pending = writes.get(txnOp.key);
               results.push(pending ? pending.v : (stored.get(txnOp.key)?.v ?? null));
             } else if (txnOp.op === 'check') {
-              // Pending writes within the same txn always pass the check.
               if (writes.has(txnOp.key)) {
                 results.push(null);
               } else {
@@ -186,18 +208,20 @@ export class AtomicStoreDO implements DurableObject {
             }
           }
 
-          // Phase 4: single batch write — 1 I/O instead of N
           if (writes.size > 0) await this.ctx.storage.put(Object.fromEntries(writes));
 
           return Response.json({ results });
         }
 
-        default:
-          return Response.json({ error: `Unknown op: ${op}` }, { status: 400 });
+        default: {
+          const _exhaustive: never = req.op;
+          void _exhaustive;
+          return Response.json({ error: `Unknown op: ${String(req.op)}` }, { status: 400 });
+        }
       }
     } catch (err) {
       return Response.json(
-        { error: `Storage error: ${err instanceof Error ? err.message : err}` },
+        { error: `Storage error: ${err instanceof Error ? err.message : String(err)}` },
         { status: 503 },
       );
     }
@@ -212,6 +236,7 @@ export class AtomicStoreDO implements DurableObject {
       // Scan TTL markers in expiry order — never touches non-expirable keys.
       // Uses a while loop so ALL expired keys are cleaned up in one alarm
       // cycle regardless of volume (no artificial 2000-key cap).
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- intentional infinite loop, broken by internal conditions
       while (true) {
         const listOpts: DurableObjectListOptions = { prefix: TTL_MARKER_PREFIX, limit: 200 };
         if (start !== undefined) listOpts.start = start;
@@ -239,8 +264,10 @@ export class AtomicStoreDO implements DurableObject {
         if (!allExpired) break;
 
         // Advance cursor past this batch
-        const lastKey = [...result.keys()].pop()!;
-        start = lastKey.slice(0, -1) + String.fromCharCode(lastKey.charCodeAt(lastKey.length - 1) + 1);
+        const lastKey = [...result.keys()].pop();
+        if (lastKey !== undefined) {
+          start = lastKey.slice(0, -1) + String.fromCharCode(lastKey.charCodeAt(lastKey.length - 1) + 1);
+        }
       }
 
       // Dynamic reschedule: next expiry, or long idle poll
@@ -250,8 +277,7 @@ export class AtomicStoreDO implements DurableObject {
       await this.ctx.storage.setAlarm(Date.now() + delay);
     } catch (err) {
       console.error('AtomicStoreDO alarm error:', err);
-      // Reschedule anyway to avoid silent stall
-      await this.ctx.storage.setAlarm(Date.now() + IDLE_ALARM_MS).catch(() => {});
+      try { await this.ctx.storage.setAlarm(Date.now() + IDLE_ALARM_MS); } catch { /* best-effort reschedule */ }
     }
   }
 }
@@ -287,10 +313,12 @@ export class DurableObjectAtomicStore implements IAtomicStore {
       method: 'POST',
       body: JSON.stringify({ op: 'get', key }),
     });
-    const body = await resp.json();
+    const body = getResponseSchema.parse(await resp.json());
     if (body.value === null || body.value === undefined) return null;
-    if (body.version === null || body.version === undefined) return null;
-    return { value: body.value, version: body.version as VersionId };
+    if (body.version === null) return null;
+    const version = createVersionId(body.version);
+    const entry: { value: T; version: VersionId } = { value: body.value as T, version };
+    return entry;
   }
 
   public async set<T>(key: string, value: T, expectedVersion: VersionId | null, ttlSeconds?: number): Promise<VersionId | null> {
@@ -298,8 +326,8 @@ export class DurableObjectAtomicStore implements IAtomicStore {
       method: 'POST',
       body: JSON.stringify({ op: 'set', key, value, expectedVersion, ttlSeconds }),
     });
-    const body = await resp.json();
-    return body.version as VersionId | null;
+    const body = setResponseSchema.parse(await resp.json());
+    return body.version !== null ? createVersionId(body.version) : null;
   }
 
   public async transact<T>(action: (txn: IStoreTransaction) => Promise<T>): Promise<T> {
@@ -321,12 +349,13 @@ export class DurableObjectAtomicStore implements IAtomicStore {
       flushScheduled = false;
 
       const keys = [...new Set(batch.map(r => r.key))];
-      const firstKey = keys[0]!;
+      const firstKey = keys[0];
+      if (firstKey === undefined) return;
       const resp = await this.#stubForKey(firstKey).fetch('https://do/op', {
         method: 'POST',
         body: JSON.stringify({ op: 'batchGet', keys }),
       });
-      const body = await resp.json();
+      const body = batchGetResponseSchema.parse(await resp.json());
 
       // Build lookup and record versions for OCC (null = phantom read tracking)
       const lookup = new Map<string, unknown>();
@@ -342,16 +371,18 @@ export class DurableObjectAtomicStore implements IAtomicStore {
     };
 
     const txn: IStoreTransaction = {
-      get: async <V>(key: string) => {
-        // 1) Read-your-writes: check locally deferred writes first
+      get: <V>(key: string) => {
+        // Read-your-writes: check locally deferred writes first
         const local = deferredWrites.find(w => w.key === key);
-        if (local !== undefined) return local.value as V;
+        if (local !== undefined) {
+          const value: V = local.value as V;
+          return Promise.resolve(value);
+        }
 
-        // 2) Register deferred read, schedule batch flush.
-        //    Duplicate keys are fine: the flush dedupes the DO fetch
-        //    but resolves each pending entry individually.
+        // Register deferred read, schedule batch flush.
         return new Promise<V>(resolve => {
-          pendingReads.push({ key, resolve: resolve as (v: unknown) => void });
+          const adaptedResolve: (v: unknown) => void = resolve as (v: unknown) => void;
+          pendingReads.push({ key, resolve: adaptedResolve });
 
           if (!flushScheduled) {
             flushScheduled = true;
@@ -359,34 +390,41 @@ export class DurableObjectAtomicStore implements IAtomicStore {
           }
         });
       },
-      getMany: async <V>(keys: string[]) => {
-        // Check local writes first
+      getMany: <V>(keys: string[]) => {
         const localResults: (V | null)[] = [];
         const remoteKeys: string[] = [];
         for (const key of keys) {
           const local = deferredWrites.find(w => w.key === key);
           if (local !== undefined) {
-            localResults.push(local.value as V);
+            const v: V = local.value as V;
+            localResults.push(v);
           } else {
-            localResults.push(null as V | null);
+            const none: V | null = null;
+            localResults.push(none);
             remoteKeys.push(key);
           }
         }
-        if (remoteKeys.length === 0) return localResults;
+        if (remoteKeys.length === 0) return Promise.resolve(localResults);
 
-        const resp = await this.#stubForKey(remoteKeys[0]!).fetch('https://do/op', {
+        const firstRemoteKey = remoteKeys[0];
+        if (firstRemoteKey === undefined) return Promise.resolve(localResults);
+        return this.#stubForKey(firstRemoteKey).fetch('https://do/op', {
           method: 'POST',
           body: JSON.stringify({ op: 'batchGet', keys: remoteKeys }),
+        }).then(async resp => {
+          const body = batchGetResponseSchema.parse(await resp.json());
+          for (const r of body.results) {
+            readSet.set(r.key, r.version);
+            const idx = keys.indexOf(r.key);
+            if (idx !== -1) {
+              const entry: V | null = (r.value ?? null) as V | null;
+              localResults[idx] = entry;
+            }
+          }
+          return localResults;
         });
-        const body = await resp.json();
-        for (const r of body.results) {
-          readSet.set(r.key, r.version);
-          const idx = keys.indexOf(r.key);
-          if (idx !== -1) localResults[idx] = (r.value ?? null) as V | null;
-        }
-        return localResults;
       },
-      set: async <V>(key: string, value: V, _ttlSeconds?: number) => {
+      set: <V>(key: string, value: V, _ttlSeconds?: number) => {
         deferredWrites.push({ key, value });
       },
     };
@@ -424,18 +462,19 @@ export class DurableObjectAtomicStore implements IAtomicStore {
         );
       }
 
-      const firstKey = readSet.keys().next().value ?? deferredWrites[0]!.key;
+      const firstWrite = deferredWrites[0];
+      const firstKey = readSet.keys().next().value ?? (firstWrite !== undefined ? firstWrite.key : '');
       const resp = await this.#stubForKey(firstKey).fetch('https://do/op', {
         method: 'POST',
         body: JSON.stringify({ op: 'transact', txnOps }),
       });
 
       if (!resp.ok) {
-        const body = await resp.json();
+        const errorBody = z.object({ error: z.string().optional() }).parse(await resp.json());
         if (resp.status === 409) {
-          throw new TransactConflictError(body.error ?? 'Transaction conflict in DO transact');
+          throw new TransactConflictError(errorBody.error ?? 'Transaction conflict in DO transact');
         }
-        throw new Error(body.error ?? 'DO transact error');
+        throw new Error(errorBody.error ?? 'DO transact error');
       }
     }
 

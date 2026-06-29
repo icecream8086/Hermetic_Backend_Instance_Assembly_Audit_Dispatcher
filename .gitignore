@@ -23,3 +23,5 @@ AGENTS.md
 .profiles.profiles/
 dependency-graph.json
 module-metrics.txt
+code-stats.json
+docs

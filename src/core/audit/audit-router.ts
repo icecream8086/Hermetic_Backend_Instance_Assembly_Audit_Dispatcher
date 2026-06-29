@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import type { IAuditReader, LogQuery } from './types.ts';
@@ -93,7 +94,7 @@ export function createAuditRouter(reader: IAuditReader): Hono<AuditEnv> {
 
     // Merge partial updates
     const updated: PersistencePolicy = {
-      enabled: typeof body.enabled === 'boolean' ? body.enabled : current.enabled,
+      enabled: z.boolean().optional().parse(body.enabled) ?? current.enabled,
       defaultMinLevel: parseLevel(body.defaultMinLevel) ?? current.defaultMinLevel,
       rules: Array.isArray(body.rules)
         ? body.rules.map((r: any, _i: number) => parseRule(r))
@@ -137,13 +138,15 @@ function parseLevel(raw: unknown): KernLevel | null {
   return map[raw.toLowerCase()] ?? null;
 }
 
-function parseRule(raw: any): PersistenceRule {
+function parseRule(raw: Record<string, unknown>): PersistenceRule {
   const rawFacility = String(raw.facility ?? '*');
+  const sampleRate = z.number().optional().parse(raw.sampleRate);
+  const ttlMs = z.number().optional().parse(raw.ttlMs);
   return {
     facility: (rawFacility === '*' ? '*' : rawFacility) as PersistenceRule['facility'],
     minLevel: parseLevel(raw.minLevel) ?? KernLevel.ERR,
-    ...(typeof raw.sampleRate === 'number' && raw.sampleRate > 0 ? { sampleRate: raw.sampleRate } : {}),
-    ...(typeof raw.ttlMs === 'number' && raw.ttlMs >= 0 ? { ttlMs: raw.ttlMs } : {}),
+    ...(sampleRate !== undefined && sampleRate > 0 ? { sampleRate } : {}),
+    ...(ttlMs !== undefined && ttlMs >= 0 ? { ttlMs } : {}),
   };
 }
 

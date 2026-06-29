@@ -8,6 +8,8 @@ import type { RouteMeta } from '../../core/http-docs/types.ts';
 import { generateVersionId } from '../../core/brand.ts';
 import { CreateWorkflowSchema, UpdateWorkflowSchema, TriggerWorkflowSchema } from './schema.ts';
 import { WorkflowRunner } from './runner.ts';
+
+const { parse: parseJson } = JSON;
 import { ActionRegistry, type CreateActionInput } from './registry.ts';
 import type { TriggerConfig, JobDef } from './types.ts';
 import { registerCronTrigger } from './triggers.ts';
@@ -237,7 +239,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
     }
 
     let payload: Record<string, unknown> = {};
-    try { payload = JSON.parse(rawBody || '{}'); } catch { /* not JSON */ }
+    try { payload = parseJson(rawBody || '{}'); } catch { /* not JSON */ }
     const inputs = payload.inputs as Record<string, string> | undefined ?? {};
 
     const run = await runner.startRun(entry.value, 'http', payload, inputs,
@@ -578,7 +580,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
   });
 
   router.get('/runners', async (c) => {
-    const labels = c.req.query('labels') ? JSON.parse(c.req.query('labels')!) : undefined;
+    const labels = c.req.query('labels') ? parseJson(c.req.query('labels')!) : undefined;
     const runners = await runnerRegistry.listOnline(labels);
     return c.json(ok(runners));
   });

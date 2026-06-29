@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
@@ -685,9 +686,12 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
         metadata: { eventType: 'template.applied', templateId: resolved.id, sandboxId: sandbox.id, actorId: user?.id },
       });
       return c.json(ok(sandbox), 201);
-    } catch (e: any) {
-      const status = typeof e.status === 'number' ? e.status : (typeof e.statusCode === 'number' ? e.statusCode : 500);
-      const code = e.code && typeof e.code === 'string' ? e.code : (status === 404 ? 'TEMPLATE_NOT_FOUND' : 'APPLY_FAILED');
+    } catch (e: unknown) {
+      const errorSchema = z.object({ status: z.number().optional(), statusCode: z.number().optional(), code: z.string().optional(), message: z.string().optional() }).passthrough();
+      let err: z.infer<typeof errorSchema>;
+      try { err = errorSchema.parse(e); } catch { err = { message: String(e) }; }
+      const status = err.status ?? err.statusCode ?? 500;
+      const code = err.code ?? (status === 404 ? 'TEMPLATE_NOT_FOUND' : 'APPLY_FAILED');
       console.error(`[template] apply failed for ${c.req.param('id')}:`, { code, status, message: e.message });
       if (resolved) {
         await releaseInstanceSlot(atomic, resolved, c.var.currentUser?.id ?? 'anonymous').catch(() => {});

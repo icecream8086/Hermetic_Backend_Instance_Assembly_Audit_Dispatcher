@@ -2,6 +2,8 @@ import type { MiddlewareHandler } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import type { IAtomicStore } from '../store/interfaces.ts';
 
+const { parse: parseJson } = JSON;
+
 /** Env shape this middleware requires on `c.var`. */
 interface IdempotencyEnv { Variables: { stores: { atomic: IAtomicStore } } }
 
@@ -25,7 +27,7 @@ export function idempotency(): MiddlewareHandler<IdempotencyEnv> {
     const existing = await stores.get<string>(storageKey);
     if (existing) {
       try {
-        const cached = JSON.parse(existing.value) as { status: number; body: unknown };
+        const cached = parseJson(existing.value) as { status: number; body: unknown };
         return c.json(cached.body, cached.status as ContentfulStatusCode);
       } catch { /* corrupted data — fall through to re-execute */ }
     }

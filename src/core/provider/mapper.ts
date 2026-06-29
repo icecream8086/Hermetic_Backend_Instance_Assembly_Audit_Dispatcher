@@ -43,12 +43,18 @@ export interface MappableEnv {
 }
 
 export function mapEnv(e: MappableEnv): EnvVar {
+  let valueFrom: EnvVar['valueFrom'] | undefined;
+  if (e.valueFrom !== undefined) {
+    if (typeof e.valueFrom === 'string') {
+      valueFrom = { fieldRef: { fieldPath: e.valueFrom } };
+    } else {
+      valueFrom = e.valueFrom;
+    }
+  }
   return {
     name: e.name,
     ...(e.value !== undefined ? { value: e.value } : {}),
-    ...(e.valueFrom !== undefined
-      ? { valueFrom: typeof e.valueFrom === 'string' ? { fieldRef: { fieldPath: e.valueFrom } } : e.valueFrom }
-      : {}),
+    ...(valueFrom !== undefined ? { valueFrom } : {}),
   };
 }
 

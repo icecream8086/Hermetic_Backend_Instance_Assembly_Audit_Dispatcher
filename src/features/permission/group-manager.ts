@@ -168,7 +168,12 @@ export class GroupManager {
   }
 }
 
-function buildCompareResult(a: any, b: any) {
+function normalizeItem(item: string | { id: string }): { id: string } {
+  if (typeof item === 'string') return { id: item };
+  return item;
+}
+
+function buildCompareResult(a: Record<string, unknown>, b: Record<string, unknown>) {
   const common: Record<string, unknown>[] = [];
   const onlyA: Record<string, unknown>[] = [];
   const onlyB: Record<string, unknown>[] = [];
@@ -179,14 +184,15 @@ function buildCompareResult(a: any, b: any) {
 
   for (const aItem of aItems) {
     const aJson = JSON.stringify(aItem);
-    const match = bItems.find((bItem: any) => JSON.stringify(bItem) === aJson);
-    if (match) common.push(typeof aItem === 'string' ? { id: aItem } : aItem);
-    else onlyA.push(typeof aItem === 'string' ? { id: aItem } : aItem);
+    const match = bItems.find((bItem: { id: string } | string) => JSON.stringify(bItem) === aJson);
+    const resolved = normalizeItem(aItem);
+    if (match) common.push(resolved);
+    else onlyA.push(resolved);
   }
   for (const bItem of bItems) {
     const bJson = JSON.stringify(bItem);
-    const inA = aItems.some((aItem: any) => JSON.stringify(aItem) === bJson);
-    if (!inA) onlyB.push(typeof bItem === 'string' ? { id: bItem } : bItem);
+    const inA = aItems.some((aItem: { id: string } | string) => JSON.stringify(aItem) === bJson);
+    if (!inA) onlyB.push(normalizeItem(bItem));
   }
 
   if ((a.dependsOn ?? []).length > 0 || (b.dependsOn ?? []).length > 0) {

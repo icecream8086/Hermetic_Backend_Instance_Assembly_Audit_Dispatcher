@@ -21,6 +21,10 @@ export function generateLogId(): LogId {
   return createLogId(`${Date.now().toString(10).padStart(16, '0')}-${rand}`);
 }
 
+export function createVersionId(raw: string): VersionId {
+  return versionIdSchema.parse(raw);
+}
+
 export function generateVersionId(): VersionId {
   return versionIdSchema.parse(crypto.randomUUID());
 }

@@ -1,5 +1,6 @@
 import type { CreateContainerGroupInput, ContainerCreateConfig, ProbeSpec } from './types.ts';
 import type { IContainerProvider, IContainerGroupProvider } from './interfaces.ts';
+import type { PodSpec, ContainerSpec } from '../pod/types.ts';
 
 // ─── Probe sanitization ───
 
@@ -81,9 +82,31 @@ export function secureContainerProvider(inner: IContainerProvider): IContainerPr
           target.update!(providerId, sanitizeContainerInput(input as CreateContainerGroupInput));
       }
       const val = Reflect.get(target, prop, receiver);
-      return typeof val === 'function' ? val.bind(target) : val;
+      if (typeof val === 'function') return val.bind(target);
+      return val;
     },
   });
+}
+
+/** Sanitize probes across all containers in a PodSpec (defense-in-depth). */
+function sanitizePodSpec(spec: PodSpec): PodSpec {
+  return {
+    ...spec,
+    spec: {
+      ...spec.spec,
+      containers: spec.spec.containers.map(sanitizePodContainer),
+      ...(spec.spec.initContainers ? { initContainers: spec.spec.initContainers.map(sanitizePodContainer) } : {}),
+    },
+  };
+}
+
+function sanitizePodContainer(c: ContainerSpec): ContainerSpec {
+  return {
+    ...c,
+    ...(c.livenessProbe ? { livenessProbe: sanitizeProbe(c.livenessProbe) } : {}),
+    ...(c.readinessProbe ? { readinessProbe: sanitizeProbe(c.readinessProbe) } : {}),
+    ...(c.startupProbe ? { startupProbe: sanitizeProbe(c.startupProbe) } : {}),
+  };
 }
 
 /**
@@ -92,11 +115,12 @@ export function secureContainerProvider(inner: IContainerProvider): IContainerPr
 export function secureContainerGroupProvider(inner: IContainerGroupProvider): IContainerGroupProvider {
   return new Proxy(inner, {
     get(target, prop: string | symbol, receiver) {
-      if (prop === 'createGroup') {
-        return (input: CreateContainerGroupInput) => target.createGroup(sanitizeContainerInput(input));
+      if (prop === 'createPod') {
+        return (input: PodSpec) => target.createPod(sanitizePodSpec(input));
       }
       const val = Reflect.get(target, prop, receiver);
-      return typeof val === 'function' ? val.bind(target) : val;
+      if (typeof val === 'function') return val.bind(target);
+      return val;
     },
   });
 }

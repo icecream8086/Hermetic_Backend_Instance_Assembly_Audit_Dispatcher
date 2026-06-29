@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { EventBus } from '../event-bus/bus.ts';
 import type { EventLoop } from '../event-bus/loop.ts';
 import type { IAtomicStore } from '../store/interfaces.ts';
@@ -6,6 +7,8 @@ import type { IAuditWriter } from '../audit/types.ts';
 import type { IMessageQueue } from '../../queue/interfaces.ts';
 import type { Sandbox } from '../../features/sandbox/types.ts';
 import { SandboxStatus } from '../../features/sandbox/types.ts';
+import { createRegionId } from '../region/types.ts';
+import { createInstanceId } from '../region/instance.ts';
 import { runtimeToNetwork, runtimeToContainers, runtimeToEvents } from '../../features/sandbox/runtime-mapper.ts';
 import { formatDmesgLine } from '../utils/dmesg.ts';
 
@@ -122,12 +125,13 @@ export function registerHealthCheck(deps: HealthCheckDeps): void {
           ) {
             const TRANSIENT_TIMEOUT_MS = 10 * 60 * 1000; // 10 min — generous for ECI scheduling + image pull
             const duration = Date.now() - entry.value.updatedAt;
-            const resolvedInstanceId = instanceId ?? (entry.value.config as any).providerIdentity?.instanceId;
+            const providerIdentity = (entry.value.config as unknown as Record<string, unknown>).providerIdentity;
+            const resolvedInstanceId = instanceId ?? (providerIdentity as Record<string, unknown> | undefined)?.instanceId as string | undefined;
 
             // Try provider status check (only if we have instance routing info)
             if (resolvedInstanceId) {
               try {
-                const p = await providers.resolveContainer?.(resolvedInstanceId);
+                const p = resolvedInstanceId ? await providers.resolveContainer?.(createInstanceId(resolvedInstanceId)) : undefined;
                 if (p?.getStatus) {
                   const rt = await p.getStatus(entry.value.providerId ?? sid);
                   if (!rt) {
@@ -260,10 +264,12 @@ export function registerHealthCheck(deps: HealthCheckDeps): void {
         const now = Date.now();
         for (const iid of instIdx.value) {
           try {
-            const instEntry = await stores.atomic.get<any>('instance:' + iid);
-            if (instEntry?.value?.status !== 'online') continue;
-            if (instEntry.value.updatedAt && (now - instEntry.value.updatedAt > 120_000)) {
-              await stores.atomic.set('instance:' + iid, { ...instEntry.value, status: 'offline', updatedAt: now }, instEntry.version);
+            const instEntry = await stores.atomic.get<Record<string, unknown>>('instance:' + iid);
+            if (!instEntry?.value) continue;
+            const instValue = z.object({ status: z.string().optional(), updatedAt: z.number().optional() }).passthrough().parse(instEntry.value);
+            if (instValue.status !== 'online') continue;
+            if (instValue.updatedAt !== undefined && (now - instValue.updatedAt > 120_000)) {
+              await stores.atomic.set('instance:' + iid, { ...instValue, status: 'offline', updatedAt: now }, instEntry.version);
             }
           } catch { /* skip */ }
         }
@@ -276,19 +282,22 @@ export function registerHealthCheck(deps: HealthCheckDeps): void {
       if (bIdx) {
         for (const sid of bIdx.value) {
           try {
-            const entry = await stores.atomic.get<any>(BINDING_PREFIX + sid);
-            if (!entry?.value || entry.value.expiresAt > Date.now()) continue;
+            const entry = await stores.atomic.get<Record<string, unknown>>(BINDING_PREFIX + sid);
+            if (!entry?.value) continue;
+            const bindingSchema = z.object({ expiresAt: z.number(), accessKeyId: z.string(), version: z.number(), rotationIntervalMs: z.number().optional() }).passthrough();
+            const parsed = bindingSchema.parse(entry.value);
+            if (parsed.expiresAt > Date.now()) continue;
             const qSent = await queueProducer.sendBucketKeyRotate({ bindingId: sid });
             if (qSent) continue;
-            // Queue unavailable — inline fallback
-            const binding = entry.value;
-            const ak = binding.accessKeyId;
             const sk = Array.from(crypto.getRandomValues(new Uint8Array(32)))
               .map((b: number) => b.toString(16).padStart(2, '0')).join('');
-            binding.secretValue = `${ak}:${sk}`;
-            binding.version++;
-            binding.expiresAt = Date.now() + (binding.rotationIntervalMs ?? 24 * 60 * 60 * 1000);
-            await stores.atomic.set(BINDING_PREFIX + sid, binding, entry.version);
+            const updated = {
+              ...parsed,
+              secretValue: `${parsed.accessKeyId}:${sk}`,
+              version: parsed.version + 1,
+              expiresAt: Date.now() + (parsed.rotationIntervalMs ?? 24 * 60 * 60 * 1000),
+            };
+            await stores.atomic.set(BINDING_PREFIX + sid, updated, entry.version);
           } catch { /* skip */ }
         }
       }
@@ -340,7 +349,7 @@ async function dispatchGc(
 
   // 2. Try Queue dispatch
   const qSent = await queueProducer.sendSandboxGc({
-    sandboxId: params.sandboxId, reason: params.reason as any,
+    sandboxId: params.sandboxId, reason: params.reason as 'stopped-gc' | 'provider-gone' | 'exited-gc' | 'unhealthy-gc' | 'manual' | 'failed-gc' | 'expired-gc' | 'stuck-gc',
     providerId: params.providerId, region: params.region,
     ...(params.instanceId ? { instanceId: params.instanceId } : {}),
     containerCount: params.containerCount,
@@ -356,8 +365,8 @@ async function dispatchGc(
   // 4. Queue unavailable — inline fallback. Resolve per-instance provider.
   if (params.instanceId && providers.resolveContainer) {
     try {
-      const resolved = await providers.resolveContainer(params.instanceId as any);
-      await resolved.delete({ region: params.region as any, providerId: params.providerId });
+      const resolved = await providers.resolveContainer(createInstanceId(params.instanceId));
+      await resolved.delete({ region: createRegionId(params.region), providerId: params.providerId });
     } catch { /* best-effort */ }
   }
 
@@ -366,7 +375,7 @@ async function dispatchGc(
 
   // 5. Clear marker (we handled it inline)
   const m2 = await atomic.get<{ expiresAt: number }>(markerKey);
-  if (m2) await atomic.set(markerKey, null as any, m2.version);
+  if (m2) await atomic.set<Record<string, unknown> | null>(markerKey, null, m2.version);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -378,7 +387,6 @@ import type { PodEntity } from '../pod/types.ts';
 import { createPodId } from '../pod/types.ts';
 import { ContainerGroupState } from '../provider/container-lifecycle.ts';
 import type { InstanceId } from '../region/instance.ts';
-import { createInstanceId } from '../region/instance.ts';
 
 export interface PodHealthCheckDeps {
   podService: PodService;
@@ -421,7 +429,7 @@ export function registerPodHealthCheck(deps: PodHealthCheckDeps): void {
 
           const phase = pod.phase;
           const providerId = pod.providerId;
-          const instanceId = (pod.spec.providerOverrides as Record<string, unknown> | undefined)?.instanceId as string | undefined;
+          const instanceId = (pod.spec.providerOverrides)?.instanceId as string | undefined;
 
           // ── Succeeded > 60s → stopped-gc ──
           if (phase === 'Succeeded') {
@@ -600,7 +608,7 @@ async function dispatchPodGc(
 
   // Queue dispatch — reuses sandbox:gc queue but with pod-scoped markers
   const qSent = await queueProducer.sendSandboxGc({
-    sandboxId: params.podId, reason: params.reason as any,
+    sandboxId: params.podId, reason: params.reason as 'stopped-gc' | 'provider-gone' | 'exited-gc' | 'unhealthy-gc' | 'manual' | 'failed-gc' | 'expired-gc' | 'stuck-gc',
     providerId: params.providerId, region: 'cn-hangzhou',
     ...(params.instanceId ? { instanceId: params.instanceId } : {}),
     containerCount: 0,
@@ -616,14 +624,14 @@ async function dispatchPodGc(
   if (instId && providers.resolveContainer) {
     try {
       const resolved = await providers.resolveContainer(instId);
-      await resolved.delete({ region: 'cn-hangzhou' as any, providerId: params.providerId });
+      await resolved.delete({ region: createRegionId('cn-hangzhou'), providerId: params.providerId });
     } catch { /* best-effort */ }
   }
 
   await gcUpdatePodState(atomic, audit, params.podId, params.reason, params.podName, params.providerId, params.createdAt);
 
   const m2 = await atomic.get<{ expiresAt: number }>(markerKey);
-  if (m2) await atomic.set(markerKey, null as any, m2.version);
+  if (m2) await atomic.set<Record<string, unknown> | null>(markerKey, null, m2.version);
 }
 
 async function gcUpdatePodState(

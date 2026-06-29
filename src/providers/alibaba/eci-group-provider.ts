@@ -8,7 +8,7 @@ import type {
   DescribeContainerGroupsInput,
   DescribeContainerGroupsResult,
 } from '../../core/provider/interfaces.ts';
-import type { CreateContainerGroupInput, ContainerGroupRuntime } from '../../core/provider/types.ts';
+import type { ContainerGroupRuntime } from '../../core/provider/types.ts';
 import type { PodSpec } from '../../core/pod/types.ts';
 import { AlibabaPodCodec } from './pod-codec.ts';
 import { rpcCall } from './eci-signer.ts';
@@ -35,13 +35,7 @@ export class AlibabaEciContainerGroupProvider implements IContainerGroupProvider
       'CreateContainerGroup', params,
     );
     const rawId = resp.ContainerGroupId;
-    return { providerId: typeof rawId === 'string' ? rawId : '' };
-  }
-
-  /** @deprecated Use createPod(PodSpec) instead. */
-  public async createGroup(input: CreateContainerGroupInput): Promise<{ providerId: string }> {
-    const { AlibabaEciContainerProvider: Inner } = await import('./eci-container.ts');
-    return new Inner(this.accessKeyId, this.accessKeySecret, this.endpoint).create(input);
+    return { providerId: z.string().optional().parse(rawId) ?? '' };
   }
 
   public async stopGroup(providerId: string): Promise<void> {
