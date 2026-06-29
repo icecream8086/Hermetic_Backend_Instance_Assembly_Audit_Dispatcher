@@ -6,7 +6,7 @@ export const ActionContainerConfigSchema = z.object({
   image: z.string().min(1),
   command: z.array(z.string()).optional(),
   args: z.array(z.string()).optional(),
-  env: z.record(z.string()).optional(),
+  env: z.record(z.string(), z.string()).optional(),
   ports: z.array(z.object({
     containerPort: z.number().int().min(1).max(65535),
     hostPort: z.number().int().min(1).max(65535).optional(),
@@ -30,7 +30,7 @@ export const RunStepDefSchema = z.object({
   name: z.string().optional(),
   id: z.string().optional(),
   run: z.string().min(1),
-  env: z.record(z.string()).optional(),
+  env: z.record(z.string(), z.string()).optional(),
   timeout: z.number().int().min(1).optional(),
   continueOnError: z.boolean().optional(),
   shell: z.string().optional(),
@@ -40,8 +40,8 @@ export const UsesStepDefSchema = z.object({
   name: z.string().optional(),
   id: z.string().optional(),
   uses: z.string().min(1),
-  with: z.record(z.string()).optional(),
-  env: z.record(z.string()).optional(),
+  with: z.record(z.string(), z.string()).optional(),
+  env: z.record(z.string(), z.string()).optional(),
   timeout: z.number().int().min(1).optional(),
   continueOnError: z.boolean().optional(),
 });
@@ -91,7 +91,7 @@ export const JobDefSchema = z.object({
   runsOn: z.string().optional(),
   needs: z.array(z.string()).optional(),
   steps: z.array(StepDefSchema),
-  env: z.record(z.string()).optional(),
+  env: z.record(z.string(), z.string()).optional(),
   timeout: z.number().int().min(1).optional(),
   if: z.string().optional(),
   container: ActionContainerConfigSchema.optional(),
@@ -110,30 +110,30 @@ export const CreateWorkflowSchema = z.object({
   name: z.string().min(1).max(256),
   description: z.string().optional(),
   on: TriggerConfigSchema,
-  env: z.record(z.string()).optional(),
-  jobs: z.record(JobDefSchema).refine(
+  env: z.record(z.string(), z.string()).optional(),
+  jobs: z.record(z.string(), JobDefSchema).refine(
     jobs => Object.keys(jobs).length > 0,
     'At least one job is required',
   ),
   orgId: z.string().optional(),
   projectId: z.string().optional(),
-  metadata: z.record(z.unknown()).optional(),
-  annotations: z.record(z.string()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+  annotations: z.record(z.string(), z.string()).optional(),
 });
 
 export const UpdateWorkflowSchema = z.object({
   name: z.string().min(1).max(256).optional(),
   description: z.string().nullable().optional(),
   on: TriggerConfigSchema.optional(),
-  env: z.record(z.string()).optional(),
-  jobs: z.record(JobDefSchema).optional(),
+  env: z.record(z.string(), z.string()).optional(),
+  jobs: z.record(z.string(), JobDefSchema).optional(),
   orgId: z.string().optional(),
   projectId: z.string().optional(),
-  metadata: z.record(z.unknown()).optional(),
-  annotations: z.record(z.string()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+  annotations: z.record(z.string(), z.string()).optional(),
 });
 
 export const TriggerWorkflowSchema = z.object({
-  inputs: z.record(z.string()).optional(),
+  inputs: z.record(z.string(), z.string()).optional(),
   payload: z.unknown().optional(),
 });

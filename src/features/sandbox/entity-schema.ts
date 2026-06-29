@@ -33,16 +33,17 @@ const BaseFields = {
 
 export const SandboxSchema = z.object({
   ...BaseFields,
-  status: z.nativeEnum(SandboxStatus),
-  config: z.record(z.unknown()).default({}),
+  status: z.enum(SandboxStatus),
+  config: z.record(z.string(), z.unknown()).default({}),
   podUid: z.string().optional(),
   providerId: z.string().optional(),
-  network: z.record(z.unknown()).default({}),
-  containers: z.array(z.record(z.unknown())).default([]),
-  conditions: z.array(z.record(z.unknown())).optional(),
-  events: z.array(z.record(z.unknown())).default([]),
+  network: z.record(z.string(), z.unknown()).default({}),
+  containers: z.array(z.record(z.string(), z.unknown())).default([]),
+  conditions: z.array(z.record(z.string(), z.unknown())).optional(),
+  events: z.array(z.record(z.string(), z.unknown())).default([]),
   ephemeralStorageGiB: z.number().optional(),
 }).passthrough(); // allow unrecognized fields for forward compatibility
+// TODO: Zod v4 — use z.looseObject() once the full migration settles
 
 /** Entity type derived from the schema. */
 export type Sandbox = z.infer<typeof SandboxSchema>;

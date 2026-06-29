@@ -1,156 +1,135 @@
-import { Hono } from 'hono';
+import { z } from 'zod';
+import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import type { Context } from 'hono';
 import type { IProviderRegistry } from '../../core/provider/interfaces.ts';
+import { AppError } from '../../core/types.ts';
 import type { AppContext } from '../../core/deps.ts';
-import { ok, fail } from '../../core/response.ts';
-import type { RouteMeta } from '../../core/http-docs/types.ts';
+import { ok } from '../../core/response.ts';
 
-function requireRoot(c: Context<{ Variables: AppContext }>): Response | null {
+function requireRoot<E extends { Variables: { currentUser?: { role?: string } } }>(c: Context<E>): void {
   const user = c.var?.currentUser;
-  if (!user) return null;
-  const isRoot = user.role === 'root' || user.role === 'Operator' || user.role === 'wheel';
-  if (!isRoot) return c.json(fail('FORBIDDEN', 'Admin access required'), 403);
-  return null;
+  if (!user || !['root', 'Operator', 'wheel'].includes(user.role)) {
+    throw new AppError(403, 'FORBIDDEN', 'Admin access required');
+  }
 }
 
-export function createImagesRouter(providers: IProviderRegistry): Hono<{ Variables: AppContext }> {
-  const router = new Hono<{ Variables: AppContext }>();
+export function createImagesRouter(providers: IProviderRegistry): OpenAPIHono<{ Variables: AppContext }> {
+  const app = new OpenAPIHono<{ Variables: AppContext }>();
 
-  // ─── List images ───
+  app.openapi(
+    createRoute({ method: 'get', path: '/', tags: ['images'], summary: '列出镜像', responses: { 200: { description: 'ImageInfo[]', content: { 'application/json': { schema: z.any() } } } } }),
+    async (c) => {
+      const search = c.req.query('search');
+      const limit = parseInt(c.req.query('limit') ?? '') || undefined;
+      const offset = parseInt(c.req.query('offset') ?? '') || undefined;
+      const instanceId = c.req.query('instanceId');
+      const provider = instanceId ? await providers.resolveImage(instanceId as any) : providers.image;
+      const images = await provider.list({ search, limit, offset } as any);
+      return c.json(ok(images));
+    },
+  );
 
-  router.get('/', async (c) => {
-    const search = c.req.query('search');
-    const limit = parseInt(c.req.query('limit') ?? '') || undefined;
-    const offset = parseInt(c.req.query('offset') ?? '') || undefined;
-    const instanceId = c.req.query('instanceId');
+  app.openapi(
+    createRoute({ method: 'post', path: '/pull', tags: ['images'], summary: '拉取镜像', responses: { 201: { description: 'ImageInfo', content: { 'application/json': { schema: z.any() } } } } }),
+    async (c) => {
+      requireRoot(c);
+      const { image, instanceId, clusterId, credentialRef } = await c.req.json();
+      if (!image) throw new AppError(400, 'VALIDATION_ERROR', 'image is required');
+      const provider = instanceId ? await providers.resolveImage(instanceId) : providers.image;
+      const info = await provider.pull(image, clusterId ?? credentialRef);
+      return c.json(ok(info), 201);
+    },
+  );
 
-    const provider = instanceId
-      ? await providers.resolveImage(instanceId as any)
-      : providers.image;
+  app.openapi(
+    createRoute({ method: 'get', path: '/{id}', tags: ['images'], summary: '查看镜像详情', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'ImageInfo', content: { 'application/json': { schema: z.any() } } } } }),
+    async (c) => {
+      const id = c.req.param('id');
+      const instanceId = c.req.query('instanceId');
+      const provider = instanceId ? await providers.resolveImage(instanceId as any) : providers.image;
+      const info = await provider.inspect(id);
+      if (!info) throw new AppError(404, 'NOT_FOUND', 'Image not found');
+      return c.json(ok(info));
+    },
+  );
 
-    const images = await provider.list({ search, limit, offset } as any);
-    return c.json(ok(images));
-  });
+  app.openapi(
+    createRoute({ method: 'delete', path: '/{id}', tags: ['images'], summary: '删除镜像', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: z.any() } } } } }),
+    async (c) => {
+      requireRoot(c);
+      const id = c.req.param('id');
+      const instanceId = c.req.query('instanceId');
+      const provider = instanceId ? await providers.resolveImage(instanceId as any) : providers.image;
+      await provider.remove(id);
+      return c.json(ok(null));
+    },
+  );
 
-  // ─── Pull image ───
+  app.openapi(
+    createRoute({ method: 'post', path: '/{id}/tag', tags: ['images'], summary: '给镜像打标签', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'OK', content: { 'application/json': { schema: z.any() } } } } }),
+    async (c) => {
+      requireRoot(c);
+      const id = c.req.param('id');
+      const instanceId = c.req.query('instanceId');
+      const { tag } = await c.req.json();
+      if (!tag) throw new AppError(400, 'VALIDATION_ERROR', 'tag is required');
+      const provider = instanceId ? await providers.resolveImage(instanceId as any) : providers.image;
+      if (!provider.tag) throw new AppError(501, 'NOT_IMPLEMENTED', 'tag is not supported by the current provider');
+      await provider.tag(id, tag);
+      return c.json(ok(null));
+    },
+  );
 
-  router.post('/pull', async (c) => {
-    const r = requireRoot(c); if (r) return r;
-    const { image, instanceId, clusterId, credentialRef } = await c.req.json();
-    if (!image) return c.json(fail('VALIDATION_ERROR', 'image is required'), 400);
+  app.openapi(
+    createRoute({ method: 'get', path: '/search', tags: ['images'], summary: '搜索远程镜像仓库', responses: { 200: { description: 'Search results', content: { 'application/json': { schema: z.any() } } } } }),
+    async (c) => {
+      const term = c.req.query('term');
+      if (!term) throw new AppError(400, 'VALIDATION_ERROR', 'term is required');
+      const instanceId = c.req.query('instanceId');
+      const provider = instanceId ? await providers.resolveImage(instanceId as any) : providers.image;
+      if (!provider.search) throw new AppError(501, 'NOT_IMPLEMENTED', 'search is not supported by the current provider');
+      const results = await provider.search(term);
+      return c.json(ok(results));
+    },
+  );
 
-    const provider = instanceId
-      ? await providers.resolveImage(instanceId)
-      : providers.image;
+  app.openapi(
+    createRoute({ method: 'post', path: '/prune', tags: ['images'], summary: '清理未使用的镜像', responses: { 200: { description: 'Result', content: { 'application/json': { schema: z.any() } } } } }),
+    async (c) => {
+      requireRoot(c);
+      const instanceId = c.req.query('instanceId');
+      const provider = instanceId ? await providers.resolveImage(instanceId as any) : providers.image;
+      if (!provider.prune) throw new AppError(501, 'NOT_IMPLEMENTED', 'prune is not supported by the current provider');
+      const { dangling } = await c.req.json();
+      const result = await provider.prune({ dangling });
+      return c.json(ok(result));
+    },
+  );
 
-    const info = await provider.pull(image, clusterId ?? credentialRef);
-    return c.json(ok(info), 201);
-  });
+  app.openapi(
+    createRoute({ method: 'get', path: '/{id}/history', tags: ['images'], summary: '查看镜像分层历史', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'History', content: { 'application/json': { schema: z.any() } } } } }),
+    async (c) => {
+      const id = c.req.param('id');
+      const instanceId = c.req.query('instanceId');
+      const provider = instanceId ? await providers.resolveImage(instanceId as any) : providers.image;
+      if (!provider.history) throw new AppError(501, 'NOT_IMPLEMENTED', 'history is not supported by the current provider');
+      const history = await provider.history(id);
+      return c.json(ok(history));
+    },
+  );
 
-  // ─── Inspect image ───
+  app.openapi(
+    createRoute({ method: 'post', path: '/build', tags: ['images'], summary: '构建镜像', responses: { 201: { description: 'ImageInfo', content: { 'application/json': { schema: z.any() } } } } }),
+    async (c) => {
+      requireRoot(c);
+      const instanceId = c.req.query('instanceId');
+      const provider = instanceId ? await providers.resolveImage(instanceId as any) : providers.image;
+      if (!provider.build) throw new AppError(501, 'NOT_IMPLEMENTED', 'build is not supported by the current provider');
+      const { context, dockerfile, tag } = await c.req.json();
+      const result = await provider.build(context, { dockerfile, tag });
+      return c.json(ok(result), 201);
+    },
+  );
 
-  router.get('/:id', async (c) => {
-    const id = c.req.param('id');
-    const instanceId = c.req.query('instanceId');
-
-    const provider = instanceId
-      ? await providers.resolveImage(instanceId as any)
-      : providers.image;
-
-    const info = await provider.inspect(id);
-    if (!info) return c.json(fail('NOT_FOUND', 'Image not found'), 404);
-    return c.json(ok(info));
-  });
-
-  // ─── Remove image ───
-
-  router.delete('/:id', async (c) => {
-    const r = requireRoot(c); if (r) return r;
-    const id = c.req.param('id');
-    const instanceId = c.req.query('instanceId');
-
-    const provider = instanceId
-      ? await providers.resolveImage(instanceId as any)
-      : providers.image;
-
-    await provider.remove(id);
-    return c.json(ok(null));
-  });
-
-  // ─── Tag image ───
-
-  router.post('/:id/tag', async (c) => {
-    const r = requireRoot(c); if (r) return r;
-    const id = c.req.param('id');
-    const instanceId = c.req.query('instanceId');
-    const { tag } = await c.req.json();
-    if (!tag) return c.json(fail('VALIDATION_ERROR', 'tag is required'), 400);
-
-    const provider = instanceId ? await providers.resolveImage(instanceId as any) : providers.image;
-    if (!provider.tag) return c.json(fail('NOT_IMPLEMENTED', 'tag is not supported by the current provider'), 501);
-    await provider.tag(id, tag);
-    return c.json(ok(null));
-  });
-
-  // ─── Search registries ───
-
-  router.get('/search', async (c) => {
-    const term = c.req.query('term');
-    if (!term) return c.json(fail('VALIDATION_ERROR', 'term is required'), 400);
-    const instanceId = c.req.query('instanceId');
-
-    const provider = instanceId ? await providers.resolveImage(instanceId as any) : providers.image;
-    if (!provider.search) return c.json(fail('NOT_IMPLEMENTED', 'search is not supported by the current provider'), 501);
-    const results = await provider.search(term);
-    return c.json(ok(results));
-  });
-
-  // ─── Prune images ───
-
-  router.post('/prune', async (c) => {
-    const r = requireRoot(c); if (r) return r;
-    const instanceId = c.req.query('instanceId');
-    const provider = instanceId ? await providers.resolveImage(instanceId as any) : providers.image;
-    if (!provider.prune) return c.json(fail('NOT_IMPLEMENTED', 'prune is not supported by the current provider'), 501);
-    const { dangling } = await c.req.json();
-    const result = await provider.prune({ dangling });
-    return c.json(ok(result));
-  });
-
-  // ─── Image history ───
-
-  router.get('/:id/history', async (c) => {
-    const id = c.req.param('id');
-    const instanceId = c.req.query('instanceId');
-    const provider = instanceId ? await providers.resolveImage(instanceId as any) : providers.image;
-    if (!provider.history) return c.json(fail('NOT_IMPLEMENTED', 'history is not supported by the current provider'), 501);
-    const history = await provider.history(id);
-    return c.json(ok(history));
-  });
-
-  // ─── Build image ───
-
-  router.post('/build', async (c) => {
-    const r = requireRoot(c); if (r) return r;
-    const instanceId = c.req.query('instanceId');
-    const provider = instanceId ? await providers.resolveImage(instanceId as any) : providers.image;
-    if (!provider.build) return c.json(fail('NOT_IMPLEMENTED', 'build is not supported by the current provider'), 501);
-    const { context, dockerfile, tag } = await c.req.json();
-    const result = await provider.build(context, { dockerfile, tag });
-    return c.json(ok(result), 201);
-  });
-
-  return router;
+  return app;
 }
-
-export const imagesRouteMeta: RouteMeta[] = [
-  { method: 'GET', path: '/', description: '列出镜像（?search=&limit=&offset=&instanceId=）', responseDescription: 'ImageInfo[]' },
-  { method: 'POST', path: '/pull', description: '拉取镜像', requestBody: { image: 'nginx:latest', instanceId: 'inst_xxx' }, responseDescription: 'ImageInfo' },
-  { method: 'GET', path: '/:id', description: '查看镜像详情（?instanceId=）', responseDescription: 'ImageInfo' },
-  { method: 'DELETE', path: '/:id', description: '删除镜像', responseDescription: '{ ok: true }' },
-  { method: 'POST', path: '/:id/tag', description: '给镜像打标签', requestBody: { tag: 'myrepo/myimage:v2' }, responseDescription: '{ ok: true }' },
-  { method: 'GET', path: '/search', description: '搜索远程镜像仓库（?term=）', responseDescription: '{ name, description, isOfficial }[]' },
-  { method: 'POST', path: '/prune', description: '清理未使用的镜像', requestBody: { dangling: true }, responseDescription: '{ reclaimed: number }' },
-  { method: 'GET', path: '/:id/history', description: '查看镜像分层历史', responseDescription: '{ id, created, createdBy, size }[]' },
-  { method: 'POST', path: '/build', description: '通过 Dockerfile 上下文构建镜像', requestBody: { dockerfile: 'FROM nginx', tag: 'custom-nginx' }, responseDescription: 'ImageInfo' },
-];

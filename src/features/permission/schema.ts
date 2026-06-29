@@ -8,7 +8,7 @@ export const CreatePolicySchema = z.object({
   name: z.string().min(1, 'Name is required').max(200),
   description: z.string().max(500).optional(),
   effect: PolicyEffectSchema,
-  userId: z.string().uuid().optional(),
+  userId: z.uuid().optional(),
   role: z.string().max(100).optional(),
   actions: z.array(z.string().min(1)).optional().default([]),
   resource: z.string().max(200).optional(),
@@ -19,7 +19,7 @@ export const UpdatePolicySchema = z.object({
   name: z.string().min(1).max(200).optional(),
   description: z.string().max(500).optional(),
   effect: PolicyEffectSchema.optional(),
-  userId: z.string().uuid().optional().nullable(),
+  userId: z.uuid().optional().nullable(),
   role: z.string().max(100).optional().nullable(),
   actions: z.array(z.string().min(1)).optional(),
   resource: z.string().max(200).optional().nullable(),
@@ -101,7 +101,7 @@ export const CreateRouteAclSchema = z.object({
   pathPrefix: z.string().min(1, 'Path prefix is required').max(500),
   matchType: MatchTypeSchema.optional().default('prefix'),
   effect: AclEffectSchema.optional().default('allow'),
-  userId: z.string().uuid().optional(),
+  userId: z.uuid().optional(),
   userGroupId: z.string().optional(),
   priority: z.number().int().optional().default(0),
 });
@@ -111,7 +111,7 @@ export const UpdateRouteAclSchema = z.object({
   pathPrefix: z.string().min(1).max(500).optional(),
   matchType: MatchTypeSchema.optional().nullable(),
   effect: AclEffectSchema.optional().nullable(),
-  userId: z.string().uuid().optional().nullable(),
+  userId: z.uuid().optional().nullable(),
   userGroupId: z.string().optional().nullable(),
   priority: z.number().int().optional(),
 });
@@ -131,5 +131,5 @@ export const PermissionCheckSchema = z.object({
   resource: z.string().min(1),
   ip: z.string().optional(),
   timestamp: z.number().optional(),
-  context: z.record(z.unknown()).optional(),
+  context: z.record(z.string(), z.unknown()).optional(),
 });

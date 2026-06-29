@@ -11,22 +11,21 @@
 import { writeFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createInfoHandler, infoRouteMeta } from '../src/features/info/info.handler.ts';
-import { createUserRouter, userRouteMeta } from '../src/features/users/handler.ts';
-import { createPermissionRouter, permissionRouteMeta } from '../src/features/permission/handler.ts';
-import { createSysGroupRouter, sysGroupRouteMeta } from '../src/features/system-group/handler.ts';
-import { createTemplateRouter, templateRouteMeta } from '../src/features/template/handler.ts';
-import { createSandboxRouter, sandboxRouteMeta } from '../src/features/sandbox/handler.ts';
-import { createPlatformsRouter, platformsRouteMeta } from '../src/features/platforms/handler.ts';
-import { createSecurityGroupRouter, networkRouteMeta } from '../src/features/network/handler.ts';
-import { createTopologyRouter, topologyRouteMeta } from '../src/features/topology/handler.ts';
-import { createSubnetRouter, subnetRouteMeta } from '../src/features/subnet/handler.ts';
-import { createVolumeRouter, volumeRouteMeta } from '../src/features/volume/handler.ts';
-import { createImagesRouter, imagesRouteMeta } from '../src/features/images/handler.ts';
-import { createActionsRouter, actionRouteMeta } from '../src/features/actions/handler.ts';
-import { createContainerSecretRouter, containerSecretRouteMeta } from '../src/features/container-secret/handler.ts';
-import { createInstancesRouter, instancesRouteMeta } from '../src/features/instances/handler.ts';
-import type { RouteMeta } from '../src/core/http-docs/types.ts';
+import { createInfoHandler } from '../src/features/info/info.handler.ts';
+import { createUserRouter } from '../src/features/users/handler.ts';
+import { createPermissionRouter } from '../src/features/permission/handler.ts';
+import { createSysGroupRouter } from '../src/features/system-group/handler.ts';
+import { createTemplateRouter } from '../src/features/template/handler.ts';
+import { createSandboxRouter } from '../src/features/sandbox/handler.ts';
+import { createPlatformsRouter } from '../src/features/platforms/handler.ts';
+import { createSecurityGroupRouter } from '../src/features/network/handler.ts';
+import { createTopologyRouter } from '../src/features/topology/handler.ts';
+import { createSubnetRouter } from '../src/features/subnet/handler.ts';
+import { createVolumeRouter } from '../src/features/volume/handler.ts';
+import { createImagesRouter } from '../src/features/images/handler.ts';
+import { createActionsRouter } from '../src/features/actions/handler.ts';
+import { createContainerSecretRouter } from '../src/features/container-secret/handler.ts';
+import { createInstancesRouter } from '../src/features/instances/handler.ts';
 import { createAuditRouter } from '../src/core/audit/audit-router.ts';
 import { WorkersAuditLogger } from '../src/core/audit/workers-audit-logger.ts';
 
@@ -136,11 +135,6 @@ function collect(
   }
 }
 
-const auditRouteMeta: RouteMeta[] = [
-  { method: 'GET', path: '/logs', description: '查询审计日志（支持翻页）', responseDescription: '{ page, limit, total, totalPages, lines }' },
-  { method: 'GET', path: '/logs/stats', description: '审计日志缓冲区统计', responseDescription: '{ count, capacity }' },
-];
-
 const stubUserService = {
   register: async () => { throw new Error('stub'); },
   login: async () => { throw new Error('stub'); },
@@ -172,36 +166,36 @@ const stubSandboxSvc: any = { getById: async () => null, stop: async () => {}, t
 const stubVolumeSvc: any = { create: async () => ({}), get: async () => null, listPaginated: async () => ({ items: [], total: 0, page: 1, limit: 50 }), update: async () => ({}), delete: async () => {} };
 const stubRegistry: any = { availableProviders: () => [{ name: 'stub' }, { name: 'podman' }] };
 
-collect('Info', '/', createInfoHandler(stubStores as any), infoRouteMeta);
-collect('Auth', '/api/users', createUserRouter(stubUserService as any), userRouteMeta?.filter(m => AUTH_PATHS.has(m.path)));
-collect('Users', '/api/users', createUserRouter(stubUserService as any), userRouteMeta?.filter(m => !AUTH_PATHS.has(m.path)));
-collect('Audit', '/api/audit', createAuditRouter(new WorkersAuditLogger()), auditRouteMeta);
-collect('Permissions', '/api/permissions', createPermissionRouter(stubPermService as any), permissionRouteMeta);
-collect('System Groups', '/api/system-groups', createSysGroupRouter(stubSysGroupService as any), sysGroupRouteMeta);
-collect('Templates', '/api/templates', createTemplateRouter(stubAtomic as any), templateRouteMeta);
-collect('Sandboxes', '/api/sandboxes', createSandboxRouter(stubSandboxSvc as any), sandboxRouteMeta);
-collect('Platforms', '/api/platforms', createPlatformsRouter(stubRegistry as any), platformsRouteMeta);
-collect('Volumes', '/api/volumes', createVolumeRouter(stubVolumeSvc as any), volumeRouteMeta);
+collect('Info', '/', createInfoHandler(stubStores as any));
+collect('Auth', '/api/users', createUserRouter(stubUserService as any));
+collect('Users', '/api/users', createUserRouter(stubUserService as any));
+collect('Audit', '/api/audit', createAuditRouter(new WorkersAuditLogger()));
+collect('Permissions', '/api/permissions', createPermissionRouter(stubPermService as any));
+collect('System Groups', '/api/system-groups', createSysGroupRouter(stubSysGroupService as any));
+collect('Templates', '/api/templates', createTemplateRouter(stubAtomic as any));
+collect('Sandboxes', '/api/sandboxes', createSandboxRouter(stubSandboxSvc as any));
+collect('Platforms', '/api/platforms', createPlatformsRouter(stubRegistry as any));
+collect('Volumes', '/api/volumes', createVolumeRouter(stubVolumeSvc as any));
 collect('Networks', '/api/networks', createSecurityGroupRouter({
   create: async () => ({} as any),
   list: async () => ({ items: [], total: 0, page: 1, limit: 20 }),
   get: async () => null,
   update: async () => ({} as any),
   delete: async () => {},
-}), networkRouteMeta);
+}));
 
 const stubSubnetSvc: any = { create: async () => ({}), list: async () => ({ items: [], total: 0, page: 1, limit: 20 }), get: async () => null, update: async () => ({}), delete: async () => {} };
-collect('Subnets', '/api/subnets', createSubnetRouter(stubSubnetSvc), subnetRouteMeta);
+collect('Subnets', '/api/subnets', createSubnetRouter(stubSubnetSvc));
 
 const stubClusterSvc: any = { create: async () => ({}), get: async () => null, list: async () => [], update: async () => ({}), delete: async () => {} };
 const stubBucketSvc: any = { create: async () => ({}), get: async () => null, list: async () => [], update: async () => ({}), delete: async () => {} };
 const stubImageSvc: any = { create: async () => ({}), get: async () => null, list: async () => [], update: async () => ({}), delete: async () => {} };
 const stubPolicyMgr: any = { list: async () => [], create: async () => ({}), get: async () => null, update: async () => ({}), delete: async () => {} };
-collect('Topology', '/api/topology', createTopologyRouter(stubClusterSvc, stubBucketSvc, stubImageSvc, undefined, stubPolicyMgr), topologyRouteMeta);
+collect('Topology', '/api/topology', createTopologyRouter(stubClusterSvc, stubBucketSvc, stubImageSvc, undefined, stubPolicyMgr));
 
 const stubImageProvider: any = { list: async () => [], inspect: async () => null, pull: async () => ({}), remove: async () => {}, tag: async () => {}, search: async () => [], prune: async () => ({}), history: async () => [], build: async () => ({}) };
 const stubProvidersRegistry: any = { image: stubImageProvider, resolveImage: async () => stubImageProvider };
-collect('Images', '/api/images', createImagesRouter(stubProvidersRegistry), imagesRouteMeta);
+collect('Images', '/api/images', createImagesRouter(stubProvidersRegistry));
 
 const stubContainerSecretSvc: any = {
   create: async () => ({}),
@@ -212,7 +206,7 @@ const stubContainerSecretSvc: any = {
   uploadBlob: async () => ({}),
   resolveData: async () => '',
 };
-collect('Container Secrets', '/api/container-secrets', createContainerSecretRouter(stubContainerSecretSvc), containerSecretRouteMeta);
+collect('Container Secrets', '/api/container-secrets', createContainerSecretRouter(stubContainerSecretSvc));
 
 const stubInstancesSvc: any = {
   register: async () => ({ runner: {}, token: '' }),
@@ -229,7 +223,7 @@ const stubInstancesSvc: any = {
   getGroup: async () => null,
   deleteGroup: async () => {},
 };
-collect('Instances', '/api/instances', createInstancesRouter(stubInstancesSvc), instancesRouteMeta);
+collect('Instances', '/api/instances', createInstancesRouter(stubInstancesSvc));
 
 const stubActionDeps2: any = {
   stores: { atomic: null as any, blob: null as any, query: null as any, metrics: null as any },
@@ -240,7 +234,7 @@ const stubActionDeps2: any = {
   queueProducer: { send: async () => false, sendSandboxGc: async () => false, sendImagePull: async () => false, sendSandboxProvision: async () => false, sendBucketKeyRotate: async () => false, sendBatch: async () => 0 } as any,
   secretEncryption: undefined,
 };
-collect('Actions', '/api/actions', createActionsRouter(stubActionDeps2), actionRouteMeta);
+collect('Actions', '/api/actions', createActionsRouter(stubActionDeps2));
 
 // Manually-added routes
 function addRoute(method: string, path: string, tag: string, meta?: RouteMeta) {

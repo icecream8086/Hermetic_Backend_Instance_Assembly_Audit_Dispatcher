@@ -1,6 +1,6 @@
 # HBI-AAD v4.0 — ESLint 全量诊断与重构路线
 
-> 基线：2868 → 2363 errors (2026-06-29)  
+> 基线：2868 → 2363 → **1976** errors (2026-06-29)  
 > 运行环境：Cloudflare Workers (默认)  
 > 编译器门禁：tsc --noEmit + ESLint
 
@@ -124,20 +124,22 @@ Stub/noop 的错误价值最低——`eslint-disable-next-line -- stub implement
 
 ---
 
-## 四、热点文件 Top 10
+## 四、热点文件 Top 10（当前）
 
-| # | 文件 | 错误 | 根因 |
-|---|------|------|------|
-| 1 | `features/template/handler.ts` | 223 | Hono `ctx.json()` any 污染 |
-| 2 | `providers/podman/podman-provider.ts` | 161 | Podman API JSON 响应无 Zod 校验 |
-| 3 | `features/sandbox/handler.ts` | 118 | Hono any 污染 |
-| 4 | `features/permission/handler.ts` | 98 | Hono any 污染 + unsafe-call |
-| 5 | `features/actions/handler.ts` | 90 | Hono any 污染 |
-| 6 | `features/topology/handler.ts` | 72 | Hono any 污染 |
-| 7 | `features/actions/job-operator.ts` | 71 | Hono + DO any 污染 |
-| 8 | `queue/consumer.ts` | 69 | Queue payload any 污染 |
-| 9 | `features/actions/runner.ts` | 62 | Runner 注册 any 污染 |
-| 10 | `features/permission/service.ts` | 59 | explicit-function-return-type(30) |
+| # | 文件 | Before → Now | 根因 |
+|---|------|-------------|------|
+| 1 | `features/template/handler.ts` | 203 → **135** | any:7 as:26 unsafe:62 |
+| 2 | `features/actions/handler.ts` | 90 → **76** | as:6 unsafe:51 |
+| 3 | `features/topology/handler.ts` | 72 → **64** | any:27 as:2 unsafe:25 |
+| 4 | `features/actions/job-operator.ts` | 71 → **62** | any:4 as:3 unsafe:47 |
+| 5 | `providers/podman/podman-provider.ts` | 129 → **58** | as:5 — unsafe 已大幅缩减 |
+| 6 | `features/users/service.ts` | 76 → **56** | unsafe:44 |
+| 7 | `features/template/applicator.ts` | 55 → **55** | any:13 as:16 unsafe:21 |
+| 8 | `queue/consumer.ts` | 69 → **54** | any:10 as:6 unsafe:23 |
+| 9 | `features/users/handler.ts` | 51 → **51** | any:11 as:8 unsafe:17 |
+| 10 | `features/actions/runner.ts` | 62 → **50** | any:8 as:4 unsafe:29 |
+
+> ⚡ permission/handler.ts (原 #4, 98 条) 已退出 Top 15——全部 `any` 消除。sandbox/handler.ts (原 #3, 118→42) 大幅降级。
 
 ---
 
@@ -183,17 +185,17 @@ Stub/noop 的错误价值最低——`eslint-disable-next-line -- stub implement
 | 21 | `no-unsafe-enum-comparison` | 19 → 0 | enum 比较改用 enum 成员；跨类型比较加显式转换或说明注释 |
 | 22 | `require-await` | 92 → 0 | stub/noop 文件加文件级 disable；接口实现加 `eslint-disable-next-line -- interface contract requires Promise<T>` |
 
-### Tier 4 — CEA 语义规则 (~301 条)
+### Tier 4 — CEA 语义规则 (~301 条 → ~436 剩余)
 
-| # | 规则 | 数量 | 操作 |
+| # | 规则 | 数量 | 状态 |
 |---|------|------|------|
-| 23 | `no-base-to-string` | 5 | 补 `.toString()` 模板 |
-| 24 | `no-misused-promises` | 5 | async 回调 → 包裹处理 |
-| 25 | `switch-exhaustiveness-check` | 13 | 补 `never` default 分支 |
-| 26 | `prefer-nullish-coalescing` | 20 | ⚠️ 不能机械换！`0 \|\| 1` ≠ `0 ?? 1`，逐条验证 |
-| 27 | `no-restricted-types` | 33 | `Partial`/`Omit`/`Pick` → 展开显式类型 |
-| 28 | `no-non-null-assertion` | 177 | `x!` → `if (!x) throw` |
-| 29 | `no-restricted-syntax` | 265 | 12 种 CEA 禁止模式 |
+| 23 | `no-base-to-string` | 5 → 1 | ✅ 基本完成 |
+| 24 | `no-misused-promises` | 3 → 0 | ✅ 完成 |
+| 25 | `switch-exhaustiveness-check` | 13 → 0 | ✅ 完成 |
+| 26 | `prefer-nullish-coalescing` | 20 → 2 | 🔄 9 代码修复 + 11 suppress |
+| 27 | `no-restricted-types` | 33 → 2 | 🔄 4 代码修复 + 29 suppress |
+| 28 | **`no-non-null-assertion`** | **178** | ⬜ 未开始 |
+| 29 | **`no-restricted-syntax`** | **253** | 🔄 部分修复（!!x/Boolean/Object.assign 归零） |
 
 #### `no-restricted-syntax` 内部分解
 
@@ -212,31 +214,45 @@ Stub/noop 的错误价值最低——`eslint-disable-next-line -- stub implement
 | `Array.isArray()` | 禁止手写守卫 → Zod |
 | 裸 `JSON.parse()` | 禁止 → `schema.parse(JSON.parse(str))` |
 
-### Tier 5 — any 污染链：根因硬 (~1562 条)
+### Tier 5 — any 污染链：根因硬 (~1562 → ~1300 条)  🔄 进行中
 
-| # | 规则 | 数量 | 说明 |
-|---|------|------|------|
-| 30 | `no-deprecated` | 40 | 迁移旧 API（`ILogWriter`/`CreateContainerGroupInput`/`ContainerGroupStatus`） |
-| 31 | `no-unsafe-return` | 27 | any 派生 ← 36+37 |
-| 32 | `no-unsafe-call` | 64 | any 派生 ← 36+37 |
-| 33 | `no-unsafe-argument` | 198 | any 派生 ← 36+37 |
-| 34 | `no-unsafe-assignment` | 233 | any 派生 ← 36+37 |
-| 35 | `no-unsafe-member-access` | 350 | any 派生 ← 36+37 |
-| **36** | **`consistent-type-assertions`** | **339** | `as T` → Zod `.parse()` — 根因 |
-| **37** | **`no-explicit-any`** | **351** | 每个都需要设计类型 — 根因 |
+| # | 规则 | Before → Now | 说明 |
+|---|------|-------------|------|
+| 30 | `no-deprecated` | 23 | 未开始 |
+| 31 | `no-unsafe-return` | 25 → 17 | any 派生 ← 36+37 — 随根因自动缩减 |
+| 32 | `no-unsafe-call` | 98 → 72 | any 派生 ← 36+37 — 随根因自动缩减 |
+| 33 | `no-unsafe-argument` | 201 → 175 | any 派生 ← 36+37 |
+| 34 | `no-unsafe-assignment` | 235 → 175 | any 派生 ← 36+37 |
+| 35 | `no-unsafe-member-access` | 386 → 270 | any 派生 ← 36+37 |
+| **36** | **`consistent-type-assertions`** | **336 → 299** | `as T` → Zod `.parse()` — 根因 🔄 |
+| **37** | **`no-explicit-any`** | **335 → 265** | 每个都需要设计类型 — 根因 🔄 |
 
-31-35 这 872 条全部是 36+37 的衍生错误。**一旦根除 `any`(351) 和 `as`(339)，`no-unsafe-*`(872) 自然塌缩。**
+**根因进度：** `any` 335→265 (-70)，`as` 336→299 (-37)。衍生 `unsafe-*` 合计 945→709 (-236)。
+**待清理：** `any` + `as` = **564 条根因**，拖拽 **709 条 unsafe-\***。
+
+**Tier 5 已修复文件：**
+
+| 文件 | Before → After | 修复内容 |
+|------|---------------|---------|
+| template/handler.ts | 203 → 135 | any 函数签名 → Record；err:any → AppError；atomic.get\<any\> |
+| podman-provider.ts | 129 → 58 | 添加 PodmanCreateResponse/Exec/Wait/Stats 等响应类型 |
+| permission/handler.ts | 96 | 全部 22 条 `any` 消除；Ctx 类型替代 `c: any` |
+| sandbox/handler.ts | 115 | catch(e:any)→unknown；移除 `as any`；修复 errorStatus |
+| users/service.ts | 76 | normalizeUser `(user as any)` → `{ ...user }` 不可变重建 |
+| transitions.ts | 16 → 0 | `[] as readonly T[]` → `[] satisfies readonly T[]` |
+| cloudflare-kv.ts | ~8 → 0 | KvMetadata 接口 + createVersionId() |
 
 ---
 
-## 六、预计曲线
+## 六、实际进度曲线
 
 ```
-Tier 0-3      Tier 4         Tier 5
-   2363  →   2062  →    ~438
-           ↑          ↑           ↑          ↑           ↑
-   模板+机械   Worker高危   接口设计     CEA语义     any/as根因
+Tier 0-3      Tier 4         Tier 5 (部分)
+   2868  →   2363   →   1976   →   ~1738 (Tier 4 收尾)
+                     →  ~564  (根因 any+as 清完后 unsafe-* 塌缩)
 ```
+
+**当前瓶颈：** `any`(265) + `as`(299) = 564 条根因，每修 1 条可连带消灭 1-3 条 `unsafe-*`。
 
 ---
 
@@ -251,3 +267,4 @@ Tier 0-3      Tier 4         Tier 5
 - 2026-06-29：Tier 1 restrict-template-expressions (190条) 全部修复，总错误 2764 → 2579
 - 2026-06-29：Tier 2 no-floating-promises (67条) 根因修复——`IAuditWriter.write()` 返回 `void` + 删除 dead code（writeSync/ILogWriter/IAuditLogger/logger目录），总错误 2579 → 2550
 - 2026-06-29：Tier 3 (194条) 全部修复——require-await/no-empty-function/no-unsafe-enum-comparison/explicit-function-return-type 归零，总错误 2550 → 2363
+- 2026-06-29：Tier 4 部分 + Tier 5 开战——switch-exhaustiveness-check(13→0)、no-misused-promises(3→0)、no-base-to-string(5→1)；Tier 5 根因修复：any 335→265(-70)、as 336→299(-37)、unsafe-* 945→709(-236)。关键文件：permission/handler 全部 any 消除、transitions.ts as 归零、podman-provider API 响应类型化。总错误 2363 → 1976 (-16%)

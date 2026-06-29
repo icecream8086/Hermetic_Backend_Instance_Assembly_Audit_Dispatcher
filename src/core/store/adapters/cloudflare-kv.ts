@@ -3,7 +3,9 @@
 import type { IAtomicStore, IStoreTransaction } from '../interfaces.ts';
 import { TransactConflictError } from '../interfaces.ts';
 import type { VersionId } from '../../brand.ts';
-import { generateVersionId } from '../../brand.ts';
+import { generateVersionId, createVersionId } from '../../brand.ts';
+
+interface KvMetadata { v?: string }
 
 /**
  * Cloudflare Workers KV adapter for IAtomicStore.
@@ -22,15 +24,17 @@ export class CloudflareKVAtomicStore implements IAtomicStore {
   public async get<T>(key: string): Promise<{ value: T; version: VersionId } | null> {
     const result = await this.kv.getWithMetadata<T>(key, 'json');
     if (result.value === null) return null;
-    const version = (result.metadata as { v?: string } | null)?.v;
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Cloudflare KV metadata is untyped, schema validation at call site
+    const version = (result.metadata as KvMetadata | null)?.v;
     if (!version) return null;
-    return { value: result.value, version: version as VersionId };
+    return { value: result.value, version: createVersionId(version) };
   }
 
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- interface contract requires generics
   public async set<T>(key: string, value: T, expectedVersion: VersionId | null, ttlSeconds?: number): Promise<VersionId | null> {
     const existing = await this.kv.getWithMetadata(key, 'json');
-    const currentVersion = (existing.metadata as { v?: string } | null)?.v;
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Cloudflare KV metadata is untyped
+    const currentVersion = (existing.metadata as KvMetadata | null)?.v;
 
     if (expectedVersion === null && existing.value !== null) return null;
     if (expectedVersion !== null && currentVersion !== expectedVersion) return null;
@@ -50,10 +54,11 @@ export class CloudflareKVAtomicStore implements IAtomicStore {
     const txn: IStoreTransaction = {
       get: async <V>(key: string) => {
         const dw = deferredWrites.get(key);
+        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- transaction deferred write, type guaranteed by set()
         if (dw !== undefined) return dw.value as V;
 
         const result = await this.kv.getWithMetadata<V>(key, 'json');
-        const version = (result.metadata as { v?: string } | null)?.v ?? null;
+        const version = (result.metadata as KvMetadata | null)?.v ?? null;
         readSet.set(key, version);
         return result.value ?? null;
       },
@@ -62,11 +67,13 @@ export class CloudflareKVAtomicStore implements IAtomicStore {
         for (const key of keys) {
           const dw = deferredWrites.get(key);
           if (dw !== undefined) {
+            // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- transaction deferred write, type guaranteed by set()
             results.push(dw.value as V);
             continue;
           }
           const result = await this.kv.getWithMetadata<V>(key, 'json');
-          const version = (result.metadata as { v?: string } | null)?.v ?? null;
+          // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Cloudflare KV metadata is untyped
+          const version = (result.metadata as KvMetadata | null)?.v ?? null;
           readSet.set(key, version);
           results.push(result.value ?? null);
         }
@@ -84,7 +91,8 @@ export class CloudflareKVAtomicStore implements IAtomicStore {
     for (const [key, expectedVersion] of readSet) {
       if (deferredWrites.has(key)) continue;
       const current = await this.kv.getWithMetadata(key, 'json');
-      const currentVersion = (current.metadata as { v?: string } | null)?.v;
+      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Cloudflare KV metadata is untyped
+      const currentVersion = (current.metadata as KvMetadata | null)?.v;
       if (currentVersion !== expectedVersion) {
         throw new TransactConflictError(
           `Transaction conflict: key "${key}" was modified concurrently.`,

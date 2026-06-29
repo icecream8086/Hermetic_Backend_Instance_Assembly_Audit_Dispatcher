@@ -13,6 +13,7 @@ import { z } from 'zod';
 import type { EnvVar, ProbeSpec, ContainerPortConfig, VolumeMountConfig } from '../provider/types.ts';
 export type { ProbeSpec };
 import { SandboxStatus } from '../../features/sandbox/types.ts';
+import type { VersionId } from '../brand.ts';
 
 // ═══════════════════════════════════════════════════════════════
 // Pod Identity
@@ -245,7 +246,7 @@ export interface PodEntity {
   readonly events: readonly PodEvent[];
   readonly createdAt: number;
   readonly updatedAt: number;
-  readonly version: string;
+  readonly version: VersionId;
   readonly creatorId?: string | undefined;
   readonly templateRef?: string | undefined;
 }

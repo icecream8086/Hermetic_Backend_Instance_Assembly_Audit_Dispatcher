@@ -5,6 +5,7 @@
 
 import type { IAtomicStore } from '../store/interfaces.ts';
 import type { PodId, PodEntity, PodPhase } from './types.ts';
+import type { VersionId } from '../brand.ts';
 import { generateVersionId } from '../brand.ts';
 import { AppError } from '../types.ts';
 const KEY_PREFIX = 'pod:';
@@ -60,7 +61,7 @@ export class PodStore {
   }
 
   /** OCC-guarded update. Returns updated entity or throws on conflict. */
-  public async update(podId: PodId, next: PodEntity, expectedVersion: string): Promise<PodEntity> {
+  public async update(podId: PodId, next: PodEntity, expectedVersion: VersionId | null): Promise<PodEntity> {
     const newVersion = await this.atomic.set(`${KEY_PREFIX}${podId}`, next, expectedVersion);
     if (!newVersion) throw new AppError(409, 'CONFLICT', 'Concurrent modification detected');
     return next;

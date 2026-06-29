@@ -30,7 +30,7 @@ export const CreateVolumeSchema = z.object({
   description: z.string().max(500).optional(),
   instanceId: z.string().min(1, 'instanceId is required — volumes must be bound to a compute instance'),
   credentialRef: z.string().optional(),
-  type: z.nativeEnum(VolumeType),
+  type: z.enum(VolumeType),
   nfs: NFSOptionsSchema.optional(),
   disk: DiskOptionsSchema.optional(),
   secret: SecretOptionsSchema.optional(),

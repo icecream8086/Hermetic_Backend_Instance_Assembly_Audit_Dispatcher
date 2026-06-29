@@ -4,14 +4,14 @@ import { UserRole } from './types.ts';
 // ─── Request schemas ───
 
 export const RegisterUserSchema = z.object({
-  email: z.string().email('Invalid email format'),
+  email: z.email({ error: 'Invalid email format' }),
   password: z.string().min(8, 'Password must be at least 8 characters').max(128),
   name: z.string().min(1, 'Name is required').max(100),
-  role: z.nativeEnum(UserRole).optional().default(UserRole.Viewer),
+  role: z.enum(UserRole).optional().default(UserRole.Viewer),
 });
 
 export const LoginUserSchema = z.object({
-  email: z.string().email('Invalid email format'),
+  email: z.email({ error: 'Invalid email format' }),
   password: z.string().min(1, 'Password is required'),
 });
 
@@ -30,14 +30,14 @@ export const LoginPolicySchema = z.object({
 export const PublicKeySchema = z.string().regex(/^[A-Za-z0-9+/]{43}=?$/, 'Invalid Ed25519 public key (base64, 32 bytes)');
 
 export const NoPasswordLoginSchema = z.object({
-  email: z.string().email('Invalid email format'),
+  email: z.email({ error: 'Invalid email format' }),
   oneTimeKey: z.string().min(1, 'One-time key is required'),
 });
 
 export const UpdateUserSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   password: z.string().min(8).max(128).optional(),
-  role: z.nativeEnum(UserRole).optional(),
+  role: z.enum(UserRole).optional(),
   loginPolicy: LoginPolicySchema.optional(),
   publicKeyEd25519: PublicKeySchema.optional(),
   gecos: z.string().max(200).optional(),
@@ -52,7 +52,7 @@ export const UserResponseSchema = z.object({
   id: z.string(),
   email: z.string(),
   name: z.string(),
-  role: z.nativeEnum(UserRole),
+  role: z.enum(UserRole),
   uid: z.number().int().min(0),
   gid: z.number().int().min(0),
   gecos: z.string(),

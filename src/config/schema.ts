@@ -24,7 +24,7 @@ const StorageConfigSchema = z.object({
     doNamespace: z.string().default('ATOMIC_STORE_DO'),
     d1Binding: z.string().default('QUERY_DB'),
     r2Binding: z.string().default('BLOB_STORE'),
-  }).default({}),
+  }).default({ filePath: '.data', kvNamespace: 'KV_STORE', doNamespace: 'ATOMIC_STORE_DO', d1Binding: 'QUERY_DB', r2Binding: 'BLOB_STORE' }),
 });
 
 const LogConfigSchema = z.object({
@@ -32,7 +32,7 @@ const LogConfigSchema = z.object({
   defaultFacility: z.string().default('app'),
   storage: z.object({
     backend: z.string().default('filesystem'),
-  }).default({}),
+  }).default({ backend: 'filesystem' }),
 });
 
 const ProviderConfigSchema = z.object({
@@ -69,14 +69,14 @@ const AuditConfigSchema = z.object({
 // ═══════════════════════════════════════════════════════════════
 
 export const AppConfigSchema = z.object({
-  storage: StorageConfigSchema.default({}),
-  log: LogConfigSchema.default({}),
-  provider: ProviderConfigSchema.default({}),
-  s3: S3ConfigSchema.default({}),
-  scheduler: SchedulerAppConfigSchema.default({}),
+  storage: StorageConfigSchema.default({ stateBackend: 'file', queryBackend: 'none', blobBackend: 'none', connections: { filePath: '.data', kvNamespace: 'KV_STORE', doNamespace: 'ATOMIC_STORE_DO', d1Binding: 'QUERY_DB', r2Binding: 'BLOB_STORE' } }),
+  log: LogConfigSchema.default({ auditTier: 'best-effort', defaultFacility: 'app', storage: { backend: 'filesystem' } }),
+  provider: ProviderConfigSchema.default({ container: 'stub', region: 'cn-hangzhou', accounts: [], defaultAccount: 'default', dns: 'cloudflare', metrics: 'alibaba' }),
+  s3: S3ConfigSchema.default({ backend: 'none', region: 'auto', accounts: [], defaultAccount: 'default' }),
+  scheduler: SchedulerAppConfigSchema.default({ backend: 'worker', intervalMs: 60_000, batchSize: 0 }),
   server: z.object({
     port: z.coerce.number().default(3000),
-  }).default({}),
+  }).default({ port: 3000 }),
   features: z.record(z.string(), z.boolean()).default({}),
   authz: z.object({ enabled: z.boolean() }).optional(),
   cors: z.object({

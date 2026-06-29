@@ -269,7 +269,7 @@ export function registerHealthCheck(deps: HealthCheckDeps): void {
           try {
             const instEntry = await stores.atomic.get<Record<string, unknown>>('instance:' + iid);
             if (!instEntry?.value) continue;
-            const instValue = z.object({ status: z.string().optional(), updatedAt: z.number().optional() }).passthrough().parse(instEntry.value);
+            const instValue = z.object({ status: z.string().optional(), updatedAt: z.number().optional() }).passthrough() /* TODO: Zod v4 z.looseObject() */.parse(instEntry.value);
             if (instValue.status !== 'online') continue;
             if (instValue.updatedAt !== undefined && (now - instValue.updatedAt > 120_000)) {
               await stores.atomic.set('instance:' + iid, { ...instValue, status: 'offline', updatedAt: now }, instEntry.version);
@@ -287,7 +287,7 @@ export function registerHealthCheck(deps: HealthCheckDeps): void {
           try {
             const entry = await stores.atomic.get<Record<string, unknown>>(BINDING_PREFIX + sid);
             if (!entry?.value) continue;
-            const bindingSchema = z.object({ expiresAt: z.number(), accessKeyId: z.string(), version: z.number(), rotationIntervalMs: z.number().optional() }).passthrough();
+            const bindingSchema = z.object({ expiresAt: z.number(), accessKeyId: z.string(), version: z.number(), rotationIntervalMs: z.number().optional() }).passthrough() /* TODO: Zod v4 z.looseObject() */;
             const parsed = bindingSchema.parse(entry.value);
             if (parsed.expiresAt > Date.now()) continue;
             const qSent = await queueProducer.sendBucketKeyRotate({ bindingId: sid });

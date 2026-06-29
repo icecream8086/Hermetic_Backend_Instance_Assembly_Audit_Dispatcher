@@ -17,7 +17,7 @@ import { VolumeStatus } from '../../features/sandbox/types.ts';
 const _V = {
   [VolumeStatus.Detached]: [VolumeStatus.Attached],
   [VolumeStatus.Attached]: [VolumeStatus.Detached, VolumeStatus.Orphaned],
-  [VolumeStatus.Orphaned]: [] as readonly VolumeStatus[],
+  [VolumeStatus.Orphaned]: ([] satisfies readonly VolumeStatus[]),
 } as const satisfies Record<VolumeStatus, readonly VolumeStatus[]>;
 assertExhaustive<VolumeStatus>(_V);
 
@@ -25,7 +25,7 @@ import { ContainerStatus } from '../../features/sandbox/types.ts';
 const _C = {
   [ContainerStatus.Waiting]: [ContainerStatus.Running, ContainerStatus.Terminated],
   [ContainerStatus.Running]: [ContainerStatus.Terminated],
-  [ContainerStatus.Terminated]: [] as readonly ContainerStatus[],
+  [ContainerStatus.Terminated]: [] satisfies readonly ContainerStatus[],
 } as const satisfies Record<ContainerStatus, readonly ContainerStatus[]>;
 assertExhaustive<ContainerStatus>(_C);
 
@@ -66,16 +66,16 @@ assertExhaustive<InstanceStatus>(_I);
 import type { InviteStatus } from '../../features/permission/types.ts';
 const _IV = {
   pending: ['accepted', 'rejected'],
-  accepted: [] as readonly InviteStatus[],
-  rejected: [] as readonly InviteStatus[],
+  accepted: [] satisfies readonly InviteStatus[],
+  rejected: [] satisfies readonly InviteStatus[],
 } as const satisfies Record<InviteStatus, readonly InviteStatus[]>;
 assertExhaustive<InviteStatus>(_IV);
 
 import type { ApprovalStatus } from '../../features/actions/extensions.ts';
 const _AP = {
   pending: ['approved', 'rejected'],
-  approved: [] as readonly ApprovalStatus[],
-  rejected: [] as readonly ApprovalStatus[],
+  approved: [] satisfies readonly ApprovalStatus[],
+  rejected: [] satisfies readonly ApprovalStatus[],
 } as const satisfies Record<ApprovalStatus, readonly ApprovalStatus[]>;
 assertExhaustive<ApprovalStatus>(_AP);
 
@@ -89,28 +89,28 @@ import type { RunnerStatus } from '../../features/instances/types.ts';
 const _W = {
   Pending: ['Running', 'Cancelled'],
   Running: ['Success', 'Failure', 'Cancelled', 'TimedOut'],
-  Success: [] as readonly WorkflowRunStatus[],
-  Failure: [] as readonly WorkflowRunStatus[],
-  Cancelled: [] as readonly WorkflowRunStatus[],
-  TimedOut: [] as readonly WorkflowRunStatus[],
+  Success: [] satisfies readonly WorkflowRunStatus[],
+  Failure: [] satisfies readonly WorkflowRunStatus[],
+  Cancelled: [] satisfies readonly WorkflowRunStatus[],
+  TimedOut: [] satisfies readonly WorkflowRunStatus[],
 } as const satisfies Record<WorkflowRunStatus, readonly WorkflowRunStatus[]>;
 assertExhaustive<WorkflowRunStatus>(_W);
 
 const _J = {
   Queued: ['Running', 'Skipped', 'Cancelled'],
   Running: ['Success', 'Failure', 'Cancelled'],
-  Success: [] as readonly JobRunStatus[],
-  Failure: [] as readonly JobRunStatus[],
-  Skipped: [] as readonly JobRunStatus[],
-  Cancelled: [] as readonly JobRunStatus[],
+  Success: [] satisfies readonly JobRunStatus[],
+  Failure: [] satisfies readonly JobRunStatus[],
+  Skipped: [] satisfies readonly JobRunStatus[],
+  Cancelled: [] satisfies readonly JobRunStatus[],
 } as const satisfies Record<JobRunStatus, readonly JobRunStatus[]>;
 assertExhaustive<JobRunStatus>(_J);
 
 const _DG = {
   QUEUED: ['RUNNING', 'FAILED'],
   RUNNING: ['SUCCESS', 'FAILED'],
-  SUCCESS: [] as readonly DagRunStatus[],
-  FAILED: [] as readonly DagRunStatus[],
+  SUCCESS: [] satisfies readonly DagRunStatus[],
+  FAILED: [] satisfies readonly DagRunStatus[],
 } as const satisfies Record<DagRunStatus, readonly DagRunStatus[]>;
 assertExhaustive<DagRunStatus>(_DG);
 

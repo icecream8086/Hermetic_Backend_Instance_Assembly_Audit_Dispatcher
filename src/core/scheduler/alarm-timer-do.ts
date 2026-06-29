@@ -25,6 +25,8 @@
  * });
  * ```
  */
+import { z } from 'zod';
+
 export class AlarmTimerDO implements DurableObject {
   public constructor(public readonly ctx: DurableObjectState, _env: unknown) {}
 
@@ -42,8 +44,8 @@ export class AlarmTimerDO implements DurableObject {
     const url = new URL(request.url);
 
     if (url.pathname.endsWith('/start')) {
-      const body = await request.json();
-      this._intervalMs = Math.max(body.intervalMs, AlarmTimerDO.MIN_INTERVAL);
+      const body = z.object({ intervalMs: z.number().optional(), callbackUrl: z.string().optional() }).parse(await request.json());
+      this._intervalMs = Math.max(body.intervalMs ?? 60000, AlarmTimerDO.MIN_INTERVAL);
       this._callbackUrl = body.callbackUrl ?? '';
       this._running = true;
       this._tickCount = 0;

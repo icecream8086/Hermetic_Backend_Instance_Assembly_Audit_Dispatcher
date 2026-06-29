@@ -12,6 +12,8 @@
  *
  * 安全： /broadcast 端点只接受内部已知事件类型，并有 64KB body 上限。
  */
+import { z } from 'zod';
+
 const MAX_BROADCAST_BYTES = 65_536;
 
 const ALLOWED_EVENT_TYPES = new Set([
@@ -36,7 +38,7 @@ export class NotificationDO implements DurableObject {
       if (contentLength > MAX_BROADCAST_BYTES) {
         return new Response('payload too large', { status: 413 });
       }
-      const body = await request.json();
+      const body = z.object({ type: z.string(), data: z.unknown() }).parse(await request.json());
       if (!ALLOWED_EVENT_TYPES.has(body.type)) {
         return new Response('unknown event type', { status: 400 });
       }

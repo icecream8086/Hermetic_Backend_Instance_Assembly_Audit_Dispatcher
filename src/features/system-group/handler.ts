@@ -1,72 +1,108 @@
-import { Hono } from 'hono';
+import { z } from 'zod';
+import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import type { Context } from 'hono';
 import type { ISysGroupService } from './service.ts';
-import type { AppContext } from "../../core/deps.ts";
+import { AppError } from '../../core/types.ts';
+import type { AppContext } from '../../core/deps.ts';
 import { CreateSysGroupSchema, UpdateSysGroupSchema } from './schema.ts';
-import { ok, fail } from '../../core/response.ts';
-import type { RouteMeta } from '../../core/http-docs/types.ts';
-import type { CrudHandlerMap } from '../../core/crud/router.ts';
-import { registerCrudRoutes } from '../../core/crud/router.ts';
+import { ok } from '../../core/response.ts';
 
-function requireRoot(c: Context<{ Variables: AppContext }>): Response | null {
+function requireRoot<E extends { Variables: { currentUser?: { role?: string } } }>(c: Context<E>): void {
   const user = c.var?.currentUser;
-  if (!user) return null;
-  const isRoot = user.role === 'root' || user.role === 'Operator' || user.role === 'wheel';
-  if (!isRoot) return c.json(fail('FORBIDDEN', 'Admin access required'), 403);
-  return null;
+  if (!user || !['root', 'Operator', 'wheel'].includes(user.role)) {
+    throw new AppError(403, 'FORBIDDEN', 'Admin access required');
+  }
 }
 
-export function createSysGroupRouter(svc: ISysGroupService): Hono<any> {
-  const router = new Hono<any>();
+export function createSysGroupRouter(svc: ISysGroupService): OpenAPIHono<{ Variables: AppContext }> {
+  const app = new OpenAPIHono<{ Variables: AppContext }>();
 
-  const crud: CrudHandlerMap = {
-    create: (r) => r.post('/', async (c) => {
-      const rv = requireRoot(c); if (rv) return rv;
-      const body: unknown = await c.req.json();
-      const parsed = CreateSysGroupSchema.safeParse(body);
-      if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
-      const group = await svc.create(parsed.data, c.var?.currentUser?.id);
-      return c.json(ok(group), 201);
+  app.openapi(
+    createRoute({
+      method: 'post',
+      path: '/',
+      tags: ['system-groups'],
+      summary: '创建系统权限组',
+      request: { body: { content: { 'application/json': { schema: CreateSysGroupSchema } } } },
+      responses: { 201: { description: 'SysGroup created', content: { 'application/json': { schema: z.any() } } }, 400: { description: 'Bad request', content: { 'application/json': { schema: z.any() } } }, 403: { description: 'Forbidden', content: { 'application/json': { schema: z.any() } } }, 500: { description: 'Internal error', content: { 'application/json': { schema: z.any() } } } },
     }),
+    async (c) => {
+      requireRoot(c);
+      const body = CreateSysGroupSchema.parse(await c.req.json());
+      const group = await svc.create(body, c.var?.currentUser?.id);
+      return c.json(ok(group), 201);
+    },
+  );
 
-    list: (r) => r.get('/', async (c) => {
-      const rv = requireRoot(c); if (rv) return rv;
+  app.openapi(
+    createRoute({
+      method: 'get',
+      path: '/',
+      tags: ['system-groups'],
+      summary: '列出所有系统权限组',
+      responses: { 200: { description: 'SysGroup[]', content: { 'application/json': { schema: z.any() } } }, 403: { description: 'Forbidden', content: { 'application/json': { schema: z.any() } } }, 500: { description: 'Internal error', content: { 'application/json': { schema: z.any() } } } },
+    }),
+    async (c) => {
+      requireRoot(c);
       const page = parseInt(c.req.query('page') ?? '') || 1;
       const limit = parseInt(c.req.query('limit') ?? '') || 50;
       const name = c.req.query('name');
       const { items, total } = await svc.listPaginated(page, limit, name);
       return c.json(ok({ items, total, page, limit }));
-    }),
+    },
+  );
 
-    get: (r) => r.get('/:id', async (c) => {
-      const rv = requireRoot(c); if (rv) return rv;
+  app.openapi(
+    createRoute({
+      method: 'get',
+      path: '/{id}',
+      tags: ['system-groups'],
+      summary: '获取系统权限组详情',
+      request: { params: z.object({ id: z.string() }) },
+      responses: { 200: { description: 'SysGroup', content: { 'application/json': { schema: z.any() } } }, 403: { description: 'Forbidden', content: { 'application/json': { schema: z.any() } } }, 404: { description: 'Not found', content: { 'application/json': { schema: z.any() } } }, 500: { description: 'Internal error', content: { 'application/json': { schema: z.any() } } } },
+    }),
+    async (c) => {
+      requireRoot(c);
       const group = await svc.get(c.req.param('id'));
-      if (!group) return c.json(fail('SYSGROUP_NOT_FOUND', 'System group not found'), 404);
+      if (!group) throw new AppError(404, 'SYSGROUP_NOT_FOUND', 'System group not found');
       return c.json(ok(group));
-    }),
+    },
+  );
 
-    update: (r) => r.put('/:id', async (c) => {
-      const rv = requireRoot(c); if (rv) return rv;
-      const body: unknown = await c.req.json();
-      const parsed = UpdateSysGroupSchema.safeParse(body);
-      if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
-      return c.json(ok(await svc.update(c.req.param('id'), parsed.data, c.var?.currentUser?.id)));
+  app.openapi(
+    createRoute({
+      method: 'put',
+      path: '/{id}',
+      tags: ['system-groups'],
+      summary: '更新系统权限组',
+      request: {
+        params: z.object({ id: z.string() }),
+        body: { content: { 'application/json': { schema: UpdateSysGroupSchema } } },
+      },
+      responses: { 200: { description: 'SysGroup updated', content: { 'application/json': { schema: z.any() } } } },
     }),
+    async (c) => {
+      requireRoot(c);
+      const body = UpdateSysGroupSchema.parse(await c.req.json());
+      return c.json(ok(await svc.update(c.req.param('id'), body, c.var?.currentUser?.id)));
+    },
+  );
 
-    delete: (r) => r.delete('/:id', async (c) => {
-      const rv = requireRoot(c); if (rv) return rv;
+  app.openapi(
+    createRoute({
+      method: 'delete',
+      path: '/{id}',
+      tags: ['system-groups'],
+      summary: '删除系统权限组',
+      request: { params: z.object({ id: z.string() }) },
+      responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: z.any() } } } },
+    }),
+    async (c) => {
+      requireRoot(c);
       await svc.delete(c.req.param('id'), c.var?.currentUser?.id);
       return c.json(ok(null));
-    }),
-  };
+    },
+  );
 
-  return registerCrudRoutes(router, crud);
+  return app;
 }
-
-export const sysGroupRouteMeta: RouteMeta[] = [
-  { method: 'POST', path: '/', description: '创建系统权限组 — 全局规则，不绑定用户/组。dependsOn 支持 DAG 继承父组规则', requestBody: { name: 'sys.custom', rules: [{ effect: 'allow', actions: ['read'], priority: 10 }] }, responseDescription: 'SysGroup' },
-  { method: 'GET', path: '/', description: '列出所有系统权限组（含种子数据：perm.sysadmin / perm.operator / perm.viewer / perm.auth）', responseDescription: 'SysGroup[]' },
-  { method: 'GET', path: '/:id', description: '按 ID 获取系统权限组详情（含规则和依赖链）', responseDescription: 'SysGroup' },
-  { method: 'PUT', path: '/:id', description: '更新系统权限组（名称/规则/priority/dependsOn）', requestBody: { priority: 200 }, responseDescription: 'SysGroup' },
-  { method: 'DELETE', path: '/:id', description: '删除系统权限组', responseDescription: '{ ok: true }' },
-];

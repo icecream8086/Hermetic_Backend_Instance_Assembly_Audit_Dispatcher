@@ -1,36 +1,50 @@
-import { Hono } from 'hono';
+import { z } from 'zod';
+import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import type { Context } from 'hono';
-import type { AppContext } from '../../core/deps.ts';
+import { AppError } from '../../core/types.ts';
+
 import type { IVolumeService } from './service.ts';
 import { CreateVolumeSchema, UpdateVolumeSchema } from './schema.ts';
 import type { CreateVolumeInput, UpdateVolumeInput } from './types.ts';
-import { ok, fail } from '../../core/response.ts';
-import type { RouteMeta } from '../../core/http-docs/types.ts';
-import type { CrudHandlerMap } from '../../core/crud/router.ts';
-import { registerCrudRoutes } from '../../core/crud/router.ts';
+import { ok } from '../../core/response.ts';
 
-function requireRoot(c: Context<{ Variables: AppContext }>): Response | null {
+function requireRoot(_c: Context<AppContext>): void {
   const user = c.var?.currentUser;
   if (!user) return null;
   const isRoot = user.role === 'root' || user.role === 'Operator' || user.role === 'wheel';
-  if (!isRoot) return c.json(fail('FORBIDDEN', 'Admin access required'), 403);
+  if (!isRoot) throw new AppError(403, 'FORBIDDEN', 'Admin access required');
   return null;
 }
 
-export function createVolumeRouter(svc: IVolumeService): Hono<any> {
-  const router = new Hono<any>();
+export function createVolumeRouter(svc: IVolumeService): OpenAPIHono<{ Variables: AppContext }> {
+  const app = new OpenAPIHono<{ Variables: AppContext }>();
 
-  const crud: CrudHandlerMap = {
-    create: (r) => r.post('/', async (c) => {
-      const rv = requireRoot(c); if (rv) return rv;
-      const body: unknown = await c.req.json();
-      const parsed = CreateVolumeSchema.safeParse(body);
-      if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
-      const volume = await svc.create(parsed.data as CreateVolumeInput);
-      return c.json(ok(volume), 201);
+  app.openapi(
+    createRoute({
+      method: 'post',
+      path: '/',
+      tags: ['volumes'],
+      summary: '创建数据卷',
+      request: { body: { content: { 'application/json': { schema: CreateVolumeSchema } } } },
+      responses: { 201: { description: 'Volume created', content: { 'application/json': { schema: z.any() } } } },
     }),
+    async (c) => {
+      requireRoot(c);
+      const body = CreateVolumeSchema.parse(await c.req.json());
+      const volume = await svc.create(body as CreateVolumeInput);
+      return c.json(ok(volume), 201);
+    },
+  );
 
-    list: (r) => r.get('/', async (c) => {
+  app.openapi(
+    createRoute({
+      method: 'get',
+      path: '/',
+      tags: ['volumes'],
+      summary: '列出数据卷',
+      responses: { 200: { description: 'Volume[]', content: { 'application/json': { schema: z.any() } } } },
+    }),
+    async (c) => {
       const page = parseInt(c.req.query('page') ?? '') || 1;
       const limit = parseInt(c.req.query('limit') ?? '') || 50;
       const filters: Record<string, string> = {};
@@ -39,36 +53,59 @@ export function createVolumeRouter(svc: IVolumeService): Hono<any> {
       const s = c.req.query('status'); if (s) filters.status = s;
       const inst = c.req.query('instanceId'); if (inst) filters.instanceId = inst;
       return c.json(ok(await svc.listPaginated(page, limit, Object.keys(filters).length ? filters : undefined)));
-    }),
+    },
+  );
 
-    get: (r) => r.get('/:id', async (c) => {
+  app.openapi(
+    createRoute({
+      method: 'get',
+      path: '/{id}',
+      tags: ['volumes'],
+      summary: '获取数据卷详情',
+      request: { params: z.object({ id: z.string() }) },
+      responses: { 200: { description: 'Volume', content: { 'application/json': { schema: z.any() } } } },
+    }),
+    async (c) => {
       const vol = await svc.get(c.req.param('id'));
-      if (!vol) return c.json(fail('VOLUME_NOT_FOUND', 'Volume not found'), 404);
+      if (!vol) throw new AppError(404, 'VOLUME_NOT_FOUND', 'Volume not found');
       return c.json(ok(vol));
-    }),
+    },
+  );
 
-    update: (r) => r.put('/:id', async (c) => {
-      const rv = requireRoot(c); if (rv) return rv;
-      const body: unknown = await c.req.json();
-      const parsed = UpdateVolumeSchema.safeParse(body);
-      if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
-      return c.json(ok(await svc.update(c.req.param('id'), parsed.data as UpdateVolumeInput)));
+  app.openapi(
+    createRoute({
+      method: 'put',
+      path: '/{id}',
+      tags: ['volumes'],
+      summary: '更新数据卷配置',
+      request: {
+        params: z.object({ id: z.string() }),
+        body: { content: { 'application/json': { schema: UpdateVolumeSchema } } },
+      },
+      responses: { 200: { description: 'Volume updated', content: { 'application/json': { schema: z.any() } } } },
     }),
+    async (c) => {
+      requireRoot(c);
+      const body = UpdateVolumeSchema.parse(await c.req.json());
+      return c.json(ok(await svc.update(c.req.param('id'), body as UpdateVolumeInput)));
+    },
+  );
 
-    delete: (r) => r.delete('/:id', async (c) => {
-      const rv = requireRoot(c); if (rv) return rv;
+  app.openapi(
+    createRoute({
+      method: 'delete',
+      path: '/{id}',
+      tags: ['volumes'],
+      summary: '删除数据卷',
+      request: { params: z.object({ id: z.string() }) },
+      responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: z.any() } } } },
+    }),
+    async (c) => {
+      requireRoot(c);
       await svc.delete(c.req.param('id'));
       return c.json(ok(null));
-    }),
-  };
+    },
+  );
 
-  return registerCrudRoutes(router, crud);
+  return app;
 }
-
-export const volumeRouteMeta: RouteMeta[] = [
-  { method: 'POST', path: '/', description: '创建数据卷 — 必须绑定到计算实例 (instanceId)', requestBody: { name: 'my-volume', type: 'NFSVolume', instanceId: 'inst_xxx', nfs: { server: '192.168.1.1', path: '/data', readOnly: false } }, responseDescription: 'Volume' },
-  { method: 'GET', path: '/', description: '列出数据卷 — 支持 ?name=&type=&status=&instanceId= 筛选', responseDescription: 'Volume[]' },
-  { method: 'GET', path: '/:id', description: '按 ID 获取数据卷详情', responseDescription: 'Volume' },
-  { method: 'PUT', path: '/:id', description: '更新数据卷配置', requestBody: { description: 'updated description' }, responseDescription: 'Volume' },
-  { method: 'DELETE', path: '/:id', description: '删除数据卷', responseDescription: '{ ok: true }' },
-];

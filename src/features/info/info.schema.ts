@@ -14,7 +14,7 @@ export const ServerInfoSchema = z.object({
   version: z.string(),
   platform: z.string(),
   region: z.string().optional(),
-  features: z.record(z.boolean()),
+  features: z.record(z.string(), z.boolean()),
   uptime: z.number(),
   storeMetrics: StoreMetricsSchema,
 });
