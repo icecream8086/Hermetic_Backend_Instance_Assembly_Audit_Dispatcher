@@ -69,5 +69,5 @@ serve({ fetch: instance.app.fetch, port: config.server.port }, (info) => {
 });
 
 process.on('SIGINT', () => {
-  instance.dispose().then(() => process.exit(0));
+  void instance.dispose().then(() => process.exit(0));
 });

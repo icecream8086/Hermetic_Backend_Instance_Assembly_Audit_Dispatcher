@@ -33,8 +33,8 @@ export interface IAuthProvider {
   /** Check if the current credentials/token are still valid. */
   isExpired(): boolean;
 
-  /** Refresh credentials/token. */
-  refresh(): Promise<void>;
+  /** Refresh credentials/token. Optional — no-op for static credentials (AkSk, none). */
+  refresh?(): Promise<void>;
 }
 
 // ─── Auth types for config ───

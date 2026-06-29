@@ -41,12 +41,8 @@ export class HybridAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmi
     this.#machineHash = hashBootId(this.#bootId);
   }
 
-  public async write(entry: AuditEntry): Promise<void> {
-    await this.#store(entry);
-  }
-
-  public async writeSync(entry: AuditEntry): Promise<LogId> {
-    return this.#store(entry);
+  public write(entry: AuditEntry): void {
+    void this.#store(entry);
   }
 
   async #store(entry: AuditEntry): Promise<LogId> {
@@ -78,7 +74,7 @@ export class HybridAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmi
     // Gate durable persistence with persistence policy (KV/DO costs real money).
     // Memory ring buffer and console output are free — always allowed.
     if (this.#atomic && shouldPersist(entry)) {
-      await this.#persistToStore(stored).catch(() => {});
+      await this.#persistToStore(stored).catch(() => { /* noop */ });
     }
 
     if (shouldLogAudit(entry.facility, entry.level)) {
@@ -119,6 +115,7 @@ export class HybridAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmi
     return c.x === expected;
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   public async getById(id: LogId): Promise<StoredAuditEntry | null> {
     return this.#memory.find(e => e.id === id) ?? null;
   }
@@ -161,7 +158,6 @@ export class HybridAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmi
 
   // ─── IAuditAdmin ───
 
-  public async forceSetTail(_facility: any, _tailId: any): Promise<void> {}
 
   public async prune(beforeTs: number): Promise<number> {
     // Filter in-memory

@@ -3,14 +3,13 @@
 // Independent from sandbox — works with any resource that needs DNS.
 
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
-import type { ILogWriter } from '../../core/audit/types.ts';
+import type { IAuditWriter } from '../../core/audit/types.ts';
 import type { IDnsProvider } from '../../core/provider/interfaces.ts';
 import type { IDnsService } from './interfaces.ts';
 import type { DnsRecordId, DnsRecord, DnsSyncInput } from './types.ts';
 import { DnsRecordStatus } from './types.ts';
 import { createFacility } from '../../core/brand.ts';
 import { AppError } from '../../core/types.ts';
-import type { IAuditWriter } from '../../core/audit/types.ts';
 import { KernLevel } from '../../core/audit/kern-level.ts';
 
 const FACILITY = createFacility('dns-service');
@@ -19,7 +18,7 @@ const KEY_PREFIX = 'dns:';
 export class DnsService implements IDnsService {
   public constructor(
     private readonly atomic: IAtomicStore,
-    private readonly logger: ILogWriter,
+    private readonly logger: IAuditWriter,
     private readonly dnsProvider: IDnsProvider,
     private readonly audit?: IAuditWriter,
   ) {}
@@ -27,7 +26,7 @@ export class DnsService implements IDnsService {
   public async syncRecord(input: DnsSyncInput, actorId?: string): Promise<DnsRecord> {
     const { domain, type, value, ttl, proxied, zoneId, id } = input;
 
-    if (type !== 'A' && type !== 'CNAME') {
+    if (type !== DnsRecordType.A && type !== DnsRecordType.CNAME) {
       throw new AppError(400, 'UNSUPPORTED_DNS_TYPE', `DNS type ${type} is not supported by the provider`);
     }
 
@@ -112,6 +111,7 @@ export class DnsService implements IDnsService {
     return entry?.value ?? null;
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   public async listRecords(_refId?: string): Promise<readonly DnsRecord[]> {
     // Atomic store (KV + DO) doesn't support prefix scans or relational queries.
     // A query-capable backend (e.g. D1) is needed to implement this efficiently.

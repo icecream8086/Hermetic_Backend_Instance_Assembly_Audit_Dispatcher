@@ -75,6 +75,7 @@ export function createAuditRouter(reader: IAuditReader): Hono<AuditEnv> {
   // ─── Persistence policy control ───
 
   /** GET /logs/persistence — view current persistence policy. */
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   router.get('/logs/persistence', async (c) => {
     { const r = requireRoot(c); if (r) return r; }
     const policy = getPersistencePolicy();
@@ -108,6 +109,7 @@ export function createAuditRouter(reader: IAuditReader): Hono<AuditEnv> {
   });
 
   /** POST /logs/persistence/reset — reset persistence policy to built-in defaults. */
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   router.post('/logs/persistence/reset', async (c) => {
     { const r = requireRoot(c); if (r) return r; }
     const userId = c.var.currentUser?.id;
@@ -118,6 +120,7 @@ export function createAuditRouter(reader: IAuditReader): Hono<AuditEnv> {
   });
 
   /** GET /logs/persistence/defaults — view built-in defaults without applying them. */
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   router.get('/logs/persistence/defaults', async (c) => {
     { const r = requireRoot(c); if (r) return r; }
     return c.json(ok(serializePolicy(buildDefaultPersistencePolicy())));

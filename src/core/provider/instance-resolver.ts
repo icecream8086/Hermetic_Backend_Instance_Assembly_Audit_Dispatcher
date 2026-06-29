@@ -190,6 +190,7 @@ export class InstanceProviderResolver {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   async #createNetworkPolicyProvider(instance: ComputeInstance): Promise<INetworkPolicyProvider | undefined> {
     switch (instance.platform) {
       case 'podman':

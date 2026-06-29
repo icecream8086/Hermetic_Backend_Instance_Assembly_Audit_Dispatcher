@@ -1,4 +1,4 @@
-import type { IAuditLogger, AuditEntry, StoredAuditEntry, LogQuery } from './types.ts';
+import type { IAuditWriter, IAuditReader, IAuditAdmin, AuditEntry, StoredAuditEntry, LogQuery } from './types.ts';
 import { AuditTier } from './types.ts';
 import type { LogId } from '../brand.ts';
 import { generateLogId } from '../brand.ts';
@@ -13,18 +13,15 @@ export function setPanicHandler(handler: ((msg: string) => void) | null): void {
 }
 
 /** Minimal console logger for local development. */
-export class ConsoleLogger implements IAuditLogger {
+export class ConsoleLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
   public readonly auditTier = AuditTier.BEST_EFFORT;
   #entries: AuditEntry[] = [];
 
-  public async write(entry: AuditEntry): Promise<void> {
-    await this.log(entry);
+  public write(entry: AuditEntry): void {
+    void this.log(entry);
   }
 
-  public async writeSync(entry: AuditEntry): Promise<LogId> {
-    return this.log(entry);
-  }
-
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   private async log(entry: AuditEntry): Promise<LogId> {
     const id = generateLogId();
     const facilityCode = resolveFacility(entry.facility);
@@ -45,6 +42,7 @@ export class ConsoleLogger implements IAuditLogger {
     return id;
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   public async query(params?: LogQuery): Promise<{ entries: StoredAuditEntry[]; nextCursor?: string; total?: number }> {
     let result: StoredAuditEntry[] = this.#entries as StoredAuditEntry[];
     if (params?.facility) result = result.filter(e => e.facility === params.facility);
@@ -55,15 +53,18 @@ export class ConsoleLogger implements IAuditLogger {
     return { entries: result, total };
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   public async getById(id: LogId): Promise<StoredAuditEntry | null> {
     return (this.#entries as StoredAuditEntry[]).find(e => e.id === id) ?? null;
   }
 
-  public async flush(): Promise<void> {}
+  public async flush(): Promise<void> { /* noop */ }
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   public async dispose(): Promise<void> { this.#entries = []; }
 
-  public async forceSetTail(_facility: any, _tailId: any): Promise<void> {}
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   public async prune(_beforeTs: number): Promise<number> { return 0; }
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   public async pruneByIds(_ids: readonly string[]): Promise<number> { return 0; }
 
   #print(entry: AuditEntry & { timestamp: number }): void {

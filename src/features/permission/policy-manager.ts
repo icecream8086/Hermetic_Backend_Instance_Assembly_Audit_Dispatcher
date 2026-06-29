@@ -2,7 +2,6 @@
  * Policy CRUD — extracted from PermissionService
  */
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
-import type { ILogWriter } from '../../core/audit/types.ts';
 import type { IAuditWriter } from '../../core/audit/types.ts';
 import { KernLevel } from '../../core/audit/kern-level.ts';
 import { createFacility } from '../../core/brand.ts';
@@ -21,7 +20,7 @@ export class PolicyManager {
 
   public constructor(
     _atomic: IAtomicStore,
-    private readonly logger: ILogWriter,
+    private readonly logger: IAuditWriter,
     private readonly audit?: IAuditWriter,
   ) {
     this.store = new CrudStore<StoredPolicy>(_atomic, 'policy:', 'policy:ids', 'POLICY_NOT_FOUND');
@@ -51,7 +50,7 @@ export class PolicyManager {
   }
 
   public async list(): Promise<StoredPolicy[]> { return this.store.list(); }
-  public async listPaginated(page?: number, limit?: number, filter?: (item: StoredPolicy) => boolean) { return this.store.listPaginated(page, limit, filter); }
+  public async listPaginated(page?: number, limit?: number, filter?: (item: StoredPolicy) => boolean): Promise<PaginatedResult<StoredPolicy>> { return this.store.listPaginated(page, limit, filter); }
   public async get(id: string): Promise<StoredPolicy | null> { return this.store.get(id); }
 
   public async update(id: string, input: UpdatePolicyInput, actor?: AuditActor): Promise<StoredPolicy> {

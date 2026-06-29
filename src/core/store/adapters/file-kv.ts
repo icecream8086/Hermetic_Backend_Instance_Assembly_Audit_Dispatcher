@@ -139,7 +139,7 @@ export class FileKVAtomicStore implements IAtomicStore {
           return results;
         },
         // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- interface contract requires generics
-        set: async <V>(key: string, value: V, ttlSeconds?: number) => {
+        set: <V>(key: string, value: V, ttlSeconds?: number) => {
           const newVersion = generateVersionId();
           deferredWrites.set(key, { value, version: newVersion, ...(ttlSeconds !== undefined && { ttlSeconds }) });
         },

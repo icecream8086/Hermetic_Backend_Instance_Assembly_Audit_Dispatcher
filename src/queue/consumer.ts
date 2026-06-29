@@ -275,7 +275,7 @@ async function handleSandboxGc(
     // Clear GC marker so the tick doesn't re-enqueue
     const markerKey = 'gc:queued:' + sid;
     const marker = await stores.atomic.get<any>(markerKey);
-    if (marker) await stores.atomic.set(markerKey, null as any, marker.version).catch(() => {});
+    if (marker) await stores.atomic.set(markerKey, null as any, marker.version).catch(() => { /* noop */ });
 
     return { success: true };
   } catch (err) {

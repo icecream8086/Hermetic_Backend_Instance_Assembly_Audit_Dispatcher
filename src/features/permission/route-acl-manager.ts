@@ -2,7 +2,6 @@
  * Route ACL CRUD + checkRouteAccess — extracted from PermissionService
  */
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
-import type { ILogWriter } from '../../core/audit/types.ts';
 import type { IAuditWriter } from '../../core/audit/types.ts';
 import { KernLevel } from '../../core/audit/kern-level.ts';
 import { AppError } from '../../core/types.ts';
@@ -42,7 +41,7 @@ export class RouteAclManager {
 
   public constructor(
     _atomic: IAtomicStore,
-    private readonly logger: ILogWriter,
+    private readonly logger: IAuditWriter,
     private readonly audit?: IAuditWriter,
   ) {
     this.atomic = _atomic;
@@ -82,9 +81,9 @@ export class RouteAclManager {
     return acl;
   }
 
-  public async list() { return this.store.list(); }
-  public async listPaginated(page?: number, limit?: number, filter?: (item: RouteAcl) => boolean) { return this.store.listPaginated(page, limit, filter); }
-  public async get(id: string) { return this.store.get(id); }
+  public async list(): Promise<RouteAcl[]> { return this.store.list(); }
+  public async listPaginated(page?: number, limit?: number, filter?: (item: RouteAcl) => boolean): Promise<PaginatedResult<RouteAcl>> { return this.store.listPaginated(page, limit, filter); }
+  public async get(id: string): Promise<RouteAcl | null> { return this.store.get(id); }
 
   public async update(id: string, input: UpdateRouteAclInput, actor?: AuditActor): Promise<RouteAcl> {
     const old = await this.store.get(id);

@@ -147,6 +147,7 @@ export function registerHealthCheck(deps: HealthCheckDeps): void {
                     continue;
                   }
                   // Scheduling auto-promotion: provider says Running → promote locally
+                  // eslint-disable-next-line @typescript-eslint/no-unsafe-enum-comparison -- rt.status is provider-level string, not SandboxStatus enum
                   if (entry.value.status === SandboxStatus.Scheduling && rt.status === 'Running') {
                     const latest = await stores.atomic.get<Sandbox>(`sandbox:${sid}`);
                     if (latest?.value.status === SandboxStatus.Scheduling) {

@@ -164,11 +164,9 @@ export enum AuditTier {
   BEST_EFFORT = 'best-effort',
 }
 
-/** Write interface — fire-and-forget or sync with log id. */
+/** Write interface — fire-and-forget. Compiler-enforced: void is not awaitable. */
 export interface IAuditWriter {
-  write(entry: AuditEntry): Promise<void>;
-  /** Sync write that returns the log id for audit chain linking. */
-  writeSync(entry: AuditEntry): Promise<LogId>;
+  write(entry: AuditEntry): void;
 }
 
 /** Read interface. */
@@ -179,18 +177,10 @@ export interface IAuditReader {
 
 /** Admin interface for recovery / archival. */
 export interface IAuditAdmin {
-  forceSetTail(facility: Facility, tailId: LogId): Promise<void>;
   /** Remove entries older than the given timestamp. */
   prune(beforeTs: number): Promise<number>;
   /** Remove specific entries by ID. Returns count removed. */
   pruneByIds(ids: readonly string[]): Promise<number>;
-}
-
-/** Full audit logger aggregate. */
-export interface IAuditLogger extends IAuditWriter, IAuditReader, IAuditAdmin {
-  readonly auditTier: AuditTier;
-  flush(): Promise<void>;
-  dispose(): Promise<void>;
 }
 
 /** Format an audit entry as a dmesg-style log line. */
@@ -198,16 +188,3 @@ export function formatAuditLine(_timestamp: number, entry: AuditEntry): string {
   const actorId = entry.actorId ?? (entry.metadata?.actorId as string | undefined);
   return formatDmesgLine(entry.message, actorId);
 }
-
-// ═══════════════════════════════════════════════════════════
-// Backward-compat aliases (will be removed after migration)
-// ═══════════════════════════════════════════════════════════
-
-/** @deprecated Use AuditEntry */
-export type LogInput = AuditEntry;
-/** @deprecated Use StoredAuditEntry */
-export type LogEntry = StoredAuditEntry;
-/** @deprecated Use IAuditWriter */
-export type ILogWriter = IAuditWriter;
-/** @deprecated Use IAuditReader */
-export type ILogReader = IAuditReader;

@@ -15,14 +15,11 @@ export class LocalAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin
     this.#capacity = capacity;
   }
 
-  public async write(entry: AuditEntry): Promise<void> {
-    await this.#store(entry);
+  public write(entry: AuditEntry): void {
+    void this.#store(entry);
   }
 
-  public async writeSync(entry: AuditEntry): Promise<LogId> {
-    return this.#store(entry);
-  }
-
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   async #store(entry: AuditEntry): Promise<LogId> {
     const id = generateLogId();
     const now = Date.now();
@@ -42,6 +39,7 @@ export class LocalAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin
     return id;
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   public async query(params?: LogQuery): Promise<{ entries: StoredAuditEntry[]; nextCursor?: string; total?: number }> {
     let f = [...this.#entries];
     if (params?.facility) f = f.filter(e => e.facility === params.facility);
@@ -52,6 +50,7 @@ export class LocalAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin
     return { entries: f, total };
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   public async getById(id: LogId): Promise<StoredAuditEntry | null> {
     return this.#entries.find(e => e.id === id) ?? null;
   }
@@ -61,10 +60,10 @@ export class LocalAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin
   }
 
   // ─── IAuditAdmin ───
-  public async forceSetTail(_facility: any, _tailId: any): Promise<void> {}
 
 
 
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   public async prune(beforeTs: number): Promise<number> {
     const kept = this.#entries.filter(e => e.timestamp >= beforeTs);
     const removed = this.#entries.length - kept.length;
@@ -73,6 +72,7 @@ export class LocalAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin
     return removed;
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   public async pruneByIds(ids: readonly string[]): Promise<number> {
     const idSet = new Set(ids);
     const before = this.#entries.length;

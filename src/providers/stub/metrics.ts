@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/require-await -- stub/noop implementation */
 import type {
   IMetricsProvider,
   FetchMetricsInput,

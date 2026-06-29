@@ -81,12 +81,14 @@ export type CapabilityValue = number;
 
 /** Map an action string to the required capability bit. */
 export function actionToCapability(action: string): CapabilityValue {
+  /* eslint-disable @typescript-eslint/no-unsafe-enum-comparison -- accepts both PermissionAction enum values and arbitrary strings */
   switch (action) {
     case PermissionAction.CREATE: return Capability.SANDBOX_CREATE;
     case PermissionAction.DELETE: return Capability.SANDBOX_DELETE;
     case PermissionAction.UPDATE: return Capability.SANDBOX_UPDATE;
     default: return Capability.NONE;
   }
+  /* eslint-enable @typescript-eslint/no-unsafe-enum-comparison */
 }
 
 /** Check if a capability set contains the required capabilities. */

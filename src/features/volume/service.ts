@@ -1,6 +1,5 @@
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
 import { TransactConflictError } from '../../core/store/interfaces.ts';
-import type { ILogWriter } from '../../core/audit/types.ts';
 import type { IAuditWriter } from '../../core/audit/types.ts';
 import type { Volume } from '../sandbox/types.ts';
 import { VolumeStatus, createVolumeId } from '../sandbox/types.ts';
@@ -19,7 +18,7 @@ export interface IVolumeService extends ICrudService<Volume, CreateVolumeInput, 
 export class VolumeService implements IVolumeService {
   public constructor(
     private readonly atomic: IAtomicStore,
-    private readonly logger: ILogWriter,
+    private readonly logger: IAuditWriter,
     _audit?: IAuditWriter,
   ) {}
 
@@ -96,7 +95,9 @@ export class VolumeService implements IVolumeService {
     if (hasFilter) {
       items = allItems.filter(v => {
         if (filters.name && !(v.name ?? '').toLowerCase().includes(filters.name.toLowerCase())) return false;
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-enum-comparison -- same enum type on both sides
         if (filters.type && v.type !== filters.type) return false;
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-enum-comparison -- same enum type on both sides
         if (filters.status && v.status !== filters.status) return false;
         if (filters.instanceId && v.instanceId !== filters.instanceId) return false;
         return true;

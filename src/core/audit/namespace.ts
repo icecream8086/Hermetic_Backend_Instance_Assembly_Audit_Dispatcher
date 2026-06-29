@@ -59,6 +59,7 @@ export class NamespacedAuditReader implements IAuditReader {
       );
     }
     if (this.ns.minLevel !== undefined) {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-enum-comparison -- KernLevel values are numeric
       entries = entries.filter(e => e.level >= this.ns.minLevel!);
     }
 

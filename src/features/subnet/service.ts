@@ -1,6 +1,4 @@
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
-import type { ILogWriter } from '../../core/audit/types.ts';
-import type { IAuditWriter } from '../../core/audit/types.ts';
 import { createFacility } from '../../core/brand.ts';
 import { AppError } from '../../core/types.ts';
 import { KernLevel } from '../../core/audit/kern-level.ts';
@@ -25,7 +23,7 @@ export interface ISubnetService extends ICrudService<Subnet, CreateSubnetInput, 
 export class SubnetService implements ISubnetService {
   public constructor(
     private readonly atomic: IAtomicStore,
-    private readonly logger: ILogWriter,
+    private readonly logger: IAuditWriter,
     private readonly audit?: IAuditWriter,
     private readonly instanceSvc?: InstanceService,
   ) {}

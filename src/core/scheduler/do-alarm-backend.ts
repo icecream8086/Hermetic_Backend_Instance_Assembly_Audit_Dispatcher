@@ -42,7 +42,7 @@ export class DoAlarmBackend implements ITimerBackend {
     this.#doStub.fetch('http://do/start', {
       method: 'POST',
       body: JSON.stringify({ intervalMs, callbackUrl: this.#callbackUrl }),
-    }).catch(() => {});
+    }).catch(() => { /* noop */ });
 
     return {
       clear: () => {
@@ -50,7 +50,7 @@ export class DoAlarmBackend implements ITimerBackend {
           clearInterval(this.#localTimerId);
           this.#localTimerId = null;
         }
-        this.#doStub.fetch('http://do/stop', { method: 'POST' }).catch(() => {});
+        this.#doStub.fetch('http://do/stop', { method: 'POST' }).catch(() => { /* noop */ });
       },
     };
   }

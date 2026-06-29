@@ -295,6 +295,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
     const rawId = c.req.param('id');
     let targetId: ReturnType<typeof createUserId>;
     try { targetId = createUserId(rawId); } catch { return c.json(fail('VALIDATION_ERROR', 'Invalid user ID'), 400); }
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-enum-comparison -- UserRole is a string enum
     const isAdmin = user.role === UserRole.Root || user.role === UserRole.Operator;
     if (user.id !== targetId && !isAdmin) {
       return c.json(fail('FORBIDDEN', 'Can only upload your own avatar'), 403);
@@ -343,6 +344,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
     const rawId = c.req.param('id');
     let targetId: ReturnType<typeof createUserId>;
     try { targetId = createUserId(rawId); } catch { return c.json(fail('VALIDATION_ERROR', 'Invalid user ID'), 400); }
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-enum-comparison -- UserRole is a string enum
     const isAdmin = user.role === UserRole.Root || user.role === UserRole.Operator;
     if (user.id !== targetId && !isAdmin) {
       return c.json(fail('FORBIDDEN', 'Can only delete your own avatar'), 403);

@@ -193,7 +193,7 @@ function mergeByName(parent: any[] | undefined, child: any[] | undefined): any[]
 function mergeHealthChecks(parent: any[] | undefined, child: any[] | undefined): any[] {
   if (!child) return parent ?? [];
   if (!parent) return child;
-  const keyFn = (h: any) => `${String(h.target)}:${String(h.name)}`;
+  const keyFn = (h: any): string => `${String(h.target)}:${String(h.name)}`;
   const map = new Map<string, any>();
   for (const h of parent) map.set(keyFn(h), h);
   for (const h of child) {
@@ -357,7 +357,7 @@ async function releaseResourceBinding(atomic: IAtomicStore, tpl: SandboxTemplate
   if (!binding?.domain || !binding.port) return;
   const key = bindingKey(binding.domain, binding.port);
   const entry = await atomic.get<string>(key);
-  if (entry) await atomic.set(key, null, entry.version).catch(() => {});
+  if (entry) await atomic.set(key, null, entry.version).catch(() => { /* noop */ });
 }
 
 async function releaseInstanceSlot(atomic: IAtomicStore, tpl: SandboxTemplate, _userId: string): Promise<void> {
@@ -365,13 +365,13 @@ async function releaseInstanceSlot(atomic: IAtomicStore, tpl: SandboxTemplate, _
   const baseKey = lockKey(tpl.id);
   const entry = await atomic.get<number>(baseKey);
   if (entry && entry.value > 0) {
-    await atomic.set(baseKey, entry.value - 1, entry.version).catch(() => {});
+    await atomic.set(baseKey, entry.value - 1, entry.version).catch(() => { /* noop */ });
   }
   if (tpl.instanceLimit?.type === 'perUser') {
     const userKey = lockKey(tpl.id, ':' + _userId);
     const uEntry = await atomic.get<number>(userKey);
     if (uEntry && uEntry.value > 0) {
-      await atomic.set(userKey, uEntry.value - 1, uEntry.version).catch(() => {});
+      await atomic.set(userKey, uEntry.value - 1, uEntry.version).catch(() => { /* noop */ });
     }
   }
 }
@@ -694,8 +694,8 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
       const code = err.code ?? (status === 404 ? 'TEMPLATE_NOT_FOUND' : 'APPLY_FAILED');
       console.error(`[template] apply failed for ${c.req.param('id')}:`, { code, status, message: e.message });
       if (resolved) {
-        await releaseInstanceSlot(atomic, resolved, c.var.currentUser?.id ?? 'anonymous').catch(() => {});
-        await releaseResourceBinding(atomic, resolved).catch(() => {});
+        await releaseInstanceSlot(atomic, resolved, c.var.currentUser?.id ?? 'anonymous').catch(() => { /* noop */ });
+        await releaseResourceBinding(atomic, resolved).catch(() => { /* noop */ });
       }
       return c.json(fail(code, e.message), status);
     }

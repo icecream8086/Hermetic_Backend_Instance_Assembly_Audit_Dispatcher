@@ -40,6 +40,7 @@ export class LogStreamDO implements DurableObject {
 
   public constructor(public readonly ctx: DurableObjectState, public readonly _env: unknown) {}
 
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   public async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const providerId = url.searchParams.get('providerId');
@@ -71,7 +72,7 @@ export class LogStreamDO implements DurableObject {
     });
 
     // Refresh idle alarm
-    this.ctx.storage.setAlarm(Date.now() + IDLE_ALARM_MS).catch(() => {});
+    this.ctx.storage.setAlarm(Date.now() + IDLE_ALARM_MS).catch(() => { /* noop */ });
 
     // Start streaming (only on first connection)
     if (!this.#abortController) {
@@ -87,7 +88,7 @@ export class LogStreamDO implements DurableObject {
 
   #start(provider: string, endpoint: string | null, containerId: string, tail?: number, since?: number): void {
     if (provider === 'podman' && endpoint) {
-      this.#streamFromPodman(endpoint, containerId, tail, since);
+      void this.#streamFromPodman(endpoint, containerId, tail, since);
     } else {
       this.#broadcast(JSON.stringify({ event: 'error', message: `Unsupported provider: ${provider}` }));
       this.#stop();
@@ -156,7 +157,7 @@ export class LogStreamDO implements DurableObject {
   }
 
   #scheduleCleanup(delayMs: number): void {
-    this.ctx.storage.setAlarm(Date.now() + delayMs).catch(() => {});
+    this.ctx.storage.setAlarm(Date.now() + delayMs).catch(() => { /* noop */ });
   }
 
   #stop(): void {
@@ -164,6 +165,7 @@ export class LogStreamDO implements DurableObject {
     this.#abortController = null;
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   public async alarm(): Promise<void> {
     this.#stop();
     for (const ws of this.#sessions) {

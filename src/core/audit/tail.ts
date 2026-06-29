@@ -76,7 +76,7 @@ export function startTail(
   options: TailOptions = {},
 ): () => void {
   const timer = setInterval(() => {
-    pollTail(reader, session, options).catch(() => {});
+    pollTail(reader, session, options).catch(() => { /* noop */ });
   }, session.intervalMs);
   session.timer = timer;
   return () => { clearInterval(timer); };
@@ -101,7 +101,7 @@ export interface TailWsMessage {
 export function createWsTailHandler(
   reader: IAuditReader,
   options: TailOptions = {},
-) {
+): { handle(send: (msg: TailWsMessage) => void, close: () => void, pollIntervalMs?: number): Promise<void> } {
   return {
     /** Upgrade an HTTP request to a WebSocket tail session. */
     async handle(

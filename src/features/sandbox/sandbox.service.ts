@@ -1,6 +1,5 @@
 import { z } from 'zod';
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
-import type { ILogWriter } from '../../core/audit/types.ts';
 import type {
   IContainerProvider,
   IMetricsProvider,
@@ -12,6 +11,7 @@ import type {
 } from '../../core/provider/index.ts';
 import {
   SandboxStatus,
+  ContainerStatus,
   isValidTransition,
   createSandboxId,
 } from './types.ts';
@@ -44,7 +44,6 @@ import { AppError } from '../../core/types.ts';
 import { ProviderResolutionError, ProviderOperationError } from '../../core/provider/errors.ts';
 import type { EventBus } from '../../core/event-bus/bus.ts';
 import { createEvent } from '../../core/event-bus/types.ts';
-import type { IAuditWriter } from '../../core/audit/types.ts';
 import type { NetworkResolverFn } from '../../core/network/types.ts';
 import type { InstanceService } from '../../core/region/instance.ts';
 import type { IMessageQueue } from '../../queue/interfaces.ts';
@@ -62,7 +61,7 @@ export class SandboxService implements ISandboxService {
 
   public constructor(
     private readonly atomic: IAtomicStore,
-    private readonly logger: ILogWriter,
+    private readonly logger: IAuditWriter,
     _containerProvider: IContainerProvider, // deprecated — retained for constructor signature compat, unused
     private readonly providerRegistry?: IProviderRegistry | undefined,
     private readonly eventBus?: EventBus,
@@ -311,7 +310,7 @@ export class SandboxService implements ISandboxService {
     });
 
     // Notify real-time subscribers
-    this.eventBus?.dispatch(createEvent('sandbox.provisioned', {
+    void this.eventBus?.dispatch(createEvent('sandbox.provisioned', {
       sandboxId: id,
       status: SandboxStatus.Running,
       name: input.name,
@@ -432,7 +431,7 @@ export class SandboxService implements ISandboxService {
       } catch (e) {
         console.error(`[sandbox] terminate: provider delete failed name=${sandbox.name} id=${id} provider=${sandbox.providerId} instance=${sandbox.config.instanceId ?? '(none)'} — ${e instanceof Error ? e.message : String(e)}`);
         // Enqueue GC retry — sandbox stays in Terminating, health-check will re-dispatch
-        this.#enqueueGcRetry(id, sandbox);
+        void this.#enqueueGcRetry(id, sandbox);
       }
     } else {
       console.error(`[sandbox] terminate: sandbox ${id} has no providerId — cloud resource may be orphaned`);
@@ -510,9 +509,9 @@ export class SandboxService implements ISandboxService {
     return target.containers.map(c => ({
       containerName: c.name,
       status: c.health?.status
-        ?? ((c.state.state === 'Running' && !provider.lifecycle.healthProbes) ? 'provider'
-          : c.state.state === 'Running' ? 'running'
-          : c.state.state === 'Waiting' ? 'starting' : 'none'),
+        ?? ((c.state.state === ContainerStatus.Running && !provider.lifecycle.healthProbes) ? 'provider'
+          : c.state.state === ContainerStatus.Running ? 'running'
+          : c.state.state === ContainerStatus.Waiting ? 'starting' : 'none'),
       ready: c.state.ready,
       startedAt: c.state.startTime,
       message: c.health?.message ?? c.state.message,
@@ -690,7 +689,7 @@ export class SandboxService implements ISandboxService {
       metadata: meta,
     });
 
-    this.eventBus?.dispatch(createEvent('sandbox.status', {
+    void this.eventBus?.dispatch(createEvent('sandbox.status', {
       sandboxId: id,
       fromStatus,
       toStatus: to,
@@ -717,6 +716,7 @@ export class SandboxMetricsService implements ISandboxMetricsService {
     return result.snapshots;
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   public async query(_sandboxId: SandboxId, _range: MetricTimeRange): Promise<readonly MetricSnapshot[]> {
     throw new AppError(501, 'NOT_IMPLEMENTED', 'MetricSnapshot query is not yet implemented');
   }

@@ -111,26 +111,32 @@ export class AlibabaEciImageProvider implements IImageProvider {
 
   // ─── ECI-unsupported operations ───
 
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   public async push(_imageOrId: string): Promise<ImageInfo> {
     throw new AppError(501, 'NOT_IMPLEMENTED', 'push is not supported by Alibaba ECI');
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   public async search(_term: string): Promise<readonly { name: string; description?: string; isOfficial?: boolean }[]> {
     throw new AppError(501, 'NOT_IMPLEMENTED', 'search is not supported by Alibaba ECI');
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   public async tag(_id: string, _tag: string): Promise<void> {
     throw new AppError(501, 'NOT_IMPLEMENTED', 'tag is not supported by Alibaba ECI');
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   public async history(_id: string): Promise<readonly { id: string; created?: number; createdBy?: string; size?: number }[]> {
     throw new AppError(501, 'NOT_IMPLEMENTED', 'history is not supported by Alibaba ECI');
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   public async prune(): Promise<{ reclaimed: number }> {
     throw new AppError(501, 'NOT_IMPLEMENTED', 'prune is not supported by Alibaba ECI');
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   public async build(_context: unknown): Promise<ImageInfo> {
     throw new AppError(501, 'NOT_IMPLEMENTED', 'build is not supported by Alibaba ECI');
   }

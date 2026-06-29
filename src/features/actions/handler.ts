@@ -634,6 +634,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
 
   // ── Templates ──
 
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   router.get('/templates', async (c) => {
     const category = c.req.query('category');
     const items = category
@@ -642,6 +643,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
     return c.json(ok({ items, total: items.length }));
   });
 
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   router.get('/templates/:id', async (c) => {
     const t = TEMPLATES.find(tpl => tpl.id === c.req.param('id'));
     if (!t) throw new AppError(404, 'TEMPLATE_NOT_FOUND', 'Template not found');

@@ -82,12 +82,8 @@ export class R2AuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
 
   // ─── IAuditWriter ───
 
-  public async write(entry: AuditEntry): Promise<void> {
-    await this.#process(entry);
-  }
-
-  public async writeSync(entry: AuditEntry): Promise<LogId> {
-    return this.#process(entry);
+  public write(entry: AuditEntry): void {
+    void this.#process(entry);
   }
 
   async #process(entry: AuditEntry): Promise<LogId> {
@@ -121,7 +117,7 @@ export class R2AuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
     if (shouldPersist(entry)) {
       this.#buffer.push(stored);
       if (this.#buffer.length >= this.#config.batchSize) {
-        await this.flush().catch(() => {});
+        await this.flush().catch(() => { /* noop */ });
       }
     }
 
@@ -236,7 +232,6 @@ export class R2AuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
 
   // ─── IAuditAdmin ───
 
-  public async forceSetTail(_facility: any, _tailId: any): Promise<void> {}
 
   public async prune(beforeTs: number): Promise<number> {
     const result = await this.bucket.list({ prefix: this.#config.prefix, limit: 500 });
@@ -251,6 +246,7 @@ export class R2AuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
     return removed;
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   public async pruneByIds(_ids: readonly string[]): Promise<number> {
     return 0; // R2 delete is per-key; full implementation would need an index
   }
@@ -260,7 +256,7 @@ export class R2AuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
   /** Start auto-flushing the write buffer. */
   public startAutoFlush(): void {
     if (this.#flushTimer) return;
-    this.#flushTimer = setInterval(() => this.flush().catch(() => {}), this.#config.flushIntervalMs);
+    this.#flushTimer = setInterval(() => this.flush().catch(() => { /* noop */ }), this.#config.flushIntervalMs);
   }
 
   public stopAutoFlush(): void {

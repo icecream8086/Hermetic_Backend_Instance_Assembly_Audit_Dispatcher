@@ -19,12 +19,8 @@ export class KvAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
     this.#capacity = capacity;
   }
 
-  public async write(entry: AuditEntry): Promise<void> {
-    await this.#store(entry);
-  }
-
-  public async writeSync(entry: AuditEntry): Promise<LogId> {
-    return this.#store(entry);
+  public write(entry: AuditEntry): void {
+    void this.#store(entry);
   }
 
   async #store(entry: AuditEntry): Promise<LogId> {
@@ -45,6 +41,7 @@ export class KvAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
     return id;
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   public async query(params?: LogQuery): Promise<{ entries: StoredAuditEntry[]; nextCursor?: string; total?: number }> {
     let f = [...this.#entries];
     if (params?.facility) f = f.filter(e => e.facility === params.facility);
@@ -55,12 +52,12 @@ export class KvAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
     return { entries: f, total };
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   public async getById(id: LogId): Promise<StoredAuditEntry | null> {
     return this.#entries.find(e => e.id === id) ?? null;
   }
 
   // ─── IAuditAdmin ───
-  public async forceSetTail(_facility: any, _tailId: any): Promise<void> {}
 
 
 

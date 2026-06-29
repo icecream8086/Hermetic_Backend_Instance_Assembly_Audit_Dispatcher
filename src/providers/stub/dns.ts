@@ -20,6 +20,7 @@ interface StubRecord {
 export class StubDnsProvider implements IDnsProvider {
   #records = new Map<string, StubRecord>();
 
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   public async updateRecord(input: UpdateDnsRecordInput): Promise<void> {
     const now = Date.now();
     const existing = this.#records.get(input.providerRecordId);
@@ -37,6 +38,7 @@ export class StubDnsProvider implements IDnsProvider {
     });
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   public async deleteRecord(input: DeleteDnsRecordInput): Promise<void> {
     this.#records.delete(input.providerRecordId);
   }

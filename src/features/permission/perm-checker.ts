@@ -11,7 +11,6 @@
  */
 
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
-import type { ILogWriter, IAuditWriter } from '../../core/audit/types.ts';
 import { PermissionDag } from '../../core/permission/permission-dag.ts';
 import { PermissionEffect } from '../../core/permission/types.ts';
 import type { PolicyNode, PermissionCheck } from '../../core/permission/types.ts';
@@ -52,7 +51,7 @@ export class PermissionChecker {
 
   public constructor(
     private readonly atomic: IAtomicStore,
-    _logger: ILogWriter,
+    _logger: IAuditWriter,
     private readonly audit?: IAuditWriter,
   ) {
     this.policyStore = new CrudStore(atomic, POLICY_PREFIX, POLICY_INDEX_KEY, 'POLICY_NOT_FOUND');

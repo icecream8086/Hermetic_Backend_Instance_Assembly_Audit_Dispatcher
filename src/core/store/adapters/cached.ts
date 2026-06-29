@@ -121,7 +121,7 @@ export class CachedAtomicStore implements IAtomicStore {
       const lastVer = this.#storeVersion.get(key) ?? null;
       void this.store.set(key, cacheEntry, lastVer, this.storeTtlSeconds)
         .then(v => { if (v) this.#storeVersion.set(key, v); })
-        .catch(() => {});
+        .catch(() => { /* noop */ });
     }
     return miss;
   }

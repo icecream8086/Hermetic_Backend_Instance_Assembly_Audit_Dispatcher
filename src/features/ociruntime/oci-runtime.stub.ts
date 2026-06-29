@@ -10,6 +10,7 @@
 // Logs:           image-aware startup + console output
 // Health check:   simulated probe with starting → healthy/unhealthy transitions
 
+/* eslint-disable @typescript-eslint/require-await -- stub/noop implementation */
 import type { IOCIRuntime } from './interfaces.ts';
 import type {
   ContainerId,
@@ -128,7 +129,7 @@ function computeHealth(c: MutableContainer): { status: OciHealthStatus; lastChec
 
 const logGenerators = new Map<string, (name: string, image: string, ip: string | undefined, ports: readonly { containerPort: number }[], args: readonly string[]) => string[]>();
 
-function reg(pattern: string, fn: typeof logGenerators extends Map<string, infer V> ? V : never) {
+function reg(pattern: string, fn: typeof logGenerators extends Map<string, infer V> ? V : never): void {
   logGenerators.set(pattern.toLowerCase(), fn);
 }
 

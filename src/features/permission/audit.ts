@@ -1,6 +1,5 @@
 import type { KernLevel } from '../../core/audit/kern-level.ts';
 import type { IAuditWriter } from '../../core/audit/types.ts';
-import type { ILogWriter } from '../../core/audit/types.ts';
 import { createFacility } from '../../core/brand.ts';
 
 const FACILITY = createFacility('perm-audit');
@@ -20,7 +19,7 @@ export function permEvent(
   fields: Record<string, unknown>,
   level: KernLevel,
   message?: string,
-) {
+): AuditEntry {
   return {
     level,
     facility: FACILITY,
@@ -37,15 +36,15 @@ export function permEvent(
 }
 
 export function permLog(
-  logger: ILogWriter,
+  logger: IAuditWriter,
   eventType: string,
   actor: AuditActor | undefined,
   fields: Record<string, unknown>,
   level: KernLevel,
   message?: string,
-) {
+): void {
   const entry = permEvent(eventType, actor, fields, level, message);
-  return logger.write({
+  logger.write({
     facility: FACILITY,
     level,
     message: entry.message,
@@ -60,22 +59,22 @@ export function permAudit(
   fields: Record<string, unknown>,
   level: KernLevel,
   message?: string,
-) {
+): void {
   return audit?.write(permEvent(eventType, actor, fields, level, message));
 }
 
 // ─── Convenience: log + audit in one call ───
 
 export function permLogAudit(
-  logger: ILogWriter,
+  logger: IAuditWriter,
   audit: IAuditWriter | undefined,
   eventType: string,
   actor: AuditActor | undefined,
   fields: Record<string, unknown>,
   level: KernLevel,
   message?: string,
-) {
-  void permLog(logger, eventType, actor, fields, level, message);
+): void {
+  permLog(logger, eventType, actor, fields, level, message);
   return permAudit(audit, eventType, actor, fields, level, message);
 }
 

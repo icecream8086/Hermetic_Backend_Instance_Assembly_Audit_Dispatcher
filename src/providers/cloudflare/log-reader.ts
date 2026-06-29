@@ -17,6 +17,7 @@ export class CloudflareLogReader implements IAuditReader {
     return this.queryAsync(params ?? { facility: 'logs' });
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   public async getById(_id: LogId): Promise<StoredAuditEntry | null> {
     return null; // Logpush logs are line-based, not id-indexed
   }

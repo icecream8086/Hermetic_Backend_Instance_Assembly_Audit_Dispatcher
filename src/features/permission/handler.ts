@@ -221,10 +221,12 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
   }
 
   // ─── Templates (read-only) ───
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   router.get('/templates', async (c) => {
     return c.json(ok(svc.listTemplates()));
   });
 
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   router.get('/templates/:id', async (c) => {
     const tpl = svc.getTemplate(c.req.param('id'));
     if (!tpl) return c.json(fail('TEMPLATE_NOT_FOUND', 'Template not found'), 404);

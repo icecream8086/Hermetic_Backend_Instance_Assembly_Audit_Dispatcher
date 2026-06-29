@@ -29,7 +29,7 @@ export class StoreSchedulerContext implements SchedulerContext {
 
   // ─── DagDef ───
 
-  public async getDagDef(dagId: DagId) {
+  public async getDagDef(dagId: DagId): Promise<{ value: DagDef; version: VersionId } | null> {
     const entry = await this.atomic.get<DagDef>(PFX_DAG_DEF + dagId);
     return entry ?? null;
   }
@@ -59,7 +59,7 @@ export class StoreSchedulerContext implements SchedulerContext {
     return runs;
   }
 
-  public async getDagRun(dagRunId: DagRunId) {
+  public async getDagRun(dagRunId: DagRunId): Promise<{ value: DagRun; version: VersionId } | null> {
     const entry = await this.atomic.get<DagRun>(PFX_DAG_RUN + dagRunId);
     return entry ?? null;
   }
@@ -121,6 +121,7 @@ export class StoreSchedulerContext implements SchedulerContext {
 
   // ─── Executor ───
 
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   public async getExecutor(key: string): Promise<ITaskExecutor | null> {
     return this.executorRegistry.get(key) ?? null;
   }

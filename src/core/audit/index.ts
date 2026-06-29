@@ -5,12 +5,8 @@ export {
 export type {
   AuditEntry, StoredAuditEntry, LogQuery, LogQueryResult, StorageEntry,
   AuditFilter, AuditQueryResult, TrustedFields, LogCursor,
-  IAuditWriter, IAuditReader, IAuditAdmin, IAuditLogger,
+  IAuditWriter, IAuditReader, IAuditAdmin,
   AuditTier,
-  /** @deprecated Use AuditEntry */
-  LogInput,
-  /** @deprecated Use StoredAuditEntry */
-  LogEntry,
 } from './types.ts';
 export { encodeCursor, decodeCursor, cursorFromEntry } from './types.ts';
 export { AuditTier as _AuditTier } from './types.ts';

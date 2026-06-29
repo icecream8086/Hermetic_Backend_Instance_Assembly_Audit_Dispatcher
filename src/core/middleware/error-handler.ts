@@ -35,7 +35,7 @@ export const globalErrorHandler: ErrorHandler = (err, c) => {
       level: KernLevel.ERR,
       facility: ERROR_FACILITY,
       message: `5xx ${method} ${url} — ${message}`,
-    }).catch(() => {});
+    });
   }
 
   // Always also write to console.error (surfaces in wrangler dev/tail)

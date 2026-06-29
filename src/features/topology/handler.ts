@@ -55,8 +55,8 @@ interface TopoCrudOpts<T, TC, TU> {
   guard?: (c: Context) => Response | null;
 }
 
-function mkTopoCrud<T, TC = any, TU = any>(opts: TopoCrudOpts<T, TC, TU>): CrudHandlerMap {
-  const id = (raw: string) => opts.idTransform ? opts.idTransform(raw) : raw;
+function mkTopoCrud<T, TC = unknown, TU = unknown>(opts: TopoCrudOpts<T, TC, TU>): CrudHandlerMap {
+  const id = (raw: string): any => opts.idTransform ? opts.idTransform(raw) : raw;
   const map = (item: T): any => opts.mapResult ? opts.mapResult(item) : item;
 
   return {
@@ -133,6 +133,7 @@ export function createTopologyRouter(
   const router = new Hono<{ Variables: AppContext }>();
 
   // ─── Region listing ───
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   router.get('/regions', async (c) => {
     const platform = c.req.query('platform');
     let regionList: string[];

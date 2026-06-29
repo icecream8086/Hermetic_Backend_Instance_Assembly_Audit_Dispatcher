@@ -39,13 +39,8 @@ export class WorkersAuditLogger implements IAuditWriter, IAuditReader, IAuditAdm
     this.#machineHash = hashBootIdStr(this.#bootId);
   }
 
-  public async write(entry: AuditEntry): Promise<void> {
+  public write(entry: AuditEntry): void {
     this.#output(entry);
-  }
-
-  public async writeSync(entry: AuditEntry): Promise<LogId> {
-    this.#output(entry);
-    return (entry as any).__id ?? generateLogId();
   }
 
   #output(entry: AuditEntry): void {
@@ -95,6 +90,7 @@ export class WorkersAuditLogger implements IAuditWriter, IAuditReader, IAuditAdm
     if (this.#memory.length > MAX_IN_MEMORY) this.#memory.shift();
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   public async query(params?: LogQuery): Promise<{ entries: StoredAuditEntry[]; nextCursor?: string; total?: number }> {
     let f = [...this.#memory].reverse(); // newest first
     if (params?.facility) f = f.filter(e => e.facility === params.facility);
@@ -120,12 +116,14 @@ export class WorkersAuditLogger implements IAuditWriter, IAuditReader, IAuditAdm
     return { entries: f, total, ...(lastCursor ? { nextCursor: lastCursor } : {}) };
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   public async getById(id: LogId): Promise<StoredAuditEntry | null> {
     return this.#memory.find(e => e.id === id) ?? null;
   }
 
-  public async forceSetTail(_facility: any, _tailId: any): Promise<void> {}
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   public async prune(_beforeTs: number): Promise<number> { return 0; }
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   public async pruneByIds(_ids: readonly string[]): Promise<number> { return 0; }
 }
 

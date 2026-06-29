@@ -4,11 +4,11 @@ import type { IAuthProvider, AuthRequest, SignResult } from './interfaces.ts';
 
 export class NoAuthProvider implements IAuthProvider {
   public readonly type = 'none';
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   public async sign(_req: AuthRequest): Promise<SignResult> {
     return { headers: {} };
   }
   public isExpired(): boolean { return false; }
-  public async refresh(): Promise<void> {}
 }
 
 // ─── Bearer token (Cloudflare, OAuth2) ───
@@ -28,10 +28,12 @@ export class BearerTokenProvider implements IAuthProvider {
     this._clientSecret = opts?.clientSecret;
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   public async sign(req: AuthRequest): Promise<SignResult> {
     return { headers: { ...req.headers, Authorization: `Bearer ${this.token}` } };
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   public async getToken(): Promise<{ token: string; expiresAt?: number | undefined } | null> {
     return { token: this.token, expiresAt: this.expiresAt || undefined };
   }
@@ -124,7 +126,6 @@ export class AkSkProvider implements IAuthProvider {
   ) {}
 
   public isExpired(): boolean { return false; }
-  public async refresh(): Promise<void> {}
 
   /**
    * Sign an Alibaba Cloud RPC request.

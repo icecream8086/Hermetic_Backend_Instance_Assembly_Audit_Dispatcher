@@ -1,8 +1,6 @@
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
-import type { ILogWriter } from '../../core/audit/types.ts';
 import { createFacility } from '../../core/brand.ts';
 import { AppError } from '../../core/types.ts';
-import type { IAuditWriter } from '../../core/audit/types.ts';
 import { KernLevel } from '../../core/audit/kern-level.ts';
 import type { SysGroup, CreateSysGroupInput, UpdateSysGroupInput } from './types.ts';
 import { generateSysGroupId } from './types.ts';
@@ -42,7 +40,7 @@ export interface ISysGroupService extends ICrudService<SysGroup, CreateSysGroupI
 export class SysGroupService implements ISysGroupService {
   public constructor(
     private readonly atomic: IAtomicStore,
-    private readonly logger: ILogWriter,
+    private readonly logger: IAuditWriter,
     private readonly audit?: IAuditWriter,
   ) {}
 
@@ -54,7 +52,7 @@ export class SysGroupService implements ISysGroupService {
     await this.atomic.set(PREFIX + id, group, null);
     await this.atomic.set(GID_INDEX_PREFIX + gid, id, null);
     await this.#addToIndex(id);
-    await this.#incrCounter().catch(() => {});
+    await this.#incrCounter().catch(() => { /* noop */ });
     await this.logger.write({ facility: FACILITY, level: KernLevel.INFO, message: `SysGroup created: ${input.name}`, metadata: { actorId: _actorId, groupId: id, gid, priority: group.priority } });
     this.audit?.write({
       level: KernLevel.NOTICE,
@@ -152,7 +150,7 @@ export class SysGroupService implements ISysGroupService {
     if (!entry) throw new AppError(404, 'SYSGROUP_NOT_FOUND', 'System group not found');
     await this.atomic.set(PREFIX + id, null, entry.version);
     await this.#removeFromIndex(id);
-    await this.#decrCounter().catch(() => {});
+    await this.#decrCounter().catch(() => { /* noop */ });
     await this.logger.write({ facility: FACILITY, level: KernLevel.WARNING, message: `SysGroup deleted: ${entry.value.name}`, metadata: { actorId: _actorId, groupId: id } });
     this.audit?.write({
       level: KernLevel.WARNING,

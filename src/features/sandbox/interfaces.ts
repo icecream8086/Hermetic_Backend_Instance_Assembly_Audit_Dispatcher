@@ -1,5 +1,5 @@
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
-import type { ILogWriter } from '../../core/audit/types.ts';
+import type { IAuditWriter } from '../../core/audit/types.ts';
 import type {
   IContainerProvider,
   IMetricsProvider,
@@ -118,7 +118,7 @@ export interface IPodMappingService {
 
 export interface SandboxDependencies {
   readonly atomic: IAtomicStore;
-  readonly logger: ILogWriter;
+  readonly logger: IAuditWriter;
   readonly containerProvider: IContainerProvider;
   readonly metricsProvider: IMetricsProvider;
 }

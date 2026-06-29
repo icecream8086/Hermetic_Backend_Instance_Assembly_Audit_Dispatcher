@@ -94,6 +94,7 @@ export class BlobWorkspaceStore implements IWorkspaceStore {
     };
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   public async list(_workflowRunId: string): Promise<WorkspaceMeta[]> {
     // IBlobStore has no list — callers track workspace keys via metadata
     return [];

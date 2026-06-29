@@ -1,10 +1,8 @@
 import type { IAtomicStore, IStoreTransaction } from '../../core/store/interfaces.ts';
 import { TransactConflictError } from '../../core/store/interfaces.ts';
-import type { ILogWriter } from '../../core/audit/types.ts';
 import { createFacility } from '../../core/brand.ts';
 import { measure, lastPerf } from '../../core/perf.ts';
 import { AppError } from '../../core/types.ts';
-import type { IAuditWriter } from '../../core/audit/types.ts';
 import { KernLevel } from '../../core/audit/kern-level.ts';
 import type { User, UserId, Session, SessionToken, RegisterInput, LoginInput, LoginContext, NoPasswordLoginInput, UpdateUserInput, LoginInfo, Uid, Gid } from './types.ts';
 import { generateUserId, generateSessionToken, createUserId, createSessionToken, UserRole, createUid, createGid, UID_MIN, GID_MIN, DEFAULT_SHELL, DEFAULT_HOME_PREFIX } from './types.ts';
@@ -217,7 +215,7 @@ export interface IUserService {
 export class UserService implements IUserService {
   public constructor(
     private readonly atomic: IAtomicStore,
-    private readonly logger: ILogWriter,
+    private readonly logger: IAuditWriter,
     private readonly audit?: IAuditWriter,
   ) {}
 
@@ -269,7 +267,7 @@ export class UserService implements IUserService {
     });
 
     // Best-effort counter update (outside transaction to avoid cross-shard contention)
-    await this.#incrCounter().catch(() => {});
+    await this.#incrCounter().catch(() => { /* noop */ });
 
     // Create session token (separate — 'session' prefix maps to different DO shard)
     const token = await this.createSession(id);
@@ -564,7 +562,7 @@ export class UserService implements IUserService {
     });
 
     // Best-effort counter update
-    await this.#decrCounter().catch(() => {});
+    await this.#decrCounter().catch(() => { /* noop */ });
 
     await this.logger.write({
       facility: FACILITY,

@@ -60,7 +60,7 @@ export function authz(config: AuthzConfig): MiddlewareHandler<{ Variables: AppCo
     const method = c.req.method;
     const ip = c.req.header('x-forwarded-for')?.split(',')[0]?.trim();
 
-    function secAudit(ev: string, level: KernLevel, fields: Record<string, unknown>) {
+    function secAudit(ev: string, level: KernLevel, fields: Record<string, unknown>): void {
       config.audit?.write({ level, facility: 'authz', message: ev, metadata: { eventType: ev, method, path, ip, ...fields, timestamp: Date.now() } });
     }
 

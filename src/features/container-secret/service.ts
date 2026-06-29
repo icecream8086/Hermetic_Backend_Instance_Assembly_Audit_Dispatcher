@@ -122,7 +122,7 @@ export class ContainerSecretService implements IContainerSecretService {
     if (!entry) throw new AppError(404, 'SECRET_NOT_FOUND', 'Container secret not found');
 
     if (entry.value.blobKey && this.blob) {
-      await this.blob.delete(entry.value.blobKey).catch(() => {});
+      await this.blob.delete(entry.value.blobKey).catch(() => { /* noop */ });
     }
 
     await this.atomic.set(this.#encId(id), null, entry.version);

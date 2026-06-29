@@ -14,6 +14,7 @@ export function createPlatformsRouter(
 ): Hono<{ Variables: AppContext }> {
   const router = new Hono<{ Variables: AppContext }>();
 
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   router.get('/', async (c) => {
     const page = parseInt(c.req.query('page') ?? '') || 1;
     const limit = parseInt(c.req.query('limit') ?? '') || 50;

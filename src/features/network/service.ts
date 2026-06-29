@@ -1,5 +1,4 @@
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
-import type { ILogWriter } from '../../core/audit/types.ts';
 import type { IAuditWriter } from '../../core/audit/types.ts';
 import type { INetworkPolicyProvider } from '../../core/provider/interfaces.ts';
 import { createFacility } from '../../core/brand.ts';
@@ -28,7 +27,7 @@ export interface ISecurityGroupService extends ICrudService<SecurityGroup, Creat
 export class SecurityGroupService implements ISecurityGroupService {
   public constructor(
     private readonly atomic: IAtomicStore,
-    private readonly logger: ILogWriter,
+    private readonly logger: IAuditWriter,
     private readonly audit?: IAuditWriter,
     private readonly networkPolicy?: INetworkPolicyProvider | undefined,
     private readonly instanceSvc?: InstanceService | undefined,

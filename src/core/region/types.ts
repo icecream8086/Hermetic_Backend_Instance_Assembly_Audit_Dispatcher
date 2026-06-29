@@ -69,13 +69,13 @@ export function createRegionId(raw: string): RegionId {
 }
 
 export function createAlibabaRegion(raw: string): AlibabaRegion {
-  const r = Object.values(AlibabaRegion).find(r => r === raw);
+  const r = Object.values(AlibabaRegion).find(r => String(r) === raw);
   if (!r) throw new TypeError(`Invalid Alibaba region: "${raw}". Valid: ${ALIBABA_REGIONS.join(', ')}`);
   return r;
 }
 
 export function createAwsRegion(raw: string): AwsRegion {
-  const r = Object.values(AwsRegion).find(r => r === raw);
+  const r = Object.values(AwsRegion).find(r => String(r) === raw);
   if (!r) throw new TypeError(`Invalid AWS region: "${raw}". Valid: ${AWS_REGIONS.join(', ')}`);
   return r;
 }

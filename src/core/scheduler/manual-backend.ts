@@ -9,6 +9,6 @@ import type { ITimerBackend, TimerHandle } from './interfaces.ts';
  */
 export class ManualBackend implements ITimerBackend {
   public start(_handler: () => void, _intervalMs: number): TimerHandle {
-    return { clear: () => {} };
+    return { clear: () => { /* noop */ } };
   }
 }

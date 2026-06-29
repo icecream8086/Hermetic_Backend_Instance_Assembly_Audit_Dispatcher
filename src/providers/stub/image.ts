@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/require-await -- stub/noop implementation */
 import type { IImageProvider, ImageInfo, ListImagesOptions } from '../../core/provider/interfaces.ts';
 
 export class StubImageProvider implements IImageProvider {

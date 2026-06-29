@@ -256,6 +256,7 @@ export class PodmanContainerProvider implements IContainerProvider {
       filtered = filtered.filter(c => c.Id.startsWith(input.sandboxId!));
     }
     if (input.status) {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-enum-comparison -- podmanStatus returns string, input.status is ContainerGroupState
       filtered = filtered.filter(c => podmanStatus(c) === input.status);
     }
 

@@ -11,6 +11,7 @@ export class AlibabaEciMetricsProvider implements IMetricsProvider {
     private readonly _endpoint = 'eci.cn-hangzhou.aliyuncs.com',
   ) {}
 
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   public async fetchMetrics(_input: FetchMetricsInput): Promise<FetchMetricsResult> {
     throw new Error('AlibabaEciMetricsProvider.fetchMetrics not implemented');
   }

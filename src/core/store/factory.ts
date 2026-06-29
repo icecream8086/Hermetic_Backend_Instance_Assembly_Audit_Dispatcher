@@ -80,6 +80,7 @@ async function createQueryStore(
   }
 
   return {
+    // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
     async execute() {
       throw new Error('QueryStore not configured. Set queryBackend or bind a D1 database.');
     },
@@ -105,8 +106,11 @@ async function createBlobStore(
   }
 
   return {
-    async put() {},
+    // eslint-disable-next-line @typescript-eslint/no-empty-function -- noop adapter
+    async put() { /* noop */ },
+    // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
     async get() { return null; },
-    async delete() {},
+    // eslint-disable-next-line @typescript-eslint/no-empty-function -- noop adapter
+    async delete() { /* noop */ },
   };
 }

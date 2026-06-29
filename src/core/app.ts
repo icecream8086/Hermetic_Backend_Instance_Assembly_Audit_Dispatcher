@@ -206,7 +206,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
     const now = Date.now();
     if (now - _lastPassiveTick > 30_000) {
       _lastPassiveTick = now;
-      eventLoop.triggerTick().catch(() => {});
+      eventLoop.triggerTick().catch(() => { /* noop */ });
     }
     await next();
   });
@@ -310,7 +310,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
   }
 
   // 11. Tick trigger — DO Alarm fires POST /__scheduled, dev tools fire POST /__tick
-  const tickHandler = async (c: any) => {
+  const tickHandler = async (c: any): Promise<Response> => {
     await eventLoop.triggerTick();
     const st = eventLoop.status();
     return c.json({ ok: true, queueSize: st.queueSize, processedCount: st.processedCount, running: st.running });
@@ -433,7 +433,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
       });
       // Persist for future requests
       if (logResult.content) {
-        await stores.atomic.set('log:' + id, { content: logResult.content, containerName, timestamp: logResult.timestamp, fetchedAt: Date.now() }, null).catch(() => {});
+        await stores.atomic.set('log:' + id, { content: logResult.content, containerName, timestamp: logResult.timestamp, fetchedAt: Date.now() }, null).catch(() => { /* noop */ });
       }
       return c.json(ok({ content: logResult.content || '', containerName, timestamp: logResult.timestamp }));
     } catch (e: any) {
@@ -479,6 +479,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
     eventBus,
     eventLoop,
     audit,
+    // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
     dispose: async () => {
       stopAll();
     },

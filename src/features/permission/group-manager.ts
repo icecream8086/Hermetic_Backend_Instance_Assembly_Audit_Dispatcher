@@ -2,7 +2,6 @@
  * UserGroup + PermGroup CRUD — extracted from PermissionService
  */
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
-import type { ILogWriter } from '../../core/audit/types.ts';
 import type { IAuditWriter } from '../../core/audit/types.ts';
 import { KernLevel } from '../../core/audit/kern-level.ts';
 import { createFacility } from '../../core/brand.ts';
@@ -27,7 +26,7 @@ export class GroupManager {
 
   public constructor(
     _atomic: IAtomicStore,
-    private readonly logger: ILogWriter,
+    private readonly logger: IAuditWriter,
     private readonly audit?: IAuditWriter,
     templates: Template[] = [],
   ) {
@@ -59,9 +58,9 @@ export class GroupManager {
     return group;
   }
 
-  public async listUserGroups() { return this.ugStore.list(); }
-  public async listUserGroupsPaginated(page?: number, limit?: number, filter?: (item: UserGroup) => boolean) { return this.ugStore.listPaginated(page, limit, filter); }
-  public async getUserGroup(id: string) { return this.ugStore.get(id); }
+  public async listUserGroups(): Promise<UserGroup[]> { return this.ugStore.list(); }
+  public async listUserGroupsPaginated(page?: number, limit?: number, filter?: (item: UserGroup) => boolean): Promise<PaginatedResult<UserGroup>> { return this.ugStore.listPaginated(page, limit, filter); }
+  public async getUserGroup(id: string): Promise<UserGroup | null> { return this.ugStore.get(id); }
 
   public async updateUserGroup(id: string, input: UpdateUserGroupInput, actor?: AuditActor): Promise<UserGroup> {
     const old = await this.ugStore.get(id);
@@ -109,9 +108,9 @@ export class GroupManager {
     return group;
   }
 
-  public async listPermGroups() { return this.pgStore.list(); }
-  public async listPermGroupsPaginated(page?: number, limit?: number, filter?: (item: PermissionGroup) => boolean) { return this.pgStore.listPaginated(page, limit, filter); }
-  public async getPermGroup(id: string) { return this.pgStore.get(id); }
+  public async listPermGroups(): Promise<PermissionGroup[]> { return this.pgStore.list(); }
+  public async listPermGroupsPaginated(page?: number, limit?: number, filter?: (item: PermissionGroup) => boolean): Promise<PaginatedResult<PermissionGroup>> { return this.pgStore.listPaginated(page, limit, filter); }
+  public async getPermGroup(id: string): Promise<PermissionGroup | null> { return this.pgStore.get(id); }
 
   public async updatePermGroup(id: string, input: UpdatePermGroupInput, actor?: AuditActor): Promise<PermissionGroup> {
     const old = await this.pgStore.get(id);
@@ -151,7 +150,7 @@ export class GroupManager {
 
   // ── Compare (reuses original logic) ──
 
-  public async comparePermGroups(idA: string, idB: string) {
+  public async comparePermGroups(idA: string, idB: string): Promise<CompareResult> {
     const a = await this.pgStore.get(idA);
     const b = await this.pgStore.get(idB);
     if (!a) throw new AppError(404, 'NOT_FOUND', `Permission group ${idA} not found`);
@@ -159,7 +158,7 @@ export class GroupManager {
     return buildCompareResult(a, b);
   }
 
-  public async compareUserGroups(idA: string, idB: string) {
+  public async compareUserGroups(idA: string, idB: string): Promise<CompareResult> {
     const a = await this.ugStore.get(idA);
     const b = await this.ugStore.get(idB);
     if (!a) throw new AppError(404, 'NOT_FOUND', `User group ${idA} not found`);
@@ -173,7 +172,7 @@ function normalizeItem(item: string | { id: string }): { id: string } {
   return item;
 }
 
-function buildCompareResult(a: Record<string, unknown>, b: Record<string, unknown>) {
+function buildCompareResult(a: Record<string, unknown>, b: Record<string, unknown>): CompareResult {
   const common: Record<string, unknown>[] = [];
   const onlyA: Record<string, unknown>[] = [];
   const onlyB: Record<string, unknown>[] = [];

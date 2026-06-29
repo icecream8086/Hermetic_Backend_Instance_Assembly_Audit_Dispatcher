@@ -297,7 +297,7 @@ export class WorkflowRunner {
   /** Resolve ${{ matrix.KEY }} in container config fields. */
   #resolveMatrixInContainer(container: any, vars: Record<string, string | number | boolean>): any {
     const pattern = /\$\{\{\s*matrix\.(\w+)\s*\}\}/g;
-    const resolve = (s: string) => {
+    const resolve = (s: string): string => {
       let r = s;
       for (const m of s.matchAll(pattern)) {
         r = r.replace(m[0], String(vars[m[1]!] ?? ''));
