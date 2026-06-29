@@ -91,6 +91,7 @@ export interface IContainerProvider {
   describe(input: DescribeContainerGroupsInput): Promise<DescribeContainerGroupsResult>;
 
   /** Update an existing container group (spec changes). */
+  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- provider interface: input fields are naturally optional for partial updates
   update?(providerId: string, input: Partial<CreateContainerGroupInput>): Promise<void>;
 
   /** Get a single sandbox's runtime status by provider ID. */

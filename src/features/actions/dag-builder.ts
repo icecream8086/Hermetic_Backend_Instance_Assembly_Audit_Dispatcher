@@ -96,6 +96,7 @@ export function createDagRunFromTrigger(
   triggerPayload?: unknown,
   env?: Record<string, string>,
   ownerId?: string,
+  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- DagRun has 12 fields, Omit avoids duplicating the type minus version
 ): Omit<DagRun, 'version'> {
   return {
     id: createDagRunId(`dr_${dagId}_${String(Date.now())}_${crypto.randomUUID()}`),

@@ -12,12 +12,7 @@ export function createContainerSecretRouter(svc: IContainerSecretService): Hono<
 
   const crud: CrudHandlerMap = {
     create: (r) => r.post('/', async (c) => {
-      const body: unknown = await c.req.json();
-      const parsed = CreateContainerSecretSchema.safeParse(body);
-      if (!parsed.success) {
-        return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
-      }
-      const secret = await svc.create(parsed.data);
+      const secret = await svc.create(CreateContainerSecretSchema.parse(await c.req.json()));
       return c.json(ok(redact(secret)), 201);
     }),
 
@@ -35,11 +30,7 @@ export function createContainerSecretRouter(svc: IContainerSecretService): Hono<
 
     update: (r) => r.put('/:id', async (c) => {
       const body: unknown = await c.req.json();
-      const parsed = UpdateContainerSecretSchema.safeParse(body);
-      if (!parsed.success) {
-        return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
-      }
-      const secret = await svc.update(c.req.param('id'), parsed.data);
+      const secret = await svc.update(c.req.param('id'), UpdateContainerSecretSchema.parse(body));
       return c.json(ok(redact(secret)));
     }),
 

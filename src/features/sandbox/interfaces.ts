@@ -59,6 +59,7 @@ export interface ISandboxService {
   restart(id: SandboxId): Promise<Sandbox>;
 
   /** Update a running sandbox's specification. ECI: UpdateContainerGroup. Only valid from Running. */
+  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- sandbox update spec: input fields are naturally optional
   update(id: SandboxId, input: Partial<CreateSandboxInput>): Promise<Sandbox>;
 }
 

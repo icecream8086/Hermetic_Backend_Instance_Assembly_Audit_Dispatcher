@@ -29,6 +29,7 @@ export async function getValidated<T>(
   const entry = await atomic.get<unknown>(key);
   if (!entry) return null;
 
+  // eslint-disable-next-line no-restricted-syntax -- store boundary: logs gracefully in production, returns null instead of throwing
   const result = schema.safeParse(entry.value);
   if (!result.success) {
     const issues = result.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; ');
@@ -51,6 +52,7 @@ export async function setValidated<T>(
   schema: ZodType<T>,
   expectedVersion: any,
 ): Promise<any> {
+  // eslint-disable-next-line no-restricted-syntax -- throws custom Error with [store] prefix for debuggability
   const result = schema.safeParse(value);
   if (!result.success) {
     const issues = result.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; ');

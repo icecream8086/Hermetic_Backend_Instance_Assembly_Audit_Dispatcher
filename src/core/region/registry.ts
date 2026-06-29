@@ -141,9 +141,7 @@ export class RegionRegistry {
 let _defaultRegistry: RegionRegistry | undefined;
 
 export function getDefaultRegistry(): RegionRegistry {
-  if (!_defaultRegistry) {
-    _defaultRegistry = new RegionRegistry();
-  }
+  _defaultRegistry ??= new RegionRegistry();
   return _defaultRegistry;
 }
 

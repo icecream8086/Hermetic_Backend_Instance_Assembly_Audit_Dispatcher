@@ -97,6 +97,7 @@ export interface IPermissionService {
   compareUserGroups(idA: string, idB: string): Promise<CompareResult>;
 
   getLogPolicy(): Promise<LogPolicy & { readonly exists: boolean }>;
+  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- LogPolicy has multiple fields, Partial avoids a separate PatchLogPolicy type
   updateLogPolicy(input: Partial<LogPolicy>, actor?: AuditActor): Promise<LogPolicy>;
 
   createUserTpl(input: CreateUserTplInput, actor?: AuditActor): Promise<UserTemplate>;
@@ -242,6 +243,7 @@ export class PermissionService implements IPermissionService {
     return { ...entry.value, exists: true };
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- LogPolicy has multiple fields
   public async updateLogPolicy(input: Partial<LogPolicy>, actor?: AuditActor): Promise<LogPolicy> {
     const existing = await this.atomic.get<LogPolicy>(LOG_POLICY_KEY);
     const base = existing ? existing.value : DEFAULT_POLICY;

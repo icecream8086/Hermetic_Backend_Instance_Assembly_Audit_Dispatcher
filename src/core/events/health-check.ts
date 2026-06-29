@@ -12,9 +12,11 @@ import { createInstanceId } from '../region/instance.ts';
 import { runtimeToNetwork, runtimeToContainers, runtimeToEvents } from '../../features/sandbox/runtime-mapper.ts';
 import { formatDmesgLine } from '../utils/dmesg.ts';
 
+type ContainerResolver = { resolveContainer: IProviderRegistry['resolveContainer'] };
+
 export interface HealthCheckDeps {
   stores: { atomic: IAtomicStore };
-  providers: Pick<IProviderRegistry, 'resolveContainer'>;
+  providers: ContainerResolver;
   eventBus: EventBus;
   eventLoop: EventLoop;
   audit: IAuditWriter;
@@ -334,7 +336,7 @@ interface GcParams {
 async function dispatchGc(
   atomic: IAtomicStore,
   queueProducer: IMessageQueue,
-  providers: Pick<IProviderRegistry, 'resolveContainer'>,
+  providers: ContainerResolver,
   audit: IAuditWriter | undefined,
   params: GcParams,
 ): Promise<void> {
@@ -392,7 +394,7 @@ import type { InstanceId } from '../region/instance.ts';
 export interface PodHealthCheckDeps {
   podService: PodService;
   stores: { atomic: IAtomicStore };
-  providers: Pick<IProviderRegistry, 'resolveContainer'>;
+  providers: ContainerResolver;
   eventBus: EventBus;
   eventLoop: EventLoop;
   audit: IAuditWriter;
@@ -597,7 +599,7 @@ function resolvePodGcInstanceId(raw: string | undefined): InstanceId | undefined
 async function dispatchPodGc(
   atomic: IAtomicStore,
   queueProducer: IMessageQueue,
-  providers: Pick<IProviderRegistry, 'resolveContainer'>,
+  providers: ContainerResolver,
   audit: IAuditWriter | undefined,
   params: PodGcParams,
 ): Promise<void> {

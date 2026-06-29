@@ -142,7 +142,7 @@ function parseLevel(raw: unknown): KernLevel | null {
 }
 
 function parseRule(raw: Record<string, unknown>): PersistenceRule {
-  const rawFacility = String(raw.facility ?? '*');
+  const rawFacility = typeof raw.facility === 'string' ? raw.facility : '*';
   const sampleRate = z.number().optional().parse(raw.sampleRate);
   const ttlMs = z.number().optional().parse(raw.ttlMs);
   return {

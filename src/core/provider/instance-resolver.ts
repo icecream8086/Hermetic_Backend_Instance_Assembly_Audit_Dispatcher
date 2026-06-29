@@ -149,9 +149,8 @@ export class InstanceProviderResolver {
           cred.accessKeyId ?? '', cred.accessKeySecret ?? '', instance.endpoint,
         ));
       }
+      case 'aws':
       case 'stub':
-        return secureContainerProvider(new StubContainerProvider());
-      default:
         return secureContainerProvider(new StubContainerProvider());
     }
   }
@@ -168,9 +167,8 @@ export class InstanceProviderResolver {
           cred.registryCredentials as { server: string; userName: string; password: string }[] | undefined,
         );
       }
+      case 'aws':
       case 'stub':
-        return new StubImageProvider();
-      default:
         return new StubImageProvider();
     }
   }
@@ -185,7 +183,8 @@ export class InstanceProviderResolver {
           cred.accessKeyId ?? '', cred.accessKeySecret ?? '', instance.endpoint,
         ));
       }
-      default:
+      case 'aws':
+      case 'stub':
         return undefined;
     }
   }
@@ -198,7 +197,8 @@ export class InstanceProviderResolver {
       case 'alibaba':
         // Alibaba SecurityGroup-based network policy — not yet implemented
         return undefined;
-      default:
+      case 'aws':
+      case 'stub':
         return undefined;
     }
   }
@@ -215,9 +215,8 @@ export class InstanceProviderResolver {
         return cred.accessKeyId && cred.accessKeySecret
           ? new AlibabaOssProvider(cred.accessKeyId, cred.accessKeySecret, instance.endpoint)
           : undefined;
+      case 'aws':
       case 'stub':
-        return undefined;
-      default:
         return undefined;
     }
   }

@@ -80,6 +80,35 @@ interface PodmanInspectResult {
   Created: string;
 }
 
+interface PodmanCreateResponse {
+  Id: string;
+  Warnings?: string[];
+}
+
+interface PodmanExecResponse {
+  Id: string;
+}
+
+interface PodmanWaitResponse {
+  StatusCode: number;
+  Error?: { Message: string };
+}
+
+interface PodmanStatsResponse {
+  cpu_stats?: { cpu_usage?: { total_usage?: number } };
+  memory_stats?: { usage?: number };
+  networks?: Record<string, { rx_bytes?: number; tx_bytes?: number }>;
+}
+
+interface PodmanTopResponse {
+  Processes?: readonly (readonly string[])[];
+  Titles?: readonly string[];
+}
+
+interface PodmanSecretResponse {
+  ID: string;
+}
+
 export class PodmanContainerProvider implements IContainerProvider {
   public readonly lifecycle: ContainerLifecycle = { stopIsDelete: false, startable: true, healthProbes: true, asyncInit: false };
   readonly #apiBase: string;
@@ -177,7 +206,7 @@ export class PodmanContainerProvider implements IContainerProvider {
             body: JSON.stringify({ name: secretName, data: btoa(sm.data) }),
           });
           if (secResp.ok) {
-            const sec = await secResp.json();
+            const sec: PodmanSecretResponse = await secResp.json();
             createdSecrets.push(sec.ID);
             mounts.push({
               Type: 'tmpfs',
@@ -222,7 +251,7 @@ export class PodmanContainerProvider implements IContainerProvider {
       const err = await resp.text();
       throw new Error(`Podman create failed (${String(resp.status)}): ${err}`);
     }
-    const data = await resp.json();
+    const data: PodmanCreateResponse = await resp.json();
 
     // Start the container
     const startResp = await fetch(`${this.#apiBase}/containers/${String(data.Id)}/start`, { method: 'POST' });
@@ -246,7 +275,7 @@ export class PodmanContainerProvider implements IContainerProvider {
 
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(`Podman list failed: ${String(resp.status)}`);
-    const list = await resp.json();
+    const list: PodmanContainer[] = await resp.json();
 
     let filtered = list;
     if (input.sandboxName) {
@@ -377,7 +406,7 @@ export class PodmanContainerProvider implements IContainerProvider {
     const resp = await this.#fetch(`${this.#apiBase}/containers/${encodeURIComponent(providerId)}/wait`, { method: 'POST' });
     if (!resp) throw new Error('Podman daemon unreachable');
     if (!resp.ok) throw new Error(`Podman wait failed (${String(resp.status)})`);
-    const data = await resp.json();
+    const data: PodmanWaitResponse = await resp.json();
     return { statusCode: data.StatusCode ?? -1 };
   }
 
@@ -390,7 +419,7 @@ export class PodmanContainerProvider implements IContainerProvider {
     });
     if (!createResp) throw new Error('Podman daemon unreachable');
     if (!createResp.ok) throw new Error(`Podman exec create failed (${String(createResp.status)})`);
-    const { Id: execId } = await createResp.json();
+    const { Id: execId }: PodmanExecResponse = await createResp.json();
 
     // Step 2: Start exec
     const startResp = await this.#fetch(`${this.#apiBase}/exec/${String(execId)}/start`, {
@@ -414,7 +443,7 @@ export class PodmanContainerProvider implements IContainerProvider {
     const resp = await this.#fetch(`${this.#apiBase}/containers/${encodeURIComponent(providerId)}/stats?stream=false`);
     if (!resp) throw new Error('Podman daemon unreachable');
     if (!resp.ok) throw new Error(`Podman stats failed (${String(resp.status)})`);
-    const data = await resp.json();
+    const data: PodmanStatsResponse = await resp.json();
     const netKeys = data.networks ? Object.keys(data.networks) : [];
     return {
       cpuUsage: data.cpu_stats?.cpu_usage?.total_usage ?? 0,
@@ -429,7 +458,7 @@ export class PodmanContainerProvider implements IContainerProvider {
     const resp = await this.#fetch(url);
     if (!resp) throw new Error('Podman daemon unreachable');
     if (!resp.ok) throw new Error(`Podman top failed (${String(resp.status)})`);
-    const data = await resp.json();
+    const data: PodmanTopResponse = await resp.json();
     return { processes: data.Processes ?? [] };
   }
 
@@ -447,7 +476,7 @@ export class PodmanContainerProvider implements IContainerProvider {
     if (resp.status === 404) return null;
     if (!resp.ok) return null;
 
-    const info = await resp.json();
+    const info: PodmanInspectResult = await resp.json();
     const created = new Date(info.Created).toISOString();
 
     return {
@@ -502,7 +531,7 @@ export class PodmanContainerProvider implements IContainerProvider {
 /** Synthesize ContainerGroupRuntimeEvent[] from Podman container inspect. */
 function runtimeEvents(info: PodmanInspectResult): { reason: string; type: 'Normal' | 'Warning'; message: string; count: number; lastTimestamp?: string }[] {
   const events: { reason: string; type: 'Normal' | 'Warning'; message: string; count: number; lastTimestamp?: string }[] = [];
-  const ts = info.State?.StartedAt || info.Created;
+  const ts = info.State?.StartedAt ?? info.Created;
 
   if (info.State?.Running && info.State?.StartedAt) {
     events.push({ reason: 'Started', type: 'Normal', message: 'Container started', count: 1, lastTimestamp: info.State.StartedAt });
@@ -526,6 +555,7 @@ function runtimeEvents(info: PodmanInspectResult): { reason: string; type: 'Norm
 // ─── Helpers ───
 
 function podmanToOciStatus(status: string | undefined): OciContainerStatus {
+  if (status === undefined) return 'creating';
   switch (status) {
     case 'running': return 'running';
     case 'paused': return 'paused';

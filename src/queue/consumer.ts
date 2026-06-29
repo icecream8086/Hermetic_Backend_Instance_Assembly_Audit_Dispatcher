@@ -190,8 +190,8 @@ async function handleImagePull(
       completedAt: Date.now(),
     }, entry.version);
     return { success: true };
-  } catch (e: any) {
-    console.error(`[queue] image.pull ${taskId} failed:`, e.message);
+  } catch (e: unknown) {
+    console.error(`[queue] image.pull ${taskId} failed:`, e instanceof Error ? e.message : String(e));
     await stores.atomic.set('pull-task:' + taskId, {
       ...taskBase,
       status: 'failed',
@@ -274,8 +274,8 @@ async function handleSandboxGc(
 
     // Clear GC marker so the tick doesn't re-enqueue
     const markerKey = 'gc:queued:' + sid;
-    const marker = await stores.atomic.get<any>(markerKey);
-    if (marker) await stores.atomic.set(markerKey, null as any, marker.version).catch(() => { /* noop */ });
+    const marker = await stores.atomic.get<{ version: number }>(markerKey);
+    if (marker) await stores.atomic.set(markerKey, null, marker.version).catch(() => { /* noop */ });
 
     return { success: true };
   } catch (err) {

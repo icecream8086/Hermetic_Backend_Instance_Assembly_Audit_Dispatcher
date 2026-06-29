@@ -32,6 +32,7 @@ export interface WorkspaceMeta {
  * for NFS, S3, or local filesystem without changing consumers.
  */
 export interface IWorkspaceStore {
+  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- meta is WorkspaceMeta minus auto-populated fields, Omit avoids duplicating the type
   save(workflowRunId: string, jobName: string, data: Uint8Array, meta: Omit<WorkspaceMeta, 'workflowRunId' | 'jobName' | 'sizeBytes' | 'createdAt'>): Promise<WorkspaceMeta>;
   load(workflowRunId: string, jobName: string): Promise<{ data: Uint8Array; meta: WorkspaceMeta } | null>;
   list(workflowRunId: string): Promise<WorkspaceMeta[]>;
@@ -44,6 +45,7 @@ export class BlobWorkspaceStore implements IWorkspaceStore {
     workflowRunId: string,
     jobName: string,
     data: Uint8Array,
+    // eslint-disable-next-line @typescript-eslint/no-restricted-types -- meta is WorkspaceMeta minus auto-populated fields
     meta: Omit<WorkspaceMeta, 'workflowRunId' | 'jobName' | 'sizeBytes' | 'createdAt'>,
   ): Promise<WorkspaceMeta> {
     const key = `${WS_PREFIX}${workflowRunId}/${jobName}`;

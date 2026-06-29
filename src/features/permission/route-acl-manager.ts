@@ -21,13 +21,14 @@ function routeMatches(method: string, path: string, acl: RouteAcl): boolean {
   // Path matching
   if (!acl.pathPrefix || acl.pathPrefix === '*') return true;
   switch (acl.matchType) {
+    case undefined:
+    case 'prefix':
+      return path.startsWith(acl.pathPrefix);
     case 'exact':
       return path === acl.pathPrefix;
     case 'regex':
       try { return new RegExp(acl.pathPrefix).test(path); }
       catch { return false; }
-    default: // prefix
-      return path.startsWith(acl.pathPrefix);
   }
 }
 

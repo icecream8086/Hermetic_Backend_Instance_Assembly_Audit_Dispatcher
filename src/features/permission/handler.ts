@@ -44,13 +44,15 @@ const UpdateLogPolicySchema = z.object({
   })).optional(),
 });
 
-function actorFrom(c: any): AuditActor | undefined {
+type Ctx = Context<{ Variables: AppContext }>;
+
+function actorFrom(c: Ctx): AuditActor | undefined {
   const u = c.var?.currentUser;
   if (!u) return undefined;
   return { userId: u.id, ip: c.req.header('x-forwarded-for')?.split(',')[0]?.trim() };
 }
 
-function requireRoot(c: Context<{ Variables: AppContext }>): Response | null {
+function requireRoot(c: Ctx): Response | null {
   const user = c.var?.currentUser;
   if (!user) return null;
   const isRoot = user.role === 'root' || user.role === 'Operator' || user.role === 'wheel';
@@ -58,7 +60,7 @@ function requireRoot(c: Context<{ Variables: AppContext }>): Response | null {
   return null;
 }
 
-function requireWheel(c: any): Response | null {
+function requireWheel(c: Ctx): Response | null {
   const user = c.var?.currentUser;
   if (!user) return null;
   if (user.role !== 'wheel') return c.json(fail('FORBIDDEN', 'Wheel privilege required'), 403);
@@ -68,14 +70,14 @@ function requireWheel(c: any): Response | null {
 // ─── CRUD sub-resource factory ───
 
 interface SubCrudOpts<T> {
-  guard: (c: any) => Response | null;
+  guard: (c: Ctx) => Response | null;
   createSchema: ZodType;
-  createFn: (data: any, actor: AuditActor | undefined) => Promise<T>;
-  listUrlFilter: (c: any) => ((item: any) => boolean) | undefined;
-  listFn: (page: number, limit: number, filter: ((item: any) => boolean) | undefined) => Promise<PaginatedResult<T>>;
+  createFn: (data: Record<string, unknown>, actor: AuditActor | undefined) => Promise<T>;
+  listUrlFilter: (c: Ctx) => ((item: T) => boolean) | undefined;
+  listFn: (page: number, limit: number, filter: ((item: T) => boolean) | undefined) => Promise<PaginatedResult<T>>;
   getFn: (id: string) => Promise<T | null>;
   updateSchema: ZodType;
-  updateFn: (id: string, data: any, actor: AuditActor | undefined) => Promise<T>;
+  updateFn: (id: string, data: Record<string, unknown>, actor: AuditActor | undefined) => Promise<T>;
   deleteFn: (id: string, actor: AuditActor | undefined) => Promise<void>;
   notFoundCode: ErrorCode;
   notFoundMsg: string;
@@ -124,15 +126,16 @@ function subCrud<T>(opts: SubCrudOpts<T>): CrudHandlerMap {
 
 // ─── Name-based filter helper ───
 
-function nameFilter(c: any): ((item: any) => boolean) | undefined {
+function nameFilter<T extends { name?: string | null }>(c: Ctx): ((item: T) => boolean) | undefined {
   const name = c.req.query('name');
-  return name ? (item: any) => item.name?.toLowerCase().includes(name.toLowerCase()) : undefined;
+  return name ? (item: T) => (item.name ?? '').toLowerCase().includes(name.toLowerCase()) : undefined;
 }
 
-function queryFilter(key: string) {
-  return (c: any): ((item: any) => boolean) | undefined => {
+function queryFilter<T extends { pathPrefix?: string | null; method?: string | null }>(key: string) {
+  return (c: Ctx): ((item: T) => boolean) | undefined => {
     const q = c.req.query(key);
-    return q ? (item: any) => (item.pathPrefix ?? '').toLowerCase().includes(q.toLowerCase()) || (item.method ?? '').toLowerCase().includes(q.toLowerCase()) : undefined;
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- boolean OR between two .includes() results, not a default-value pattern
+    return q ? (item: T) => (item.pathPrefix ?? '').toLowerCase().includes(q.toLowerCase()) || (item.method ?? '').toLowerCase().includes(q.toLowerCase()) : undefined;
   };
 }
 
@@ -312,10 +315,8 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
 
   router.put('/log-policy', async (c) => {
     { const r = requireRoot(c); if (r) return r; }
-    const body: unknown = await c.req.json();
-    const parsed = UpdateLogPolicySchema.safeParse(body);
-    if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
-    const policy = await svc.updateLogPolicy(parsed.data as any, actorFrom(c));
+    const body = UpdateLogPolicySchema.parse(await c.req.json());
+    const policy = await svc.updateLogPolicy(body as Record<string, unknown>, actorFrom(c));
     return c.json(ok(policy));
   });
 
@@ -372,7 +373,7 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
     const { idA, idB } = await c.req.json<{ idA: string; idB: string }>();
     if (!idA || !idB) return c.json(fail('VALIDATION_ERROR', 'idA and idB required'), 400);
     try { return c.json(ok(await svc.comparePermGroups(idA, idB))); }
-    catch (e: any) { return c.json(fail('NOT_FOUND', e.message), 404); }
+    catch (e: unknown) { return c.json(fail('NOT_FOUND', e instanceof Error ? e.message : String(e)), 404); }
   });
 
   router.post('/compare/user-groups', async (c) => {
@@ -380,7 +381,7 @@ export function createPermissionRouter(svc: IPermissionService): Hono<{ Variable
     const { idA, idB } = await c.req.json<{ idA: string; idB: string }>();
     if (!idA || !idB) return c.json(fail('VALIDATION_ERROR', 'idA and idB required'), 400);
     try { return c.json(ok(await svc.compareUserGroups(idA, idB))); }
-    catch (e: any) { return c.json(fail('NOT_FOUND', e.message), 404); }
+    catch (e: unknown) { return c.json(fail('NOT_FOUND', e instanceof Error ? e.message : String(e)), 404); }
   });
 
   // ─── Permission check ───

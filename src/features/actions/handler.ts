@@ -396,6 +396,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
     const entry = await atomic.get<JobRun>(PFX_JOB_RUN + jobId);
     if (!entry) throw new AppError(404, 'JOB_NOT_FOUND', 'Job run not found');
 
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- empty query param '' should also default to 'all'
     const step = c.req.query('step') || 'all';
     const offset = Math.max(0, parseInt(c.req.query('offset') ?? '') || 0);
     const limit = Math.min(parseInt(c.req.query('limit') ?? '') || 500, 10000);

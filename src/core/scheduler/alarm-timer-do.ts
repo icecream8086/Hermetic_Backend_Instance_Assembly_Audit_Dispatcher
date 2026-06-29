@@ -55,7 +55,7 @@ export class AlarmTimerDO implements DurableObject {
       return Response.json({
         ok: true,
         intervalMs: this._intervalMs,
-        hasCallback: !!body.callbackUrl,
+        hasCallback: body.callbackUrl != null,
       });
     }
 
@@ -71,7 +71,7 @@ export class AlarmTimerDO implements DurableObject {
         running: this._running,
         intervalMs: this._intervalMs,
         tickCount: this._tickCount,
-        hasCallback: !!this._callbackUrl,
+        hasCallback: this._callbackUrl != null,
         nextAlarm,
       });
     }

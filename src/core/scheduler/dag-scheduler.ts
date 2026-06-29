@@ -64,6 +64,7 @@ export class DagScheduler {
   public constructor(
     private readonly ctx: SchedulerContext,
     private readonly timer: ITimerBackend,
+    // eslint-disable-next-line @typescript-eslint/no-restricted-types -- constructor overrides with defaults
     config: Partial<DagSchedulerConfig> = {},
   ) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -76,7 +77,7 @@ export class DagScheduler {
     this.running = true;
     this.paused = false;
     this.startedAt = Date.now();
-    this.timerHandle = this.timer.start(() => this.tick(), this.config.intervalMs);
+    this.timerHandle = this.timer.start(() => { void this.tick(); }, this.config.intervalMs);
   }
 
   public stop(): void {
@@ -88,12 +89,13 @@ export class DagScheduler {
   public pause(): void { this.paused = true; }
   public resume(): void { this.paused = false; }
 
+  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- runtime reconfiguration with defaults
   public configure(partial: Partial<DagSchedulerConfig>): DagSchedulerConfig {
     this.config = { ...this.config, ...partial };
     // Restart timer if interval changed and running
     if (this.running) {
       this.timerHandle?.clear();
-      this.timerHandle = this.timer.start(() => this.tick(), this.config.intervalMs);
+      this.timerHandle = this.timer.start(() => { void this.tick(); }, this.config.intervalMs);
     }
     return this.config;
   }

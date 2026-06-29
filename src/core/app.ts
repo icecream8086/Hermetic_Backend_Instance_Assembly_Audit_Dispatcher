@@ -357,6 +357,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
     .post('/loop/pause', (c) => { eventLoop.pause(); return c.json({ ok: true }); })
     .post('/loop/resume', (c) => { eventLoop.resume(); return c.json({ ok: true }); })
     .post('/loop/configure', async (c) => {
+      // eslint-disable-next-line @typescript-eslint/no-restricted-types -- config patches naturally allow any subset of fields
       const body = await c.req.json<Partial<EventLoopConfig>>();
       return c.json(eventLoop.configure(body));
     });
@@ -440,6 +441,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
       // Try cached
       const cached = await stores.atomic.get<{ content: string; containerName: string; fetchedAt: number }>('log:' + id);
       if (cached) return c.json(ok({ content: cached.value.content, containerName: cached.value.containerName, cached: true }));
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- error.message can be empty string, || catches both undefined and ''
       return c.json(fail('LOGS_UNAVAILABLE', e.message || 'Logs unavailable'), 502);
     }
   });

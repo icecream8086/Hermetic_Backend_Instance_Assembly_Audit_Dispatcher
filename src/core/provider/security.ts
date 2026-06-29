@@ -78,6 +78,7 @@ export function secureContainerProvider(inner: IContainerProvider): IContainerPr
         return (input: CreateContainerGroupInput) => target.create(sanitizeContainerInput(input));
       }
       if (prop === 'update' && target.update) {
+        // eslint-disable-next-line @typescript-eslint/no-restricted-types -- proxy delegates to target with same Partial signature
         return (providerId: string, input: Partial<CreateContainerGroupInput>) =>
           target.update!(providerId, sanitizeContainerInput(input as CreateContainerGroupInput));
       }

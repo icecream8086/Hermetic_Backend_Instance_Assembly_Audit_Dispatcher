@@ -73,6 +73,7 @@ export class R2AuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
 
   public constructor(
     private readonly bucket: R2Bucket,
+    // eslint-disable-next-line @typescript-eslint/no-restricted-types -- constructor config with defaults, Partial expresses "all overrides optional"
     config: Partial<R2LoggerConfig> = {},
   ) {
     this.#config = { ...DEFAULT_CONFIG, ...config };
@@ -256,7 +257,7 @@ export class R2AuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
   /** Start auto-flushing the write buffer. */
   public startAutoFlush(): void {
     if (this.#flushTimer) return;
-    this.#flushTimer = setInterval(() => this.flush().catch(() => { /* noop */ }), this.#config.flushIntervalMs);
+    this.#flushTimer = setInterval(() => { void this.flush().catch(() => { /* noop */ }); }, this.#config.flushIntervalMs);
   }
 
   public stopAutoFlush(): void {

@@ -14,7 +14,9 @@ import type { PaginatedResult } from './types.ts';
  */
 export interface ICrudService<
   TEntity,
+  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- generic CRUD: TEntity is unbounded, Partial is the only way to express "all fields optional for create"
   TCreate = Partial<TEntity>,
+  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- generic CRUD: same rationale as TCreate
   TUpdate = Partial<TEntity>,
   TId = string,
 > {

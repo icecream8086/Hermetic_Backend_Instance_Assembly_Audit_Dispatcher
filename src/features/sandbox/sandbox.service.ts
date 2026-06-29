@@ -543,7 +543,8 @@ export class SandboxService implements ISandboxService {
 	    return (await this.getById(id)) ?? sandbox;
 	  }
 
-	  public async update(id: SandboxId, input: Partial<CreateSandboxInput>): Promise<Sandbox> {
+	  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- sandbox update spec: input fields are naturally optional
+  public async update(id: SandboxId, input: Partial<CreateSandboxInput>): Promise<Sandbox> {
 	    const sandbox = await this.getById(id);
 	    if (!sandbox) throw new AppError(404, 'SANDBOX_NOT_FOUND', `Sandbox ${id} not found`);
 
@@ -893,7 +894,7 @@ function mergeNetworkWithExtensions(input: CreateSandboxInput): {
       : {}),
     subnetIds: nw.subnetIds?.length
       ? nw.subnetIds
-      : (ext?.vSwitchId ? String(ext.vSwitchId).split(',').map(s => s.trim()) : undefined),
+      : (ext?.vSwitchId !== undefined && typeof ext.vSwitchId === 'string' ? ext.vSwitchId.split(',').map(s => s.trim()) : undefined),
     securityGroupId: nw.securityGroupId ?? ext?.securityGroupId as string | undefined,
     bandwidth: nw.bandwidth,
   };
@@ -901,6 +902,7 @@ function mergeNetworkWithExtensions(input: CreateSandboxInput): {
 
 /** Map a Partial<CreateSandboxInput> to Partial<CreateContainerGroupInput> for UpdateContainerGroup.
  *  Only maps fields that are present in the input, leaving everything else undefined. */
+// eslint-disable-next-line @typescript-eslint/no-restricted-types -- maps Partial sandbox input to Partial container group input, both are naturally sparse
 function toPartialContainerGroupInput(
   input: Partial<CreateSandboxInput>,
   _existing: CreateSandboxInput,

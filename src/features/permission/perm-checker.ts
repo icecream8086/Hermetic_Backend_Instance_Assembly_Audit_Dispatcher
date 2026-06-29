@@ -309,6 +309,7 @@ function ruleToNode(rule: PermissionRule, source: string, resourceOwnerId?: stri
 
 function expandSelf(pattern: string, ownerId?: string, resourceId?: string): string {
   if (!pattern.includes('$self')) return pattern;
+  // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- provide fallback for both undefined and empty string IDs
   const effective = ownerId || resourceId;
   if (!effective) return pattern;
   return pattern.replace(/\$self/g, effective);

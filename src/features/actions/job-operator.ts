@@ -24,6 +24,7 @@ export class JobOperator implements ITaskExecutor {
   public constructor(
     private readonly deps: {
       stores: { blob: IBlobStore };
+      // eslint-disable-next-line @typescript-eslint/no-restricted-types -- slim dependency interface: only two methods needed from IProviderRegistry
       providers: Pick<IProviderRegistry, 'resolveContainer' | 'dns'>;
       audit: IAuditWriter;
       eventBus?: EventBus;

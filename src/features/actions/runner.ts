@@ -40,6 +40,7 @@ function jId(): JobRunId { return createJobRunId(`jr_${crypto.randomUUID()}`); }
 
 export interface WorkflowRunnerDeps {
   stores: { atomic: IAtomicStore; blob: IBlobStore };
+  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- slim dependency interface: only two methods needed from IProviderRegistry
   providers: Pick<IProviderRegistry, 'resolveContainer' | 'dns'>;
   audit: IAuditWriter;
   queueProducer?: IMessageQueue;

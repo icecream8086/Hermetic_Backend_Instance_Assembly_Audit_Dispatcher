@@ -82,7 +82,7 @@ class LazyProviderRegistry implements IProviderRegistry {
 
   /** Number of Alibaba accounts with valid credentials. */
   private get _hasAlibabaAccounts(): boolean {
-    return this.config.accounts.some(a => !!(a.accessKeyId && a.accessKeySecret));
+    return this.config.accounts.some(a => (a.accessKeyId != null && a.accessKeySecret != null));
   }
 
   /** @deprecated Global default is disabled — use resolveContainer(instanceId) instead. */
@@ -110,18 +110,16 @@ class LazyProviderRegistry implements IProviderRegistry {
   }
 
   public get dns(): IDnsProvider {
-    if (!this._dns) {
-      this._dns = this.config.dns === 'cloudflare' && this.config.cfApiToken
+    this._dns ??= this.config.dns === 'cloudflare' && this.config.cfApiToken
         ? new CloudflareDnsProvider(this.config.cfApiToken)
         : new StubDnsProvider();
-    }
     return this._dns;
   }
 
   public get metrics(): IMetricsProvider {
     if (!this._metrics) {
       const defaultCreds = this.config.accounts.find(
-        (a): a is Credential & { accessKeyId: string; accessKeySecret: string } => !!(a.accessKeyId && a.accessKeySecret),
+        (a): a is Credential & { accessKeyId: string; accessKeySecret: string } => (a.accessKeyId != null && a.accessKeySecret != null),
       );
       this._metrics = this.config.metrics === 'alibaba' && defaultCreds
         ? new AlibabaEciMetricsProvider(defaultCreds.accessKeyId, defaultCreds.accessKeySecret)
@@ -131,9 +129,7 @@ class LazyProviderRegistry implements IProviderRegistry {
   }
 
   public get groupContainer(): IContainerGroupProvider | undefined {
-    if (!this._groupContainer) {
-      this._groupContainer = this._createGroupProvider();
-    }
+    this._groupContainer ??= this._createGroupProvider();
     return this._groupContainer;
   }
 
@@ -172,9 +168,7 @@ class LazyProviderRegistry implements IProviderRegistry {
   // ─── Type-based provider lookup (lazy) ───
 
   private _getTypeEntries(): Map<string, ProviderEntry> {
-    if (!this._typeEntries) {
-      this._typeEntries = this._buildTypeEntries();
-    }
+    this._typeEntries ??= this._buildTypeEntries();
     return this._typeEntries;
   }
 
@@ -209,9 +203,7 @@ class LazyProviderRegistry implements IProviderRegistry {
 
   private async _ensureResolver(): Promise<void> {
     if (this._instanceResolver || !this.atomicStore) return;
-    if (!this._resolverPromise) {
-      this._resolverPromise = this._initResolver();
-    }
+    this._resolverPromise ??= this._initResolver();
     await this._resolverPromise;
   }
 
@@ -282,7 +274,7 @@ class LazyProviderRegistry implements IProviderRegistry {
   /** First valid Alibaba credential from config, or undefined if none configured. */
   private _firstAlibabaCred(): { accessKeyId: string; accessKeySecret: string } | undefined {
     const found = this.config.accounts.find(
-      (a): a is Credential & { accessKeyId: string; accessKeySecret: string } => !!(a.accessKeyId && a.accessKeySecret),
+      (a): a is Credential & { accessKeyId: string; accessKeySecret: string } => (a.accessKeyId != null && a.accessKeySecret != null),
     );
     return found ? { accessKeyId: found.accessKeyId, accessKeySecret: found.accessKeySecret } : undefined;
   }
@@ -325,7 +317,7 @@ class LazyProviderRegistry implements IProviderRegistry {
 
   private _buildAlibabaAccounts(): { name: string; container: IContainerProvider; image: IImageProvider }[] {
     return this.config.accounts
-      .filter((a): a is Credential & { accessKeyId: string; accessKeySecret: string } => !!(a.accessKeyId && a.accessKeySecret))
+      .filter((a): a is Credential & { accessKeyId: string; accessKeySecret: string } => (a.accessKeyId != null && a.accessKeySecret != null))
       .map(a => ({
         name: a.name,
         container: secureContainerProvider(new AlibabaEciContainerProvider(a.accessKeyId, a.accessKeySecret, a.endpoint)),
@@ -353,7 +345,7 @@ class LazyProviderRegistry implements IProviderRegistry {
   private _createGroupProvider(): IContainerGroupProvider | undefined {
     if (this._isAlibaba) {
       const defaultAccount = this.config.accounts.find(
-        (a): a is Credential & { accessKeyId: string; accessKeySecret: string } => !!(a.accessKeyId && a.accessKeySecret),
+        (a): a is Credential & { accessKeyId: string; accessKeySecret: string } => (a.accessKeyId != null && a.accessKeySecret != null),
       );
       if (defaultAccount) {
         return secureContainerGroupProvider(

@@ -76,9 +76,7 @@ export class PermissionDag extends Dag<PolicyId, PolicyNode> {
         };
       }
 
-      if (!allowMatched) {
-        allowMatched = node;
-      }
+      allowMatched ??= node;
     }
 
     if (allowMatched) {

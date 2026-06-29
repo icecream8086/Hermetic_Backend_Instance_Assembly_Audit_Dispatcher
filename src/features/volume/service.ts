@@ -80,12 +80,13 @@ export class VolumeService implements IVolumeService {
   public async listPaginated(page = 1, limit = 50, filters?: Record<string, string>): Promise<PaginatedResult<Volume>> {
     const idsEntry = await this.atomic.get<string[]>(INDEX_KEY);
     const allIds = idsEntry?.value ?? [];
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- boolean OR chain for hasFilter check, not default values
     const hasFilter = filters && (filters.name || filters.type || filters.status || filters.instanceId);
 
     // Load all, filter in memory, then paginate
     const allItems = hasFilter
       ? (await Promise.all(allIds.map(id => this.atomic.get<Volume>(PREFIX + id))))
-          .filter((e): e is NonNullable<typeof e> => Boolean(e))
+          .filter((e): e is NonNullable<typeof e> => (e != null))
           .map(e => e.value)
       : [];
 
@@ -108,7 +109,7 @@ export class VolumeService implements IVolumeService {
       total = allIds.length;
       const pageIds = allIds.slice((page - 1) * limit, (page - 1) * limit + limit);
       const entries = await Promise.all(pageIds.map(id => this.atomic.get<Volume>(PREFIX + id)));
-      items = entries.filter((e): e is NonNullable<typeof e> => Boolean(e)).map(e => e.value);
+      items = entries.filter((e): e is NonNullable<typeof e> => (e != null)).map(e => e.value);
     }
 
     return { items, total, page, limit };

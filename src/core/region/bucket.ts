@@ -128,6 +128,7 @@ export class BucketService {
     if (!entry) throw new AppError(404, 'BUCKET_NOT_FOUND', 'Bucket not found');
 
     // If instanceId changes, re-inherit platform/region/endpoint from the new instance
+    // eslint-disable-next-line @typescript-eslint/no-restricted-types -- inherited fields from instance: only a subset may be populated
     let inheritedFields: Partial<RegionBucket> = {};
     if (input.instanceId !== undefined) {
       const instSvc = new InstanceService(this.atomic);

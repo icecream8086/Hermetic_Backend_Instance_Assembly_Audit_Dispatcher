@@ -279,6 +279,7 @@ export class PodService {
     return { execId: result.execId, webSocketUri: result.webSocketUri ?? undefined };
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- PodSpec has many fields, Partial avoids maintaining a duplicate PatchSpec type
   public async update(podId: PodId, specPatch: Partial<PodSpec>): Promise<PodEntity> {
     const pod = await this.store.getById(podId);
     if (!pod) throw new AppError(404, 'POD_NOT_FOUND', `Pod ${podId} not found`);
@@ -300,6 +301,7 @@ export class PodService {
   }
 }
 
+// eslint-disable-next-line @typescript-eslint/no-restricted-types -- merge helper: Partial allows sparse overrides over a large spec
 function mergePodSpec(base: PodSpec, patch: Partial<PodSpec>): PodSpec {
   return {
     metadata: { ...base.metadata, ...patch.metadata },

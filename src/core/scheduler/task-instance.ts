@@ -40,9 +40,14 @@ export function transitionState(ti: TaskInstance, to: TaskInstanceState): TaskIn
   }
 
   const now = Date.now();
+  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- state transition patch: only a subset of TaskInstance fields are mutated
   const patch: Partial<TaskInstance> = { state: to, version: generateVersionId() };
 
   switch (to) {
+    case 'NONE':
+    case 'SCHEDULED':
+    case 'DEFERRED':
+      break;
     case 'QUEUED':
       patch.startedAt = undefined;
       patch.completedAt = undefined;

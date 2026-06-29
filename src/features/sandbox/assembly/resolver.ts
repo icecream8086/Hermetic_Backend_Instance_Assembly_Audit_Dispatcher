@@ -62,7 +62,7 @@ export function resolveAssembly(
     };
   }
 
-  const merged = mergeTemplates([...sorted.sorted]);
+  let merged = mergeTemplates([...sorted.sorted]);
   if (merged === null) {
     return { success: false, errors: [{ templateName: '(assembly)', message: 'Merge produced no result' }] };
   }
@@ -70,7 +70,7 @@ export function resolveAssembly(
   // Apply assembly-level static overrides
   const root = store.get(rootName);
   if (root?.kind === TemplateKind.Assembly && (root).overrides) {
-    Object.assign(merged, (root).overrides);
+    merged = { ...merged, ...(root).overrides };
   }
 
   const validationErrors = validateConfig(merged);
@@ -121,7 +121,7 @@ function mergeTemplates(sorted: Template[]): MutableSandboxInput | null {
 
       case TemplateKind.Resource: {
         const rt = template;
-        if (!config.providerOverrides) config.providerOverrides = {};
+        config.providerOverrides ??= {};
         const prev = (config.providerOverrides[rt.resourceType] ?? {}) as Record<string, unknown>;
         config.providerOverrides[rt.resourceType] = { ...prev, ...rt.spec };
         break;

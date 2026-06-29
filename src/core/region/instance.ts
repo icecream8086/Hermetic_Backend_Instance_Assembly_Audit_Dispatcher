@@ -87,7 +87,8 @@ function defaultEndpoint(platform: Platform, region: string): string {
   switch (platform) {
     case 'alibaba': return `eci.${region}.aliyuncs.com`;
     case 'podman': return 'http://127.0.0.1:8080'; // fallback — handler enforces override
-    default: return region;
+    case 'aws':
+    case 'stub': return region;
   }
 }
 

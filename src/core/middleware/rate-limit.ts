@@ -87,7 +87,7 @@ function ipv6ToBytes(ip: string): Uint8Array | null {
   const groups = [...left, ...Array<string>(missing).fill('0'), ...right];
   const bytes = new Uint8Array(16);
   for (let i = 0; i < 8; i++) {
-    const val = parseInt(groups[i] || '0', 16);
+    const val = parseInt(groups[i] ?? '0', 16);
     if (isNaN(val) || val < 0 || val > 0xffff) return null;
     bytes[i * 2] = (val >> 8) & 0xff;
     bytes[i * 2 + 1] = val & 0xff;

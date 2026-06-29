@@ -14,9 +14,10 @@ import type { ErrorCode } from '../../core/error-codes.ts';
 
 interface PermissionCheckFn { check(params: { userId: string; action: string; resource: string; ip?: string }): Promise<{ allowed: boolean; reason: string }> }
 
-function errorStatus(e: unknown, fallbackCode: ErrorCode, fallbackStatus = 500): { code: ErrorCode; status: any } {
-  const status: any = (e as any)?.statusCode ?? (e as any)?.status ?? fallbackStatus;
-  const code = ((e as any)?.code as ErrorCode | undefined) ?? fallbackCode;
+function errorStatus(e: unknown, fallbackCode: ErrorCode, fallbackStatus = 500): { code: ErrorCode; status: number } {
+  const err = e as Record<string, unknown> | undefined;
+  const status = typeof err?.statusCode === 'number' ? err.statusCode : typeof err?.status === 'number' ? err.status : fallbackStatus;
+  const code = (typeof err?.code === 'string' ? err.code as ErrorCode : undefined) ?? fallbackCode;
   return { code, status };
 }
 
@@ -52,7 +53,7 @@ export function createSandboxRouter(
       }
       const pod = await podService.provision(spec);
       return c.json(ok({ podId: pod.podId, providerId: pod.providerId, phase: pod.phase, name: pod.name }), 201);
-    } catch (e: any) {
+    } catch (e: unknown) {
       const { code, status } = errorStatus(e, 'POD_CREATE_FAILED');
       return c.json(fail(code, e.message), status);
     }
@@ -63,12 +64,12 @@ export function createSandboxRouter(
     { const r = await requirePerm(c, permissionChecker, 'read', 'sandbox'); if (r) return r; }
     if (!podService) return c.json(fail('NOT_CONFIGURED', 'PodService not available'), 501);
     try {
-      const phase = c.req.query('phase') as any || undefined;
+      const phase = c.req.query('phase') || undefined;
       const limit = parseInt(c.req.query('limit') ?? '50');
       const cursor = c.req.query('cursor');
       const result = await podService.list(phase, limit, cursor);
       return c.json(ok(result));
-    } catch (e: any) {
+    } catch (e: unknown) {
       const { code, status } = errorStatus(e, 'POD_LIST_FAILED');
       return c.json(fail(code, e.message), status);
     }
@@ -83,7 +84,7 @@ export function createSandboxRouter(
       const pod = await podService.getById(podId);
       if (!pod) return c.json(fail('POD_NOT_FOUND', 'Pod not found'), 404);
       return c.json(ok(pod));
-    } catch (e: any) {
+    } catch (e: unknown) {
       const { code, status } = errorStatus(e, 'POD_GET_FAILED');
       return c.json(fail(code, e.message), status);
     }
@@ -97,7 +98,7 @@ export function createSandboxRouter(
       const podId = createPodId(c.req.param('id'));
       const pod = await podService.stop(podId);
       return c.json(ok({ podId: pod.podId, phase: pod.phase }));
-    } catch (e: any) {
+    } catch (e: unknown) {
       const { code, status } = errorStatus(e, 'POD_STOP_FAILED', 409);
       return c.json(fail(code, e.message), status);
     }
@@ -111,7 +112,7 @@ export function createSandboxRouter(
       const podId = createPodId(c.req.param('id'));
       await podService.terminate(podId);
       return c.json(ok(null));
-    } catch (e: any) {
+    } catch (e: unknown) {
       const { code, status } = errorStatus(e, 'POD_DELETE_FAILED', 404);
       return c.json(fail(code, e.message), status);
     }
@@ -125,7 +126,7 @@ export function createSandboxRouter(
       const podId = createPodId(c.req.param('id'));
       const pod = await podService.syncRuntime(podId);
       return c.json(ok(pod));
-    } catch (e: any) {
+    } catch (e: unknown) {
       const { code, status } = errorStatus(e, 'SYNC_FAILED', 502);
       return c.json(fail(code, e.message), status);
     }
@@ -148,7 +149,7 @@ export function createSandboxRouter(
       if (timestamps !== undefined) options.timestamps = timestamps;
       const result = await podService.getLogs(podId, containerName, options);
       return c.json(ok(result));
-    } catch (e: any) {
+    } catch (e: unknown) {
       const { code, status } = errorStatus(e, 'POD_LOGS_FAILED');
       return c.json(fail(code, e.message), status);
     }
@@ -164,7 +165,7 @@ export function createSandboxRouter(
       if (!body.cmd?.length) return c.json(fail('VALIDATION_ERROR', 'Body.cmd (string array) is required'), 400);
       const result = await podService.exec(podId, body.cmd, body.containerName);
       return c.json(ok(result));
-    } catch (e: any) {
+    } catch (e: unknown) {
       const { code, status } = errorStatus(e, 'POD_EXEC_FAILED');
       return c.json(fail(code, e.message), status);
     }
@@ -176,10 +177,11 @@ export function createSandboxRouter(
     if (!podService) return c.json(fail('NOT_CONFIGURED', 'PodService not available'), 501);
     try {
       const podId = createPodId(c.req.param('id'));
+      // eslint-disable-next-line @typescript-eslint/no-restricted-types -- HTTP JSON body: naturally a subset of PodSpec fields
       const specPatch = await c.req.json<Partial<PodSpec>>();
       const updated = await podService.update(podId, specPatch);
       return c.json(ok(updated));
-    } catch (e: any) {
+    } catch (e: unknown) {
       const { code, status } = errorStatus(e, 'POD_UPDATE_FAILED', 409);
       return c.json(fail(code, e.message), status);
     }
@@ -189,16 +191,16 @@ export function createSandboxRouter(
 
   router.get('/', async (c) => {
     { const r = await requirePerm(c, permissionChecker, 'read', 'sandbox'); if (r) return r; }
-    const status = c.req.query('status') as any || undefined;
+    const status = c.req.query('status') || undefined;
     const apiVer = c.req.query('apiVersion');
     const podPhase = c.req.query('podPhase')! || undefined;
     const limit = parseInt(c.req.query('limit') ?? '50');
     const cursor = c.req.query('cursor');
     let result = await svc.list?.(status, limit, cursor) ?? { items: [] };
     if (apiVer) {
-      result = { ...result, items: result.items.filter(s => (s.config as any).apiVersion === apiVer) };
+      result = { ...result, items: result.items.filter(s => s.config.apiVersion === apiVer) };
     } else {
-      result = { ...result, items: result.items.filter(s => (s.config as any).apiVersion !== 'hbi-aad/v2') };
+      result = { ...result, items: result.items.filter(s => s.config.apiVersion !== 'hbi-aad/v2') };
     }
     // Enrich with podPhase when PodService is available
     if (podService && result.items.length > 0) {
@@ -246,7 +248,7 @@ export function createSandboxRouter(
     try {
       const stopped = await svc.stop(id);
       return c.json(ok(stopped));
-    } catch (e: any) {
+    } catch (e: unknown) {
       const { code, status } = errorStatus(e, 'STOP_FAILED', 409);
       return c.json(fail(code, e.message), status);
     }
@@ -261,7 +263,7 @@ export function createSandboxRouter(
       if (!svc.start) return c.json(fail('START_FAILED', 'Start not supported by this service'), 501);
       const started = await svc.start(id);
       return c.json(ok(started));
-    } catch (e: any) {
+    } catch (e: unknown) {
       const { code, status } = errorStatus(e, 'START_FAILED', 409);
       return c.json(fail(code, e.message), status);
     }
@@ -276,7 +278,7 @@ export function createSandboxRouter(
     try {
       await svc.terminate(id, actorId);
       return c.json(ok(null));
-    } catch (e: any) {
+    } catch (e: unknown) {
       const { code, status } = errorStatus(e, 'DELETE_FAILED', 404);
       return c.json(fail(code, e.message), status);
     }
@@ -289,7 +291,7 @@ export function createSandboxRouter(
       const runtime = await svc.syncRuntime(id);
       const updated = await svc.getById(id);
       return c.json(ok({ runtime, sandbox: updated }), 200);
-    } catch (e: any) {
+    } catch (e: unknown) {
       const { code, status } = errorStatus(e, 'SYNC_FAILED', 502);
       return c.json(fail(code, e.message), status);
     }
@@ -301,7 +303,7 @@ export function createSandboxRouter(
     try {
       const health = await svc.getHealth(id);
       return c.json(ok(health));
-    } catch (e: any) {
+    } catch (e: unknown) {
       return c.json(fail('HEALTH_FAILED', e.message), e.status ?? 500);
     }
   });
@@ -314,7 +316,7 @@ export function createSandboxRouter(
     try {
       const result = await svc.restart(id);
       return c.json(ok(result));
-    } catch (e: any) {
+    } catch (e: unknown) {
       const { code, status } = errorStatus(e, 'RESTART_FAILED', 409);
       return c.json(fail(code, e.message), status);
     }
@@ -326,10 +328,11 @@ export function createSandboxRouter(
     const ownerId = sandbox?.config?.creatorId;
     { const r = await requirePerm(c, permissionChecker, 'update', 'sandbox', ownerId); if (r) return r; }
     try {
+      // eslint-disable-next-line @typescript-eslint/no-restricted-types -- HTTP JSON body: naturally a subset of CreateSandboxInput fields
       const body = await c.req.json<Partial<CreateSandboxInput>>();
       const result = await svc.update(id, body);
       return c.json(ok(result));
-    } catch (e: any) {
+    } catch (e: unknown) {
       const { code, status } = errorStatus(e, 'UPDATE_FAILED', 409);
       return c.json(fail(code, e.message), status);
     }

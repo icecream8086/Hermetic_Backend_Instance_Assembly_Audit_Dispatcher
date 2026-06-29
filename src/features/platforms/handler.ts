@@ -93,6 +93,10 @@ export function createPlatformsRouter(
         case 'podman':
           regions = [{ regionId: 'local', endpoints: [{ endpoint: inst.endpoint }] }];
           break;
+        case 'aws':
+        case 'stub':
+          // No live API — fall through to static region list
+          break;
       }
     }
 

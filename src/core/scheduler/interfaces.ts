@@ -68,6 +68,7 @@ export interface IScheduler {
   stop(): void;
   pause(): void;
   resume(): void;
+  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- interface contract: configure accepts any subset of config fields
   configure(config: Partial<SchedulerConfig>): SchedulerConfig;
   status(): SchedulerStatus;
 }

@@ -137,11 +137,15 @@ export function createTopologyRouter(
   router.get('/regions', async (c) => {
     const platform = c.req.query('platform');
     let regionList: string[];
-    switch (platform) {
-      case 'alibaba': regionList = Object.values(AlibabaRegion); break;
-      case 'aws': regionList = Object.values(AwsRegion); break;
-      case 'podman': regionList = Object.values(PodmanRegion); break;
-      default: regionList = [...Object.values(AlibabaRegion), ...Object.values(AwsRegion), ...Object.values(PodmanRegion)];
+    if (!platform) {
+      regionList = [...Object.values(AlibabaRegion), ...Object.values(AwsRegion), ...Object.values(PodmanRegion)];
+    } else {
+      switch (platform) {
+        case 'alibaba': regionList = Object.values(AlibabaRegion); break;
+        case 'aws': regionList = Object.values(AwsRegion); break;
+        case 'podman': regionList = Object.values(PodmanRegion); break;
+        default: regionList = [];
+      }
     }
     return c.json(ok({ platform, regions: regionList }));
   });

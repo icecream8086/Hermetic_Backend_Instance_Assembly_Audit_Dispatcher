@@ -4,6 +4,7 @@ import type { Context } from 'hono';
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
 import type { RouteMeta } from '../../core/http-docs/types.ts';
 import { ok, fail } from '../../core/response.ts';
+import { AppError } from '../../core/types.ts';
 import type { AppContext } from '../../core/deps.ts';
 import type { ISandboxService } from '../sandbox/interfaces.ts';
 import type { SandboxTemplate, CreateTemplateInput, UpdateTemplateInput, ContainerSpec, ContainerDef, HealthCheckDef, TemplateInstanceLimit } from './types.ts';
@@ -49,6 +50,7 @@ function fromGeneratedTemplate(def: InstanceTemplateDef, defaultInstanceId?: str
   const now = Date.now();
   const cid = defaultInstanceId;
 
+  // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- boolean OR chain for feature detection, not default values
   const hasContainer = s.containers || s.initContainers || s.region !== undefined
     || s.restartPolicy !== undefined || (cid && !s.instanceId);
 
@@ -96,7 +98,7 @@ async function resolveTemplateSource(atomic: IAtomicStore, id: string): Promise<
   const storeEntry = await atomic.get<Record<string, unknown>>(PREFIX + id);
   if (storeEntry) {
     if (storeEntry.value.__deleted === true) return null;
-    return { source: 'store', template: storeEntry.value as unknown as SandboxTemplate };
+    return { source: 'store', template: storeEntry.value as SandboxTemplate };
   }
   const gen = INSTANCE_TEMPLATES.find(d => d.id === id);
   if (gen) return { source: 'generated', template: fromGeneratedTemplate(gen) };
@@ -112,7 +114,7 @@ async function listAllLive(atomic: IAtomicStore): Promise<SandboxTemplate[]> {
   for (const t of stored) map.set(t.id, t);
   const result: SandboxTemplate[] = [];
   for (const t of map.values()) {
-    const entry = await atomic.get<any>(PREFIX + t.id);
+    const entry = await atomic.get<Record<string, unknown>>(PREFIX + t.id);
     if (entry?.value?.__deleted === true) continue;
     result.push(t);
   }
@@ -140,6 +142,7 @@ function resolveDag(tpls: SandboxTemplate[], seedIds: string[]): SandboxTemplate
       continue;
     }
     if (inStack.has(frame.id)) {
+      // eslint-disable-next-line no-restricted-syntax -- Error with status code: spread doesn't work with Error prototype chain
       throw Object.assign(new Error(`Cycle detected: template "${frame.id}" depends on itself (directly or transitively)`), { status: 400 });
     }
     if (visited.has(frame.id)) continue;
@@ -159,7 +162,7 @@ function resolveDag(tpls: SandboxTemplate[], seedIds: string[]): SandboxTemplate
 }
 
 /** Deep-merge two plain objects — child values override parents. */
-export function deepMerge(parent: any, child: any): any {
+export function deepMerge(parent: Record<string, unknown>, child: Record<string, unknown>): Record<string, unknown> {
   if (!parent) return child ?? {};
   if (!child) return parent;
   const out = { ...parent };
@@ -177,10 +180,10 @@ export function deepMerge(parent: any, child: any): any {
   return out;
 }
 
-function mergeByName(parent: any[] | undefined, child: any[] | undefined): any[] {
+function mergeByName(parent: Record<string, unknown>[] | undefined, child: Record<string, unknown>[] | undefined): Record<string, unknown>[] {
   if (!child) return parent ?? [];
   if (!parent) return child;
-  const map = new Map<string, any>();
+  const map = new Map<string, Record<string, unknown>>();
   for (const item of parent) map.set(item.name, item);
   for (const item of child) {
     const existing = map.get(item.name);
@@ -190,11 +193,11 @@ function mergeByName(parent: any[] | undefined, child: any[] | undefined): any[]
   return [...map.values()];
 }
 
-function mergeHealthChecks(parent: any[] | undefined, child: any[] | undefined): any[] {
+function mergeHealthChecks(parent: Record<string, unknown>[] | undefined, child: Record<string, unknown>[] | undefined): Record<string, unknown>[] {
   if (!child) return parent ?? [];
   if (!parent) return child;
-  const keyFn = (h: any): string => `${String(h.target)}:${String(h.name)}`;
-  const map = new Map<string, any>();
+  const keyFn = (h: Record<string, unknown>): string => `${String(h.target)}:${String(h.name)}`;
+  const map = new Map<string, Record<string, unknown>>();
   for (const h of parent) map.set(keyFn(h), h);
   for (const h of child) {
     const k = keyFn(h);
@@ -213,11 +216,12 @@ async function resolveTemplate(atomic: IAtomicStore, id: string): Promise<Sandbo
 async function resolveTemplateWithChain(atomic: IAtomicStore, id: string): Promise<{ template: SandboxTemplate; chain: readonly string[] }> {
   const allTemplates = await listAllLive(atomic);
   const tpl = allTemplates.find(t => t.id === id);
+  // eslint-disable-next-line no-restricted-syntax -- Error with status code: spread doesn't work with Error prototype chain
   if (!tpl) throw Object.assign(new Error('Template not found'), { status: 404 });
 
   const chain = resolveDag(allTemplates, [id]).reverse();
   const chainIds = chain.map(t => t.id);
-  let mergedSpec: any = {};
+  let mergedSpec: Record<string, unknown> = {};
   for (const t of chain) {
     mergedSpec = deepMerge(mergedSpec, {
       ...(t.container ? { container: t.container } : {}),
@@ -263,7 +267,7 @@ async function countRunningForTemplate(atomic: IAtomicStore, tplId: string): Pro
   if (!idx) return 0;
   let count = 0;
   for (const sid of idx.value) {
-    const entry = await atomic.get<any>(SANDBOX_PREFIX + sid);
+    const entry = await atomic.get<Record<string, unknown>>(SANDBOX_PREFIX + sid);
     if (entry?.value?.config?.templateRef === tplId && LIVE_STATUSES.includes(entry.value.status)) {
       count++;
     }
@@ -279,9 +283,7 @@ async function claimInstanceSlot(
   if (tpl.singleton) {
     const runningCount = await countRunningForTemplate(atomic, tpl.id);
     if (runningCount >= 1) {
-      const err: any = new Error(`Template "${tpl.name}" is singleton — only 1 instance allowed at a time (${String(runningCount)} running)`);
-      err.status = 429;
-      throw err;
+      throw new AppError(429, 'TEMPLATE_SINGLETON', `Template "${tpl.name}" is singleton — only 1 instance allowed at a time (${String(runningCount)} running)`);
     }
     const key = lockKey(tpl.id);
     const entry = await atomic.get<number>(key);
@@ -300,9 +302,7 @@ async function claimInstanceSlot(
 
   if (type === 'fixed' || type === 'perSystem') {
     if (runningCount >= max) {
-      const err: any = new Error(`Template "${tpl.name}" has ${String(runningCount)} running instance(s) — limit is ${String(max)}`);
-      err.status = 429;
-      throw err;
+      throw new AppError(429, 'TEMPLATE_LIMIT', `Template "${tpl.name}" has ${String(runningCount)} running instance(s) — limit is ${String(max)}`);
     }
     const entry = await atomic.get<number>(baseKey);
     await atomic.set(baseKey, (entry?.value ?? 0) + 1, entry?.version ?? null);
@@ -314,7 +314,7 @@ async function claimInstanceSlot(
     let userCount = 0;
     if (idx) {
       for (const sid of idx.value) {
-        const entry = await atomic.get<any>(SANDBOX_PREFIX + sid);
+        const entry = await atomic.get<Record<string, unknown>>(SANDBOX_PREFIX + sid);
         if (entry?.value?.config?.templateRef === tpl.id
             && LIVE_STATUSES.includes(entry.value.status)
             && entry.value.config?.creatorId === userId) {
@@ -323,9 +323,7 @@ async function claimInstanceSlot(
       }
     }
     if (userCount >= max) {
-      const err: any = new Error(`Template "${tpl.name}" per-user limit of ${String(max)} reached (${String(userCount)} running)`);
-      err.status = 429;
-      throw err;
+      throw new AppError(429, 'TEMPLATE_PER_USER_LIMIT', `Template "${tpl.name}" per-user limit of ${String(max)} reached (${String(userCount)} running)`);
     }
     const entry = await atomic.get<number>(userKey);
     await atomic.set(userKey, (entry?.value ?? 0) + 1, entry?.version ?? null);

@@ -64,6 +64,7 @@ export interface AssemblyTemplate extends BaseTemplate<TemplateKind.Assembly> {
   /** Templates that form this assembly, resolved in declaration order. */
   readonly components: readonly DagEdge[];
   /** Static overrides applied after all components are merged. */
+  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- template overrides: a sparse subset of CreateSandboxInput fields
   readonly overrides?: Partial<CreateSandboxInput>;
 }
 

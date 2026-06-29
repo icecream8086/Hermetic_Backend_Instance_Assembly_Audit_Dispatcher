@@ -67,6 +67,7 @@ export async function backfillDagRuns(
   dagDef: DagDef,
   existingRuns: readonly DagRun[],
   config: BackfillConfig,
+  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- DagRun has 12 fields, Omit avoids duplicating all fields minus one
   factory: (dagRun: Omit<DagRun, 'version'>) => Promise<boolean>,
 ): Promise<BackfillResult> {
   const result: BackfillResult = { created: 0, skipped: 0, errors: [] };
@@ -97,6 +98,7 @@ export async function backfillDagRuns(
       continue;
     }
 
+    // eslint-disable-next-line @typescript-eslint/no-restricted-types -- constructing a new DagRun, version is assigned by the store
     const dagRun: Omit<DagRun, 'version'> = {
       id: createDagRunId(`dr_${dagDef.id}_${String(execDate)}_${crypto.randomUUID()}`),
       dagId: dagDef.id,

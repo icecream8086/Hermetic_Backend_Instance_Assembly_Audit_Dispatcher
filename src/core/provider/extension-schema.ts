@@ -82,20 +82,21 @@ export function applyExtensionOverrides(
     if (!field.eciParam) continue;
 
     switch (field.transform) {
+      case undefined:
+        out[field.eciParam] = typeof val === 'object' ? JSON.stringify(val) : String(val);
+        break;
       case 'boolean-string':
         out[field.eciParam] = val ? 'true' : 'false';
         break;
       case 'number-string':
-        out[field.eciParam] = String(val);
+        out[field.eciParam] = typeof val === 'number' ? String(val) : '';
         break;
       case 'json-string':
         out[field.eciParam] = JSON.stringify(val);
         break;
       case 'comma-sep':
-        out[field.eciParam] = Array.isArray(val) ? val.join(',') : String(val);
+        out[field.eciParam] = Array.isArray(val) ? val.join(',') : (typeof val === 'string' ? val : '');
         break;
-      default:
-        out[field.eciParam] = String(val);
     }
   }
 
@@ -130,6 +131,9 @@ export function validateExtensionOverrides(
         break;
       case 'string':
         if (typeof val !== 'string') errors.push(`${field.key} must be a string`);
+        break;
+      case 'object':
+        if (typeof val !== 'object' || val === null) errors.push(`${field.key} must be an object`);
         break;
       case 'string[]':
         if (!Array.isArray(val) || val.some(v => typeof v !== 'string')) errors.push(`${field.key} must be a string array`);

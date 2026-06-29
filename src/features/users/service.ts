@@ -25,13 +25,15 @@ const UID_INDEX_PREFIX = 'user:uid:';
 
 /** Normalise a stored user that may be missing RHEL passwd fields added in Phase 5.1. */
 function normalizeUser(user: User): User {
-  if (!user.uid) (user as any).uid = createUid(UID_MIN);
-  if (!user.gid) (user as any).gid = createGid(GID_MIN);
-  if (user.gecos === undefined) (user as any).gecos = user.name ?? '';
-  if (!user.directory) (user as any).directory = `${DEFAULT_HOME_PREFIX}${user.email}`;
-  if (!user.shell) (user as any).shell = DEFAULT_SHELL;
-  if (!user.supplementaryGids) (user as any).supplementaryGids = [];
-  return user;
+  return {
+    ...user,
+    uid: user.uid || createUid(UID_MIN),
+    gid: user.gid || createGid(GID_MIN),
+    gecos: user.gecos ?? user.name ?? '',
+    directory: user.directory || `${DEFAULT_HOME_PREFIX}${user.email}`,
+    shell: user.shell || DEFAULT_SHELL,
+    supplementaryGids: user.supplementaryGids.length > 0 ? user.supplementaryGids : [],
+  };
 }
 
 /** Deterministic shard assignment from a UserId (UUID v4). */
@@ -710,7 +712,7 @@ export class UserService implements IUserService {
       policy: {
         enabled: policy.enabled,
         disabled: !policy.enabled,
-        timeRestricted: !!(policy.timeRanges.length),
+        timeRestricted: policy.timeRanges.length > 0,
         timeRanges: policy.timeRanges,
       },
     };
