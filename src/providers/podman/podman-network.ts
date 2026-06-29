@@ -55,7 +55,7 @@ export class PodmanNetworkPolicyProvider implements INetworkPolicyProvider {
       const err = await resp.text().catch(() => '');
       // 409 = already exists (race), treat as success
       if (resp.status !== 409) {
-        throw new Error(`Podman network create failed (${resp.status}): ${err}`);
+        throw new Error(`Podman network create failed (${String(resp.status)}): ${err}`);
       }
     }
 
@@ -68,7 +68,7 @@ export class PodmanNetworkPolicyProvider implements INetworkPolicyProvider {
     });
     if (!resp.ok && resp.status !== 404) {
       const err = await resp.text().catch(() => '');
-      throw new Error(`Podman network remove failed (${resp.status}): ${err}`);
+      throw new Error(`Podman network remove failed (${String(resp.status)}): ${err}`);
     }
   }
 }
@@ -86,5 +86,5 @@ function tenantSubnet(tenantId: string): string {
   }
   // Map to 10.2.x.x range (skip 10.0.x.x and 10.1.x.x for safety)
   const b2 = ((Math.abs(hash) % 253) + 2) & 0xff; // 2-254
-  return `10.2.${b2}.0/24`;
+  return `10.2.${String(b2)}.0/24`;
 }

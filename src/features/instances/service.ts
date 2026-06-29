@@ -175,7 +175,7 @@ export class RunnerService implements IRunnerService {
     if (count > 0) {
       await this.logger.write({
         facility: FACILITY, level: KernLevel.WARNING,
-        message: `Marked ${count} runners offline (stale heartbeat)`,
+        message: `Marked ${String(count)} runners offline (stale heartbeat)`,
       });
     }
     return count;
@@ -245,23 +245,23 @@ export class RunnerService implements IRunnerService {
 
   // ─── Index helpers ───
 
-  public async #addRunnerToIndex(id: string): Promise<void> {
+  async #addRunnerToIndex(id: string): Promise<void> {
     const idx = await this.atomic.get<string[]>(RUNNER_IDS_KEY);
     await this.atomic.set(RUNNER_IDS_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
   }
 
-  public async #removeRunnerFromIndex(id: string): Promise<void> {
+  async #removeRunnerFromIndex(id: string): Promise<void> {
     const idx = await this.atomic.get<string[]>(RUNNER_IDS_KEY);
     if (!idx) return;
     await this.atomic.set(RUNNER_IDS_KEY, idx.value.filter(i => i !== id), idx.version);
   }
 
-  public async #addGroupToIndex(id: string): Promise<void> {
+  async #addGroupToIndex(id: string): Promise<void> {
     const idx = await this.atomic.get<string[]>(RUNNER_GROUP_IDS_KEY);
     await this.atomic.set(RUNNER_GROUP_IDS_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
   }
 
-  public async #removeGroupFromIndex(id: string): Promise<void> {
+  async #removeGroupFromIndex(id: string): Promise<void> {
     const idx = await this.atomic.get<string[]>(RUNNER_GROUP_IDS_KEY);
     if (!idx) return;
     await this.atomic.set(RUNNER_GROUP_IDS_KEY, idx.value.filter(i => i !== id), idx.version);

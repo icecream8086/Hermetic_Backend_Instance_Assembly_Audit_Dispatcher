@@ -55,7 +55,7 @@ export class CfQueueProducer implements IMessageQueue {
 
   // ─── Internal ───
 
-  public async #send(message: TaskMessage): Promise<boolean> {
+  async #send(message: TaskMessage): Promise<boolean> {
     if (!this.#queue) return false;
     try {
       await this.#queue.send(message);
@@ -66,6 +66,7 @@ export class CfQueueProducer implements IMessageQueue {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- interface contract requires generics
   #message<T>(type: TaskType, payload: T): TaskMessage {
     return {
       type,

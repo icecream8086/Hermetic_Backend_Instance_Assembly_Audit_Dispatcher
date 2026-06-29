@@ -679,7 +679,7 @@ export class SandboxService implements ISandboxService {
     };
     await this.logger.write({
       facility: FACILITY, level: KernLevel.NOTICE,
-      message: `sandbox ${fromStatus}→${to} name=${sandbox.name} provider=${sandbox.providerId ?? ''} containers=${sandbox.containers.length} uptime=${uptime}ms reason=${reason}`,
+      message: `sandbox ${fromStatus}→${to} name=${sandbox.name} provider=${sandbox.providerId ?? ''} containers=${String(sandbox.containers.length)} uptime=${String(uptime)}ms reason=${reason}`,
       actorId,
       metadata: meta,
     });

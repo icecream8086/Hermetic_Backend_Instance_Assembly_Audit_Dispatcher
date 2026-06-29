@@ -33,7 +33,7 @@ export async function seedPolicyLibrary(atomic: IAtomicStore): Promise<void> {
     sysGroupIds[g.name] = id;
     await atomic.set('sysgroup:' + id, { id, name: g.name, description: g.desc, rules: g.rules, priority: g.rules[0]!.priority, dependsOn: [], createdAt: now, updatedAt: now }, null);
     const shardIdx = Math.abs(Array.from(id).reduce((h, c) => ((h << 5) + h) + c.charCodeAt(0), 5381)) % 4;
-    const sk = 'sysgroup:idx:' + shardIdx;
+    const sk = 'sysgroup:idx:' + String(shardIdx);
     const idx = await atomic.get<string[]>(sk);
     await atomic.set(sk, [...(idx?.value ?? []), id], idx?.version ?? null);
     const cEntry = await atomic.get<number>('sysgroup:count');
@@ -78,7 +78,7 @@ export async function seedPolicyLibrary(atomic: IAtomicStore): Promise<void> {
     { userGroupName: 'daemon', sysGroupName: 'perm.operator' },
   ];
   for (const b of permGroupBindings) {
-    const sgEntry = await atomic.get<any>('sysgroup:' + sysGroupIds[b.sysGroupName]);
+    const sgEntry = await atomic.get<any>('sysgroup:' + String(sysGroupIds[b.sysGroupName]));
     if (!sgEntry) continue;
     const ugId = userGroupIds[b.userGroupName];
     if (!ugId) continue;
@@ -164,7 +164,7 @@ export async function seedPolicyLibrary(atomic: IAtomicStore): Promise<void> {
   }
 
   await atomic.set(KEY, { seededAt: now }, null);
-  console.log(`[${new Date().toISOString()}] INFO: [seed] Policy library seeded: ${count} items`);
+  console.log(`[${new Date().toISOString()}] INFO: [seed] Policy library seeded: ${String(count)} items`);
 }
 
 async function seedDefaultInstance(atomic: IAtomicStore): Promise<string | undefined> {
@@ -190,7 +190,7 @@ async function seedDefaultInstance(atomic: IAtomicStore): Promise<string | undef
     console.log(`[${new Date().toISOString()}] INFO: [seed] Default instance seeded: ${instanceId}`);
     return instanceId;
   } catch (e: unknown) {
-    console.error(`[${new Date().toISOString()}] ERROR: [seed] Failed to seed default instance: ${e instanceof Error ? e.message : e}`);
+    console.error(`[${new Date().toISOString()}] ERROR: [seed] Failed to seed default instance: ${String(e instanceof Error ? e.message : e)}`);
     return undefined;
   }
 }
@@ -248,7 +248,7 @@ async function seedLogPolicy(atomic: IAtomicStore): Promise<void> {
     updatedAt: Date.now(),
   };
   await atomic.set(KEY, policy, null);
-  console.log(`[${new Date().toISOString()}] INFO: [seed] Log policy seeded: ${policy.facilities.length} facilities`);
+  console.log(`[${new Date().toISOString()}] INFO: [seed] Log policy seeded: ${String(policy.facilities.length)} facilities`);
 }
 
 async function seedVolumes(atomic: IAtomicStore, defaultInstanceId: string): Promise<void> {
@@ -274,11 +274,11 @@ async function seedVolumes(atomic: IAtomicStore, defaultInstanceId: string): Pro
   const ids: string[] = [];
   for (const v of volumes) {
     ids.push(v.id as string);
-    await atomic.set('volume:' + v.id, v, null);
+    await atomic.set('volume:' + String(v.id), v, null);
   }
   await atomic.set('volume:ids', ids, null);
   await atomic.set(KEY, { seededAt: now }, null);
-  console.log(`[${new Date().toISOString()}] INFO: [seed] Demo volumes seeded: ${volumes.length}`);
+  console.log(`[${new Date().toISOString()}] INFO: [seed] Demo volumes seeded: ${String(volumes.length)}`);
 }
 
 export async function seedIfNeeded(atomic: IAtomicStore): Promise<void> {

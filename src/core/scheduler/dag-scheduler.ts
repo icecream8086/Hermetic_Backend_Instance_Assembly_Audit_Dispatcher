@@ -120,7 +120,7 @@ export class DagScheduler {
       await this.heartbeat();
     } catch (err) {
       // Log but don't crash the scheduler
-      console.error(`[DagScheduler] tick #${this.tickCount} error:`, err);
+      console.error(`[DagScheduler] tick #${String(this.tickCount)} error:`, err);
     }
   }
 
@@ -390,7 +390,7 @@ export class DagScheduler {
 
         const elapsed = ti.startedAt ? Date.now() - ti.startedAt : 0;
         if (elapsed > task.timeoutMs) {
-          const msg = `Task timed out after ${task.timeoutMs}ms`;
+          const msg = `Task timed out after ${String(task.timeoutMs)}ms`;
 
           if (shouldRetry(ti, task.retries)) {
             const retried = transitionState(ti, 'UP_FOR_RETRY');

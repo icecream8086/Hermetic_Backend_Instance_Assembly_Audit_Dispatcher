@@ -197,7 +197,7 @@ export class InstanceService {
       );
       const running = sandboxes.filter(s => s && s.value?.config?.instanceId === id && s.value?.status !== 'Deleted');
       if (running.length > 0) {
-        throw new AppError(409, 'INSTANCE_HAS_SANDBOXES', `Instance ${id} has ${running.length} running sandbox(es)`);
+        throw new AppError(409, 'INSTANCE_HAS_SANDBOXES', `Instance ${id} has ${String(running.length)} running sandbox(es)`);
       }
     }
 
@@ -224,19 +224,19 @@ export class InstanceService {
 
   // ─── Internal helpers ───
 
-  public async #listAll(): Promise<ComputeInstance[]> {
+  async #listAll(): Promise<ComputeInstance[]> {
     const idx = await this.atomic.get<string[]>(INDEX_KEY);
     if (!idx) return [];
     const entries = await Promise.all(idx.value.map(id => this.atomic.get<ComputeInstance>(PREFIX + id)));
     return entries.filter(e => e).map(e => e!.value);
   }
 
-  public async #addToIndex(id: InstanceId): Promise<void> {
+  async #addToIndex(id: InstanceId): Promise<void> {
     const idx = await this.atomic.get<string[]>(INDEX_KEY);
     await this.atomic.set(INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
   }
 
-  public async #removeFromIndex(id: InstanceId): Promise<void> {
+  async #removeFromIndex(id: InstanceId): Promise<void> {
     const idx = await this.atomic.get<string[]>(INDEX_KEY);
     if (!idx) return;
     await this.atomic.set(INDEX_KEY, idx.value.filter((i: string) => i !== id), idx.version);

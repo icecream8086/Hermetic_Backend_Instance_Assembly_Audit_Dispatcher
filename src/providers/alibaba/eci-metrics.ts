@@ -4,10 +4,11 @@
 import type { IMetricsProvider, FetchMetricsInput, FetchMetricsResult } from '../../core/provider/interfaces.ts';
 
 export class AlibabaEciMetricsProvider implements IMetricsProvider {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- constructor params are for future use
   public constructor(
-    _accessKeyId: string,
-    _accessKeySecret: string,
-    _endpoint = 'eci.cn-hangzhou.aliyuncs.com',
+    private readonly _accessKeyId: string,
+    private readonly _accessKeySecret: string,
+    private readonly _endpoint = 'eci.cn-hangzhou.aliyuncs.com',
   ) {}
 
   public async fetchMetrics(_input: FetchMetricsInput): Promise<FetchMetricsResult> {

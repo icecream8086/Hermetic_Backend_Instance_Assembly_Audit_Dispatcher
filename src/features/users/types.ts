@@ -33,12 +33,12 @@ export function generateSessionToken(): SessionToken {
 }
 
 export function createUid(n: number): Uid {
-  if (!Number.isSafeInteger(n) || n < 0) throw new TypeError(`Invalid UID: ${n}`);
+  if (!Number.isSafeInteger(n) || n < 0) throw new TypeError(`Invalid UID: ${String(n)}`);
   return n as Uid;
 }
 
 export function createGid(n: number): Gid {
-  if (!Number.isSafeInteger(n) || n < 0) throw new TypeError(`Invalid GID: ${n}`);
+  if (!Number.isSafeInteger(n) || n < 0) throw new TypeError(`Invalid GID: ${String(n)}`);
   return n as Gid;
 }
 

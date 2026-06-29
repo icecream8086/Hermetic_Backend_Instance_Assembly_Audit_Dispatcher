@@ -24,7 +24,7 @@ export class VolumeService implements IVolumeService {
   ) {}
 
   /** Validate that an instanceId refers to an existing ComputeInstance. */
-  public async #validateInstance(instanceId: string): Promise<void> {
+  async #validateInstance(instanceId: string): Promise<void> {
     const { InstanceService } = await import('../../core/region/instance.ts');
     const svc = new InstanceService(this.atomic);
     const inst = await svc.get(instanceId as any);

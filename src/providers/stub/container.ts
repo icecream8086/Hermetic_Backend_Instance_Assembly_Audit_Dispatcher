@@ -28,7 +28,7 @@ export class StubContainerProvider implements IContainerProvider {
   #nextProviderId = 1;
 
   public async create(input: CreateContainerGroupInput): Promise<{ providerId: string }> {
-    const providerId = `stub-eci-${this.#nextProviderId++}`;
+    const providerId = `stub-eci-${String(this.#nextProviderId++)}`;
 
     // Delegate container lifecycle to the OCI runtime
     const ociContainers: OciContainer[] = [];
@@ -67,7 +67,7 @@ export class StubContainerProvider implements IContainerProvider {
       lastTimestamp: now,
     }];
 
-    const publicIp = input.network.allocatePublicIp ? `203.0.113.${this.#nextProviderId}` : undefined;
+    const publicIp = input.network.allocatePublicIp ? `203.0.113.${String(this.#nextProviderId)}` : undefined;
     const associatedResources: AssociatedResource[] = publicIp ? [{
       type: 'eip',
       resourceId: `eip-${providerId}`,
@@ -88,7 +88,7 @@ export class StubContainerProvider implements IContainerProvider {
       cpu: input.cpu,
       memory: input.memory,
       network: {
-        privateIp: `10.0.0.${this.#nextProviderId}`,
+        privateIp: `10.0.0.${String(this.#nextProviderId)}`,
         vpcId: 'stub-vpc',
         ...(input.network.subnetIds?.[0] ? { subnetId: input.network.subnetIds[0] } : {}),
         ...(input.network.securityGroupId ? { securityGroupId: input.network.securityGroupId } : {}),

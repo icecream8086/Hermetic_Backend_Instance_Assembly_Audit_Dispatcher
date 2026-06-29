@@ -11,8 +11,6 @@ import type {
 import type { S3ProviderConfig } from './s3-types.ts';
 import { payloadHash } from './s3-signer.ts';
 
-export { encodeKey, parseObjectInfo, parseListResult, toArrayBuffer };
-
 export abstract class S3ClientBase implements IS3Provider {
   public abstract readonly type: S3ProviderType;
   protected readonly config: S3ProviderConfig;
@@ -52,7 +50,7 @@ export abstract class S3ClientBase implements IS3Provider {
     const amzHeaders: Record<string, string> = { host: new URL(url).host };
     const res = await this.authFetch(url, 'DELETE', path, '', amzHeaders, '');
     if (res.status !== 204 && res.status !== 404) {
-      throw new Error(`S3 deleteObject failed: ${res.status} ${await res.text()}`);
+      throw new Error(`S3 deleteObject failed: ${String(res.status)} ${await res.text()}`);
     }
   }
 
@@ -98,12 +96,12 @@ export abstract class S3ClientBase implements IS3Provider {
   }
 
   public async uploadPart(input: { bucket: string; key: string; uploadId: string; partNumber: number }, body: Uint8Array): Promise<{ etag: string; partNumber: number }> {
-    const path = `/${this.bucketMapping(input.bucket)}/${encodeKey(input.key)}?partNumber=${input.partNumber}&uploadId=${encodeURIComponent(input.uploadId)}`;
+    const path = `/${this.bucketMapping(input.bucket)}/${encodeKey(input.key)}?partNumber=${String(input.partNumber)}&uploadId=${encodeURIComponent(input.uploadId)}`;
     const url = `${this.endpointFor(input.bucket)}${path}`;
     const amzHeaders: Record<string, string> = { host: new URL(url).host };
     const bodyBuf = body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength) as ArrayBuffer;
     const bodyHash = await payloadHash(bodyBuf);
-    const res = await this.authFetch(url, 'PUT', `/${this.bucketMapping(input.bucket)}/${encodeKey(input.key)}`, `partNumber=${input.partNumber}&uploadId=${encodeURIComponent(input.uploadId)}`, amzHeaders, bodyHash, bodyBuf);
+    const res = await this.authFetch(url, 'PUT', `/${this.bucketMapping(input.bucket)}/${encodeKey(input.key)}`, `partNumber=${String(input.partNumber)}&uploadId=${encodeURIComponent(input.uploadId)}`, amzHeaders, bodyHash, bodyBuf);
     return { etag: (res.headers.get('etag') ?? '').replace(/"/g, ''), partNumber: input.partNumber };
   }
 
@@ -164,17 +162,17 @@ export abstract class S3ClientBase implements IS3Provider {
 
 // ─── 共享工具函数 ───
 
-function encodeKey(key: string): string {
+export function encodeKey(key: string): string {
   return key.split('/').map(encodeURIComponent).join('/');
 }
 
-async function toArrayBuffer(body: ReadableStream | ArrayBuffer | Uint8Array): Promise<ArrayBuffer> {
+export async function toArrayBuffer(body: ReadableStream | ArrayBuffer | Uint8Array): Promise<ArrayBuffer> {
   if (body instanceof ReadableStream) return new Response(body).arrayBuffer();
   if (body instanceof ArrayBuffer) return body;
   return body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength) as ArrayBuffer;
 }
 
-function parseObjectInfo(key: string, res: Response): S3ObjectInfo {
+export function parseObjectInfo(key: string, res: Response): S3ObjectInfo {
   return {
     key,
     size: Number(res.headers.get('content-length') ?? 0),
@@ -184,10 +182,10 @@ function parseObjectInfo(key: string, res: Response): S3ObjectInfo {
   };
 }
 
-function parseListResult(xml: string): S3ListObjectsResult {
+export function parseListResult(xml: string): S3ListObjectsResult {
   const objects: S3ObjectInfo[] = [];
   const commonPrefixes: string[] = [];
-  let isTruncated = false;
+  let isTruncated: boolean;
   let nextToken: string | undefined;
 
   const contents = xml.matchAll(/<Contents>(.*?)<\/Contents>/gs);
@@ -219,6 +217,6 @@ function parseListResult(xml: string): S3ListObjectsResult {
 
 function buildCompleteXml(parts: readonly { partNumber: number; etag: string }[]): string {
   const sorted = [...parts].sort((a, b) => a.partNumber - b.partNumber);
-  const partTags = sorted.map(p => `  <Part><PartNumber>${p.partNumber}</PartNumber><ETag>"${p.etag}"</ETag></Part>`).join('\n');
+  const partTags = sorted.map(p => `  <Part><PartNumber>${String(p.partNumber)}</PartNumber><ETag>"${p.etag}"</ETag></Part>`).join('\n');
   return `<?xml version="1.0" encoding="UTF-8"?>\n<CompleteMultipartUpload>\n${partTags}\n</CompleteMultipartUpload>`;
 }

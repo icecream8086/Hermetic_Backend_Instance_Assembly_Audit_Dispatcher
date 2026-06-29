@@ -5,6 +5,7 @@ import type { EventBus } from './event-bus/bus.ts';
 import type { EventLoop } from './event-bus/loop.ts';
 import type { IAuditWriter } from './audit/types.ts';
 import type { IMessageQueue } from '../queue/interfaces.ts';
+import type { SecretEncryption } from './auth/secret-encryption.ts';
 
 /**
  * Dependency injection root types.
@@ -40,7 +41,7 @@ export interface FeatureDeps {
   /** Optional action+resource level permission checker (PermissionService.check compatible). */
   permissionChecker?: { check(params: { userId: string; action: string; resource: string; ip?: string; resourceOwnerId?: string }): Promise<{ allowed: boolean; reason: string }> };
   /** AES-256-GCM envelope encryption for credential secrets at rest. */
-  secretEncryption?: import('./auth/secret-encryption.ts').SecretEncryption;
+  secretEncryption?: SecretEncryption;
 }
 
 /** Assembled application instance returned by createApp(). */

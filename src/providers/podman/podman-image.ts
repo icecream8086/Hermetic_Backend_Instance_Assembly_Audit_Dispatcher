@@ -40,7 +40,7 @@ export class PodmanImageProvider implements IImageProvider {
     }
     const resp = await this.#fetch(url, { method: 'POST' });
     if (!resp) throw new Error('Podman daemon unreachable');
-    if (!resp.ok) throw new Error(`Podman pull failed (${resp.status}): ${await resp.text().catch(() => '')}`);
+    if (!resp.ok) throw new Error(`Podman pull failed (${String(resp.status)}):${await resp.text().catch(() => '')}`);
     return this.inspect(image).then(r => r!);
   }
 
@@ -81,13 +81,13 @@ export class PodmanImageProvider implements IImageProvider {
     const resp = await this.#fetch(`${this.#apiBase}/images/${encodeURIComponent(id)}`, { method: 'DELETE' });
     if (!resp) return;
     if (resp.status === 404) return;
-    if (!resp.ok) throw new Error(`Podman remove failed: ${resp.status}`);
+    if (!resp.ok) throw new Error(`Podman remove failed: ${String(resp.status)}`);
   }
 
   public async push(imageOrId: string): Promise<ImageInfo> {
     const resp = await this.#fetch(`${this.#apiBase}/images/${encodeURIComponent(imageOrId)}/push`, { method: 'POST' });
     if (!resp) throw new Error('Podman daemon unreachable');
-    if (!resp.ok) throw new Error(`Podman push failed (${resp.status}): ${await resp.text().catch(() => '')}`);
+    if (!resp.ok) throw new Error(`Podman push failed (${String(resp.status)}):${await resp.text().catch(() => '')}`);
     return this.inspect(imageOrId).then(r => r!);
   }
 
@@ -103,7 +103,7 @@ export class PodmanImageProvider implements IImageProvider {
     const [repo, t] = tag.includes(':') ? tag.split(':') : [tag, 'latest'];
     const resp = await this.#fetch(`${this.#apiBase}/images/${encodeURIComponent(id)}/tag?repo=${encodeURIComponent(repo!)}&tag=${encodeURIComponent(t!)}`, { method: 'POST' });
     if (!resp) throw new Error('Podman daemon unreachable');
-    if (!resp.ok) throw new Error(`Podman tag failed (${resp.status})`);
+    if (!resp.ok) throw new Error(`Podman tag failed (${String(resp.status)})`);
   }
 
   public async history(id: string): Promise<readonly { id: string; created?: number | undefined; createdBy?: string | undefined; size?: number | undefined }[]> {
@@ -129,7 +129,7 @@ export class PodmanImageProvider implements IImageProvider {
     const query = params.toString() ? '?' + params.toString() : '';
     const resp = await this.#fetch(`${this.#apiBase}/build${query}`, { method: 'POST' });
     if (!resp) throw new Error('Podman daemon unreachable');
-    if (!resp.ok) throw new Error(`Podman build failed (${resp.status}): ${await resp.text().catch(() => '')}`);
+    if (!resp.ok) throw new Error(`Podman build failed (${String(resp.status)}):${await resp.text().catch(() => '')}`);
     // build returns a stream — resolve the image from the tag
     if (options?.tag) {
       return this.inspect(options.tag).then(r => r ?? this.inspect(options.tag!.split(':')[0]!).then(r2 => r2!));
@@ -140,7 +140,7 @@ export class PodmanImageProvider implements IImageProvider {
   }
 
   /** Fetch with connection error protection. Returns null when Podman is down. */
-  public async #fetch(url: string, init?: RequestInit): Promise<Response | null> {
+  async #fetch(url: string, init?: RequestInit): Promise<Response | null> {
     try {
       return await fetch(url, init);
     } catch {

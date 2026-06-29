@@ -140,7 +140,7 @@ async function checkThrottle(atomic: IAtomicStore, email: string, ip?: string): 
     const elapsed = Date.now() - entry.value.window;
     if (elapsed >= LOCKOUT_MS) return;
     const remaining = Math.ceil((LOCKOUT_MS - elapsed) / 1000);
-    throw new AppError(429, 'TOO_MANY_ATTEMPTS', `Too many login attempts. Try again in ${remaining}s`);
+    throw new AppError(429, 'TOO_MANY_ATTEMPTS', `Too many login attempts. Try again in ${String(remaining)}s`);
   }
 }
 
@@ -221,7 +221,7 @@ export class UserService implements IUserService {
     private readonly audit?: IAuditWriter,
   ) {}
 
-  public async #transactWithRetry<T>(fn: (txn: IStoreTransaction) => Promise<T>, maxRetries = 3): Promise<T> {
+  async #transactWithRetry<T>(fn: (txn: IStoreTransaction) => Promise<T>, maxRetries = 3): Promise<T> {
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
         return await this.atomic.transact(fn);
@@ -260,7 +260,7 @@ export class UserService implements IUserService {
     await this.#transactWithRetry(async (txn) => {
       const emailEntry = await txn.get<any>(EMAIL_INDEX_PREFIX + input.email);
       if (emailEntry) throw new AppError(409, 'EMAIL_EXISTS', 'Email already registered');
-      const shardKey = USER_IDS_SHARD_PREFIX + shardIndex(id);
+      const shardKey = USER_IDS_SHARD_PREFIX + String(shardIndex(id));
       const idx = await txn.get<string[]>(shardKey);
       txn.set(shardKey, [...(idx ?? []), id]);
       txn.set(USER_PREFIX + id, user);
@@ -295,7 +295,7 @@ export class UserService implements IUserService {
     await this.audit?.write({
       level: KernLevel.NOTICE,
       facility: FACILITY,
-      message: `User registered — ${input.email} (role=${input.role}, uid=${uid})`,
+      message: `User registered — ${input.email} (role=${input.role}, uid=${String(uid)})`,
     });
 
     return { user, token };
@@ -440,7 +440,7 @@ export class UserService implements IUserService {
     } catch {
       await recordAttempt(this.atomic, email, false, ip); throw new AppError(400, 'BAD_KEY_FORMAT', 'Invalid base64 encoding in one-time key');
     }
-    const message = new Uint8Array(new TextEncoder().encode(`${ts}${input.email}${ctx?.siteContext ?? ''}`));
+    const message = new Uint8Array(new TextEncoder().encode(`${String(ts)}${input.email}${ctx?.siteContext ?? ''}`));
     const pkRaw = atob(pubKeyB64);
     const publicKeyBytes = new Uint8Array(pkRaw.length);
     for (let i = 0; i < pkRaw.length; i++) publicKeyBytes[i] = pkRaw.charCodeAt(i);
@@ -555,7 +555,7 @@ export class UserService implements IUserService {
     await this.#transactWithRetry(async (txn) => {
       const e = await txn.get<User>(USER_PREFIX + id);
       if (!e) throw new AppError(404, 'USER_NOT_FOUND', 'User not found');
-      const shardKey = USER_IDS_SHARD_PREFIX + shardIndex(id);
+      const shardKey = USER_IDS_SHARD_PREFIX + String(shardIndex(id));
       const idx = await txn.get<string[]>(shardKey);
       if (idx) txn.set(shardKey, idx.filter((i: string) => i !== id));
       txn.set(USER_PREFIX + id, null);
@@ -582,7 +582,7 @@ export class UserService implements IUserService {
   }
 
   /** Increment user count — best-effort, OCC retry ×3. */
-  public async #incrCounter(): Promise<void> {
+  async #incrCounter(): Promise<void> {
     for (let attempt = 0; attempt < 3; attempt++) {
       const entry = await this.atomic.get<number>(USER_COUNT_KEY);
       const ver = await this.atomic.set(USER_COUNT_KEY, (entry?.value ?? 0) + 1, entry?.version ?? null);
@@ -591,7 +591,7 @@ export class UserService implements IUserService {
   }
 
   /** Decrement user count — best-effort, OCC retry ×3. */
-  public async #decrCounter(): Promise<void> {
+  async #decrCounter(): Promise<void> {
     for (let attempt = 0; attempt < 3; attempt++) {
       const entry = await this.atomic.get<number>(USER_COUNT_KEY);
       const cur = entry?.value ?? 0;
@@ -605,7 +605,7 @@ export class UserService implements IUserService {
     // Read all shards in parallel, then merge.
     const shardKeys = Array.from(
       { length: USER_IDS_SHARDS },
-      (_, i) => USER_IDS_SHARD_PREFIX + i,
+      (_, i) => USER_IDS_SHARD_PREFIX + String(i),
     );
     const shards = await Promise.all(shardKeys.map(k => this.atomic.get<string[]>(k)));
     const ids = shards.flatMap(s => s?.value ?? []);
@@ -630,7 +630,7 @@ export class UserService implements IUserService {
     let skip = start;
 
     for (let i = 0; i < USER_IDS_SHARDS && remaining > 0; i++) {
-      const shard = await this.atomic.get<string[]>(USER_IDS_SHARD_PREFIX + i);
+      const shard = await this.atomic.get<string[]>(USER_IDS_SHARD_PREFIX + String(i));
       const ids = shard?.value ?? [];
       if (ids.length === 0) continue;
 
@@ -816,7 +816,7 @@ export class UserService implements IUserService {
   }
 
   /** Allocate next available UID — RHEL §1 UID auto-increment from 1000. */
-  public async #nextUid(): Promise<Uid> {
+  async #nextUid(): Promise<Uid> {
     for (let attempt = 0; attempt < 3; attempt++) {
       const entry = await this.atomic.get<number>(UID_COUNTER_KEY);
       const next = entry?.value ?? UID_MIN;
@@ -845,7 +845,7 @@ export class UserService implements IUserService {
     await this.audit?.write({
       level: KernLevel.INFO,
       facility: FACILITY,
-      message: `Supplementary group added — user ${userId} → gid ${gid}`,
+      message: `Supplementary group added — user ${String(userId)} → gid ${String(gid)}`,
       metadata: { eventType: 'user.suppGroup.added', userId: userId, gid, actorId },
     });
     return updated;
@@ -868,7 +868,7 @@ export class UserService implements IUserService {
     await this.audit?.write({
       level: KernLevel.INFO,
       facility: FACILITY,
-      message: `Supplementary group removed — user ${userId} → gid ${gid}`,
+      message: `Supplementary group removed — user ${String(userId)} → gid ${String(gid)}`,
       metadata: { eventType: 'user.suppGroup.removed', userId: userId, gid, actorId },
     });
     return updated;
@@ -881,12 +881,12 @@ export class UserService implements IUserService {
   }
 
   /** Auto-join "users" group on registration (Linux-style). */
-  public async #joinDefaultGroup(userId: UserId): Promise<void> {
+  async #joinDefaultGroup(userId: UserId): Promise<void> {
     return this.#joinNamedGroup(userId, 'users');
   }
 
   /** Add a user to a named user group by group name. */
-  public async #joinNamedGroup(userId: UserId, groupName: string): Promise<void> {
+  async #joinNamedGroup(userId: UserId, groupName: string): Promise<void> {
     try {
       const ugEntry = await this.atomic.get<string[]>('usergroup:ids');
       if (!ugEntry) return;

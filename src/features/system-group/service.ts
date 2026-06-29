@@ -97,7 +97,7 @@ export class SysGroupService implements ISysGroupService {
     let skip = start;
 
     for (let i = 0; i < IDS_SHARDS && remaining > 0; i++) {
-      const shard = await this.atomic.get<string[]>(IDS_SHARD_PREFIX + i);
+      const shard = await this.atomic.get<string[]>(IDS_SHARD_PREFIX + String(i));
       const ids = shard?.value ?? [];
       if (ids.length === 0) continue;
 
@@ -162,8 +162,8 @@ export class SysGroupService implements ISysGroupService {
     });
   }
 
-  public async #listAll(): Promise<SysGroup[]> {
-    const shardKeys = Array.from({ length: IDS_SHARDS }, (_, i) => IDS_SHARD_PREFIX + i);
+  async #listAll(): Promise<SysGroup[]> {
+    const shardKeys = Array.from({ length: IDS_SHARDS }, (_, i) => IDS_SHARD_PREFIX + String(i));
     const shards = await Promise.all(shardKeys.map(k => this.atomic.get<string[]>(k)));
     const allIds = shards.flatMap(s => s?.value ?? []);
     if (allIds.length === 0) return [];
@@ -171,16 +171,16 @@ export class SysGroupService implements ISysGroupService {
     return entries.filter((e): e is NonNullable<typeof e> => e !== null).map(e => e.value);
   }
 
-  public async #addToIndex(id: string): Promise<void> {
-    const shardKey = IDS_SHARD_PREFIX + sysgroupShard(id);
+  async #addToIndex(id: string): Promise<void> {
+    const shardKey = IDS_SHARD_PREFIX + String(sysgroupShard(id));
     const entry = await this.atomic.get<string[]>(shardKey);
     const ids = entry?.value ?? [];
     ids.push(id);
     await this.atomic.set(shardKey, ids, entry?.version ?? null);
   }
 
-  public async #removeFromIndex(id: string): Promise<void> {
-    const shardKey = IDS_SHARD_PREFIX + sysgroupShard(id);
+  async #removeFromIndex(id: string): Promise<void> {
+    const shardKey = IDS_SHARD_PREFIX + String(sysgroupShard(id));
     const entry = await this.atomic.get<string[]>(shardKey);
     if (!entry) return;
     const ids = entry.value.filter((i: string) => i !== id);
@@ -188,7 +188,7 @@ export class SysGroupService implements ISysGroupService {
   }
 
   /** Best-effort counter increment. */
-  public async #incrCounter(): Promise<void> {
+  async #incrCounter(): Promise<void> {
     for (let attempt = 0; attempt < 3; attempt++) {
       const entry = await this.atomic.get<number>(COUNT_KEY);
       const ver = await this.atomic.set(COUNT_KEY, (entry?.value ?? 0) + 1, entry?.version ?? null);
@@ -197,7 +197,7 @@ export class SysGroupService implements ISysGroupService {
   }
 
   /** Best-effort counter decrement. */
-  public async #decrCounter(): Promise<void> {
+  async #decrCounter(): Promise<void> {
     for (let attempt = 0; attempt < 3; attempt++) {
       const entry = await this.atomic.get<number>(COUNT_KEY);
       const cur = entry?.value ?? 0;
@@ -208,7 +208,7 @@ export class SysGroupService implements ISysGroupService {
   }
 
   /** Allocate next available GID — RHEL §1 GID auto-increment. */
-  public async #nextGid(): Promise<Gid> {
+  async #nextGid(): Promise<Gid> {
     for (let attempt = 0; attempt < 3; attempt++) {
       const entry = await this.atomic.get<number>(GID_COUNTER_KEY);
       const next = entry?.value ?? GID_MIN;

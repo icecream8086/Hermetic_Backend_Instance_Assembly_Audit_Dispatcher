@@ -27,7 +27,7 @@ const KERN_NAMES: Record<number, string> = {
 };
 
 export function kernLevelName(level: KernLevel): string {
-  return KERN_NAMES[level] ?? `LEVEL_${level}`;
+  return KERN_NAMES[level] ?? `LEVEL_${String(level)}`;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -105,5 +105,5 @@ export function resolveFacility(name: string): AuditFacility {
 
 /** Get the human-readable name of a numeric facility. */
 export function facilityName(facility: AuditFacility): string {
-  return FACILITY_NAMES[facility] ?? `local${facility - 16}`;
+  return FACILITY_NAMES[facility] ?? `local${String(facility - 16)}`;
 }

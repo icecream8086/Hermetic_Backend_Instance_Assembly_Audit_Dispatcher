@@ -1,9 +1,6 @@
 import { buildDag } from '../../../core/dag/graph.ts';
 import type {
   Template,
-  AssemblyTemplate,
-  ContainerTemplate,
-  ResourceTemplate,
   ResolveResult,
   ResolveError,
 } from './types.ts';

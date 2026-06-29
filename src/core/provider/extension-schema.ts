@@ -149,10 +149,10 @@ export function validateExtensionOverrides(
     // Range check
     if (field.validation) {
       if (field.validation.min !== undefined && typeof val === 'number' && val < field.validation.min) {
-        errors.push(`${field.key} must be >= ${field.validation.min}`);
+        errors.push(`${field.key} must be >= ${String(field.validation.min)}`);
       }
       if (field.validation.max !== undefined && typeof val === 'number' && val > field.validation.max) {
-        errors.push(`${field.key} must be <= ${field.validation.max}`);
+        errors.push(`${field.key} must be <= ${String(field.validation.max)}`);
       }
     }
   }

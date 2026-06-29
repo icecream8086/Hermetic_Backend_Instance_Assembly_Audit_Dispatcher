@@ -24,8 +24,8 @@ const IDLE_ALARM_MS = 300_000; // 5 min
 function podmanLogsUrl(base: string, id: string, tail?: number, since?: number): string {
   const ep = base.replace(/\/+$/, '');
   let url = `${ep}/containers/${id}/logs?follow=1&stdout=1&stderr=1`;
-  if (tail !== undefined && tail > 0) url += `&tail=${tail}`;
-  if (since !== undefined) url += `&since=${since}`;
+  if (tail !== undefined && tail > 0) url += `&tail=${String(tail)}`;
+  if (since !== undefined) url += `&since=${String(since)}`;
   return url;
 }
 
@@ -102,7 +102,7 @@ export class LogStreamDO implements DurableObject {
     this.#stop();
   }
 
-  public async #streamFromPodman(endpoint: string, containerId: string, tail?: number, since?: number): Promise<void> {
+  async #streamFromPodman(endpoint: string, containerId: string, tail?: number, since?: number): Promise<void> {
     this.#abortController = new AbortController();
     try {
       const url = podmanLogsUrl(endpoint, containerId, tail, since);
@@ -112,7 +112,7 @@ export class LogStreamDO implements DurableObject {
           this.#broadcast(JSON.stringify({ event: 'container_deleted', message: 'Container not found' }));
           this.#scheduleCleanup(10_000);
         } else {
-          this.#broadcast(JSON.stringify({ event: 'error', message: `Logs failed: ${resp.status}` }));
+          this.#broadcast(JSON.stringify({ event: 'error', message: `Logs failed: ${String(resp.status)}` }));
         }
         return;
       }
@@ -135,7 +135,7 @@ export class LogStreamDO implements DurableObject {
     }
   }
 
-  public async #checkContainer(endpoint: string, containerId: string): Promise<void> {
+  async #checkContainer(endpoint: string, containerId: string): Promise<void> {
     try {
       const resp = await fetch(podmanInspectUrl(endpoint, containerId));
       if (resp.status === 404) {

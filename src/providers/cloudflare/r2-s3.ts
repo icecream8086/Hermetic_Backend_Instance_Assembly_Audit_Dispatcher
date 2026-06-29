@@ -38,9 +38,9 @@ export class CloudflareR2S3Provider extends S3ClientBase {
         const bodyText = await res.clone().text().catch(() => '');
         if (bodyText.includes('RequestTimeTooSkewed') || bodyText.includes('Skewed')) continue;
       }
-      throw new Error(`R2 ${method} failed: ${res.status} ${await res.text()}`);
+      throw new Error(`R2 ${method} failed: ${String(res.status)} ${await res.text()}`);
     }
-    throw new Error(`R2 ${method} failed after ${CLOCK_SKEW_RETRIES} retries`);
+    throw new Error(`R2 ${method} failed after ${String(CLOCK_SKEW_RETRIES)} retries`);
   }
 
   public async getPresignedUrl(bucket: string, key: string, expiresInSeconds = 3600): Promise<string> {

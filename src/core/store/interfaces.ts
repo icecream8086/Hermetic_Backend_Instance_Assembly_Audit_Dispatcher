@@ -13,6 +13,7 @@ export interface IStoreTransaction {
   /** 批量读多个 key。后端保证在 DO 上合并为一次 batchGet。 */
   getMany<T>(keys: string[]): Promise<(T | null)[]>;
 
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- interface contract requires generics
   set<T>(key: string, value: T, ttlSeconds?: number): void;
 }
 
@@ -24,9 +25,20 @@ export interface IStoreTransaction {
  */
 export class TransactRetryExhausted extends Error {
   public constructor(retries: number, cause?: unknown) {
-    super(`Transaction failed after ${retries} retries`);
+    super(`Transaction failed after ${String(retries)} retries`);
     this.name = 'TransactRetryExhausted';
     this.cause = cause;
+  }
+}
+
+/**
+ * Error thrown when a transaction fails due to an optimistic concurrency conflict.
+ * The caller should catch this and retry the transaction if appropriate.
+ */
+export class TransactConflictError extends Error {
+  public constructor(message?: string) {
+    super(message ?? 'Transaction conflict detected. One or more keys were modified concurrently.');
+    this.name = 'TransactConflictError';
   }
 }
 
@@ -57,6 +69,7 @@ export async function withRetry<T>(
  */
 export interface IAtomicStore {
   /** Read current value and its version. Returns null if key does not exist. */
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- interface contract requires generics
   get<T>(key: string): Promise<{ value: T; version: VersionId } | null>;
 
   /**
@@ -65,6 +78,7 @@ export interface IAtomicStore {
    * Returns the new version on success, or null on conflict.
    * Pass `ttlSeconds` to set server-side TTL on backends that support it (e.g. KV).
    */
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- interface contract requires generics
   set<T>(key: string, value: T, expectedVersion: VersionId | null, ttlSeconds?: number): Promise<VersionId | null>;
 
   /** Execute operations inside a serialized atomic transaction. */
@@ -86,16 +100,6 @@ export interface IQueryStore {
 
 export type QueryParams = Record<string, unknown> | unknown[];
 
-/**
- * Error thrown when a transaction fails due to an optimistic concurrency conflict.
- * The caller should catch this and retry the transaction if appropriate.
- */
-export class TransactConflictError extends Error {
-  public constructor(message?: string) {
-    super(message ?? 'Transaction conflict detected. One or more keys were modified concurrently.');
-    this.name = 'TransactConflictError';
-  }
-}
 
 /**
  * Binary archive layer: large objects and log backups.

@@ -163,19 +163,19 @@ export class BucketService {
 
   // ─── Internal helpers ───
 
-  public async #listAll(): Promise<RegionBucket[]> {
+  async #listAll(): Promise<RegionBucket[]> {
     const idx = await this.atomic.get<string[]>(BUCKET_INDEX_KEY);
     if (!idx) return [];
     const entries = await Promise.all(idx.value.map(id => this.atomic.get<RegionBucket>(BUCKET_PREFIX + id)));
     return entries.filter(e => e).map(e => e!.value);
   }
 
-  public async #addToIndex(id: string): Promise<void> {
+  async #addToIndex(id: string): Promise<void> {
     const idx = await this.atomic.get<string[]>(BUCKET_INDEX_KEY);
     await this.atomic.set(BUCKET_INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
   }
 
-  public async #removeFromIndex(id: string): Promise<void> {
+  async #removeFromIndex(id: string): Promise<void> {
     const idx = await this.atomic.get<string[]>(BUCKET_INDEX_KEY);
     if (!idx) return;
     await this.atomic.set(BUCKET_INDEX_KEY, idx.value.filter((i: string) => i !== id), idx.version);

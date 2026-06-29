@@ -59,7 +59,7 @@ export class CloudflareDnsProvider implements IDnsProvider {
     }
   }
 
-  public async #createRecord(input: UpdateDnsRecordInput): Promise<void> {
+  async #createRecord(input: UpdateDnsRecordInput): Promise<void> {
     const res = await this.#fetch('POST',
       `${CF_API_BASE_URL}/zones/${input.zoneId}/dns_records`,
       input,
@@ -71,7 +71,7 @@ export class CloudflareDnsProvider implements IDnsProvider {
     }
   }
 
-  public async #fetch(method: string, url: string, bodyInput?: UpdateDnsRecordInput): Promise<Response> {
+  async #fetch(method: string, url: string, bodyInput?: UpdateDnsRecordInput): Promise<Response> {
     const headers = await this.#headers();
     const init: RequestInit = { method, headers };
     if (bodyInput) {
@@ -86,7 +86,7 @@ export class CloudflareDnsProvider implements IDnsProvider {
     return fetch(url, init);
   }
 
-  public async #headers(): Promise<Record<string, string>> {
+  async #headers(): Promise<Record<string, string>> {
     const base = { 'Content-Type': 'application/json' };
     const { headers } = await this.#auth.sign({ method: 'GET', url: '', headers: base });
     return headers;
@@ -104,5 +104,5 @@ async function parseCfResponse(res: Response): Promise<CfApiResponse> {
 
 function formatErrors(errors: readonly CfError[]): string {
   if (errors.length === 0) return 'unknown error';
-  return errors.map(e => `[${e.code}] ${e.message}`).join('; ');
+  return errors.map(e => `[${String(e.code)}] ${e.message}`).join('; ');
 }

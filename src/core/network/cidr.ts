@@ -18,7 +18,7 @@ export function parseCidr(s: string): CidrBlock {
     throw new Error(`Invalid IPv4 address: ${addr}`);
   }
   const bits = parseInt(bitsStr, 10);
-  if (isNaN(bits) || bits < 1 || bits > 32) throw new Error(`Invalid prefix length: ${bits}`);
+  if (isNaN(bits) || bits < 1 || bits > 32) throw new Error(`Invalid prefix length: ${String(bits)}`);
   const raw = ((octets[0]! << 24) | (octets[1]! << 16) | (octets[2]! << 8) | octets[3]!) >>> 0;
   // Mask to network address — >>> 0 to keep unsigned after signed 32-bit &
   const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
@@ -32,7 +32,7 @@ export function formatCidr(block: CidrBlock): string {
   const o2 = (ip >>> 16) & 0xFF;
   const o3 = (ip >>> 8) & 0xFF;
   const o4 = ip & 0xFF;
-  return `${o1}.${o2}.${o3}.${o4}/${block.bits}`;
+  return `${[o1, o2, o3, o4].join('.')}/${String(block.bits)}`;
 }
 
 /** Get the broadcast address of a CIDR block. */
@@ -59,7 +59,7 @@ export function contains(outer: CidrBlock, inner: CidrBlock): boolean {
  * Yields each subnet CIDR block.
  */
 export function* subnets(parent: CidrBlock, prefixLen: number): Generator<CidrBlock> {
-  if (prefixLen <= parent.bits) throw new Error(`prefixLen (${prefixLen}) must be > parent bits (${parent.bits})`);
+  if (prefixLen <= parent.bits) throw new Error(`prefixLen (${String(prefixLen)}) must be > parent bits (${String(parent.bits)})`);
   const step = 2 ** (32 - prefixLen);
   const end = broadcast(parent) + 1;
   for (let ip = parent.ip; ip < end; ip += step) {

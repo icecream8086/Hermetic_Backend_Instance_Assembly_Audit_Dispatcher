@@ -51,7 +51,7 @@ export class BearerTokenProvider implements IAuthProvider {
         ...(this._clientSecret ? { client_secret: this._clientSecret } : {}),
       }),
     });
-    if (!resp.ok) throw new Error(`Token refresh failed: ${resp.status}`);
+    if (!resp.ok) throw new Error(`Token refresh failed: ${String(resp.status)}`);
     const data = await resp.json() as any;
     this.token = data.access_token ?? data.token ?? data.accessToken ?? '';
     this.expiresAt = data.expires_in ? Date.now() + data.expires_in * 1000 : 0;
@@ -144,7 +144,7 @@ export class AkSkProvider implements IAuthProvider {
       AccessKeyId: this._accessKeyId,
       SignatureMethod: 'HMAC-SHA1',
       SignatureVersion: '1.0',
-      SignatureNonce: `${Date.now()}${Math.random().toString(36).slice(2)}`,
+      SignatureNonce: `${String(Date.now())}${Math.random().toString(36).slice(2)}`,
       Timestamp: new Date().toISOString().replace(/\.\d+Z$/, 'Z'),
     };
 

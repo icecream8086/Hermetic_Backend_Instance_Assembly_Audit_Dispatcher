@@ -13,7 +13,7 @@ export class StubMetricsProvider implements IMetricsProvider {
     for (let i = 0; i < 10; i++) {
       const t = i + 1; // 1..10, deterministic
       snapshots.push({
-        id: `stub-metric-${i}`,
+        id: `stub-metric-${String(i)}`,
         sandboxId: input.providerId,
         timestamp: now - (9 - i) * 60_000,
         cpu: { usageNanoCores: t * 100_000_000, usageCores: t * 0.2 },

@@ -93,6 +93,7 @@ export class CachedAtomicStore implements IAtomicStore {
     public readonly metrics?: AtomicStoreMetrics,
   ) {}
 
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- interface contract requires generics
   public async get<T>(key: string): Promise<{ value: T; version: VersionId } | null> {
     this.metrics?.recordGet();
 
@@ -125,6 +126,7 @@ export class CachedAtomicStore implements IAtomicStore {
     return miss;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- interface contract requires generics
   public async set<T>(key: string, value: T, expectedVersion: VersionId | null, ttlSeconds?: number): Promise<VersionId | null> {
     this.metrics?.recordSet();
     const version = await this.coordinator.set(key, value, expectedVersion, ttlSeconds);

@@ -151,7 +151,7 @@ export class SharedLinkService {
 
   // ─── Password helpers ───
 
-  public async #hashPassword(password: string): Promise<string> {
+  async #hashPassword(password: string): Promise<string> {
     const encoder = new TextEncoder();
     const salt = crypto.getRandomValues(new Uint8Array(16));
     const key = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits']);
@@ -164,7 +164,7 @@ export class SharedLinkService {
     return `$pbkdf2$${saltB64}$${hashB64}`;
   }
 
-  public async #verifyPassword(password: string, stored: string): Promise<boolean> {
+  async #verifyPassword(password: string, stored: string): Promise<boolean> {
     const parts = stored.split('$');
     if (parts.length !== 4 || parts[1] !== 'pbkdf2') return false;
     const salt = Uint8Array.from(atob(parts[2]!), c => c.charCodeAt(0));

@@ -90,7 +90,7 @@ export class WorkflowSecretService {
     return result;
   }
 
-  public async #resolveValue(workflowId: string, value: string): Promise<string> {
+  async #resolveValue(workflowId: string, value: string): Promise<string> {
     const pattern = /\$\{\{\s*secrets\.(\w+)\s*\}\}/g;
     let resolved = value;
     for (const match of value.matchAll(pattern)) {
@@ -102,7 +102,7 @@ export class WorkflowSecretService {
     return resolved;
   }
 
-  public async #findByKey(workflowId: string, key: string): Promise<WorkflowSecret | null> {
+  async #findByKey(workflowId: string, key: string): Promise<WorkflowSecret | null> {
     const idx = await this.atomic.get<string[]>(IDX);
     if (!idx) return null;
     for (const id of idx.value) {

@@ -152,7 +152,7 @@ export class OrgService {
     await this.atomic.set(PFX_ORG + orgId, updated, e.version);
   }
 
-  public async #addToIdx(key: string, id: string): Promise<void> {
+  async #addToIdx(key: string, id: string): Promise<void> {
     const idx = await this.atomic.get<string[]>(key);
     await this.atomic.set(key, [...(idx?.value ?? []), id], idx?.version ?? null);
   }
@@ -197,7 +197,7 @@ export class ProjectService {
     return entries.filter(p => p.orgId === orgId);
   }
 
-  public async #addToIdx(key: string, id: string): Promise<void> {
+  async #addToIdx(key: string, id: string): Promise<void> {
     const idx = await this.atomic.get<string[]>(key);
     await this.atomic.set(key, [...(idx?.value ?? []), id], idx?.version ?? null);
   }
@@ -246,7 +246,7 @@ export class ApprovalService {
     return entries;
   }
 
-  public async #addToIdx(key: string, id: string): Promise<void> {
+  async #addToIdx(key: string, id: string): Promise<void> {
     const idx = await this.atomic.get<string[]>(key);
     await this.atomic.set(key, [...(idx?.value ?? []), id], idx?.version ?? null);
   }

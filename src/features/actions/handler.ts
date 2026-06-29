@@ -10,17 +10,15 @@ import { CreateWorkflowSchema, UpdateWorkflowSchema, TriggerWorkflowSchema } fro
 import { WorkflowRunner } from './runner.ts';
 
 const { parse: parseJson } = JSON;
-import { ActionRegistry, type CreateActionInput } from './registry.ts';
+import { ActionRegistry } from './registry.ts';
 import type { TriggerConfig, JobDef } from './types.ts';
 import { registerCronTrigger } from './triggers.ts';
 import { readStepLogs } from './logs.ts';
 import { WorkflowSecretService } from './secrets.ts';
 import { SharedLinkService } from './shared-link.ts';
 import { RunnerRegistry } from './runner-registry.ts';
-import type { RunnerHeartbeatInput } from './runner-registry.ts';
 import { BlobWorkspaceStore } from './workspace.ts';
 import { OrgService, ProjectService, ApprovalService } from './extensions.ts';
-import type { CreateOrgInput, CreateProjectInput } from './extensions.ts';
 import { DashboardService } from './dashboard.ts';
 import { TEMPLATES, TEMPLATE_METAS } from './templates.generated.ts';
 import {
@@ -274,7 +272,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
 
     deps.audit.write({
       level: 5, facility: 'dag-scheduler',
-      message: `DagRun ${run.id} created via scheduler for workflow ${entry.value.name}`,
+      message: `DagRun ${String(run.id)} created via scheduler for workflow ${entry.value.name}`,
       metadata: { dagId: dag.id, dagRunId: run.id, trigger: 'manual', taskCount: dag.tasks.length },
     });
 
@@ -528,20 +526,20 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
     // Extract owner from auth context if available
     const ownerId = c.var.currentUser?.id ?? 'anonymous';
     const link = await sharedLinkService.create(ownerId, body);
-    const { passwordHash, ...safe } = link;
+    const { passwordHash: _passwordHash, ...safe } = link;
     return c.json(ok(safe), 201);
   });
 
   router.get('/shared-links', async (c) => {
     const ownerId = c.var.currentUser?.id ?? 'anonymous';
     const links = await sharedLinkService.list(ownerId);
-    return c.json(ok(links.map(({ passwordHash, ...safe }) => safe)));
+    return c.json(ok(links.map(({ passwordHash: _passwordHash, ...safe }) => safe)));
   });
 
   router.get('/shared-links/:id', async (c) => {
     const link = await sharedLinkService.get(c.req.param('id'));
     if (!link) throw new AppError(404, 'LINK_NOT_FOUND', 'Shared link not found');
-    const { passwordHash, ...safe } = link;
+    const { passwordHash: _passwordHash, ...safe } = link;
     return c.json(ok(safe));
   });
 
@@ -602,7 +600,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
     if (marked > 0) {
       deps.audit.write({
         level: 4, facility: 'runner-registry',
-        message: `Marked ${marked} stale runner(s) offline`,
+        message: `Marked ${String(marked)} stale runner(s) offline`,
         metadata: { count: marked },
       });
     }

@@ -28,7 +28,7 @@ export function sanitizeProbe(p: ProbeSpec): ProbeSpec {
     return {
       ...p,
       httpGet: {
-        port: Number(p.httpGet.port),
+        port: p.httpGet.port,
         path: (p.httpGet.path ?? '/').replace(SHELL_META, ''),
         ...(p.httpGet.scheme !== undefined ? { scheme: p.httpGet.scheme } : {}),
       },
@@ -37,7 +37,7 @@ export function sanitizeProbe(p: ProbeSpec): ProbeSpec {
   if (p.tcpSocket) {
     return {
       ...p,
-      tcpSocket: { port: Number(p.tcpSocket.port) },
+      tcpSocket: { port: p.tcpSocket.port },
     };
   }
   return p;

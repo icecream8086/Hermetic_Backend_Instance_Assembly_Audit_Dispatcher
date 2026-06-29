@@ -16,7 +16,7 @@ export class FileQueryStore implements IQueryStore {
     this.#dataDir = resolve(basePath, 'query');
   }
 
-  public async #ensureDir(): Promise<void> {
+  async #ensureDir(): Promise<void> {
     await mkdir(this.#dataDir, { recursive: true });
   }
 
@@ -24,7 +24,7 @@ export class FileQueryStore implements IQueryStore {
     return join(this.#dataDir, `${table}.json`);
   }
 
-  public async #readTable(table: string): Promise<Record<string, unknown>[]> {
+  async #readTable(table: string): Promise<Record<string, unknown>[]> {
     try {
       const raw = await readFile(this.#tablePath(table), 'utf-8');
       return parseJson(raw) as Record<string, unknown>[];
@@ -33,7 +33,7 @@ export class FileQueryStore implements IQueryStore {
     }
   }
 
-  public async #writeTable(table: string, rows: Record<string, unknown>[]): Promise<void> {
+  async #writeTable(table: string, rows: Record<string, unknown>[]): Promise<void> {
     await writeFile(this.#tablePath(table), JSON.stringify(rows), 'utf-8');
   }
 
@@ -68,7 +68,7 @@ export class FileQueryStore implements IQueryStore {
       if (Array.isArray(params)) {
         const newRow: Record<string, unknown> = {};
         for (let i = 0; i < params.length; i++) {
-          newRow[`col${i}`] = params[i];
+          newRow[`col${String(i)}`] = params[i];
         }
         rows.push(newRow);
         await this.#writeTable(table, rows);

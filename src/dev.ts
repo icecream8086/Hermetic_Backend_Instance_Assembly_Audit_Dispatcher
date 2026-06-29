@@ -61,11 +61,11 @@ const instance = await createApp(config);
 // Run seeding synchronously in dev mode — no ctx.waitUntil() available locally.
 // On first run this seeds policy lib, default instance, and templates (~100 I/O ops).
 // Subsequent starts only check gate keys (negligible cost).
-instance.seed().catch((err) => { console.error('[dev] seed error:', err); });
+instance.seed().catch((err: unknown) => { console.error('[dev] seed error:', err); });
 
 serve({ fetch: instance.app.fetch, port: config.server.port }, (info) => {
    
-  console.log(`[${new Date().toISOString()}] INFO: [dev] Server listening on http://localhost:${info.port}`);
+  console.log(`[${new Date().toISOString()}] INFO: [dev] Server listening on http://localhost:${String(info.port)}`);
 });
 
 process.on('SIGINT', () => {

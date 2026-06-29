@@ -49,9 +49,9 @@ export class AwsS3Provider extends S3ClientBase {
           }
         }
       }
-      throw new Error(`S3 ${method} failed: ${res.status} ${await res.text()}`);
+      throw new Error(`S3 ${method} failed: ${String(res.status)} ${await res.text()}`);
     }
-    throw new Error(`S3 ${method} failed after ${CLOCK_SKEW_RETRIES} retries`);
+    throw new Error(`S3 ${method} failed after ${String(CLOCK_SKEW_RETRIES)} retries`);
   }
 
   public async getPresignedUrl(bucket: string, key: string, expiresInSeconds = 3600): Promise<string> {

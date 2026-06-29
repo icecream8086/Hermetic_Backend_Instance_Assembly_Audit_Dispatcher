@@ -308,6 +308,7 @@ export class DurableObjectAtomicStore implements IAtomicStore {
     return this.#ns.get(id);
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- interface contract requires generics
   public async get<T>(key: string): Promise<{ value: T; version: VersionId } | null> {
     const resp = await this.#stubForKey(key).fetch('https://do/op', {
       method: 'POST',
@@ -321,6 +322,7 @@ export class DurableObjectAtomicStore implements IAtomicStore {
     return entry;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- interface contract requires generics
   public async set<T>(key: string, value: T, expectedVersion: VersionId | null, ttlSeconds?: number): Promise<VersionId | null> {
     const resp = await this.#stubForKey(key).fetch('https://do/op', {
       method: 'POST',
@@ -424,6 +426,7 @@ export class DurableObjectAtomicStore implements IAtomicStore {
           return localResults;
         });
       },
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- interface contract requires generics
       set: <V>(key: string, value: V, _ttlSeconds?: number) => {
         deferredWrites.push({ key, value });
       },

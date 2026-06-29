@@ -65,17 +65,17 @@ export class QuotaService {
     const usage = await this.getUsage(userId);
 
     if (quota.maxSandboxes && usage.sandboxes >= quota.maxSandboxes) {
-      const err: any = new Error(`Sandbox quota exceeded: ${usage.sandboxes}/${quota.maxSandboxes}`);
+      const err: any = new Error(`Sandbox quota exceeded: ${String(usage.sandboxes)}/${String(quota.maxSandboxes)}`);
       err.status = 429;
       throw err;
     }
     if (quota.maxCpu && (usage.cpu + cpu) > quota.maxCpu) {
-      const err: any = new Error(`CPU quota exceeded: ${usage.cpu + cpu}/${quota.maxCpu}`);
+      const err: any = new Error(`CPU quota exceeded: ${String(usage.cpu + cpu)}/${String(quota.maxCpu)}`);
       err.status = 429;
       throw err;
     }
     if (quota.maxMemory && (usage.memory + memory) > quota.maxMemory) {
-      const err: any = new Error(`Memory quota exceeded: ${usage.memory + memory}/${quota.maxMemory}`);
+      const err: any = new Error(`Memory quota exceeded: ${String(usage.memory + memory)}/${String(quota.maxMemory)}`);
       err.status = 429;
       throw err;
     }

@@ -183,7 +183,7 @@ export class ContainerSecretService implements IContainerSecretService {
       }
       return new TextDecoder().decode(buf);
     }
-    throw new AppError(500, 'SECRET_INVALID_TYPE', `Unknown secret type: ${secret.type}`);
+    throw new AppError(500, 'SECRET_INVALID_TYPE', `Unknown secret type: ${String(secret.type)}`);
   }
 
   public async canAccess(id: string, scopeId: string): Promise<boolean> {
@@ -199,14 +199,14 @@ export class ContainerSecretService implements IContainerSecretService {
 
   // ─── Encryption helpers ───
 
-  public async #encryptFields(s: ContainerSecret): Promise<ContainerSecret> {
+  async #encryptFields(s: ContainerSecret): Promise<ContainerSecret> {
     if (s.keyType === 'sealed-box') return s; // already sealed
     const enc = this.encryption;
     if (!enc || !s.value) return s;
     return { ...s, value: await enc.encrypt(s.value) };
   }
 
-  public async #decryptFields(s: ContainerSecret): Promise<ContainerSecret> {
+  async #decryptFields(s: ContainerSecret): Promise<ContainerSecret> {
     if (s.keyType === 'sealed-box' && s.sealedForUserId && this.keyring) {
       const kp = await this.keyring.ensureSealedBox(s.sealedForUserId);
       const opened = await SealedBox.open(kp.privateKey, s.value!);
@@ -219,12 +219,12 @@ export class ContainerSecretService implements IContainerSecretService {
 
   // ─── Index helpers ───
 
-  public async #addToIndex(id: string): Promise<void> {
+  async #addToIndex(id: string): Promise<void> {
     const idx = await this.atomic.get<string[]>(INDEX_KEY);
     await this.atomic.set(INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
   }
 
-  public async #removeFromIndex(id: string): Promise<void> {
+  async #removeFromIndex(id: string): Promise<void> {
     const idx = await this.atomic.get<string[]>(INDEX_KEY);
     if (!idx) return;
     await this.atomic.set(INDEX_KEY, idx.value.filter((i: string) => i !== id), idx.version);

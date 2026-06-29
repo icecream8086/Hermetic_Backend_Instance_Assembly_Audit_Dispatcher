@@ -2,9 +2,10 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import type { ISandboxService } from './interfaces.ts';
 import { createSandboxId } from './types.ts';
+import type { CreateSandboxInput } from './types.ts';
 import type { PodSpec } from '../../core/pod/types.ts';
 import { createPodId } from '../../core/pod/types.ts';
-import { PodService } from '../../core/pod/service.ts';
+import type { PodService } from '../../core/pod/service.ts';
 import type { IProviderRegistry } from '../../core/provider/interfaces.ts';
 import type { RouteMeta } from '../../core/http-docs/types.ts';
 import type { AppContext } from '../../core/deps.ts';
@@ -190,7 +191,7 @@ export function createSandboxRouter(
     { const r = await requirePerm(c, permissionChecker, 'read', 'sandbox'); if (r) return r; }
     const status = c.req.query('status') as any || undefined;
     const apiVer = c.req.query('apiVersion');
-    const podPhase = c.req.query('podPhase') as string || undefined;
+    const podPhase = c.req.query('podPhase')! || undefined;
     const limit = parseInt(c.req.query('limit') ?? '50');
     const cursor = c.req.query('cursor');
     let result = await svc.list?.(status, limit, cursor) ?? { items: [] };
@@ -325,7 +326,7 @@ export function createSandboxRouter(
     const ownerId = sandbox?.config?.creatorId;
     { const r = await requirePerm(c, permissionChecker, 'update', 'sandbox', ownerId); if (r) return r; }
     try {
-      const body = await c.req.json<Partial<import('./types.ts').CreateSandboxInput>>();
+      const body = await c.req.json<Partial<CreateSandboxInput>>();
       const result = await svc.update(id, body);
       return c.json(ok(result));
     } catch (e: any) {

@@ -138,7 +138,7 @@ export function rateLimit(config: RateLimitConfig): MiddlewareHandler {
     bucket.lastRefill = now;
 
     if (bucket.tokens < 1) {
-      throw new AppError(429, 'RATE_LIMITED', `Rate limit exceeded — ${burst} req / ${intervalMs}ms`);
+      throw new AppError(429, 'RATE_LIMITED', `Rate limit exceeded — ${String(burst)} req / ${String(intervalMs)}ms`);
     }
 
     bucket.tokens -= 1;

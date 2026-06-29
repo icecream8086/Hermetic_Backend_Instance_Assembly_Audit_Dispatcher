@@ -654,7 +654,7 @@ async function gcUpdatePodState(
     const idxEntry = await atomic.get<string[]>('pod:ids');
     if (idxEntry) await atomic.set('pod:ids', idxEntry.value.filter((i: string) => i !== pid), idxEntry.version);
 
-    console.log(formatDmesgLine(`pod DELETED (${reason}) id=${pid} name=${name} provider=${providerId} uptime=${Date.now() - createdAt}ms`));
+    console.log(formatDmesgLine(`pod DELETED (${reason}) id=${pid} name=${name} provider=${providerId} uptime=${String(Date.now() - createdAt)}ms`));
     audit?.write({
       level: 4, facility: 'pod-service',
       message: `Pod auto-deleted (${reason}) — ${pid}`,
@@ -686,7 +686,7 @@ async function gcUpdateState(
     if (!ver) continue;
     const idxEntry = await atomic.get<string[]>('sandbox:ids');
     if (idxEntry) await atomic.set('sandbox:ids', idxEntry.value.filter((i: string) => i !== sid), idxEntry.version);
-    console.log(formatDmesgLine(`sandbox DELETED (${reason}) id=${sid} name=${name} provider=${providerId} containers=${containerCount} uptime=${Date.now() - createdAt}ms`));
+    console.log(formatDmesgLine(`sandbox DELETED (${reason}) id=${sid} name=${name} provider=${providerId} containers=${String(containerCount)} uptime=${String(Date.now() - createdAt)}ms`));
     audit?.write({
       level: 4, facility: 'sandbox-service',
       message: `Sandbox auto-deleted (${reason}) — ${sid}`,

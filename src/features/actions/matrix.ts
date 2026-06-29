@@ -74,7 +74,7 @@ export class MatrixExpander {
       : combinations;
 
     return filtered.map((vars, _i) => {
-      const labelParts = Object.entries(vars).map(([k, v]) => `${k}=${v}`);
+      const labelParts = Object.entries(vars).map(([k, v]) => `${k}=${String(v)}`);
       return {
         name: `${jobName} (${labelParts.join(', ')})`,
         matrixVars: vars,

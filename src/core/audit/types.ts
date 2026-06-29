@@ -86,7 +86,7 @@ export interface LogQuery {
 
 /** Encode a LogCursor to its string representation. */
 export function encodeCursor(c: LogCursor): string {
-  return `s=${c.s};i=${c.i};b=${c.b};m=${c.m};t=${c.t};x=${c.x}`;
+  return `s=${c.s};i=${String(c.i)};b=${c.b};m=${String(c.m)};t=${String(c.t)};x=${c.x}`;
 }
 
 /** Decode a cursor string back to LogCursor. Returns null if format is invalid. */

@@ -33,7 +33,7 @@ export class AlibabaEciImageProvider implements IImageProvider {
     const params: Record<string, string | undefined> = {
       RegionId: this.region,
       Image: image,
-      ImageCacheName: `cache-${name.replace(/[^a-zA-Z0-9_-]/g, '_')}-${Date.now()}`,
+      ImageCacheName: `cache-${name.replace(/[^a-zA-Z0-9_-]/g, '_')}-${String(Date.now())}`,
     };
 
     // Build registry credentials list
@@ -41,9 +41,9 @@ export class AlibabaEciImageProvider implements IImageProvider {
     const creds = regCred ? [regCred] : (this.registryCredentials ?? []);
     if (creds.length > 0) {
       creds.forEach((c, i) => {
-        params[`ImageRegistryCredential.${i + 1}.Server`] = c.server;
-        params[`ImageRegistryCredential.${i + 1}.UserName`] = c.userName;
-        params[`ImageRegistryCredential.${i + 1}.Password`] = c.password;
+        params[`ImageRegistryCredential.${String(i + 1)}.Server`] = c.server;
+        params[`ImageRegistryCredential.${String(i + 1)}.UserName`] = c.userName;
+        params[`ImageRegistryCredential.${String(i + 1)}.Password`] = c.password;
       });
     }
 
@@ -77,7 +77,7 @@ export class AlibabaEciImageProvider implements IImageProvider {
         created: c.CreationTime ? new Date(c.CreationTime).getTime() : undefined,
         size: c.FlashSize ?? c.Size ?? undefined,
       }));
-    } catch (e) {
+    } catch (_e) {
       return [];
     }
   }

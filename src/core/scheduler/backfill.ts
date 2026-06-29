@@ -98,7 +98,7 @@ export async function backfillDagRuns(
     }
 
     const dagRun: Omit<DagRun, 'version'> = {
-      id: createDagRunId(`dr_${dagDef.id}_${execDate}_${crypto.randomUUID()}`),
+      id: createDagRunId(`dr_${dagDef.id}_${String(execDate)}_${crypto.randomUUID()}`),
       dagId: dagDef.id,
       status: 'QUEUED',
       executionDate: execDate,
@@ -111,11 +111,11 @@ export async function backfillDagRuns(
       if (ok) {
         result.created++;
       } else {
-        result.errors.push(`Factory returned false for execution date ${execDate}`);
+        result.errors.push(`Factory returned false for execution date ${String(execDate)}`);
       }
     } catch (err) {
       result.errors.push(
-        `Failed to create DagRun for ${execDate}: ${err instanceof Error ? err.message : String(err)}`,
+        `Failed to create DagRun for ${String(execDate)}: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }

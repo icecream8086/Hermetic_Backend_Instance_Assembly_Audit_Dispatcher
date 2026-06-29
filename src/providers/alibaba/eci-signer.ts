@@ -67,4 +67,3 @@ export async function rpcCall(
 function stringifyIfNeeded(v: unknown): string {
   try { return z.string().parse(v); } catch { return JSON.stringify(v); }
 }
-}

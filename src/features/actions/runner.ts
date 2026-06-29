@@ -10,7 +10,6 @@ import {
   type JobRun,
   type JobDef,
   type StepDef,
-  type DnsStepDef,
   type RunStepDef,
   type UsesStepDef,
   type WorkflowRunId,
@@ -31,7 +30,7 @@ import type { ActionRegistry } from './registry.ts';
 import { MatrixExpander } from './matrix.ts';
 import { DashboardService } from './dashboard.ts';
 import { generateVersionId } from '../../core/brand.ts';
-import { PodService } from '../../core/pod/service.ts';
+import type { PodService } from '../../core/pod/service.ts';
 import type { PodSpec } from '../../core/pod/types.ts';
 import { createRegionId } from '../../core/region/types.ts';
 import { createInstanceId } from '../../core/region/instance.ts';
@@ -231,7 +230,7 @@ export class WorkflowRunner {
 
   // ─── Private ───
 
-  public async #createJobRuns(wf: WorkflowDef, wfRunId: WorkflowRunId): Promise<WorkflowRun['jobRunRefs']> {
+  async #createJobRuns(wf: WorkflowDef, wfRunId: WorkflowRunId): Promise<WorkflowRun['jobRunRefs']> {
     const refs: { jobName: string; jobRunId: JobRunId }[] = [];
     const expander = new MatrixExpander();
 
@@ -311,7 +310,7 @@ export class WorkflowRunner {
     };
   }
 
-  public async #enqueueReadyJobs(wf: WorkflowDef, run: WorkflowRun): Promise<void> {
+  async #enqueueReadyJobs(wf: WorkflowDef, run: WorkflowRun): Promise<void> {
     const { atomic } = this.deps.stores;
 
     for (const ref of run.jobRunRefs) {
@@ -363,7 +362,7 @@ export class WorkflowRunner {
     }
   }
 
-  public async #checkWorkflowCompletion(run: WorkflowRun): Promise<void> {
+  async #checkWorkflowCompletion(run: WorkflowRun): Promise<void> {
     const { atomic } = this.deps.stores;
     const statuses: JobRunStatus[] = [];
     for (const ref of run.jobRunRefs) {
@@ -394,12 +393,12 @@ export class WorkflowRunner {
     }
   }
 
-  public async #provisionJobSandbox(
+  async #provisionJobSandbox(
     jobDef: JobDef,
     env: Record<string, string>,
     jobName: string,
   ): Promise<{ sandboxId: string; podId?: string }> {
-    const instanceId = jobDef.instanceId as string | undefined;
+    const instanceId = jobDef.instanceId;
     const region = jobDef.region ?? 'local';
     const mergedEnv = { ...env, ...jobDef.env };
     const container = jobDef.containers?.[0] ?? jobDef.container;
@@ -419,7 +418,7 @@ export class WorkflowRunner {
     const provider = await this.deps.providers.resolveContainer(createInstanceId(instanceId));
 
     const result = await provider.create({
-      name: `action-${jobName}-${Date.now()}`,
+      name: `action-${jobName}-${String(Date.now())}`,
       region: createRegionId(region),
       ...(instanceId ? { instanceId: createInstanceId(instanceId) } : {}),
       cpu: container.resources?.cpu ?? 1,
@@ -450,7 +449,7 @@ export class WorkflowRunner {
     const envList = Object.entries(env).map(([name, value]) => ({ name, value }));
     return {
       metadata: {
-        name: `action-${jobName}-${Date.now()}`,
+        name: `action-${jobName}-${String(Date.now())}`,
         labels: { job: jobName, owner: 'actions' },
       },
       spec: {
@@ -474,7 +473,7 @@ export class WorkflowRunner {
     };
   }
 
-  public async #executeSteps(
+  async #executeSteps(
     steps: readonly StepDef[],
     env: Record<string, string>,
     sandboxId: string,
@@ -538,7 +537,7 @@ export class WorkflowRunner {
   }
 
   /** Execute a `run:` step inside the container via provider.exec(). */
-  public async #executeRunStep(
+  async #executeRunStep(
     step: RunStepDef,
     env: Record<string, string>,
     sandboxId: string,
@@ -566,13 +565,13 @@ export class WorkflowRunner {
 
     if (result?.exitCode !== 0) {
       throw new Error(
-        `Command exited with code ${result?.exitCode ?? -1}: ${script.slice(0, 200)}`,
+        `Command exited with code ${String(result?.exitCode ?? -1)}: ${script.slice(0, 200)}`,
       );
     }
   }
 
   /** Execute a `uses:` step by resolving the action reference and running it. */
-  public async #executeUsesStep(
+  async #executeUsesStep(
     step: UsesStepDef,
     env: Record<string, string>,
     sandboxId: string,
@@ -591,7 +590,7 @@ export class WorkflowRunner {
           timeout: step.timeout ? step.timeout * 1000 : undefined,
         });
         if (result?.exitCode !== 0) {
-          throw new Error(`Action ${step.uses} failed with exit ${result?.exitCode}`);
+          throw new Error(`Action ${String(step.uses)} failed with exit ${String(result?.exitCode)}`);
         }
         return;
       }
@@ -615,7 +614,7 @@ export class WorkflowRunner {
         timeout: step.timeout ? step.timeout * 1000 : undefined,
       });
       if (result?.exitCode !== 0) {
-        throw new Error(`Action ${step.uses} failed with exit ${result?.exitCode}`);
+        throw new Error(`Action ${String(step.uses)} failed with exit ${String(result?.exitCode)}`);
       }
     }
   }
@@ -625,7 +624,7 @@ export class WorkflowRunner {
     return { name, status: 'Queued' };
   }
 
-  public async #addToIndex(indexKey: string, id: string): Promise<void> {
+  async #addToIndex(indexKey: string, id: string): Promise<void> {
     const { atomic } = this.deps.stores;
     const idx = await atomic.get<string[]>(indexKey);
     await atomic.set(indexKey, [...(idx?.value ?? []), id], idx?.version ?? null);

@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/restrict-template-expressions -- stub implementation */
+
 // ─── Stub OCI Runtime — Container Simulator ───
 // Models five dimensions: container info, network, storage, logs, health check.
 // Cloud orchestration creates instances → OCI Runtime manages them.

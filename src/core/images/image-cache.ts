@@ -155,18 +155,18 @@ export class ImageCacheTracker {
 
   // ─── Index helpers ───
 
-  public async #addToIndex(id: string): Promise<void> {
+  async #addToIndex(id: string): Promise<void> {
     const idx = await this.atomic.get<string[]>(CACHE_INDEX_KEY);
     await this.atomic.set(CACHE_INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
   }
 
-  public async #removeFromIndex(id: string): Promise<void> {
+  async #removeFromIndex(id: string): Promise<void> {
     const idx = await this.atomic.get<string[]>(CACHE_INDEX_KEY);
     if (!idx) return;
     await this.atomic.set(CACHE_INDEX_KEY, idx.value.filter(i => i !== id), idx.version);
   }
 
-  public async #addToTotalSize(delta: number): Promise<void> {
+  async #addToTotalSize(delta: number): Promise<void> {
     for (let attempt = 0; attempt < 3; attempt++) {
       const entry = await this.atomic.get<number>(CACHE_TOTAL_SIZE_KEY);
       const cur = entry?.value ?? 0;

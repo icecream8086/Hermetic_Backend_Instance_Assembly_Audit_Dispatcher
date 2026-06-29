@@ -28,7 +28,7 @@ export class AlibabaOssProvider extends S3ClientBase {
     const ossHeaders = Object.keys(headers)
       .filter(k => k.startsWith('x-oss-'))
       .sort()
-      .map(k => `${k.toLowerCase()}:${headers[k]}\n`).join('');
+      .map(k => `${k.toLowerCase()}:${String(headers[k])}\n`).join('');
 
     const contentMD5 = headers['content-md5'] ?? '';
     const contentType = headers['content-type'] ?? '';
@@ -45,7 +45,7 @@ export class AlibabaOssProvider extends S3ClientBase {
     });
 
     if (res.ok || res.status === 404) return res;
-    throw new Error(`OSS ${method} failed: ${res.status} ${await res.text()}`);
+    throw new Error(`OSS ${method} failed: ${String(res.status)} ${await res.text()}`);
   }
 
   /** Build the OSS canonical resource including sub-resources like ?uploads, ?partNumber=, ?uploadId= */
@@ -71,18 +71,18 @@ export class AlibabaOssProvider extends S3ClientBase {
     return this.#ossPresignedUrl('PUT', bucket, key, expiresInSeconds);
   }
 
-  public async #ossPresignedUrl(method: string, bucket: string, key: string, expiresInSeconds: number): Promise<string> {
+  async #ossPresignedUrl(method: string, bucket: string, key: string, expiresInSeconds: number): Promise<string> {
     const bucketName = this.#bucketMapping(bucket);
     const encodedKey = key.split('/').map(encodeURIComponent).join('/');
     const expires = Math.floor(Date.now() / 1000) + expiresInSeconds;
     const path = `/${bucketName}/${encodedKey}`;
 
-    const stringToSign = `${method}\n\n\n${expires}\n${path}`;
+    const stringToSign = `${method}\n\n\n${String(expires)}\n${path}`;
     const signature = await hmacSha1(this.#accessKeySecret, stringToSign);
     const encodedSig = encodeURIComponent(signature);
 
     const host = new URL(this.#endpoint).host;
-    return `https://${host}${path}?OSSAccessKeyId=${encodeURIComponent(this.#accessKeyId)}&Expires=${expires}&Signature=${encodedSig}`;
+    return `https://${host}${path}?OSSAccessKeyId=${encodeURIComponent(this.#accessKeyId)}&Expires=${String(expires)}&Signature=${encodedSig}`;
   }
 
   #bucketMapping(bucket: string): string {

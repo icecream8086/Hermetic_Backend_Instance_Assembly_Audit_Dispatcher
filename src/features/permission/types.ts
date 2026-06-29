@@ -1,4 +1,4 @@
-import type { PolicyId } from '../../core/permission/types.ts';
+import type { PolicyId, DenialLayer } from '../../core/permission/types.ts';
 import { createPolicyId } from '../../core/permission/types.ts';
 
 export { createPolicyId };
@@ -307,7 +307,7 @@ export interface PolicyMatchResult {
   matchedPolicy?: StoredPolicy | undefined;
   matchedGroup?: string | undefined;
   /** Which denial layer. Undefined if allowed. */
-  layer?: import('../../core/permission/types.ts').DenialLayer;
+  layer?: DenialLayer;
   /** Audit type for denial events. */
   auditType?: string;
 }

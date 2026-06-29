@@ -92,12 +92,12 @@ export class S3PolicyManager {
     return { effect: 'Allow', actions: [...allow.actions], pathPrefix: allow.pathPrefix };
   }
 
-  public async #addToIndex(id: string): Promise<void> {
+  async #addToIndex(id: string): Promise<void> {
     const idx = await this.atomic.get<string[]>(INDEX_KEY);
     await this.atomic.set(INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
   }
 
-  public async #removeFromIndex(id: string): Promise<void> {
+  async #removeFromIndex(id: string): Promise<void> {
     const idx = await this.atomic.get<string[]>(INDEX_KEY);
     if (!idx) return;
     await this.atomic.set(INDEX_KEY, idx.value.filter((i: string) => i !== id), idx.version);

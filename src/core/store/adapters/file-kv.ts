@@ -42,7 +42,7 @@ export class FileKVAtomicStore implements IAtomicStore {
     });
   }
 
-  public async #ensureDir(): Promise<void> {
+  async #ensureDir(): Promise<void> {
     await mkdir(this.#dataDir, { recursive: true });
   }
 
@@ -51,6 +51,7 @@ export class FileKVAtomicStore implements IAtomicStore {
     return join(this.#dataDir, `${safe}.json`);
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- interface contract requires generics
   public async get<T>(key: string): Promise<{ value: T; version: VersionId } | null> {
     return this.#serialise(async () => {
       await this.#ensureDir();
@@ -59,7 +60,7 @@ export class FileKVAtomicStore implements IAtomicStore {
         const entry = parseJson(raw) as FileEntry<T>;
         if (entry.metadata.e && Date.now() > entry.metadata.e) {
           // TTL expired — delete file and return null
-          try { await rm(this.#filePath(key), { force: true }); } catch {}
+          try { await rm(this.#filePath(key), { force: true }); } catch { /* file may not exist */ }
           return null;
         }
         // null value = deleted — consistent with DO adapter behavior
@@ -71,6 +72,7 @@ export class FileKVAtomicStore implements IAtomicStore {
     });
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- interface contract requires generics
   public async set<T>(key: string, value: T, expectedVersion: VersionId | null, ttlSeconds?: number): Promise<VersionId | null> {
     return this.#serialise(async () => {
       await this.#ensureDir();
@@ -136,6 +138,7 @@ export class FileKVAtomicStore implements IAtomicStore {
           }
           return results;
         },
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- interface contract requires generics
         set: async <V>(key: string, value: V, ttlSeconds?: number) => {
           const newVersion = generateVersionId();
           deferredWrites.set(key, { value, version: newVersion, ...(ttlSeconds !== undefined && { ttlSeconds }) });

@@ -1,4 +1,4 @@
-import type { RegionId, AlibabaRegion, ClusterId } from './types.ts';
+import type { RegionId, ClusterId } from './types.ts';
 import { ALIBABA_REGIONS } from './types.ts';
 import { createRegionId } from './types.ts';
 import { getDefaultRegistry } from './registry.ts';

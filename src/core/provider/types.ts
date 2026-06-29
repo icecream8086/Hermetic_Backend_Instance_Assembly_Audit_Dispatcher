@@ -11,7 +11,7 @@
 // OCI Runtime containers (same object, different abstraction layers).
 
 /** Real-time status from the cloud provider. */
-import { ContainerGroupState } from './container-lifecycle.ts';
+import type { ContainerGroupState } from './container-lifecycle.ts';
 /** @deprecated Use ContainerGroupState enum directly. Kept as alias for migration. */
 export type ContainerGroupStatus = ContainerGroupState;
 

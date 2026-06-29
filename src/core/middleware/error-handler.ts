@@ -39,7 +39,7 @@ export const globalErrorHandler: ErrorHandler = (err, c) => {
   }
 
   // Always also write to console.error (surfaces in wrangler dev/tail)
-  console.error(`[${KernLevel.ERR}] ${message}`);
+  console.error(`[${String(KernLevel.ERR)}] ${message}`);
 
   return c.json(fail('INTERNAL_ERROR', 'Internal server error'), status);
 };

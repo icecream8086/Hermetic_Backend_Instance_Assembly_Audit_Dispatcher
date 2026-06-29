@@ -7,7 +7,7 @@ import { AppError } from '../../core/types.ts';
 import { KernLevel } from '../../core/audit/kern-level.ts';
 import type { InstanceService } from '../../core/region/instance.ts';
 import type {
-  SecurityGroup, SecurityGroupId, SecurityGroupStatus,
+  SecurityGroup, SecurityGroupId,
   CreateSecurityGroupInput, UpdateSecurityGroupInput,
 } from './types.ts';
 import { generateSecurityGroupId } from './types.ts';
@@ -50,7 +50,7 @@ export class SecurityGroupService implements ISecurityGroupService {
           await this.networkPolicy.applyRules(providerNetworkId, input.rules);
         }
       } catch (e: any) {
-        throw new AppError(502, 'PROVIDER_ERROR', `Failed to provision security group: ${e.message}`);
+        throw new AppError(502, 'PROVIDER_ERROR', `Failed to provision security group: ${String(e.message)}`);
       }
     }
 
@@ -107,8 +107,8 @@ export class SecurityGroupService implements ISecurityGroupService {
     if (!newVersion) throw new AppError(409, 'CONFLICT', 'Concurrent modification detected');
 
     if (input.rules !== undefined && updated.providerNetworkId && this.networkPolicy?.applyRules) {
-      await this.networkPolicy.applyRules(updated.providerNetworkId, updated.rules ?? []).catch(e => {
-        this.logger.write({ facility: FACILITY, level: KernLevel.WARNING, message: `Failed to apply rules: ${e.message}`, actorId });
+      await this.networkPolicy.applyRules(updated.providerNetworkId, updated.rules ?? []).catch((e: unknown) => {
+        this.logger.write({ facility: FACILITY, level: KernLevel.WARNING, message: `Failed to apply rules: ${String(e.message)}`, actorId });
       });
     }
     return updated;
@@ -125,17 +125,17 @@ export class SecurityGroupService implements ISecurityGroupService {
     this.audit?.write({ level: KernLevel.WARNING, facility: FACILITY, message: `Security group deleted — ${entry.value.name}`, actorId, metadata: { eventType: 'secgroup.deleted' } });
   }
 
-  public async #listAll(): Promise<SecurityGroup[]> {
+  async #listAll(): Promise<SecurityGroup[]> {
     const idx = await this.atomic.get<string[]>(INDEX_KEY);
     if (!idx) return [];
     const entries = await Promise.all(idx.value.map(id => this.atomic.get<SecurityGroup>(PREFIX + id)));
     return entries.filter(e => e).map(e => e!.value);
   }
-  public async #addToIndex(id: SecurityGroupId): Promise<void> {
+  async #addToIndex(id: SecurityGroupId): Promise<void> {
     const idx = await this.atomic.get<string[]>(INDEX_KEY);
     await this.atomic.set(INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
   }
-  public async #removeFromIndex(id: SecurityGroupId): Promise<void> {
+  async #removeFromIndex(id: SecurityGroupId): Promise<void> {
     const idx = await this.atomic.get<string[]>(INDEX_KEY);
     if (!idx) return;
     await this.atomic.set(INDEX_KEY, idx.value.filter((i: string) => i !== id), idx.version);

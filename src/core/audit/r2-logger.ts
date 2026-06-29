@@ -90,7 +90,7 @@ export class R2AuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
     return this.#process(entry);
   }
 
-  public async #process(entry: AuditEntry): Promise<LogId> {
+  async #process(entry: AuditEntry): Promise<LogId> {
     const id = generateLogId();
     const now = Date.now();
     const facility = entry.facility ?? 'audit';
@@ -141,11 +141,11 @@ export class R2AuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
     const meta = stored.metadata ? JSON.stringify(stored.metadata) : undefined;
 
     if (entry.level <= KernLevel.ERR) {
-      meta ? console.error(line, meta) : console.error(line);
+      if (meta) { console.error(line, meta); } else { console.error(line); }
     } else if (entry.level === KernLevel.WARNING) {
-      meta ? console.warn(line, meta) : console.warn(line);
+      if (meta) { console.warn(line, meta); } else { console.warn(line); }
     } else {
-      meta ? console.log(line, meta) : console.log(line);
+      if (meta) { console.log(line, meta); } else { console.log(line); }
     }
   }
 
@@ -155,7 +155,7 @@ export class R2AuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
     if (this.#buffer.length === 0) return;
     const batch = this.#buffer.splice(0);
     const now = Date.now();
-    const key = `${this.#config.prefix}${now}-${batch[0]!.id}.json`;
+    const key = `${this.#config.prefix}${String(now)}-${batch[0]!.id}.json`;
     await this.bucket.put(key, JSON.stringify(batch));
   }
 

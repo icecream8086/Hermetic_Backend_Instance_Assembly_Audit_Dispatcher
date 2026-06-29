@@ -97,7 +97,7 @@ export class CrudStore<T extends { id: string }> {
   }
 
   /** Load all entities — uses transact().getMany() to batch DO reads into 1 round-trip. */
-  public async #loadAll(): Promise<T[]> {
+  async #loadAll(): Promise<T[]> {
     return this.atomic.transact(async (txn) => {
       const idxEntry = await txn.get<string[]>(this.indexKey);
       if (!idxEntry?.length) return [];

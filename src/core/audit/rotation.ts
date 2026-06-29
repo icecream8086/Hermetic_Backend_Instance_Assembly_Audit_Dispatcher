@@ -62,7 +62,7 @@ export function selectEntriesToPrune(
   // Sort by timestamp ascending (oldest first)
   const sorted = [...entries].sort((a, b) => a.timestamp - b.timestamp);
   const toRemove: string[] = [];
-  let totalSize = estimateTotalSize(sorted);
+  let totalSize: number;
   const now = Date.now();
 
   // Apply age-based eviction

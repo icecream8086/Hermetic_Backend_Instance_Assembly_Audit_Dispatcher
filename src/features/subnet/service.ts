@@ -6,7 +6,7 @@ import { AppError } from '../../core/types.ts';
 import { KernLevel } from '../../core/audit/kern-level.ts';
 import { parseCidr } from '../../core/network/cidr.ts';
 import type { InstanceService } from '../../core/region/instance.ts';
-import type { Subnet, SubnetId, SubnetStatus, CreateSubnetInput, UpdateSubnetInput } from './types.ts';
+import type { Subnet, SubnetId, CreateSubnetInput, UpdateSubnetInput } from './types.ts';
 import { generateSubnetId } from './types.ts';
 import type { ICrudService, PaginatedResult } from '../../core/crud/index.ts';
 
@@ -100,17 +100,17 @@ export class SubnetService implements ISubnetService {
     this.audit?.write({ level: KernLevel.WARNING, facility: FACILITY, message: `Subnet deleted — ${entry.value.name}`, actorId, metadata: { eventType: 'subnet.deleted' } });
   }
 
-  public async #listAll(): Promise<Subnet[]> {
+  async #listAll(): Promise<Subnet[]> {
     const idx = await this.atomic.get<string[]>(INDEX_KEY);
     if (!idx) return [];
     const entries = await Promise.all(idx.value.map(id => this.atomic.get<Subnet>(PREFIX + id)));
     return entries.filter(e => e).map(e => e!.value);
   }
-  public async #addToIndex(id: SubnetId): Promise<void> {
+  async #addToIndex(id: SubnetId): Promise<void> {
     const idx = await this.atomic.get<string[]>(INDEX_KEY);
     await this.atomic.set(INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
   }
-  public async #removeFromIndex(id: SubnetId): Promise<void> {
+  async #removeFromIndex(id: SubnetId): Promise<void> {
     const idx = await this.atomic.get<string[]>(INDEX_KEY);
     if (!idx) return;
     await this.atomic.set(INDEX_KEY, idx.value.filter((i: string) => i !== id), idx.version);

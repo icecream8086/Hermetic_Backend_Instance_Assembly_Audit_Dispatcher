@@ -18,6 +18,7 @@ import { generateVersionId } from '../../brand.ts';
 export class CloudflareKVAtomicStore implements IAtomicStore {
   public constructor(private readonly kv: KVNamespace) {}
 
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- interface contract requires generics
   public async get<T>(key: string): Promise<{ value: T; version: VersionId } | null> {
     const result = await this.kv.getWithMetadata<T>(key, 'json');
     if (result.value === null) return null;
@@ -26,6 +27,7 @@ export class CloudflareKVAtomicStore implements IAtomicStore {
     return { value: result.value, version: version as VersionId };
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- interface contract requires generics
   public async set<T>(key: string, value: T, expectedVersion: VersionId | null, ttlSeconds?: number): Promise<VersionId | null> {
     const existing = await this.kv.getWithMetadata(key, 'json');
     const currentVersion = (existing.metadata as { v?: string } | null)?.v;
@@ -70,6 +72,7 @@ export class CloudflareKVAtomicStore implements IAtomicStore {
         }
         return results;
       },
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- interface contract requires generics
       set: async <V>(key: string, value: V, ttlSeconds?: number) => {
         const newVersion = generateVersionId();
         deferredWrites.set(key, { value, version: newVersion, ...(ttlSeconds !== undefined && { ttlSeconds }) });

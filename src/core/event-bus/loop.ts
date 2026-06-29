@@ -275,7 +275,7 @@ export class EventLoop implements IEventLoopControl {
     this.#config.onError?.(err, context);
   }
 
-  public async #tick(): Promise<void> {
+  async #tick(): Promise<void> {
     if (this.#paused || this.#queue.isEmpty) return;
 
     const limit = this.#config.batchSize > 0
@@ -311,7 +311,7 @@ export class EventLoop implements IEventLoopControl {
   // ─── Store persistence ───
 
   /** Recover pending events from store after construction. */
-  public async #recover(): Promise<void> {
+  async #recover(): Promise<void> {
     try {
       await this.#store!.transact(async (txn) => {
         const pending = await txn.get<Event[]>(KEY_PENDING);
@@ -331,7 +331,7 @@ export class EventLoop implements IEventLoopControl {
   static #PERSISTED_TYPES = new Set(['image.pull']);
 
   /** Append one event to the persisted queue (transient events skipped). */
-  public async #persistEnqueue(event: Event): Promise<void> {
+  async #persistEnqueue(event: Event): Promise<void> {
     if (!EventLoop.#PERSISTED_TYPES.has(event.type)) return;
     await this.#store!.transact(async (txn) => {
       const pending = (await txn.get<Event[]>(KEY_PENDING)) ?? [];
@@ -341,7 +341,7 @@ export class EventLoop implements IEventLoopControl {
   }
 
   /** Remove dispatched events from the persisted queue. */
-  public async #persistDequeue(events: Event[]): Promise<void> {
+  async #persistDequeue(events: Event[]): Promise<void> {
     const dispatched = new Set(events.map(e => e.id));
     await this.#store!.transact(async (txn) => {
       const pending = (await txn.get<Event[]>(KEY_PENDING)) ?? [];

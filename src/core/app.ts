@@ -128,7 +128,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
       intervalMs: 30000,
       batchSize: config.scheduler.batchSize,
       autoStart: true,
-      onError: (err, ctx) => { console.error(formatDmesgLine(`[event-loop] ${ctx}: ${err instanceof Error ? err.message : err}`)); },
+      onError: (err, ctx) => { console.error(formatDmesgLine(`[event-loop] ${ctx}: ${String(err instanceof Error ? err.message : err)}`)); },
     },
     schedulerBackend,
     stores.atomic,
@@ -323,7 +323,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
     const { ids } = await c.req.json<{ ids: string[] }>();
     const atomic = stores.atomic;
     const SHARDS = 16;
-    const shards = Array.from({ length: SHARDS }, (_, i) => ({ key: 'user:idx:' + i, ids: new Set<string>() }));
+    const shards = Array.from({ length: SHARDS }, (_, i) => ({ key: 'user:idx:' + String(i), ids: new Set<string>() }));
     let count = 0;
     for (const id of ids) {
       const entry = await atomic.get<unknown>('user:' + id);

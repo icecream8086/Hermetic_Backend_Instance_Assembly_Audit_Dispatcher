@@ -29,6 +29,7 @@ export async function createStores(config: StorageConfig, platformBindings?: Rec
 // Atomic store
 // ══════════════════════════════════════════════
 
+// eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- interface contract requires generics
 function resolveBinding<T>(name: string, bindings?: Record<string, unknown>): T | undefined {
   return bindings?.[name] as T | undefined;
 }

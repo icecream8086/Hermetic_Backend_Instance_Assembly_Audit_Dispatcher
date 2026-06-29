@@ -303,7 +303,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
     // Read raw body (Hono buffers multipart; we use it as bytes)
     const blob = await c.req.blob();
     if (blob.size > AVATAR_MAX_SIZE) {
-      return c.json(fail('AVATAR_TOO_LARGE', `Avatar must be under ${AVATAR_MAX_SIZE / 1024} KB`), 413);
+      return c.json(fail('AVATAR_TOO_LARGE', `Avatar must be under ${String(AVATAR_MAX_SIZE / 1024)} KB`), 413);
     }
     if (blob.size === 0) {
       return c.json(fail('AVATAR_EMPTY', 'Avatar cannot be empty'), 400);

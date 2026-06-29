@@ -339,7 +339,7 @@ export function createTopologyRouter(
         const presignedUrls = [];
         for (let i = 1; i <= body.parts; i++) {
           const url = await (s3Provider.putPresignedUrl
-            ? s3Provider.putPresignedUrl(bucket.name, `${body.key}?partNumber=${i}&uploadId=${upload.uploadId}`, expiresIn)
+            ? s3Provider.putPresignedUrl(bucket.name, `${body.key}?partNumber=${String(i)}&uploadId=${upload.uploadId}`, expiresIn)
             : Promise.resolve(''));
           presignedUrls.push({ partNumber: i, url });
         }
@@ -412,7 +412,7 @@ export function createTopologyRouter(
         const start = i * partSize;
         const end = Math.min(start + partSize - 1, info.size - 1);
         if (start >= info.size) break;
-        const range = `bytes=${start}-${end}`;
+        const range = `bytes=${String(start)}-${String(end)}`;
         const url = await s3Provider.getPresignedUrl(bucket.name, key, expiresIn);
         const urlWithRange = `${url}&range=${encodeURIComponent(range)}`;
         presignedUrls.push({ partNumber: i + 1, url: urlWithRange, range });

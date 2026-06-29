@@ -98,7 +98,7 @@ export class InstanceProviderResolver {
 
   // ─── Provider factory methods ───
 
-  public async #resolveCredential(credentialRef?: string, instanceId?: string): Promise<{
+  async #resolveCredential(credentialRef?: string, instanceId?: string): Promise<{
     type?: string | undefined;
     accessKeyId: string | undefined;
     accessKeySecret: string | undefined;
@@ -139,7 +139,7 @@ export class InstanceProviderResolver {
     return { accessKeyId: undefined, accessKeySecret: undefined };
   }
 
-  public async #createContainerProvider(instance: ComputeInstance): Promise<IContainerProvider> {
+  async #createContainerProvider(instance: ComputeInstance): Promise<IContainerProvider> {
     switch (instance.platform) {
       case 'podman':
         return secureContainerProvider(new PodmanContainerProvider(instance.endpoint));
@@ -156,7 +156,7 @@ export class InstanceProviderResolver {
     }
   }
 
-  public async #createImageProvider(instance: ComputeInstance): Promise<IImageProvider> {
+  async #createImageProvider(instance: ComputeInstance): Promise<IImageProvider> {
     switch (instance.platform) {
       case 'podman':
         return new PodmanImageProvider(instance.endpoint);
@@ -175,7 +175,7 @@ export class InstanceProviderResolver {
     }
   }
 
-  public async #createGroupProvider(instance: ComputeInstance): Promise<IContainerGroupProvider | undefined> {
+  async #createGroupProvider(instance: ComputeInstance): Promise<IContainerGroupProvider | undefined> {
     switch (instance.platform) {
       case 'podman':
         return secureContainerGroupProvider(new PodmanContainerGroupProvider(instance.endpoint));
@@ -190,7 +190,7 @@ export class InstanceProviderResolver {
     }
   }
 
-  public async #createNetworkPolicyProvider(instance: ComputeInstance): Promise<INetworkPolicyProvider | undefined> {
+  async #createNetworkPolicyProvider(instance: ComputeInstance): Promise<INetworkPolicyProvider | undefined> {
     switch (instance.platform) {
       case 'podman':
         return new PodmanNetworkPolicyProvider(instance.endpoint);
@@ -202,7 +202,7 @@ export class InstanceProviderResolver {
     }
   }
 
-  public async #createS3Provider(instance: ComputeInstance): Promise<IS3Provider | undefined> {
+  async #createS3Provider(instance: ComputeInstance): Promise<IS3Provider | undefined> {
     const cred = await this.#resolveCredential(instance.credentialRef, instance.id);
     switch (instance.platform) {
       case 'podman':
@@ -222,7 +222,7 @@ export class InstanceProviderResolver {
   }
 
   /** Resolve a raw ECI API client for a specific instance. */
-  public async resolveRawEciApi(instanceId: InstanceId): Promise<any | undefined> {
+  public async resolveRawEciApi(instanceId: InstanceId): Promise<any> {
     const inst = await this.instanceService.get(instanceId);
     if (inst?.platform !== 'alibaba') return undefined;
     const cred = await this.#resolveCredential(inst.credentialRef);
@@ -231,7 +231,7 @@ export class InstanceProviderResolver {
   }
 
   /** Resolve a CR (Container Registry) API client for a specific instance. */
-  public async resolveCrApi(instanceId: InstanceId): Promise<any | undefined> {
+  public async resolveCrApi(instanceId: InstanceId): Promise<any> {
     const inst = await this.instanceService.get(instanceId);
     if (inst?.platform !== 'alibaba') return undefined;
     const cred = await this.#resolveCredential(inst.credentialRef);
@@ -240,7 +240,7 @@ export class InstanceProviderResolver {
   }
 
   /** Resolve an OSS management-plane API client for a specific instance. */
-  public async resolveOssOpenApi(instanceId: InstanceId): Promise<any | undefined> {
+  public async resolveOssOpenApi(instanceId: InstanceId): Promise<any> {
     const inst = await this.instanceService.get(instanceId);
     if (inst?.platform !== 'alibaba') return undefined;
     const cred = await this.#resolveCredential(inst.credentialRef);

@@ -27,7 +27,7 @@ export class KvAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
     return this.#store(entry);
   }
 
-  public async #store(entry: AuditEntry): Promise<LogId> {
+  async #store(entry: AuditEntry): Promise<LogId> {
     const id = generateLogId();
     const now = Date.now();
     const facilityCode = resolveFacility(entry.facility);

@@ -138,19 +138,19 @@ export class ImageRepositoryService {
 
   // ─── Internal helpers ───
 
-  public async #listAll(): Promise<ImageRepository[]> {
+  async #listAll(): Promise<ImageRepository[]> {
     const idx = await this.atomic.get<string[]>(IMAGE_INDEX_KEY);
     if (!idx) return [];
     const entries = await Promise.all(idx.value.map(id => this.atomic.get<ImageRepository>(IMAGE_PREFIX + id)));
     return entries.filter(e => e).map(e => e!.value);
   }
 
-  public async #addToIndex(id: string): Promise<void> {
+  async #addToIndex(id: string): Promise<void> {
     const idx = await this.atomic.get<string[]>(IMAGE_INDEX_KEY);
     await this.atomic.set(IMAGE_INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
   }
 
-  public async #removeFromIndex(id: string): Promise<void> {
+  async #removeFromIndex(id: string): Promise<void> {
     const idx = await this.atomic.get<string[]>(IMAGE_INDEX_KEY);
     if (!idx) return;
     await this.atomic.set(IMAGE_INDEX_KEY, idx.value.filter((i: string) => i !== id), idx.version);

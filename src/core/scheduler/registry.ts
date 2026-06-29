@@ -32,7 +32,7 @@ export function startAll(): void {
   for (const [name, s] of entries) {
     const status = s.status();
     if (!status.running) {
-      console.log(`[scheduler] Starting ${name} (interval=${status.config.intervalMs}ms)`);
+      console.log(`[scheduler] Starting ${name} (interval=${String(status.config.intervalMs)}ms)`);
       s.start();
     }
   }

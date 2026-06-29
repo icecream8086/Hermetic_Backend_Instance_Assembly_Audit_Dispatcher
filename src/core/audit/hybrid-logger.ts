@@ -49,7 +49,7 @@ export class HybridAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmi
     return this.#store(entry);
   }
 
-  public async #store(entry: AuditEntry): Promise<LogId> {
+  async #store(entry: AuditEntry): Promise<LogId> {
     const id = generateLogId();
     const now = Date.now();
     const facilityCode = resolveFacility(entry.facility);
@@ -135,7 +135,7 @@ export class HybridAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmi
     return f;
   }
 
-  public async #persistToStore(e: StoredAuditEntry): Promise<void> {
+  async #persistToStore(e: StoredAuditEntry): Promise<void> {
     if (!this.#atomic) return;
     const idx = await this.#atomic.get<string[]>(IDX_AUDIT);
     const ids = idx?.value ?? [];
@@ -145,7 +145,7 @@ export class HybridAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmi
     await this.#atomic.set(IDX_AUDIT, ids, idx?.version ?? null);
   }
 
-  public async #queryFromStore(params: LogQuery): Promise<StoredAuditEntry[]> {
+  async #queryFromStore(params: LogQuery): Promise<StoredAuditEntry[]> {
     if (!this.#atomic) return [];
     const idx = await this.#atomic.get<string[]>(IDX_AUDIT);
     if (!idx) return [];

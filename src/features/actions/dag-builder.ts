@@ -98,7 +98,7 @@ export function createDagRunFromTrigger(
   ownerId?: string,
 ): Omit<DagRun, 'version'> {
   return {
-    id: createDagRunId(`dr_${dagId}_${Date.now()}_${crypto.randomUUID()}`),
+    id: createDagRunId(`dr_${dagId}_${String(Date.now())}_${crypto.randomUUID()}`),
     dagId,
     status: 'QUEUED',
     executionDate: Date.now(),

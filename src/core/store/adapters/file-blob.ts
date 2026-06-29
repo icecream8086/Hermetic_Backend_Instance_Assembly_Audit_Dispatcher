@@ -15,7 +15,7 @@ export class FileBlobStore implements IBlobStore {
     this.#dataDir = resolve(basePath, 'blob');
   }
 
-  public async #ensureDir(): Promise<void> {
+  async #ensureDir(): Promise<void> {
     await mkdir(this.#dataDir, { recursive: true });
   }
 

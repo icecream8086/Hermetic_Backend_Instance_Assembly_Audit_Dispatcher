@@ -55,8 +55,8 @@ export class Dag<TId, TNode> {
    * Both nodes must already exist (call `addNode` first).
    */
   public addEdge(from: TId, to: TId): void {
-    if (!this.nodes.has(from)) throw new TypeError(`Dag.addEdge: source node "${from}" does not exist`);
-    if (!this.nodes.has(to)) throw new TypeError(`Dag.addEdge: target node "${to}" does not exist`);
+    if (!this.nodes.has(from)) throw new TypeError(`Dag.addEdge: source node "${String(from)}" does not exist`);
+    if (!this.nodes.has(to)) throw new TypeError(`Dag.addEdge: target node "${String(to)}" does not exist`);
 
     this.outgoing.get(from)!.add(to);
     this.incoming.get(to)!.add(from);
@@ -174,7 +174,7 @@ export class Dag<TId, TNode> {
       return {
         success: false,
         sorted,
-        error: `Cycle detected: could not sort ${remaining.length} node(s) [${remaining.join(', ')}]`,
+        error: `Cycle detected: could not sort ${String(remaining.length)} node(s) [${remaining.join(', ')}]`,
       };
     }
 
@@ -197,8 +197,8 @@ export class Dag<TId, TNode> {
     const visited = new Set<TId>();
 
     const visit = (id: TId): string | undefined => {
-      if (!this.nodes.has(id)) return `Node "${id}" not found`;
-      if (path.has(id)) return `Cycle detected: "${id}" is visited twice on the same path`;
+      if (!this.nodes.has(id)) return `Node "${String(id)}" not found`;
+      if (path.has(id)) return `Cycle detected: "${String(id)}" is visited twice on the same path`;
       if (visited.has(id)) return;
 
       path.add(id);

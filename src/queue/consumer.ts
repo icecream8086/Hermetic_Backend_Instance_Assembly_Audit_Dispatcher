@@ -42,7 +42,7 @@ export async function processTaskBatch(
       if (r.success) {
         msg.ack();
       } else {
-        console.error(formatDmesgLine(`[queue] ${msg.body.type} failed — ${r.error}`));
+        console.error(formatDmesgLine(`[queue] ${String(msg.body.type)} failed — ${String(r.error)}`));
         msg.retry({ delaySeconds: 5 });
       }
     }
@@ -92,7 +92,7 @@ export async function handleTask(
     default: {
       const _exhaustive: never = msg.type;
       void _exhaustive;
-      return { success: false, error: `Unknown task type: ${msg.type}` };
+      return { success: false, error: `Unknown task type: ${String(msg.type)}` };
     }
   }
 }
@@ -250,8 +250,8 @@ async function handleSandboxGc(
 
       console.log(formatDmesgLine(
         `sandbox DELETED (${reason}) id=${sid} name=${sandboxName} ` +
-        `provider=${providerId} containers=${containerCount} ` +
-        `uptime=${Date.now() - createdAt}ms [via-queue]`,
+        `provider=${providerId} containers=${String(containerCount)} ` +
+        `uptime=${String(Date.now() - createdAt)}ms [via-queue]`,
       ));
 
       audit?.write({
@@ -322,9 +322,9 @@ async function handleBucketKeyRotate(
     const sk = Array.from(crypto.getRandomValues(new Uint8Array(32)))
       .map((b: number) => b.toString(16).padStart(2, '0'))
       .join('');
-    binding.secretValue = `${ak}:${sk}`;
+    binding.secretValue = `${String(ak)}:${sk}`;
     binding.version++;
-    binding.expiresAt = Date.now() + (binding.rotationIntervalMs ?? 24 * 60 * 60 * 1000);
+    binding.expiresAt = Date.now() + Number(binding.rotationIntervalMs ?? 24 * 60 * 60 * 1000);
 
     const ver = await stores.atomic.set(BINDING_PREFIX + bindingId, binding, entry.version);
     if (!ver) return { success: false, error: 'OCC conflict on key rotation' };

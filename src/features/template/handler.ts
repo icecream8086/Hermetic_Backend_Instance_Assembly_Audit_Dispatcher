@@ -6,7 +6,7 @@ import type { RouteMeta } from '../../core/http-docs/types.ts';
 import { ok, fail } from '../../core/response.ts';
 import type { AppContext } from '../../core/deps.ts';
 import type { ISandboxService } from '../sandbox/interfaces.ts';
-import type { SandboxTemplate, CreateTemplateInput, UpdateTemplateInput, ContainerSpec, ContainerDef, HealthCheckDef, NetworkSpec, TemplateExtensions, TemplateInstanceLimit } from './types.ts';
+import type { SandboxTemplate, CreateTemplateInput, UpdateTemplateInput, ContainerSpec, ContainerDef, HealthCheckDef, TemplateInstanceLimit } from './types.ts';
 import { KernLevel } from '../../core/audit/kern-level.ts';
 import { TemplateVisibility } from './types.ts';
 import type { IProviderRegistry } from '../../core/provider/interfaces.ts';
@@ -193,7 +193,7 @@ function mergeByName(parent: any[] | undefined, child: any[] | undefined): any[]
 function mergeHealthChecks(parent: any[] | undefined, child: any[] | undefined): any[] {
   if (!child) return parent ?? [];
   if (!parent) return child;
-  const keyFn = (h: any) => `${h.target}:${h.name}`;
+  const keyFn = (h: any) => `${String(h.target)}:${String(h.name)}`;
   const map = new Map<string, any>();
   for (const h of parent) map.set(keyFn(h), h);
   for (const h of child) {
@@ -279,7 +279,7 @@ async function claimInstanceSlot(
   if (tpl.singleton) {
     const runningCount = await countRunningForTemplate(atomic, tpl.id);
     if (runningCount >= 1) {
-      const err: any = new Error(`Template "${tpl.name}" is singleton — only 1 instance allowed at a time (${runningCount} running)`);
+      const err: any = new Error(`Template "${tpl.name}" is singleton — only 1 instance allowed at a time (${String(runningCount)} running)`);
       err.status = 429;
       throw err;
     }
@@ -300,7 +300,7 @@ async function claimInstanceSlot(
 
   if (type === 'fixed' || type === 'perSystem') {
     if (runningCount >= max) {
-      const err: any = new Error(`Template "${tpl.name}" has ${runningCount} running instance(s) — limit is ${max}`);
+      const err: any = new Error(`Template "${tpl.name}" has ${String(runningCount)} running instance(s) — limit is ${String(max)}`);
       err.status = 429;
       throw err;
     }
@@ -323,7 +323,7 @@ async function claimInstanceSlot(
       }
     }
     if (userCount >= max) {
-      const err: any = new Error(`Template "${tpl.name}" per-user limit of ${max} reached (${userCount} running)`);
+      const err: any = new Error(`Template "${tpl.name}" per-user limit of ${String(max)} reached (${String(userCount)} running)`);
       err.status = 429;
       throw err;
     }
@@ -333,7 +333,7 @@ async function claimInstanceSlot(
   }
 }
 
-function bindingKey(domain: string, port: number): string { return `tpl:bind:${domain}:${port}`; }
+function bindingKey(domain: string, port: number): string { return `tpl:bind:${domain}:${String(port)}`; }
 
 async function claimResourceBinding(
   atomic: IAtomicStore,
@@ -345,7 +345,7 @@ async function claimResourceBinding(
   const key = bindingKey(binding.domain, binding.port);
   const entry = await atomic.get<string>(key);
   if (entry) {
-    const err: any = new Error(`Domain ${binding.domain}:${binding.port} is already bound to another instance`);
+    const err: any = new Error(`Domain ${binding.domain}:${String(binding.port)} is already bound to another instance`);
     err.status = 409;
     throw err;
   }
@@ -663,7 +663,7 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
         }
       } else if (providerName && providers) {
         const entry = providers.provider(providerName);
-        if (!entry) return c.json(fail('PROVIDER_NOT_FOUND', `Provider "${providerName}" not available`), 400);
+        if (!entry) return c.json(fail('PROVIDER_NOT_FOUND', `Provider "${String(providerName)}" not available`), 400);
         svc = new SandboxService(atomic, new ConsoleLogger(), entry.container, providers, undefined, undefined, createAtomicNetworkResolver(atomic), new InstanceService(atomic));
       }
       if (!svc) return c.json(fail('SERVICE_UNAVAILABLE', 'Sandbox service not available'), 503);

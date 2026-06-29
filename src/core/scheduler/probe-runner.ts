@@ -88,8 +88,8 @@ export async function evaluateProbe(
   }
 
   const timeoutMs = (spec.timeoutSeconds ?? DEFAULT_TIMEOUT) * 1000;
-  let success = false;
-  let message = '';
+  let success: boolean;
+  let message: string;
 
   try {
     const result = await Promise.race([
@@ -136,7 +136,7 @@ export async function evaluateProbe(
   return {
     type,
     success,
-    message: success ? message || 'probe passed' : message || `probe failed (${state.consecutiveFailures}/${failureThreshold})`,
+    message: success ? message || 'probe passed' : message || `probe failed (${String(state.consecutiveFailures)}/${String(failureThreshold)})`,
     shouldRestart: isFailing && type !== 'readiness',  // readiness failure → don't restart
     shouldRemoveEndpoint: isFailing && type === 'readiness',
   };

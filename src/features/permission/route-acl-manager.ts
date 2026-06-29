@@ -50,7 +50,7 @@ export class RouteAclManager {
   }
 
   /** Bump the global version so all RouteAclManager instances see the mutation. */
-  public async #bumpVersion(): Promise<void> {
+  async #bumpVersion(): Promise<void> {
     this.#cachedAcls = null;
     const entry = await this.atomic.get<number>(RouteAclManager.VERSION_KEY);
     await this.atomic.set(RouteAclManager.VERSION_KEY, (entry?.value ?? 0) + 1, entry?.version ?? null);
@@ -108,7 +108,7 @@ export class RouteAclManager {
   }
 
   /** Load ACLs, refreshing cache only when store version changes (cross-instance safe). */
-  public async #loadCachedAcls(): Promise<readonly RouteAcl[]> {
+  async #loadCachedAcls(): Promise<readonly RouteAcl[]> {
     const verEntry = await this.atomic.get<number>(RouteAclManager.VERSION_KEY);
     const currentVersion = verEntry?.value ?? 0;
     if (this.#cachedAcls === null || this.#cachedAclsVersion !== currentVersion) {

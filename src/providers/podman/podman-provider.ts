@@ -108,7 +108,7 @@ export class PodmanContainerProvider implements IContainerProvider {
     const portBindings: Record<string, { HostPort?: string }[]> = {};
     if (c?.ports) {
       for (const p of c.ports) {
-        const key = `${p.containerPort}/${p.protocol ?? 'tcp'}`;
+        const key = `${String(p.containerPort)}/${p.protocol ?? 'tcp'}`;
         exposedPorts[key] = {};
         portBindings[key] = p.hostPort !== undefined ? [{ HostPort: String(p.hostPort) }] : [{}];
       }
@@ -121,9 +121,9 @@ export class PodmanContainerProvider implements IContainerProvider {
       if (lp.exec) {
         healthcheck = { Test: ['CMD', ...lp.exec.command] };
       } else if (lp.httpGet) {
-        healthcheck = { Test: ['CMD', 'curl', '-sf', `http://localhost:${lp.httpGet.port}${lp.httpGet.path ?? '/'}`] };
+        healthcheck = { Test: ['CMD', 'curl', '-sf', `http://localhost:${String(lp.httpGet.port)}${lp.httpGet.path ?? '/'}`] };
       } else if (lp.tcpSocket) {
-        healthcheck = { Test: ['CMD', '/bin/bash', '-c', `exec 3<>/dev/tcp/localhost/${lp.tcpSocket.port} || exit 1`] };
+        healthcheck = { Test: ['CMD', '/bin/bash', '-c', `exec 3<>/dev/tcp/localhost/${String(lp.tcpSocket.port)} || exit 1`] };
       }
       if (healthcheck) {
         if (lp.initialDelaySeconds) healthcheck.StartPeriod = lp.initialDelaySeconds * 1_000_000_000;
@@ -151,7 +151,7 @@ export class PodmanContainerProvider implements IContainerProvider {
     if (input.volumes?.length && c?.volumeMounts) {
       const binds: string[] = [];
       for (const vm of c.volumeMounts) {
-        const vol = input.volumes.find(v => String(v.id) === vm.volumeId);
+        const vol = input.volumes.find(v => v.id === vm.volumeId);
         const nfsOpts = vol?.options as { path?: string } | undefined;
         const nfsPath = nfsOpts?.path;
         if (nfsPath?.startsWith('/') && isBindMountAllowed(nfsPath)) {
@@ -220,16 +220,16 @@ export class PodmanContainerProvider implements IContainerProvider {
     }
     if (!resp.ok) {
       const err = await resp.text();
-      throw new Error(`Podman create failed (${resp.status}): ${err}`);
+      throw new Error(`Podman create failed (${String(resp.status)}): ${err}`);
     }
     const data = await resp.json();
 
     // Start the container
-    const startResp = await fetch(`${this.#apiBase}/containers/${data.Id}/start`, { method: 'POST' });
+    const startResp = await fetch(`${this.#apiBase}/containers/${String(data.Id)}/start`, { method: 'POST' });
     if (!startResp.ok && startResp.status !== 304) {
       // 304 = already started, ignore
       const err = await startResp.text();
-      throw new Error(`Podman start failed (${startResp.status}): ${err}`);
+      throw new Error(`Podman start failed (${String(startResp.status)}): ${err}`);
     }
 
     // Track created secrets for cleanup
@@ -242,10 +242,10 @@ export class PodmanContainerProvider implements IContainerProvider {
 
   public async describe(input: DescribeContainerGroupsInput): Promise<DescribeContainerGroupsResult> {
     let url = `${this.#apiBase}/containers/json?all=true`;
-    if (input.limit) url += `&limit=${input.limit}`;
+    if (input.limit) url += `&limit=${String(input.limit)}`;
 
     const resp = await fetch(url);
-    if (!resp.ok) throw new Error(`Podman list failed: ${resp.status}`);
+    if (!resp.ok) throw new Error(`Podman list failed: ${String(resp.status)}`);
     const list = await resp.json();
 
     let filtered = list;
@@ -286,18 +286,18 @@ export class PodmanContainerProvider implements IContainerProvider {
     });
     if (!resp.ok && resp.status !== 404) {
       const err = await resp.text();
-      throw new Error(`Podman delete failed (${resp.status}): ${err}`);
+      throw new Error(`Podman delete failed (${String(resp.status)}): ${err}`);
     }
   }
 
   public async getLogs(input: GetContainerLogInput): Promise<ContainerLogResult> {
     let url = `${this.#apiBase}/containers/${input.providerId}/logs?stdout=true&stderr=true`;
-    if (input.limitBytes) url += `&tail=${input.limitBytes}`;
-    if (input.sinceSeconds) url += `&since=${Math.floor(Date.now() / 1000) - input.sinceSeconds}`;
+    if (input.limitBytes) url += `&tail=${String(input.limitBytes)}`;
+    if (input.sinceSeconds) url += `&since=${String(Math.floor(Date.now() / 1000) - input.sinceSeconds)}`;
     if (input.timestamps) url += `&timestamps=1`;
 
     const resp = await fetch(url);
-    if (!resp.ok) throw new Error(`Podman logs failed (${resp.status})`);
+    if (!resp.ok) throw new Error(`Podman logs failed (${String(resp.status)})`);
     const text = await resp.text();
 
     return {
@@ -315,13 +315,13 @@ export class PodmanContainerProvider implements IContainerProvider {
 
   public async stop(providerId: string, timeoutSeconds?: number): Promise<void> {
     let url = `${this.#apiBase}/containers/${encodeURIComponent(providerId)}/stop`;
-    if (timeoutSeconds !== undefined) url += `?t=${timeoutSeconds}`;
+    if (timeoutSeconds !== undefined) url += `?t=${String(timeoutSeconds)}`;
     const resp = await this.#fetch(url, { method: 'POST' });
     if (!resp) throw new Error('Podman daemon unreachable');
     if (resp.status === 304) return; // already stopped
     if (!resp.ok) {
       const body = await resp.text().catch(() => '');
-      throw new Error(`Podman stop failed (${resp.status}): ${body.slice(0, 200)}`);
+      throw new Error(`Podman stop failed (${String(resp.status)}): ${body.slice(0, 200)}`);
     }
   }
 
@@ -332,19 +332,19 @@ export class PodmanContainerProvider implements IContainerProvider {
     if (resp.status === 304) return; // already started
     if (!resp.ok) {
       const body = await resp.text().catch(() => '');
-      throw new Error(`Podman start failed (${resp.status}): ${body.slice(0, 200)}`);
+      throw new Error(`Podman start failed (${String(resp.status)}): ${body.slice(0, 200)}`);
     }
   }
 
   public async restart(providerId: string, timeoutSeconds?: number): Promise<void> {
     let url = `${this.#apiBase}/containers/${encodeURIComponent(providerId)}/restart`;
-    if (timeoutSeconds !== undefined) url += `?t=${timeoutSeconds}`;
+    if (timeoutSeconds !== undefined) url += `?t=${String(timeoutSeconds)}`;
     const resp = await this.#fetch(url, { method: 'POST' });
     if (!resp) throw new Error('Podman daemon unreachable');
     if (resp.status === 304) return; // already restarting
     if (!resp.ok) {
       const body = await resp.text().catch(() => '');
-      throw new Error(`Podman restart failed (${resp.status}): ${body.slice(0, 200)}`);
+      throw new Error(`Podman restart failed (${String(resp.status)}): ${body.slice(0, 200)}`);
     }
   }
 
@@ -356,26 +356,26 @@ export class PodmanContainerProvider implements IContainerProvider {
     if (resp.status === 304) return; // already stopped/killed
     if (!resp.ok) {
       const body = await resp.text().catch(() => '');
-      throw new Error(`Podman kill failed (${resp.status}): ${body.slice(0, 200)}`);
+      throw new Error(`Podman kill failed (${String(resp.status)}): ${body.slice(0, 200)}`);
     }
   }
 
   public async pause(providerId: string): Promise<void> {
     const resp = await this.#fetch(`${this.#apiBase}/containers/${encodeURIComponent(providerId)}/pause`, { method: 'POST' });
     if (!resp) throw new Error('Podman daemon unreachable');
-    if (!resp.ok) throw new Error(`Podman pause failed (${resp.status})`);
+    if (!resp.ok) throw new Error(`Podman pause failed (${String(resp.status)})`);
   }
 
   public async unpause(providerId: string): Promise<void> {
     const resp = await this.#fetch(`${this.#apiBase}/containers/${encodeURIComponent(providerId)}/unpause`, { method: 'POST' });
     if (!resp) throw new Error('Podman daemon unreachable');
-    if (!resp.ok) throw new Error(`Podman unpause failed (${resp.status})`);
+    if (!resp.ok) throw new Error(`Podman unpause failed (${String(resp.status)})`);
   }
 
   public async wait(providerId: string, _condition?: 'not-running' | 'next-exit'): Promise<{ statusCode: number }> {
     const resp = await this.#fetch(`${this.#apiBase}/containers/${encodeURIComponent(providerId)}/wait`, { method: 'POST' });
     if (!resp) throw new Error('Podman daemon unreachable');
-    if (!resp.ok) throw new Error(`Podman wait failed (${resp.status})`);
+    if (!resp.ok) throw new Error(`Podman wait failed (${String(resp.status)})`);
     const data = await resp.json();
     return { statusCode: data.StatusCode ?? -1 };
   }
@@ -388,17 +388,17 @@ export class PodmanContainerProvider implements IContainerProvider {
       body: JSON.stringify({ Cmd: [...cmd], AttachStdout: true, AttachStderr: true }),
     });
     if (!createResp) throw new Error('Podman daemon unreachable');
-    if (!createResp.ok) throw new Error(`Podman exec create failed (${createResp.status})`);
+    if (!createResp.ok) throw new Error(`Podman exec create failed (${String(createResp.status)})`);
     const { Id: execId } = await createResp.json();
 
     // Step 2: Start exec
-    const startResp = await this.#fetch(`${this.#apiBase}/exec/${execId}/start`, {
+    const startResp = await this.#fetch(`${this.#apiBase}/exec/${String(execId)}/start`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ Detach: false, Tty: false }),
     });
     if (!startResp) throw new Error('Podman daemon unreachable');
-    if (!startResp.ok) throw new Error(`Podman exec start failed (${startResp.status})`);
+    if (!startResp.ok) throw new Error(`Podman exec start failed (${String(startResp.status)})`);
 
     return { execId };
   }
@@ -406,13 +406,13 @@ export class PodmanContainerProvider implements IContainerProvider {
   public async rename(providerId: string, newName: string): Promise<void> {
     const resp = await this.#fetch(`${this.#apiBase}/containers/${encodeURIComponent(providerId)}/rename?name=${encodeURIComponent(newName)}`, { method: 'POST' });
     if (!resp) throw new Error('Podman daemon unreachable');
-    if (!resp.ok) throw new Error(`Podman rename failed (${resp.status})`);
+    if (!resp.ok) throw new Error(`Podman rename failed (${String(resp.status)})`);
   }
 
   public async stats(providerId: string): Promise<{ cpuUsage: number; memoryUsage: number; networkIO?: { rx: number; tx: number } }> {
     const resp = await this.#fetch(`${this.#apiBase}/containers/${encodeURIComponent(providerId)}/stats?stream=false`);
     if (!resp) throw new Error('Podman daemon unreachable');
-    if (!resp.ok) throw new Error(`Podman stats failed (${resp.status})`);
+    if (!resp.ok) throw new Error(`Podman stats failed (${String(resp.status)})`);
     const data = await resp.json();
     const netKeys = data.networks ? Object.keys(data.networks) : [];
     return {
@@ -427,13 +427,13 @@ export class PodmanContainerProvider implements IContainerProvider {
     if (psArgs) url += `?ps_args=${encodeURIComponent(psArgs)}`;
     const resp = await this.#fetch(url);
     if (!resp) throw new Error('Podman daemon unreachable');
-    if (!resp.ok) throw new Error(`Podman top failed (${resp.status})`);
+    if (!resp.ok) throw new Error(`Podman top failed (${String(resp.status)})`);
     const data = await resp.json();
     return { processes: data.Processes ?? [] };
   }
 
   /** Fetch with connection error protection. Returns null when Podman is down. */
-  public async #fetch(url: string, init?: RequestInit): Promise<Response | null> {
+  async #fetch(url: string, init?: RequestInit): Promise<Response | null> {
     try {
       return await fetch(url, init);
     } catch {
@@ -441,7 +441,7 @@ export class PodmanContainerProvider implements IContainerProvider {
     }
   }
 
-  public async #toRuntime(containerId: string): Promise<ContainerGroupRuntime | null> {
+  async #toRuntime(containerId: string): Promise<ContainerGroupRuntime | null> {
     const resp = await fetch(`${this.#apiBase}/containers/${containerId}/json`);
     if (resp.status === 404) return null;
     if (!resp.ok) return null;
@@ -488,7 +488,7 @@ export class PodmanContainerProvider implements IContainerProvider {
           status: info.State.Running
             ? (info.State.Health?.Status ?? 'none')
             : 'starting',
-          ...(info.State.Health?.FailingStreak && info.State.Health.FailingStreak > 0 ? { message: `Failing health check (${info.State.Health.FailingStreak})` } : {}),
+          ...(info.State.Health?.FailingStreak && info.State.Health.FailingStreak > 0 ? { message: `Failing health check (${String(info.State.Health.FailingStreak)})` } : {}),
         },
       }] as unknown as readonly [],
       volumes: [],
@@ -507,13 +507,13 @@ function runtimeEvents(info: PodmanInspectResult): { reason: string; type: 'Norm
     events.push({ reason: 'Started', type: 'Normal', message: 'Container started', count: 1, lastTimestamp: info.State.StartedAt });
   }
   if (info.State?.Status === 'exited' || info.State?.Status === 'stopped') {
-    events.push({ reason: 'Stopped', type: 'Normal', message: `Container exited with code ${info.State.ExitCode ?? '?'}`, count: 1, lastTimestamp: info.State.FinishedAt ?? ts });
+    events.push({ reason: 'Stopped', type: 'Normal', message: `Container exited with code ${String(info.State.ExitCode ?? '?')}`, count: 1, lastTimestamp: info.State.FinishedAt ?? ts });
   }
   if (info.State?.Health?.Status === 'healthy') {
     events.push({ reason: 'HealthCheck', type: 'Normal', message: 'Health check passed', count: info.State.Health.Log?.length ?? 1, lastTimestamp: info.State.Health.Log?.[info.State.Health.Log.length - 1]?.End ?? ts });
   }
   if (info.State?.Health?.Status === 'unhealthy') {
-    events.push({ reason: 'Unhealthy', type: 'Warning', message: `Health check failed (${info.State.Health.FailingStreak}x)`, count: info.State.Health.FailingStreak ?? 1, lastTimestamp: ts });
+    events.push({ reason: 'Unhealthy', type: 'Warning', message: `Health check failed (${String(info.State.Health.FailingStreak)}x)`, count: info.State.Health.FailingStreak ?? 1, lastTimestamp: ts });
   }
   if (info.State?.Error && info.State.Error !== '') {
     events.push({ reason: 'Error', type: 'Warning', message: info.State.Error, count: 1, lastTimestamp: ts });

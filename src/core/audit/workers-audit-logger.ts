@@ -62,11 +62,11 @@ export class WorkersAuditLogger implements IAuditWriter, IAuditReader, IAuditAdm
     const meta = safeMeta ? JSON.stringify(safeMeta) : undefined;
 
     if (entry.level <= KernLevel.ERR) {
-      meta ? console.error(line, meta) : console.error(line);
+      if (meta) { console.error(line, meta); } else { console.error(line); }
     } else if (entry.level === KernLevel.WARNING) {
-      meta ? console.warn(line, meta) : console.warn(line);
+      if (meta) { console.warn(line, meta); } else { console.warn(line); }
     } else {
-      meta ? console.log(line, meta) : console.log(line);
+      if (meta) { console.log(line, meta); } else { console.log(line); }
     }
 
     // Keep in-memory ring buffer for recent query

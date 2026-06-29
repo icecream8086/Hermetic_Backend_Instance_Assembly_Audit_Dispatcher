@@ -144,7 +144,7 @@ export interface TaskInstance {
   completedAt?: number | undefined;
   exitCode?: number | undefined;
   error?: string | undefined;
-  output?: unknown | undefined;
+  output?: unknown;
   version: VersionId;
 }
 

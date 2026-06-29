@@ -20,6 +20,13 @@ function checkDepth(obj: unknown, maxDepth: number, depth = 0): boolean {
   return true;
 }
 
+class BodyDepthError extends Error {
+  public constructor(maxDepth: number) {
+    super(`JSON nesting depth exceeds limit of ${String(maxDepth)}`);
+    this.name = 'BodyDepthError';
+  }
+}
+
 /**
  * Middleware that limits JSON nesting depth.
  *
@@ -62,9 +69,3 @@ export function jsonDepthLimit(maxDepth = DEFAULT_MAX_DEPTH): MiddlewareHandler<
   };
 }
 
-class BodyDepthError extends Error {
-  public constructor(maxDepth: number) {
-    super(`JSON nesting depth exceeds limit of ${maxDepth}`);
-    this.name = 'BodyDepthError';
-  }
-}

@@ -115,7 +115,7 @@ export class ActionRegistry {
     // Container image fallback: docker.io/library/node:20, etc.
     if (uses.includes('/') || uses.includes(':')) {
       const [image, tag] = uses.includes(':') ? uses.split(':') : [uses, 'latest'];
-      return { image: `${image}:${tag}` };
+      return { image: `${String(image)}:${String(tag)}` };
     }
 
     return null;

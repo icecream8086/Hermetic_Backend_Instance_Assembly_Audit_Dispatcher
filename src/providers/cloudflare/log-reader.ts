@@ -68,7 +68,7 @@ export class CloudflareLogReader implements IAuditReader {
       const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
       const dd = String(d.getUTCDate()).padStart(2, '0');
       for (let h = 0; h < 24; h++) {
-        keys.push(`${this.prefix}/${yyyy}/${mm}/${dd}/${String(h).padStart(2, '0')}/`);
+        keys.push(`${this.prefix}/${String(yyyy)}/${mm}/${dd}/${String(h).padStart(2, '0')}/`);
       }
       d.setUTCDate(d.getUTCDate() + 1);
     }

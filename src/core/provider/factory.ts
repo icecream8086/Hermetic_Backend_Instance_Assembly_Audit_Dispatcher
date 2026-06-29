@@ -55,9 +55,9 @@ class LazyProviderRegistry implements IProviderRegistry {
   private _dns?: IDnsProvider;
   private _metrics?: IMetricsProvider;
   private _groupContainer: IContainerGroupProvider | undefined;
-  private _rawEciApi: any | undefined;
-  private _crApi: any | undefined;
-  private _ossOpenApi: any | undefined;
+  private _rawEciApi: any;
+  private _crApi: any;
+  private _ossOpenApi: any;
   private _typeEntries?: Map<string, ProviderEntry>;
   private _s3Entries?: S3ProviderEntry[];
   private _instanceResolver?: InstanceProviderResolver;
@@ -137,7 +137,7 @@ class LazyProviderRegistry implements IProviderRegistry {
     return this._groupContainer;
   }
 
-  public get rawEciApi(): any | undefined {
+  public get rawEciApi(): any {
     if (!this._rawEciApi) {
       const cred = this._firstAlibabaCred();
       if (cred) this._rawEciApi = new AlibabaEciApiClient(cred.accessKeyId, cred.accessKeySecret);
@@ -145,7 +145,7 @@ class LazyProviderRegistry implements IProviderRegistry {
     return this._rawEciApi;
   }
 
-  public get crApi(): any | undefined {
+  public get crApi(): any {
     if (!this._crApi) {
       const cred = this._firstAlibabaCred();
       if (cred) this._crApi = new AlibabaCrApiClient(cred.accessKeyId, cred.accessKeySecret);
@@ -153,7 +153,7 @@ class LazyProviderRegistry implements IProviderRegistry {
     return this._crApi;
   }
 
-  public get ossOpenApi(): any | undefined {
+  public get ossOpenApi(): any {
     if (!this._ossOpenApi) {
       const cred = this._firstAlibabaCred();
       if (cred) this._ossOpenApi = new AlibabaOssOpenApiClient(cred.accessKeyId, cred.accessKeySecret);
@@ -249,7 +249,7 @@ class LazyProviderRegistry implements IProviderRegistry {
     return this._instanceResolver.resolveGroup(instanceId);
   }
 
-  public async resolveRawEciApi(instanceId?: InstanceId): Promise<any | undefined> {
+  public async resolveRawEciApi(instanceId?: InstanceId): Promise<any> {
     await this._ensureResolver();
     if (this._instanceResolver && instanceId) {
       return this._instanceResolver.resolveRawEciApi(instanceId);
@@ -257,7 +257,7 @@ class LazyProviderRegistry implements IProviderRegistry {
     return this.rawEciApi;
   }
 
-  public async resolveCrApi(instanceId?: InstanceId): Promise<any | undefined> {
+  public async resolveCrApi(instanceId?: InstanceId): Promise<any> {
     await this._ensureResolver();
     if (this._instanceResolver && instanceId) {
       return this._instanceResolver.resolveCrApi(instanceId);
@@ -265,7 +265,7 @@ class LazyProviderRegistry implements IProviderRegistry {
     return this.crApi;
   }
 
-  public async resolveOssOpenApi(instanceId?: InstanceId): Promise<any | undefined> {
+  public async resolveOssOpenApi(instanceId?: InstanceId): Promise<any> {
     await this._ensureResolver();
     if (this._instanceResolver && instanceId) {
       return this._instanceResolver.resolveOssOpenApi(instanceId);

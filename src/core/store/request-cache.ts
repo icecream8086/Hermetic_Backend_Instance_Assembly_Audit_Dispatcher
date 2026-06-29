@@ -22,6 +22,7 @@ export class RequestCachedAtomicStore implements IAtomicStore {
     this.#inner = inner;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- interface contract requires generics
   public async get<T>(key: string): Promise<{ value: T; version: VersionId } | null> {
     const cached = this.#cache.get(key);
     if (cached !== undefined) return cached as { value: T; version: VersionId } | null;
@@ -31,6 +32,7 @@ export class RequestCachedAtomicStore implements IAtomicStore {
     return result;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- interface contract requires generics
   public async set<T>(key: string, value: T, expectedVersion: VersionId | null, ttlSeconds?: number): Promise<VersionId | null> {
     this.#cache.delete(key);
     return this.#inner.set(key, value, expectedVersion, ttlSeconds);

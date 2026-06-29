@@ -84,7 +84,7 @@ export class SubnetPool {
       return cidrStr;
     }
 
-    throw new Error(`Subnet pool exhausted: no free /${this.#prefixLen} in ${formatCidr(this.#supernet)}`);
+    throw new Error(`Subnet pool exhausted: no free /${String(this.#prefixLen)} in ${formatCidr(this.#supernet)}`);
   }
 
   /**
@@ -126,7 +126,7 @@ export class SubnetPool {
   /**
    * List all current allocations.
    */
-  public async #listAllocations(): Promise<SubnetAllocation[]> {
+  async #listAllocations(): Promise<SubnetAllocation[]> {
     const idxEntry = await this.#atomic.get<string[]>(INDEX_KEY);
     if (!idxEntry) return [];
 

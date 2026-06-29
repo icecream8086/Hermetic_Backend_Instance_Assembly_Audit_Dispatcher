@@ -1,4 +1,4 @@
-import type { RegionId, AlibabaRegion, ZoneId, ClusterId } from './types.ts';
+import type { RegionId, ZoneId, ClusterId } from './types.ts';
 import { ALIBABA_REGIONS } from './types.ts';
 
 // ─── Region-level configuration ───

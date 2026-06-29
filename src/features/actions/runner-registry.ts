@@ -183,7 +183,7 @@ export class RunnerRegistry {
     return entries.filter(e => e).map(e => e!.value);
   }
 
-  public async #findByName(name: string): Promise<RunnerRegistration | null> {
+  async #findByName(name: string): Promise<RunnerRegistration | null> {
     const idx = await this.atomic.get<string[]>(IDX);
     if (!idx) return null;
     for (const id of idx.value) {

@@ -8,7 +8,7 @@ import { executeDnsStep } from './step-dns.ts';
 import { appendStepLog } from './logs.ts';
 import type { ActionRegistry } from './registry.ts';
 import { createEvent } from '../../core/event-bus/types.ts';
-import { PodService } from '../../core/pod/service.ts';
+import type { PodService } from '../../core/pod/service.ts';
 import type { PodSpec } from '../../core/pod/types.ts';
 
 /**
@@ -120,7 +120,7 @@ export class JobOperator implements ITaskExecutor {
     if (this.deps.podService) {
       const podSpec: PodSpec = {
         metadata: {
-          name: `action-${config.jobName}-${Date.now()}`,
+          name: `action-${String(config.jobName)}-${String(Date.now())}`,
           labels: { job: config.jobName, owner: 'actions' },
         },
         spec: {
@@ -155,7 +155,7 @@ export class JobOperator implements ITaskExecutor {
     const region = config.region ?? 'local';
 
     const result = await provider.create({
-      name: `action-${config.jobName}-${Date.now()}`,
+      name: `action-${String(config.jobName)}-${String(Date.now())}`,
       region,
       ...(instanceId ? { instanceId } : {}),
       cpu: mainContainer.resources?.cpu ?? 1,
@@ -196,7 +196,7 @@ export class JobOperator implements ITaskExecutor {
     });
 
     if (result?.exitCode !== 0) {
-      throw new Error(`Command exited with ${result?.exitCode ?? -1}: ${step.run.slice(0, 200)}`);
+      throw new Error(`Command exited with ${String(result?.exitCode ?? -1)}: ${step.run.slice(0, 200)}`);
     }
   }
 
@@ -224,7 +224,7 @@ export class JobOperator implements ITaskExecutor {
         timeout: step.timeout ? step.timeout * 1000 : undefined,
       });
       if (result?.exitCode !== 0) {
-        throw new Error(`Action ${step.uses} failed with exit ${result?.exitCode}`);
+        throw new Error(`Action ${String(step.uses)} failed with exit ${String(result?.exitCode)}`);
       }
     } else if (typeof provider?.exec === 'function') {
       const mergedEnv = { ...env, ...step.env, ...step.with };
@@ -236,7 +236,7 @@ export class JobOperator implements ITaskExecutor {
         timeout: step.timeout ? step.timeout * 1000 : undefined,
       });
       if (result?.exitCode !== 0) {
-        throw new Error(`Action ${step.uses} failed with exit ${result?.exitCode}`);
+        throw new Error(`Action ${String(step.uses)} failed with exit ${String(result?.exitCode)}`);
       }
     } else {
       throw new Error(`Action not found: ${step.uses}`);

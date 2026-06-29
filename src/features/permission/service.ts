@@ -11,7 +11,7 @@ import { KernLevel } from '../../core/audit/kern-level.ts';
 import { applyUpdate } from '../../core/utils/apply-update.ts';
 import type { AuditActor } from './audit.ts';
 import { CrudStore, type PaginatedResult } from './crud-store.ts';
-import type { Invitation, InviteStatus, CreateInviteInput } from './types.ts';
+import type { Invitation, CreateInviteInput } from './types.ts';
 import { INVITE_PREFIX, INVITE_INDEX_KEY } from './types.ts';
 import { setActivePolicy, DEFAULT_POLICY } from '../../core/audit/log-policy.ts';
 import type {
@@ -387,7 +387,7 @@ export class PermissionService implements IPermissionService {
 
       this.audit?.write({
         level: KernLevel.WARNING, facility: FACILITY,
-        message: `Temporary elevation granted: ${userId} for ${dur}ms, caps=${formatCapabilities(caps).join(',')}`,
+        message: `Temporary elevation granted: ${userId} for ${String(dur)}ms, caps=${formatCapabilities(caps).join(',')}`,
         metadata: { eventType: 'perm.elevation.granted', userId, durationMs: dur, caps: formatCapabilities(caps) },
       });
       return expiry;
@@ -512,7 +512,7 @@ export class PermissionService implements IPermissionService {
       .filter(inv => inv.inviteeId === userId);
   }
 
-  public async #transactWithRetry<T>(fn: (txn: IStoreTransaction) => Promise<T>, retries = 3): Promise<T> {
+  async #transactWithRetry<T>(fn: (txn: IStoreTransaction) => Promise<T>, retries = 3): Promise<T> {
     for (let i = 0; i < retries; i++) {
       try {
         return await this.atomic.transact(fn);

@@ -103,7 +103,7 @@ export function formatCapabilities(caps: CapabilityValue): string[] {
   const names: string[] = [];
   for (let bit = 0; bit < 19; bit++) {
     const v = 1 << bit;
-    if (caps & v) names.push(CAP_NAMES[v] ?? `BIT_${bit}`);
+    if (caps & v) names.push(CAP_NAMES[v] ?? `BIT_${String(bit)}`);
   }
   return names;
 }
