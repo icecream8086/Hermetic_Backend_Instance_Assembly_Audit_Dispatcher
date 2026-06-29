@@ -104,8 +104,8 @@ async function createBlobStore(
   }
 
   return {
-    async put() { /* noop */ },
+    async put() {},
     async get() { return null; },
-    async delete() { /* noop */ },
+    async delete() {},
   };
 }

@@ -60,7 +60,7 @@ export class PermissionChecker {
     this.pgStore = new CrudStore(atomic, PERMGROUP_PREFIX, PERMGROUP_INDEX_KEY, 'PERMGROUP_NOT_FOUND');
   }
 
-  invalidateCache(): void { this.#cache = { policies: null, userGroups: null, permGroups: null }; }
+  public invalidateCache(): void { this.#cache = { policies: null, userGroups: null, permGroups: null }; }
 
   // ─── Public API ───
 

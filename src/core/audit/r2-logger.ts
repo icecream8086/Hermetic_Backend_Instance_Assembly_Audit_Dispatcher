@@ -258,12 +258,12 @@ export class R2AuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
   // ─── Lifecycle ───
 
   /** Start auto-flushing the write buffer. */
-  startAutoFlush(): void {
+  public startAutoFlush(): void {
     if (this.#flushTimer) return;
     this.#flushTimer = setInterval(() => this.flush().catch(() => {}), this.#config.flushIntervalMs);
   }
 
-  stopAutoFlush(): void {
+  public stopAutoFlush(): void {
     if (this.#flushTimer) {
       clearInterval(this.#flushTimer);
       this.#flushTimer = null;

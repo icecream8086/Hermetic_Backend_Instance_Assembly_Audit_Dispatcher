@@ -8,7 +8,7 @@ import type { IMessageQueue } from './interfaces.ts';
  * to inline execution.
  */
 export class NoopMessageQueue implements IMessageQueue {
-  get available(): boolean { return false; }
+  public get available(): boolean { return false; }
 
   public async sendImagePull(): Promise<boolean> { return false; }
   public async sendSandboxGc(): Promise<boolean> { return false; }

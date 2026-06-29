@@ -3,18 +3,18 @@ import type { IAuthProvider, AuthRequest, SignResult } from './interfaces.ts';
 // ─── No-auth (local Podman, stub) ───
 
 export class NoAuthProvider implements IAuthProvider {
-  readonly type = 'none';
+  public readonly type = 'none';
   public async sign(_req: AuthRequest): Promise<SignResult> {
     return { headers: {} };
   }
-  isExpired(): boolean { return false; }
+  public isExpired(): boolean { return false; }
   public async refresh(): Promise<void> {}
 }
 
 // ─── Bearer token (Cloudflare, OAuth2) ───
 
 export class BearerTokenProvider implements IAuthProvider {
-  readonly type = 'bearer';
+  public readonly type = 'bearer';
   private token: string;
   private expiresAt = 0;
   private readonly _tokenUrl: string | undefined;
@@ -36,7 +36,7 @@ export class BearerTokenProvider implements IAuthProvider {
     return { token: this.token, expiresAt: this.expiresAt || undefined };
   }
 
-  isExpired(): boolean {
+  public isExpired(): boolean {
     return this.expiresAt > 0 && Date.now() >= this.expiresAt;
   }
 
@@ -99,13 +99,13 @@ async function signAlibabaRpc(
 }
 
 export class AkSkProvider implements IAuthProvider {
-  readonly type = 'aksk';
+  public readonly type = 'aksk';
 
   /** Cache of stateless AkSkProvider instances, keyed by accessKeyId. */
   static #cache = new Map<string, AkSkProvider>();
 
   /** Get or create a cached instance. AkSkProvider is effectively stateless — reuse is safe. */
-  static getOrCreate(accessKeyId: string, accessKeySecret: string, region?: string, endpoint?: string): AkSkProvider {
+  public static getOrCreate(accessKeyId: string, accessKeySecret: string, region?: string, endpoint?: string): AkSkProvider {
     let p = AkSkProvider.#cache.get(accessKeyId);
     if (!p) {
       p = new AkSkProvider(accessKeyId, accessKeySecret, region, endpoint);
@@ -115,15 +115,15 @@ export class AkSkProvider implements IAuthProvider {
   }
 
   public constructor(
-    readonly _accessKeyId: string,
-    readonly _accessKeySecret: string,
+    public readonly _accessKeyId: string,
+    public readonly _accessKeySecret: string,
     /** Region for endpoint resolution (e.g. 'cn-hangzhou'). */
-    readonly _region?: string | undefined,
+    public readonly _region?: string | undefined,
     /** Custom endpoint override. */
-    readonly _endpoint?: string | undefined,
+    public readonly _endpoint?: string | undefined,
   ) {}
 
-  isExpired(): boolean { return false; }
+  public isExpired(): boolean { return false; }
   public async refresh(): Promise<void> {}
 
   /**

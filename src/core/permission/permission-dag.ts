@@ -27,7 +27,7 @@ export class PermissionDag extends Dag<PolicyId, PolicyNode> {
   // ─── Building ───
 
   /** Register a policy node. Replaces any node with the same id. */
-  addPolicy(node: PolicyNode): void {
+  public addPolicy(node: PolicyNode): void {
     this.addNode(node);
   }
 
@@ -35,7 +35,7 @@ export class PermissionDag extends Dag<PolicyId, PolicyNode> {
    * Add a dependency edge: `from` policy must be evaluated before `to`.
    * Both policy IDs must already exist.
    */
-  addDependency(from: PolicyId, to: PolicyId): void {
+  public addDependency(from: PolicyId, to: PolicyId): void {
     this.addEdge(from, to);
   }
 
@@ -53,7 +53,7 @@ export class PermissionDag extends Dag<PolicyId, PolicyNode> {
    *
    * Returns the decision and the policy node that triggered it (if any).
    */
-  evaluate(params: PermissionCheck): EvaluationResult {
+  public evaluate(params: PermissionCheck): EvaluationResult {
     const sortResult = this.topologicalSort();
 
     if (!sortResult.success) {

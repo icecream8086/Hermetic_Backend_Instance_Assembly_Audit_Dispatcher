@@ -38,7 +38,7 @@ export class RouteAclManager {
   /** Cache of sorted ACLs with store version for cross-instance coherency. */
   #cachedAclsVersion = -1;
   #cachedAcls: readonly RouteAcl[] | null = null;
-  static readonly VERSION_KEY = 'routeacl:version';
+  public static readonly VERSION_KEY = 'routeacl:version';
 
   public constructor(
     _atomic: IAtomicStore,

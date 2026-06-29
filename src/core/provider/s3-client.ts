@@ -14,7 +14,7 @@ import { payloadHash } from './s3-signer.ts';
 export { encodeKey, parseObjectInfo, parseListResult, toArrayBuffer };
 
 export abstract class S3ClientBase implements IS3Provider {
-  abstract readonly type: S3ProviderType;
+  public abstract readonly type: S3ProviderType;
   protected readonly config: S3ProviderConfig;
 
   public constructor(config?: S3ProviderConfig) {

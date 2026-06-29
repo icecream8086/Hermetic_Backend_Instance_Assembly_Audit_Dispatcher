@@ -156,9 +156,9 @@ export class PermissionService implements IPermissionService {
     this.#checker.invalidateCache();
     return result;
   }
-  listPolicies() { return this.#policyMgr.list(); }
-  listPoliciesPaginated(page?: number, limit?: number, filter?: (item: StoredPolicy) => boolean) { return this.#policyMgr.listPaginated(page, limit, filter); }
-  getPolicy(id: string) { return this.#policyMgr.get(id); }
+  public listPolicies() { return this.#policyMgr.list(); }
+  public listPoliciesPaginated(page?: number, limit?: number, filter?: (item: StoredPolicy) => boolean) { return this.#policyMgr.listPaginated(page, limit, filter); }
+  public getPolicy(id: string) { return this.#policyMgr.get(id); }
   public async updatePolicy(id: string, input: UpdatePolicyInput, actor?: AuditActor) {
     const result = await this.#policyMgr.update(id, input, actor);
     this.#checker.invalidateCache();
@@ -175,9 +175,9 @@ export class PermissionService implements IPermissionService {
     this.#checker.invalidateCache();
     return result;
   }
-  listUserGroups() { return this.#groupMgr.listUserGroups(); }
-  listUserGroupsPaginated(page?: number, limit?: number, filter?: (item: UserGroup) => boolean) { return this.#groupMgr.listUserGroupsPaginated(page, limit, filter); }
-  getUserGroup(id: string) { return this.#groupMgr.getUserGroup(id); }
+  public listUserGroups() { return this.#groupMgr.listUserGroups(); }
+  public listUserGroupsPaginated(page?: number, limit?: number, filter?: (item: UserGroup) => boolean) { return this.#groupMgr.listUserGroupsPaginated(page, limit, filter); }
+  public getUserGroup(id: string) { return this.#groupMgr.getUserGroup(id); }
   public async updateUserGroup(id: string, input: UpdateUserGroupInput, actor?: AuditActor) {
     const result = await this.#groupMgr.updateUserGroup(id, input, actor);
     this.#checker.invalidateCache();
@@ -194,9 +194,9 @@ export class PermissionService implements IPermissionService {
     this.#checker.invalidateCache();
     return result;
   }
-  listPermGroups() { return this.#groupMgr.listPermGroups(); }
-  listPermGroupsPaginated(page?: number, limit?: number, filter?: (item: PermissionGroup) => boolean) { return this.#groupMgr.listPermGroupsPaginated(page, limit, filter); }
-  getPermGroup(id: string) { return this.#groupMgr.getPermGroup(id); }
+  public listPermGroups() { return this.#groupMgr.listPermGroups(); }
+  public listPermGroupsPaginated(page?: number, limit?: number, filter?: (item: PermissionGroup) => boolean) { return this.#groupMgr.listPermGroupsPaginated(page, limit, filter); }
+  public getPermGroup(id: string) { return this.#groupMgr.getPermGroup(id); }
   public async updatePermGroup(id: string, input: UpdatePermGroupInput, actor?: AuditActor) {
     const result = await this.#groupMgr.updatePermGroup(id, input, actor);
     this.#checker.invalidateCache();
@@ -206,21 +206,21 @@ export class PermissionService implements IPermissionService {
     await this.#groupMgr.deletePermGroup(id, actor);
     this.#checker.invalidateCache();
   }
-  createPermGroupFromTemplate(templateId: string, overrides: any, actor?: AuditActor) {
+  public createPermGroupFromTemplate(templateId: string, overrides: any, actor?: AuditActor) {
     return this.#groupMgr.createFromTemplate(templateId, overrides, actor);
   }
 
   // ── Templates ──
-  listTemplates(): Template[] { return TEMPLATES; }
-  getTemplate(id: string): Template | undefined { return TEMPLATES.find(t => t.id === id); }
+  public listTemplates(): Template[] { return TEMPLATES; }
+  public getTemplate(id: string): Template | undefined { return TEMPLATES.find(t => t.id === id); }
 
   // ── Route ACL ──
-  createRouteAcl(input: CreateRouteAclInput, actor?: AuditActor) { return this.#routeAclMgr.create(input, actor); }
-  listRouteAcls() { return this.#routeAclMgr.list(); }
-  listRouteAclsPaginated(page?: number, limit?: number, filter?: (item: RouteAcl) => boolean) { return this.#routeAclMgr.listPaginated(page, limit, filter); }
-  getRouteAcl(id: string) { return this.#routeAclMgr.get(id); }
-  updateRouteAcl(id: string, input: UpdateRouteAclInput, actor?: AuditActor) { return this.#routeAclMgr.update(id, input, actor); }
-  deleteRouteAcl(id: string, actor?: AuditActor) { return this.#routeAclMgr.delete(id, actor); }
+  public createRouteAcl(input: CreateRouteAclInput, actor?: AuditActor) { return this.#routeAclMgr.create(input, actor); }
+  public listRouteAcls() { return this.#routeAclMgr.list(); }
+  public listRouteAclsPaginated(page?: number, limit?: number, filter?: (item: RouteAcl) => boolean) { return this.#routeAclMgr.listPaginated(page, limit, filter); }
+  public getRouteAcl(id: string) { return this.#routeAclMgr.get(id); }
+  public updateRouteAcl(id: string, input: UpdateRouteAclInput, actor?: AuditActor) { return this.#routeAclMgr.update(id, input, actor); }
+  public deleteRouteAcl(id: string, actor?: AuditActor) { return this.#routeAclMgr.delete(id, actor); }
 
   public async checkRouteAccess(method: string, path: string, userId: string): Promise<boolean> {
     const userEntry = await this.atomic.get<any>('user:' + userId);
@@ -233,8 +233,8 @@ export class PermissionService implements IPermissionService {
   }
 
   // ── Compare ──
-  comparePermGroups(idA: string, idB: string) { return this.#groupMgr.comparePermGroups(idA, idB); }
-  compareUserGroups(idA: string, idB: string) { return this.#groupMgr.compareUserGroups(idA, idB); }
+  public comparePermGroups(idA: string, idB: string) { return this.#groupMgr.comparePermGroups(idA, idB); }
+  public compareUserGroups(idA: string, idB: string) { return this.#groupMgr.compareUserGroups(idA, idB); }
 
   // ── Log Policy ──
   public async getLogPolicy(): Promise<LogPolicy & { readonly exists: boolean }> {
@@ -274,9 +274,9 @@ export class PermissionService implements IPermissionService {
     });
     return tpl;
   }
-  listUserTpls() { return this.userTplStore.list(); }
-  listUserTplsPaginated(page?: number, limit?: number, filter?: (item: UserTemplate) => boolean) { return this.userTplStore.listPaginated(page, limit, filter); }
-  getUserTpl(id: string) { return this.userTplStore.get(id); }
+  public listUserTpls() { return this.userTplStore.list(); }
+  public listUserTplsPaginated(page?: number, limit?: number, filter?: (item: UserTemplate) => boolean) { return this.userTplStore.listPaginated(page, limit, filter); }
+  public getUserTpl(id: string) { return this.userTplStore.get(id); }
 
   public async updateUserTpl(id: string, input: UpdateUserTplInput, actor?: AuditActor): Promise<UserTemplate> {
     const old = await this.userTplStore.get(id);
@@ -304,7 +304,7 @@ export class PermissionService implements IPermissionService {
   }
 
   // ── Permission Check ──
-  check(input: PermissionCheckInput): Promise<PolicyMatchResult> {
+  public check(input: PermissionCheckInput): Promise<PolicyMatchResult> {
     return this.#checker.check(input, this.#macRules);
   }
 

@@ -7,7 +7,7 @@ import type { S3ProviderConfig } from '../../core/provider/s3-types.ts';
 import { hmacSha1 } from '../../core/auth/providers.ts';
 
 export class AlibabaOssProvider extends S3ClientBase {
-  readonly type = 'alibaba-oss' as const;
+  public readonly type = 'alibaba-oss' as const;
   readonly #accessKeyId: string;
   readonly #accessKeySecret: string;
   readonly #endpoint: string;

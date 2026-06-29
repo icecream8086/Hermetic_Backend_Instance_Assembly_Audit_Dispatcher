@@ -14,7 +14,7 @@ export function setPanicHandler(handler: ((msg: string) => void) | null): void {
 
 /** Minimal console logger for local development. */
 export class ConsoleLogger implements IAuditLogger {
-  readonly auditTier = AuditTier.BEST_EFFORT;
+  public readonly auditTier = AuditTier.BEST_EFFORT;
   #entries: AuditEntry[] = [];
 
   public async write(entry: AuditEntry): Promise<void> {
@@ -59,7 +59,7 @@ export class ConsoleLogger implements IAuditLogger {
     return (this.#entries as StoredAuditEntry[]).find(e => e.id === id) ?? null;
   }
 
-  public async flush(): Promise<void> { /* noop */ }
+  public async flush(): Promise<void> {}
   public async dispose(): Promise<void> { this.#entries = []; }
 
   public async forceSetTail(_facility: any, _tailId: any): Promise<void> {}

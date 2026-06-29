@@ -10,7 +10,7 @@ import type { SigV4Credentials } from '../../core/provider/s3-signer.ts';
 const CLOCK_SKEW_RETRIES = 2;
 
 export class CloudflareR2S3Provider extends S3ClientBase {
-  readonly type = 'cloudflare-r2' as const;
+  public readonly type = 'cloudflare-r2' as const;
   readonly #accountId: string;
   readonly #credentials: SigV4Credentials;
   #clockOffset = 0;

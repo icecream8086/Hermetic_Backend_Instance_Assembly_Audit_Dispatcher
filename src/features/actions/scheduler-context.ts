@@ -23,7 +23,7 @@ export class StoreSchedulerContext implements SchedulerContext {
   ) {}
 
   /** Register an executor so the scheduler can resolve it by key. */
-  registerExecutor(executor: ITaskExecutor): void {
+  public registerExecutor(executor: ITaskExecutor): void {
     this.executorRegistry.set(executor.key, executor);
   }
 

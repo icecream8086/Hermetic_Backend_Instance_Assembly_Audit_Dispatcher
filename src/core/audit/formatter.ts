@@ -8,11 +8,11 @@ export interface ILogFormatter {
 }
 
 export class JsonLogFormatter implements ILogFormatter {
-  serialize(entry: StoredAuditEntry): SerializedBody {
+  public serialize(entry: StoredAuditEntry): SerializedBody {
     return createSerializedBody(JSON.stringify(entry));
   }
 
-  deserialize(body: SerializedBody): StoredAuditEntry {
+  public deserialize(body: SerializedBody): StoredAuditEntry {
     return JSON.parse(body) as StoredAuditEntry;
   }
 }

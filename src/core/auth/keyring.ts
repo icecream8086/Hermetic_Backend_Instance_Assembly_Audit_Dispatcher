@@ -100,7 +100,7 @@ export class SessionKeyring {
     return kp;
   }
 
-  get(sessionId: string): KeyPair | null {
+  public get(sessionId: string): KeyPair | null {
     const entry = this.#keys.get(sessionId);
     if (!entry || Date.now() >= entry.expiresAt) {
       this.#keys.delete(sessionId);
@@ -109,6 +109,6 @@ export class SessionKeyring {
     return entry.keypair;
   }
 
-  clear(sessionId: string): void { this.#keys.delete(sessionId); }
-  clearAll(): void { this.#keys.clear(); }
+  public clear(sessionId: string): void { this.#keys.delete(sessionId); }
+  public clearAll(): void { this.#keys.clear(); }
 }

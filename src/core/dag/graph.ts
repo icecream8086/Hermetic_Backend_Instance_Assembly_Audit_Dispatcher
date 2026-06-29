@@ -43,7 +43,7 @@ export class Dag<TId, TNode> {
   // ─── Mutation ───
 
   /** Add a node. Replaces any existing node with the same id. */
-  addNode(node: TNode): void {
+  public addNode(node: TNode): void {
     const id = this.getId(node);
     this.nodes.set(id, node);
     if (!this.outgoing.has(id)) this.outgoing.set(id, new Set());
@@ -54,7 +54,7 @@ export class Dag<TId, TNode> {
    * Add a directed edge `from` → `to`.
    * Both nodes must already exist (call `addNode` first).
    */
-  addEdge(from: TId, to: TId): void {
+  public addEdge(from: TId, to: TId): void {
     if (!this.nodes.has(from)) throw new TypeError(`Dag.addEdge: source node "${from}" does not exist`);
     if (!this.nodes.has(to)) throw new TypeError(`Dag.addEdge: target node "${to}" does not exist`);
 
@@ -64,26 +64,26 @@ export class Dag<TId, TNode> {
 
   // ─── Queries ───
 
-  hasNode(id: TId): boolean {
+  public hasNode(id: TId): boolean {
     return this.nodes.has(id);
   }
 
-  getNode(id: TId): TNode | undefined {
+  public getNode(id: TId): TNode | undefined {
     return this.nodes.get(id);
   }
 
   /** Returns all nodes. Order is undefined. */
-  getAllNodes(): readonly TNode[] {
+  public getAllNodes(): readonly TNode[] {
     return [...this.nodes.values()];
   }
 
   /** Number of nodes in the graph. */
-  get size(): number {
+  public get size(): number {
     return this.nodes.size;
   }
 
   /** Nodes that have a direct edge TO `id` (incoming neighbours). */
-  predecessorsOf(id: TId): readonly TNode[] {
+  public predecessorsOf(id: TId): readonly TNode[] {
     const result: TNode[] = [];
     for (const from of this.incoming.get(id) ?? []) {
       const node = this.nodes.get(from);
@@ -93,7 +93,7 @@ export class Dag<TId, TNode> {
   }
 
   /** Nodes that `id` has a direct edge TO (outgoing neighbours). */
-  successorsOf(id: TId): readonly TNode[] {
+  public successorsOf(id: TId): readonly TNode[] {
     const result: TNode[] = [];
     for (const to of this.outgoing.get(id) ?? []) {
       const node = this.nodes.get(to);
@@ -103,7 +103,7 @@ export class Dag<TId, TNode> {
   }
 
   /** Nodes with in-degree 0 — no edges point TO them. */
-  sources(): readonly TNode[] {
+  public sources(): readonly TNode[] {
     const result: TNode[] = [];
     for (const [id] of this.nodes) {
       const inc = this.incoming.get(id);
@@ -115,7 +115,7 @@ export class Dag<TId, TNode> {
   }
 
   /** Nodes with out-degree 0 — no edges point FROM them. */
-  sinks(): readonly TNode[] {
+  public sinks(): readonly TNode[] {
     const result: TNode[] = [];
     for (const [id] of this.nodes) {
       const out = this.outgoing.get(id);
@@ -136,7 +136,7 @@ export class Dag<TId, TNode> {
    * On success: `{ success: true, sorted: [...] }`
    * On cycle:  `{ success: false, sorted: [...partial...], error: "..." }`
    */
-  topologicalSort(): TopoSortResult<TNode> {
+  public topologicalSort(): TopoSortResult<TNode> {
     const inDegree = new Map<TId, number>();
 
     // initialise in-degree for every node
@@ -189,7 +189,7 @@ export class Dag<TId, TNode> {
    * - `{ success: true, dag }` on success
    * - `{ success: false, error }` when the root is missing or a cycle is detected
    */
-  reachableSubgraph(root: TId):
+  public reachableSubgraph(root: TId):
     | { readonly success: true; readonly dag: Dag<TId, TNode> }
     | { readonly success: false; readonly error: string } {
     const subgraph = new Dag<TId, TNode>(this.getId);

@@ -42,10 +42,10 @@ export type ProviderName = 'alibaba' | 'aws' | 'podman' | 'stub';
 // ─── RegionRegistry ───
 
 export class RegionRegistry {
-  static readonly ALIBABA = buildAlibabaDefaults();
+  public static readonly ALIBABA = buildAlibabaDefaults();
 
   /** Local dev region config. */
-  static readonly LOCAL: RegionConfig = {
+  public static readonly LOCAL: RegionConfig = {
     endpoints: { container: 'http://127.0.0.1:8080', s3: 'http://127.0.0.1:9000' },
   };
 
@@ -65,7 +65,7 @@ export class RegionRegistry {
 
   /** Get the full region config (defaults + overrides merged).
    *  If clusterId is provided, cluster-level overrides are also applied. */
-  getConfig(region: RegionId, provider?: ProviderName, clusterId?: ClusterId): RegionConfig {
+  public getConfig(region: RegionId, provider?: ProviderName, clusterId?: ClusterId): RegionConfig {
     // Cluster-specific override takes highest priority
     if (clusterId) {
       const co = this.#clusterOverrides.get(clusterId);
@@ -92,7 +92,7 @@ export class RegionRegistry {
    * this method can route to the correct default table (Alibaba vs AWS).
    * Runtime overrides are checked first, then built-in defaults.
    */
-  getEndpoint(provider: ProviderName, region: RegionId, service: string, clusterId?: ClusterId): string {
+  public getEndpoint(provider: ProviderName, region: RegionId, service: string, clusterId?: ClusterId): string {
     const cfg = this.getConfig(region, provider, clusterId);
 
     // Check region-level override first
@@ -110,27 +110,27 @@ export class RegionRegistry {
   }
 
   /** Apply a runtime override for a specific cluster. */
-  setClusterOverride(clusterId: ClusterId, config: RegionConfig): void {
+  public setClusterOverride(clusterId: ClusterId, config: RegionConfig): void {
     this.#clusterOverrides.set(clusterId, config);
   }
 
   /** Remove a cluster override. */
-  removeClusterOverride(clusterId: ClusterId): void {
+  public removeClusterOverride(clusterId: ClusterId): void {
     this.#clusterOverrides.delete(clusterId);
   }
 
   /** Apply a runtime override for a specific region. */
-  setOverride(region: string, config: RegionConfig): void {
+  public setOverride(region: string, config: RegionConfig): void {
     this.#overrides.set(region, config);
   }
 
   /** Remove a runtime override (reverts to static default). */
-  removeOverride(region: string): void {
+  public removeOverride(region: string): void {
     this.#overrides.delete(region);
   }
 
   /** List all known region IDs (static + overrides). */
-  listRegions(): string[] {
+  public listRegions(): string[] {
     const set = new Set<string>([...ALIBABA_REGIONS, 'local', ...this.#overrides.keys()]);
     return [...set];
   }

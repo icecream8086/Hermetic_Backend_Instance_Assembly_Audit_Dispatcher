@@ -7,7 +7,7 @@ import type { ITimerBackend, TimerHandle } from './interfaces.ts';
  * the platform's event loop.
  */
 export class SetIntervalBackend implements ITimerBackend {
-  start(handler: () => void, intervalMs: number): TimerHandle {
+  public start(handler: () => void, intervalMs: number): TimerHandle {
     const id = setInterval(handler, intervalMs);
     return { clear: () => { clearInterval(id); } };
   }

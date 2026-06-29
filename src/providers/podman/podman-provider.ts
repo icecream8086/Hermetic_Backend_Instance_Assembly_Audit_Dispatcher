@@ -81,7 +81,7 @@ interface PodmanInspectResult {
 }
 
 export class PodmanContainerProvider implements IContainerProvider {
-  readonly lifecycle: ContainerLifecycle = { stopIsDelete: false, startable: true, healthProbes: true, asyncInit: false };
+  public readonly lifecycle: ContainerLifecycle = { stopIsDelete: false, startable: true, healthProbes: true, asyncInit: false };
   readonly #apiBase: string;
   /** Tracks created Podman secret IDs for cleanup on container delete. */
   readonly #createdSecrets = new Map<string, string[]>();

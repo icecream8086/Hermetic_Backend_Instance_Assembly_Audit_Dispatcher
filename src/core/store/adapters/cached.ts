@@ -31,7 +31,7 @@ class BloomFilter {
     this.#bits = new Uint8Array(Math.ceil(BloomFilter.#SIZE / 8));
   }
 
-  add(key: string): void {
+  public add(key: string): void {
     for (const seed of BloomFilter.#SEEDS) {
       const idx = this.#hash(key, seed) % BloomFilter.#SIZE;
       const i = idx >> 3;
@@ -39,7 +39,7 @@ class BloomFilter {
     }
   }
 
-  mightContain(key: string): boolean {
+  public mightContain(key: string): boolean {
     for (const seed of BloomFilter.#SEEDS) {
       const idx = this.#hash(key, seed) % BloomFilter.#SIZE;
       if (!((this.#bits[idx >> 3] ?? 0) & (1 << (idx & 7)))) return false;
@@ -90,7 +90,7 @@ export class CachedAtomicStore implements IAtomicStore {
     private readonly store: IAtomicStore,
     private readonly readTtlMs: number = DEFAULT_CACHE_TTL_MS,
     private readonly storeTtlSeconds?: number,
-    readonly metrics?: AtomicStoreMetrics,
+    public readonly metrics?: AtomicStoreMetrics,
   ) {}
 
   public async get<T>(key: string): Promise<{ value: T; version: VersionId } | null> {

@@ -25,7 +25,7 @@ export class LinkedList<T> {
   // ─── Mutation ───
 
   /** Insert a value at the head of the list. Returns the new node. */
-  addToHead(value: T): ListNode<T> {
+  public addToHead(value: T): ListNode<T> {
     const node: ListNode<T> = { value, next: null, prev: null };
     if (this.head === null) {
       this.head = node;
@@ -40,7 +40,7 @@ export class LinkedList<T> {
   }
 
   /** Insert a value at the tail of the list. Returns the new node. */
-  addToTail(value: T): ListNode<T> {
+  public addToTail(value: T): ListNode<T> {
     const node: ListNode<T> = { value, next: null, prev: null };
     if (this.tail === null) {
       this.head = node;
@@ -55,7 +55,7 @@ export class LinkedList<T> {
   }
 
   /** Insert a value after a given node. Returns the new node. */
-  addAfter(ref: ListNode<T>, value: T): ListNode<T> {
+  public addAfter(ref: ListNode<T>, value: T): ListNode<T> {
     const node: ListNode<T> = { value, next: ref.next, prev: ref };
     if (ref.next) {
       ref.next.prev = node;
@@ -68,7 +68,7 @@ export class LinkedList<T> {
   }
 
   /** Insert a value before a given node. Returns the new node. */
-  addBefore(ref: ListNode<T>, value: T): ListNode<T> {
+  public addBefore(ref: ListNode<T>, value: T): ListNode<T> {
     const node: ListNode<T> = { value, next: ref, prev: ref.prev };
     if (ref.prev) {
       ref.prev.next = node;
@@ -84,7 +84,7 @@ export class LinkedList<T> {
    * Remove a specific node from the list.
    * The caller must ensure the node belongs to this list.
    */
-  remove(node: ListNode<T>): void {
+  public remove(node: ListNode<T>): void {
     if (this._size === 0) return;
     if (node.prev) {
       node.prev.next = node.next;
@@ -100,7 +100,7 @@ export class LinkedList<T> {
   }
 
   /** Remove and return the value at the head (or undefined if empty). */
-  removeFirst(): T | undefined {
+  public removeFirst(): T | undefined {
     if (this.head === null) return undefined;
     const value = this.head.value;
     this.remove(this.head);
@@ -108,7 +108,7 @@ export class LinkedList<T> {
   }
 
   /** Remove and return the value at the tail (or undefined if empty). */
-  removeLast(): T | undefined {
+  public removeLast(): T | undefined {
     if (this.tail === null) return undefined;
     const value = this.tail.value;
     this.remove(this.tail);
@@ -116,7 +116,7 @@ export class LinkedList<T> {
   }
 
   /** Remove all nodes. */
-  clear(): void {
+  public clear(): void {
     this.head = null;
     this.tail = null;
     this._size = 0;
@@ -128,7 +128,7 @@ export class LinkedList<T> {
    * Find the first node whose value satisfies `predicate`.
    * Traverses from head to tail.
    */
-  find(predicate: (value: T) => boolean): ListNode<T> | undefined {
+  public find(predicate: (value: T) => boolean): ListNode<T> | undefined {
     let current = this.head;
     while (current) {
       if (predicate(current.value)) return current;
@@ -140,7 +140,7 @@ export class LinkedList<T> {
    * Find the last node whose value satisfies `predicate`.
    * Traverses from tail to head.
    */
-  findLast(predicate: (value: T) => boolean): ListNode<T> | undefined {
+  public findLast(predicate: (value: T) => boolean): ListNode<T> | undefined {
     let current = this.tail;
     while (current) {
       if (predicate(current.value)) return current;
@@ -149,7 +149,7 @@ export class LinkedList<T> {
   }
 
   /** Get the node at `index` (0-based, negative allowed as offset from tail). */
-  at(index: number): ListNode<T> | undefined {
+  public at(index: number): ListNode<T> | undefined {
     if (index < 0) return this.#atReverse(-index - 1);
     let current = this.head;
     let i = 0;
@@ -171,7 +171,7 @@ export class LinkedList<T> {
   }
 
   /** Convert the list to an array (head → tail). */
-  toArray(): T[] {
+  public toArray(): T[] {
     const result: T[] = [];
     let current = this.head;
     while (current) {
@@ -182,7 +182,7 @@ export class LinkedList<T> {
   }
 
   /** Convert the list to an array in reverse (tail → head). */
-  toArrayReverse(): T[] {
+  public toArrayReverse(): T[] {
     const result: T[] = [];
     let current = this.tail;
     while (current) {
@@ -194,7 +194,7 @@ export class LinkedList<T> {
 
   // ─── Iteration ───
 
-  *values(): IterableIterator<T> {
+  public *values(): IterableIterator<T> {
     let current = this.head;
     while (current) {
       yield current.value;
@@ -202,7 +202,7 @@ export class LinkedList<T> {
     }
   }
 
-  *nodes(): IterableIterator<ListNode<T>> {
+  public *nodes(): IterableIterator<ListNode<T>> {
     let current = this.head;
     while (current) {
       yield current;
@@ -210,25 +210,25 @@ export class LinkedList<T> {
     }
   }
 
-  [Symbol.iterator](): IterableIterator<T> {
+  public [Symbol.iterator](): IterableIterator<T> {
     return this.values();
   }
 
   // ─── Properties ───
 
-  get size(): number {
+  public get size(): number {
     return this._size;
   }
 
-  get isEmpty(): boolean {
+  public get isEmpty(): boolean {
     return this._size === 0;
   }
 
-  get headNode(): ListNode<T> | null {
+  public get headNode(): ListNode<T> | null {
     return this.head;
   }
 
-  get tailNode(): ListNode<T> | null {
+  public get tailNode(): ListNode<T> | null {
     return this.tail;
   }
 }

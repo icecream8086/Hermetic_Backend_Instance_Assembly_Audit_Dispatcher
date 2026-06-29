@@ -32,7 +32,7 @@ export class EventBus {
    * Multiple handlers for the same type are invoked in registration order.
    * The same handler reference can be safely re-registered (it is a no-op).
    */
-  on<T>(type: string, handler: EventHandler<T>): void {
+  public on<T>(type: string, handler: EventHandler<T>): void {
     let set = this.#handlers.get(type);
     if (!set) {
       set = new Set();
@@ -45,14 +45,14 @@ export class EventBus {
    * Remove a previously registered handler.
    * @returns `true` if the handler was found and removed.
    */
-  off<T>(type: string, handler: EventHandler<T>): boolean {
+  public off<T>(type: string, handler: EventHandler<T>): boolean {
     return this.#handlers.get(type)?.delete(handler as EventHandler) ?? false;
   }
 
   /**
    * Remove all handlers for an event type, or all handlers across all types.
    */
-  removeAll(type?: string): void {
+  public removeAll(type?: string): void {
     if (type) {
       this.#handlers.delete(type);
     } else {
@@ -107,12 +107,12 @@ export class EventBus {
   }
 
   /** Number of registered event types. */
-  get registeredTypes(): number {
+  public get registeredTypes(): number {
     return this.#handlers.size;
   }
 
   /** Check if any handlers exist for a given event type. */
-  hasHandlers(type: string): boolean {
+  public hasHandlers(type: string): boolean {
     return (this.#handlers.get(type)?.size ?? 0) > 0;
   }
 }

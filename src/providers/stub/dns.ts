@@ -42,7 +42,7 @@ export class StubDnsProvider implements IDnsProvider {
   }
 
   /** Expose all tracked records for test inspection. */
-  get entries(): readonly StubRecord[] {
+  public get entries(): readonly StubRecord[] {
     return [...this.#records.values()];
   }
 }

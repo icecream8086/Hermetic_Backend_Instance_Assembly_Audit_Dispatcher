@@ -9,7 +9,7 @@
 import type { ExhaustiveTransitions } from './types.ts';
 
 /** Assert at compile time that `table` covers every key in `S`. */
-function assertExhaustive<S extends string>(_table: ExhaustiveTransitions<S>): void {}
+function assertExhaustive<S extends string>(_table: ExhaustiveTransitions<S>): void { /* compile-time check only */ }
 
 // ═══════════════ enum-based statuses ═══════════════
 

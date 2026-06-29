@@ -53,7 +53,7 @@ export class CircularQueue<T> {
    * Insert a value at the tail of the queue.
    * @returns `false` if the queue has a fixed capacity and is full.
    */
-  enqueue(value: T): boolean {
+  public enqueue(value: T): boolean {
     if (this._size === this._capacity) {
       if (this.fixed) return false;
       this.#resize();
@@ -68,7 +68,7 @@ export class CircularQueue<T> {
    * Remove and return the value at the head (the oldest element).
    * Returns `undefined` if the queue is empty.
    */
-  dequeue(): T | undefined {
+  public dequeue(): T | undefined {
     if (this._size === 0) return undefined;
     const value = this.buffer[this.head];
     this.buffer[this.head] = undefined;
@@ -81,7 +81,7 @@ export class CircularQueue<T> {
    * Return the value at the head without removing it.
    * Returns `undefined` if the queue is empty.
    */
-  peek(): T | undefined {
+  public peek(): T | undefined {
     return this.buffer[this.head];
   }
 
@@ -89,7 +89,7 @@ export class CircularQueue<T> {
    * Current element in a round-robin scheduling context.
    * Alias for {@link peek}.
    */
-  get current(): T | undefined {
+  public get current(): T | undefined {
     return this.peek();
   }
 
@@ -104,7 +104,7 @@ export class CircularQueue<T> {
    * @returns The new head (the "current" for the next time slice), or
    *   `undefined` if the queue is empty.
    */
-  rotate(): T | undefined {
+  public rotate(): T | undefined {
     if (this._size <= 1) return this.peek();
     const value = this.dequeue()!;
     this.enqueue(value);
@@ -115,7 +115,7 @@ export class CircularQueue<T> {
    * Remove and return the element at the tail (the most recently enqueued).
    * Useful for preemption or cancellation of the last-arrived task.
    */
-  dequeueTail(): T | undefined {
+  public dequeueTail(): T | undefined {
     if (this._size === 0) return undefined;
     this.tail = (this.tail - 1 + this._capacity) % this._capacity;
     const value = this.buffer[this.tail];
@@ -125,7 +125,7 @@ export class CircularQueue<T> {
   }
 
   /** Remove all elements. */
-  clear(): void {
+  public clear(): void {
     this.buffer.fill(undefined);
     this.head = 0;
     this.tail = 0;
@@ -139,14 +139,14 @@ export class CircularQueue<T> {
    * Negative indices count from the tail (-1 = last element).
    * Returns `undefined` for out-of-range indices.
    */
-  at(index: number): T | undefined {
+  public at(index: number): T | undefined {
     if (index < 0) index = this._size + index;
     if (index < 0 || index >= this._size) return undefined;
     return this.buffer[(this.head + index) % this._capacity];
   }
 
   /** Check if `value` is in the queue (by reference equality). */
-  includes(value: T): boolean {
+  public includes(value: T): boolean {
     for (let i = 0; i < this._size; i++) {
       if (this.buffer[(this.head + i) % this._capacity] === value) return true;
     }
@@ -154,7 +154,7 @@ export class CircularQueue<T> {
   }
 
   /** Return all elements as an array, head to tail. */
-  toArray(): T[] {
+  public toArray(): T[] {
     const result: T[] = new Array(this._size);
     for (let i = 0; i < this._size; i++) {
       result[i] = this.buffer[(this.head + i) % this._capacity]!;
@@ -165,27 +165,27 @@ export class CircularQueue<T> {
   // ─── Iteration ───
 
   /** Iterate values from head to tail. */
-  *values(): IterableIterator<T> {
+  public *values(): IterableIterator<T> {
     for (let i = 0; i < this._size; i++) {
       yield this.buffer[(this.head + i) % this._capacity]!;
     }
   }
 
   /** Iterate `[index, value]` pairs, where index is the logical position. */
-  *entries(): IterableIterator<[number, T]> {
+  public *entries(): IterableIterator<[number, T]> {
     for (let i = 0; i < this._size; i++) {
       yield [i, this.buffer[(this.head + i) % this._capacity]!];
     }
   }
 
-  [Symbol.iterator](): IterableIterator<T> {
+  public [Symbol.iterator](): IterableIterator<T> {
     return this.values();
   }
 
   // ─── Properties ───
 
   /** Number of elements currently in the queue. */
-  get size(): number {
+  public get size(): number {
     return this._size;
   }
 
@@ -194,12 +194,12 @@ export class CircularQueue<T> {
    * - In fixed-capacity mode: the configured capacity.
    * - In auto-grow mode: the current underlying array length (may increase).
    */
-  get capacity(): number {
+  public get capacity(): number {
     return this._capacity;
   }
 
   /** `true` when the queue contains no elements. */
-  get isEmpty(): boolean {
+  public get isEmpty(): boolean {
     return this._size === 0;
   }
 
@@ -207,7 +207,7 @@ export class CircularQueue<T> {
    * `true` when `size` equals the current capacity.
    * In fixed-capacity mode this means `enqueue` will return `false`.
    */
-  get isFull(): boolean {
+  public get isFull(): boolean {
     return this._size === this._capacity;
   }
 

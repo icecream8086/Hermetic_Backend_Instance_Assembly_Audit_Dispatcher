@@ -17,7 +17,7 @@ export class CfQueueProducer implements IMessageQueue {
     this.#queue = queueBinding ?? null;
   }
 
-  get available(): boolean {
+  public get available(): boolean {
     return this.#queue !== null;
   }
 

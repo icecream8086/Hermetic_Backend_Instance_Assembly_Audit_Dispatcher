@@ -57,14 +57,14 @@ export interface IEventLoopControl {
    * Convenience: create an Event from a public TriggerEventInput and enqueue it.
    * This is the method external HTTP callers route through.
    */
-  enqueueTrigger<T>(input: TriggerEventInput<T>): Event;
+  public enqueueTrigger<T>(input: TriggerEventInput<T>): Event;
 
   /**
    * Enqueue a system event that bypasses the maxQueueSize limit.
    * Use for critical internal events (health:check, etc.) that must
    * never be dropped due to queue pressure.
    */
-  enqueuePriority<T>(input: TriggerEventInput<T>): Event;
+  public enqueuePriority<T>(input: TriggerEventInput<T>): Event;
 
   /** List pending events in the queue (type + id, no payload). */
   pendingEvents(): { type: string; id: string }[];
@@ -148,7 +148,7 @@ export class EventLoop implements IEventLoopControl {
 
   // ─── IEventLoopControl ───
 
-  start(): void {
+  public start(): void {
     if (this.#timerHandle !== null) return;
     this.#paused = false;
     this.#startTime = this.#startTime === 0 ? Date.now() : this.#startTime;
@@ -158,7 +158,7 @@ export class EventLoop implements IEventLoopControl {
     );
   }
 
-  stop(): void {
+  public stop(): void {
     if (this.#timerHandle === null) return;
     this.#timerHandle.clear();
     this.#timerHandle = null;
@@ -166,15 +166,15 @@ export class EventLoop implements IEventLoopControl {
     this.#startTime = 0;
   }
 
-  pause(): void {
+  public pause(): void {
     this.#paused = true;
   }
 
-  resume(): void {
+  public resume(): void {
     this.#paused = false;
   }
 
-  configure(config: Partial<EventLoopConfig>): EventLoopConfig {
+  public configure(config: Partial<EventLoopConfig>): EventLoopConfig {
     let restart = false;
 
     if (config.intervalMs !== undefined && config.intervalMs > 0) {
@@ -202,7 +202,7 @@ export class EventLoop implements IEventLoopControl {
     return { ...this.#config };
   }
 
-  status(): EventLoopStatus {
+  public status(): EventLoopStatus {
     return {
       running: this.#timerHandle !== null,
       paused: this.#paused,
@@ -213,7 +213,7 @@ export class EventLoop implements IEventLoopControl {
     };
   }
 
-  enqueue(event: Event): void {
+  public enqueue(event: Event): void {
     if (this.#config.maxQueueSize > 0 && this.#queue.size >= this.#config.maxQueueSize) {
       this.#reportError(
         new Error(`Queue full (${this.#queue.size} >= ${this.#config.maxQueueSize})`),
@@ -228,7 +228,7 @@ export class EventLoop implements IEventLoopControl {
     this.#queue.enqueue(event);
   }
 
-  enqueueTrigger<T>(input: TriggerEventInput<T>): Event {
+  public enqueueTrigger<T>(input: TriggerEventInput<T>): Event {
     const event = eventFromTrigger(input);
     if (this.#config.maxQueueSize > 0 && this.#queue.size >= this.#config.maxQueueSize) {
       this.#reportError(
@@ -242,18 +242,18 @@ export class EventLoop implements IEventLoopControl {
     return event;
   }
 
-  enqueuePriority<T>(input: TriggerEventInput<T>): Event {
+  public enqueuePriority<T>(input: TriggerEventInput<T>): Event {
     const event = eventFromTrigger(input);
     if (this.#store) this.#persistEnqueue(event).catch(err => { this.#reportError(err, 'persist-enqueue'); });
     this.#queue.enqueue(event);
     return event;
   }
 
-  pendingEvents(): { type: string; id: string }[] {
+  public pendingEvents(): { type: string; id: string }[] {
     return this.#queue.toArray().map(e => ({ type: e.type, id: e.id }));
   }
 
-  get size(): number {
+  public get size(): number {
     return this.#queue.size;
   }
 

@@ -48,7 +48,7 @@ export interface DagSchedulerConfig {
 export class DagScheduler {
   public constructor(private readonly config: DagSchedulerConfig) {}
 
-  schedule(
+  public schedule(
     tasks: readonly SchedulableTask[],
     resources: readonly ResourceNode[],
   ): Schedule {

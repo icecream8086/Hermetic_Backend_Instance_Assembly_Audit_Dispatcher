@@ -19,7 +19,7 @@ import type { PodSpec } from '../../core/pod/types.ts';
  * the job's steps inside it.
  */
 export class JobOperator implements ITaskExecutor {
-  readonly key = 'sandbox';
+  public readonly key = 'sandbox';
 
   public constructor(
     private readonly deps: {

@@ -52,7 +52,7 @@ export class MatrixExpander {
    * Expand a matrix configuration into individual job variants.
    * Returns an empty array if no matrix strategy is configured.
    */
-  expand(jobName: string, jobDef: JobDef): JobVariant[] {
+  public expand(jobName: string, jobDef: JobDef): JobVariant[] {
     const matrix = (jobDef as any).strategy?.matrix as MatrixConfig['matrix'] | undefined;
     if (!matrix) return [{ name: jobName, matrixVars: {}, jobDef }];
 

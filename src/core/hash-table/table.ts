@@ -40,7 +40,7 @@ export class HashTable<K, V> {
   // ─── Mutation ───
 
   /** Insert or update a key-value pair. */
-  set(key: K, value: V): void {
+  public set(key: K, value: V): void {
     const bucket = this.#bucket(key);
     const existing = bucket.find(e => e.key === key);
     if (existing) {
@@ -55,7 +55,7 @@ export class HashTable<K, V> {
   }
 
   /** Remove a key. Returns true if the key existed. */
-  delete(key: K): boolean {
+  public delete(key: K): boolean {
     const bucket = this.#bucket(key);
     const idx = bucket.findIndex(e => e.key === key);
     if (idx === -1) return false;
@@ -65,7 +65,7 @@ export class HashTable<K, V> {
   }
 
   /** Remove all entries. */
-  clear(): void {
+  public clear(): void {
     for (const bucket of this.buckets) {
       bucket.length = 0;
     }
@@ -75,17 +75,17 @@ export class HashTable<K, V> {
   // ─── Queries ───
 
   /** Get the value for a key, or undefined if not found. */
-  get(key: K): V | undefined {
+  public get(key: K): V | undefined {
     return this.#bucket(key).find(e => e.key === key)?.value;
   }
 
   /** Check if a key exists in the table. */
-  has(key: K): boolean {
+  public has(key: K): boolean {
     return this.#bucket(key).some(e => e.key === key);
   }
 
   /** Return all entries as an array of [key, value] pairs. */
-  entries(): [K, V][] {
+  public entries(): [K, V][] {
     const result: [K, V][] = [];
     for (const bucket of this.buckets) {
       for (const entry of bucket) {
@@ -96,7 +96,7 @@ export class HashTable<K, V> {
   }
 
   /** Return all keys. */
-  keys(): K[] {
+  public keys(): K[] {
     const result: K[] = [];
     for (const bucket of this.buckets) {
       for (const entry of bucket) {
@@ -107,7 +107,7 @@ export class HashTable<K, V> {
   }
 
   /** Return all values. */
-  values(): V[] {
+  public values(): V[] {
     const result: V[] = [];
     for (const bucket of this.buckets) {
       for (const entry of bucket) {
@@ -119,16 +119,16 @@ export class HashTable<K, V> {
 
   // ─── Properties ───
 
-  get size(): number {
+  public get size(): number {
     return this._size;
   }
 
-  get isEmpty(): boolean {
+  public get isEmpty(): boolean {
     return this._size === 0;
   }
 
   /** Current number of buckets (capacity). */
-  get capacity(): number {
+  public get capacity(): number {
     return this.buckets.length;
   }
 

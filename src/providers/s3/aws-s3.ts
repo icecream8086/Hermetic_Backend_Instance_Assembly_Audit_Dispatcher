@@ -10,7 +10,7 @@ import type { SigV4Credentials } from '../../core/provider/s3-signer.ts';
 const CLOCK_SKEW_RETRIES = 2;
 
 export class AwsS3Provider extends S3ClientBase {
-  readonly type = 'aws-s3' as const;
+  public readonly type = 'aws-s3' as const;
   readonly #region: string;
   readonly #endpoint: string;
   readonly #credentials: SigV4Credentials;

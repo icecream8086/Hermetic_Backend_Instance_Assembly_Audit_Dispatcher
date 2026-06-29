@@ -56,7 +56,7 @@ export class LocalAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin
     return this.#entries.find(e => e.id === id) ?? null;
   }
 
-  stats(): { count: number; capacity: number } {
+  public stats(): { count: number; capacity: number } {
     return { count: this.#entries.length, capacity: this.#capacity };
   }
 

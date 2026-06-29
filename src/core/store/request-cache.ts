@@ -42,7 +42,7 @@ export class RequestCachedAtomicStore implements IAtomicStore {
     return result;
   }
 
-  invalidateCache(key: string): Promise<void> {
+  public invalidateCache(key: string): Promise<void> {
     this.#cache.delete(key);
     return this.#inner.invalidateCache?.(key) ?? Promise.resolve();
   }

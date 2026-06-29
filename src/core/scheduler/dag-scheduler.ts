@@ -71,7 +71,7 @@ export class DagScheduler {
 
   // ─── Lifecycle ───
 
-  start(): void {
+  public start(): void {
     if (this.running) return;
     this.running = true;
     this.paused = false;
@@ -79,16 +79,16 @@ export class DagScheduler {
     this.timerHandle = this.timer.start(() => this.tick(), this.config.intervalMs);
   }
 
-  stop(): void {
+  public stop(): void {
     this.running = false;
     this.timerHandle?.clear();
     this.timerHandle = null;
   }
 
-  pause(): void { this.paused = true; }
-  resume(): void { this.paused = false; }
+  public pause(): void { this.paused = true; }
+  public resume(): void { this.paused = false; }
 
-  configure(partial: Partial<DagSchedulerConfig>): DagSchedulerConfig {
+  public configure(partial: Partial<DagSchedulerConfig>): DagSchedulerConfig {
     this.config = { ...this.config, ...partial };
     // Restart timer if interval changed and running
     if (this.running) {
@@ -98,7 +98,7 @@ export class DagScheduler {
     return this.config;
   }
 
-  status(): SchedulerStatus {
+  public status(): SchedulerStatus {
     return {
       running: this.running,
       paused: this.paused,

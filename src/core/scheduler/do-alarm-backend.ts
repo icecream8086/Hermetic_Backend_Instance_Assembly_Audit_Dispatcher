@@ -30,7 +30,7 @@ export class DoAlarmBackend implements ITimerBackend {
     this.#callbackUrl = callbackUrl;
   }
 
-  start(handler: () => void, intervalMs: number): TimerHandle {
+  public start(handler: () => void, intervalMs: number): TimerHandle {
     // In production mode (callbackUrl set), the DO alarm drives the tick
     // via HTTP callback — the handler is wired through the Worker route.
     // In dev mode, use setInterval to call the handler directly.

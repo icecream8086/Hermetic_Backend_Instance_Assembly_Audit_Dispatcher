@@ -512,7 +512,7 @@ export class SandboxService implements ISandboxService {
     }));
   }
 
-	  async restart(id: SandboxId): Promise<Sandbox> {
+	  public async restart(id: SandboxId): Promise<Sandbox> {
 	    const sandbox = await this.getById(id);
 	    if (!sandbox) throw new AppError(404, 'SANDBOX_NOT_FOUND', `Sandbox ${id} not found`);
 
@@ -537,7 +537,7 @@ export class SandboxService implements ISandboxService {
 	    return (await this.getById(id)) ?? sandbox;
 	  }
 
-	  async update(id: SandboxId, input: Partial<CreateSandboxInput>): Promise<Sandbox> {
+	  public async update(id: SandboxId, input: Partial<CreateSandboxInput>): Promise<Sandbox> {
 	    const sandbox = await this.getById(id);
 	    if (!sandbox) throw new AppError(404, 'SANDBOX_NOT_FOUND', `Sandbox ${id} not found`);
 
@@ -571,7 +571,7 @@ export class SandboxService implements ISandboxService {
 	    return (await this.getById(id)) ?? sandbox;
 	  }
 
-	  async syncRuntime(id: SandboxId): Promise<ContainerGroupRuntime> {
+	  public async syncRuntime(id: SandboxId): Promise<ContainerGroupRuntime> {
     // Single read — reuse its version for OCC at write time, avoiding a redundant
     // second read before the set() below.
     const entry = await this.atomic.get<Sandbox>(`${KEY_PREFIX}${id}`);

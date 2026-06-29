@@ -7,24 +7,24 @@ import type { SchedulableTask, ResourceSnapshot, ResourceVector } from './types.
 
 /** First-Come, First-Served — preserves input order. */
 export class FcfsStrategy implements ISchedulingStrategy {
-  readonly name = 'FCFS';
-  order(ready: readonly SchedulableTask[]): readonly SchedulableTask[] {
+  public readonly name = 'FCFS';
+  public order(ready: readonly SchedulableTask[]): readonly SchedulableTask[] {
     return ready;
   }
 }
 
 /** Priority scheduling — higher priority first, ties broken by FCFS. */
 export class PriorityStrategy implements ISchedulingStrategy {
-  readonly name = 'Priority';
-  order(ready: readonly SchedulableTask[]): readonly SchedulableTask[] {
+  public readonly name = 'Priority';
+  public order(ready: readonly SchedulableTask[]): readonly SchedulableTask[] {
     return [...ready].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
   }
 }
 
 /** Shortest Job First — smallest estimatedDuration first. */
 export class SjfStrategy implements ISchedulingStrategy {
-  readonly name = 'SJF';
-  order(ready: readonly SchedulableTask[]): readonly SchedulableTask[] {
+  public readonly name = 'SJF';
+  public order(ready: readonly SchedulableTask[]): readonly SchedulableTask[] {
     return [...ready].sort((a, b) => a.estimatedDuration - b.estimatedDuration);
   }
 }
@@ -37,7 +37,7 @@ export class SjfStrategy implements ISchedulingStrategy {
  * on the critical path and should be scheduled first to minimize makespan.
  */
 export class CriticalPathStrategy implements ISchedulingStrategy {
-  readonly name = 'CPM';
+  public readonly name = 'CPM';
   readonly #ranks: Map<string, number>;
 
   /**
@@ -48,7 +48,7 @@ export class CriticalPathStrategy implements ISchedulingStrategy {
     this.#ranks = computeUpwardRanks(allTasks);
   }
 
-  order(ready: readonly SchedulableTask[]): readonly SchedulableTask[] {
+  public order(ready: readonly SchedulableTask[]): readonly SchedulableTask[] {
     return [...ready].sort((a, b) => {
       const ra = this.#ranks.get(a.id) ?? 0;
       const rb = this.#ranks.get(b.id) ?? 0;
@@ -62,14 +62,14 @@ export class CriticalPathStrategy implements ISchedulingStrategy {
  * For homogeneous resources, this is equivalent to CPM.
  */
 export class HeftTaskPriorityStrategy implements ISchedulingStrategy {
-  readonly name = 'HEFT-Priority';
+  public readonly name = 'HEFT-Priority';
   readonly #ranks: Map<string, number>;
 
   public constructor(allTasks: readonly SchedulableTask[]) {
     this.#ranks = computeUpwardRanks(allTasks);
   }
 
-  order(ready: readonly SchedulableTask[]): readonly SchedulableTask[] {
+  public order(ready: readonly SchedulableTask[]): readonly SchedulableTask[] {
     return [...ready].sort((a, b) => {
       const ra = this.#ranks.get(a.id) ?? 0;
       const rb = this.#ranks.get(b.id) ?? 0;
@@ -86,9 +86,9 @@ export class HeftTaskPriorityStrategy implements ISchedulingStrategy {
  * First-Fit — assign to the first resource with enough available capacity.
  */
 export class FirstFitAllocator implements IResourceAllocator {
-  readonly name = 'FirstFit';
+  public readonly name = 'FirstFit';
 
-  select(task: SchedulableTask, resources: readonly ResourceSnapshot[]): string | null {
+  public select(task: SchedulableTask, resources: readonly ResourceSnapshot[]): string | null {
     for (const r of resources) {
       if (fits(task.requirements, r.available)) {
         return r.node.id;
@@ -103,9 +103,9 @@ export class FirstFitAllocator implements IResourceAllocator {
  * (i.e., lowest utilization).  Equivalent to K8s LeastRequestedPriority.
  */
 export class LeastRequestedAllocator implements IResourceAllocator {
-  readonly name = 'LeastRequested';
+  public readonly name = 'LeastRequested';
 
-  select(task: SchedulableTask, resources: readonly ResourceSnapshot[]): string | null {
+  public select(task: SchedulableTask, resources: readonly ResourceSnapshot[]): string | null {
     let best: string | null = null;
     let bestUtil = Infinity;
 
@@ -126,9 +126,9 @@ export class LeastRequestedAllocator implements IResourceAllocator {
  * earliest finish time for the task.
  */
 export class HeftAllocator implements IResourceAllocator {
-  readonly name = 'HEFT';
+  public readonly name = 'HEFT';
 
-  select(task: SchedulableTask, resources: readonly ResourceSnapshot[]): string | null {
+  public select(task: SchedulableTask, resources: readonly ResourceSnapshot[]): string | null {
     let best: string | null = null;
     let bestFinish = Infinity;
 

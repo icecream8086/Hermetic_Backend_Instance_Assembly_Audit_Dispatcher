@@ -57,7 +57,7 @@ export class FileKVAtomicStore implements IAtomicStore {
         const entry = JSON.parse(raw) as FileEntry<T>;
         if (entry.metadata.e && Date.now() > entry.metadata.e) {
           // TTL expired — delete file and return null
-          try { await rm(this.#filePath(key), { force: true }); } catch { /* noop */ }
+          try { await rm(this.#filePath(key), { force: true }); } catch {}
           return null;
         }
         // null value = deleted — consistent with DO adapter behavior

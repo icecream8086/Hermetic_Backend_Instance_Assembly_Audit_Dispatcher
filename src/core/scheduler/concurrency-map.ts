@@ -49,17 +49,17 @@ export class ConcurrencyMap {
   }
 
   /** How many active TIs exist for this DAG across all DagRuns? */
-  dagActiveCount(dagId: string): number {
+  public dagActiveCount(dagId: string): number {
     return this.counts.get(dagId)?.dagActive ?? 0;
   }
 
   /** How many active TIs exist for this specific task? */
-  taskActiveCount(dagId: string, taskId: string): number {
+  public taskActiveCount(dagId: string, taskId: string): number {
     return this.counts.get(dagId)?.taskActive.get(taskId) ?? 0;
   }
 
   /** How many active TIs exist for this specific DagRun? */
-  dagRunActiveCount(dagId: string, dagRunId: string): number {
+  public dagRunActiveCount(dagId: string, dagRunId: string): number {
     return this.counts.get(dagId)?.dagRunActive.get(dagRunId) ?? 0;
   }
 }

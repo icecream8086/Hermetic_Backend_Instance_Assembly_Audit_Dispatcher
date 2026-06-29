@@ -8,7 +8,7 @@ import type { ITimerBackend, TimerHandle } from './interfaces.ts';
  * The `start()` call is a no-op and returns a no-op handle.
  */
 export class ManualBackend implements ITimerBackend {
-  start(_handler: () => void, _intervalMs: number): TimerHandle {
+  public start(_handler: () => void, _intervalMs: number): TimerHandle {
     return { clear: () => {} };
   }
 }

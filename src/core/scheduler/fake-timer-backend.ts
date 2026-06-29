@@ -23,7 +23,7 @@ export class FakeTimerBackend implements ITimerBackend {
   #intervalMs = 0;
   #running = false;
 
-  start(handler: () => void, intervalMs: number): TimerHandle {
+  public start(handler: () => void, intervalMs: number): TimerHandle {
     this.#handler = handler;
     this.#intervalMs = intervalMs;
     this.#running = true;
@@ -39,17 +39,17 @@ export class FakeTimerBackend implements ITimerBackend {
    * Fire the scheduled handler once, simulating one tick.
    * No-op if the timer has been cleared / stopped.
    */
-  tick(): void {
+  public tick(): void {
     if (this.#running && this.#handler) {
       this.#handler();
     }
   }
 
-  get isRunning(): boolean {
+  public get isRunning(): boolean {
     return this.#running;
   }
 
-  get intervalMs(): number {
+  public get intervalMs(): number {
     return this.#intervalMs;
   }
 }

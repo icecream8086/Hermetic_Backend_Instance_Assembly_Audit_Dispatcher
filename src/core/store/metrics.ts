@@ -32,12 +32,12 @@ export class AtomicStoreMetrics implements IServerMetrics {
   #misses = 0;
   #sets = 0;
 
-  recordGet(): void { this.#gets++; }
-  recordHit(): void { this.#hits++; }
-  recordMiss(): void { this.#misses++; }
-  recordSet(): void { this.#sets++; }
+  public recordGet(): void { this.#gets++; }
+  public recordHit(): void { this.#hits++; }
+  public recordMiss(): void { this.#misses++; }
+  public recordSet(): void { this.#sets++; }
 
-  snapshot(): ServerCacheStats {
+  public snapshot(): ServerCacheStats {
     const gets = this.#gets;
     const hits = this.#hits;
     const misses = this.#misses;

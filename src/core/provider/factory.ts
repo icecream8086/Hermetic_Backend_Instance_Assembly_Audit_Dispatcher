@@ -86,14 +86,14 @@ class LazyProviderRegistry implements IProviderRegistry {
   }
 
   /** @deprecated Global default is disabled — use resolveContainer(instanceId) instead. */
-  get container(): IContainerProvider {
+  public get container(): IContainerProvider {
     throw new Error(
       'Global default provider is disabled. Use resolveContainer(instanceId) to route to a specific instance, ' +
       'or resolveContainer(undefined) to auto-pick the first online container-capable instance.'
     );
   }
 
-  get image(): IImageProvider {
+  public get image(): IImageProvider {
     if (!this._defaultImage) {
       this.#warnDefault();
       this._defaultImage = this._resolveDefaultEntry().image;
@@ -101,7 +101,7 @@ class LazyProviderRegistry implements IProviderRegistry {
     return this._defaultImage;
   }
 
-  get networkPolicy(): INetworkPolicyProvider | undefined {
+  public get networkPolicy(): INetworkPolicyProvider | undefined {
     if (this._networkPolicy === undefined) {
       const ep = process.env.PODMAN_ENDPOINT ?? 'http://127.0.0.1:8080';
       this._networkPolicy = this._isAlibaba ? undefined : new PodmanNetworkPolicyProvider(ep);
@@ -109,7 +109,7 @@ class LazyProviderRegistry implements IProviderRegistry {
     return this._networkPolicy;
   }
 
-  get dns(): IDnsProvider {
+  public get dns(): IDnsProvider {
     if (!this._dns) {
       this._dns = this.config.dns === 'cloudflare' && this.config.cfApiToken
         ? new CloudflareDnsProvider(this.config.cfApiToken)
@@ -118,7 +118,7 @@ class LazyProviderRegistry implements IProviderRegistry {
     return this._dns;
   }
 
-  get metrics(): IMetricsProvider {
+  public get metrics(): IMetricsProvider {
     if (!this._metrics) {
       const defaultCreds = this.config.accounts.find(
         (a): a is Credential & { accessKeyId: string; accessKeySecret: string } => !!(a.accessKeyId && a.accessKeySecret),
@@ -130,14 +130,14 @@ class LazyProviderRegistry implements IProviderRegistry {
     return this._metrics;
   }
 
-  get groupContainer(): IContainerGroupProvider | undefined {
+  public get groupContainer(): IContainerGroupProvider | undefined {
     if (!this._groupContainer) {
       this._groupContainer = this._createGroupProvider();
     }
     return this._groupContainer;
   }
 
-  get rawEciApi(): any | undefined {
+  public get rawEciApi(): any | undefined {
     if (!this._rawEciApi) {
       const cred = this._firstAlibabaCred();
       if (cred) this._rawEciApi = new AlibabaEciApiClient(cred.accessKeyId, cred.accessKeySecret);
@@ -145,7 +145,7 @@ class LazyProviderRegistry implements IProviderRegistry {
     return this._rawEciApi;
   }
 
-  get crApi(): any | undefined {
+  public get crApi(): any | undefined {
     if (!this._crApi) {
       const cred = this._firstAlibabaCred();
       if (cred) this._crApi = new AlibabaCrApiClient(cred.accessKeyId, cred.accessKeySecret);
@@ -153,7 +153,7 @@ class LazyProviderRegistry implements IProviderRegistry {
     return this._crApi;
   }
 
-  get ossOpenApi(): any | undefined {
+  public get ossOpenApi(): any | undefined {
     if (!this._ossOpenApi) {
       const cred = this._firstAlibabaCred();
       if (cred) this._ossOpenApi = new AlibabaOssOpenApiClient(cred.accessKeyId, cred.accessKeySecret);
@@ -161,7 +161,7 @@ class LazyProviderRegistry implements IProviderRegistry {
     return this._ossOpenApi;
   }
 
-  get capabilities(): ProviderCapabilities {
+  public get capabilities(): ProviderCapabilities {
     const isProd = this.config.container === 'alibaba' && this._hasAlibabaAccounts;
     return {
       spotInstances: isProd, nfsVolumes: true, publicIpAutoAssign: true,
@@ -178,11 +178,11 @@ class LazyProviderRegistry implements IProviderRegistry {
     return this._typeEntries;
   }
 
-  provider(name: string): ProviderEntry | undefined {
+  public provider(name: string): ProviderEntry | undefined {
     return this._getTypeEntries().get(name);
   }
 
-  availableProviders(): readonly ProviderEntry[] {
+  public availableProviders(): readonly ProviderEntry[] {
     return [...this._getTypeEntries().values()];
   }
 
@@ -195,13 +195,13 @@ class LazyProviderRegistry implements IProviderRegistry {
     return this._s3Entries ?? [];
   }
 
-  s3Account(name?: string): IS3Provider | undefined {
+  public s3Account(name?: string): IS3Provider | undefined {
     const entries = this._getS3Entries();
     const n = name ?? this.s3Config?.defaultAccount ?? '';
     return entries.find(e => e.name === n)?.provider;
   }
 
-  listS3Accounts(): string[] {
+  public listS3Accounts(): string[] {
     return this._getS3Entries().map(e => e.name);
   }
 

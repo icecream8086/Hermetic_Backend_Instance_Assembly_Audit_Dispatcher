@@ -30,14 +30,14 @@ export class Tree<T> {
   // ─── Mutation ───
 
   /** Set the root value. Replaces any existing tree. Returns the new root node. */
-  setRoot(value: T): TreeNode<T> {
+  public setRoot(value: T): TreeNode<T> {
     this.root = { value, children: [] };
     this._size = 1;
     return this.root;
   }
 
   /** Add a child to `parent`. Returns the new child node. */
-  addChild(parent: TreeNode<T>, value: T): TreeNode<T> {
+  public addChild(parent: TreeNode<T>, value: T): TreeNode<T> {
     const child: TreeNode<T> = { value, children: [] };
     parent.children.push(child);
     this._size++;
@@ -48,7 +48,7 @@ export class Tree<T> {
    * Remove a node and its entire subtree from the tree.
    * Returns `true` if the node was found and removed.
    */
-  remove(node: TreeNode<T>): boolean {
+  public remove(node: TreeNode<T>): boolean {
     if (this.root === node) {
       this.root = null;
       this._size = 0;
@@ -66,7 +66,7 @@ export class Tree<T> {
   }
 
   /** Remove all nodes. */
-  clear(): void {
+  public clear(): void {
     this.root = null;
     this._size = 0;
   }
@@ -74,7 +74,7 @@ export class Tree<T> {
   // ─── Queries ───
 
   /** Find the first node whose value satisfies `predicate` (preorder traversal). */
-  find(predicate: (value: T) => boolean): TreeNode<T> | undefined {
+  public find(predicate: (value: T) => boolean): TreeNode<T> | undefined {
     if (!this.root) return undefined;
     const stack: TreeNode<T>[] = [this.root];
     while (stack.length > 0) {
@@ -87,7 +87,7 @@ export class Tree<T> {
   }
 
   /** Traverse the tree and collect values in the specified order. */
-  traverse(order: TreeTraversalOrder): T[] {
+  public traverse(order: TreeTraversalOrder): T[] {
     const result: T[] = [];
     if (!this.root) return result;
 
@@ -106,12 +106,12 @@ export class Tree<T> {
   }
 
   /** Shorthand for `traverse('preorder')`. */
-  toArray(): T[] {
+  public toArray(): T[] {
     return this.traverse('preorder');
   }
 
   /** Get the depth of a node (root depth = 0). Returns -1 if not found. */
-  depthOf(node: TreeNode<T>): number {
+  public depthOf(node: TreeNode<T>): number {
     if (node === this.root) return 0;
     let depth = 1;
     let current: TreeNode<T> | undefined = this.#findParent(node);
@@ -124,15 +124,15 @@ export class Tree<T> {
   }
 
   /** Number of nodes. */
-  get size(): number {
+  public get size(): number {
     return this._size;
   }
 
-  get isEmpty(): boolean {
+  public get isEmpty(): boolean {
     return this._size === 0;
   }
 
-  get rootNode(): TreeNode<T> | null {
+  public get rootNode(): TreeNode<T> | null {
     return this.root;
   }
 

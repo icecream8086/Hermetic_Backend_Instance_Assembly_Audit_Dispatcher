@@ -12,10 +12,10 @@ const IV_LENGTH = 12;
  * stores secrets in plaintext — functionally identical to today.
  */
 export class SecretEncryption {
-  static readonly ENV_KEY = 'SECRET_MASTER_KEY';
-  static readonly ENC_PREFIX = '$AES$';
+  public static readonly ENV_KEY = 'SECRET_MASTER_KEY';
+  public static readonly ENC_PREFIX = '$AES$';
 
-  static fromEnv(): SecretEncryption | undefined {
+  public static fromEnv(): SecretEncryption | undefined {
     const key = process.env[SecretEncryption.ENV_KEY];
     if (!key) return undefined;
     return new SecretEncryption(key);

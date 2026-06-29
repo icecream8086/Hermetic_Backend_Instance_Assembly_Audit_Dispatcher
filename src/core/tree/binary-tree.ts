@@ -37,14 +37,14 @@ export class BinaryTree<T> {
   // ─── Mutation ───
 
   /** Set the root value. Replaces any existing tree. Returns the new root node. */
-  setRoot(value: T): BinaryTreeNode<T> {
+  public setRoot(value: T): BinaryTreeNode<T> {
     this.root = { value, left: null, right: null };
     this._size = 1;
     return this.root;
   }
 
   /** Set the left child of `parent`. Returns the new node. */
-  setLeft(parent: BinaryTreeNode<T>, value: T): BinaryTreeNode<T> {
+  public setLeft(parent: BinaryTreeNode<T>, value: T): BinaryTreeNode<T> {
     const child: BinaryTreeNode<T> = { value, left: null, right: null };
     if (parent.left) this.#subtractSize(parent.left);
     parent.left = child;
@@ -53,7 +53,7 @@ export class BinaryTree<T> {
   }
 
   /** Set the right child of `parent`. Returns the new node. */
-  setRight(parent: BinaryTreeNode<T>, value: T): BinaryTreeNode<T> {
+  public setRight(parent: BinaryTreeNode<T>, value: T): BinaryTreeNode<T> {
     const child: BinaryTreeNode<T> = { value, left: null, right: null };
     if (parent.right) this.#subtractSize(parent.right);
     parent.right = child;
@@ -65,7 +65,7 @@ export class BinaryTree<T> {
    * Remove a node and its entire subtree.
    * Returns `true` if the node was found and removed.
    */
-  remove(node: BinaryTreeNode<T>): boolean {
+  public remove(node: BinaryTreeNode<T>): boolean {
     if (this.root === node) {
       this.root = null;
       this._size = 0;
@@ -84,7 +84,7 @@ export class BinaryTree<T> {
   }
 
   /** Remove all nodes. */
-  clear(): void {
+  public clear(): void {
     this.root = null;
     this._size = 0;
   }
@@ -95,7 +95,7 @@ export class BinaryTree<T> {
    * Find the first node whose value satisfies `predicate`.
    * Uses preorder traversal.
    */
-  find(predicate: (value: T) => boolean): BinaryTreeNode<T> | undefined {
+  public find(predicate: (value: T) => boolean): BinaryTreeNode<T> | undefined {
     if (!this.root) return undefined;
     const stack: BinaryTreeNode<T>[] = [this.root];
     while (stack.length > 0) {
@@ -107,7 +107,7 @@ export class BinaryTree<T> {
   }
 
   /** Traverse the tree and collect values in the specified order. */
-  traverse(order: BinaryTreeTraversalOrder): T[] {
+  public traverse(order: BinaryTreeTraversalOrder): T[] {
     const result: T[] = [];
     if (!this.root) return result;
 
@@ -132,25 +132,25 @@ export class BinaryTree<T> {
   }
 
   /** Shorthand for `traverse('preorder')`. */
-  toArray(): T[] {
+  public toArray(): T[] {
     return this.traverse('preorder');
   }
 
   /** Height of the tree (number of edges on the longest root-to-leaf path). */
-  get height(): number {
+  public get height(): number {
     return this.#height(this.root);
   }
 
   /** Number of nodes. */
-  get size(): number {
+  public get size(): number {
     return this._size;
   }
 
-  get isEmpty(): boolean {
+  public get isEmpty(): boolean {
     return this._size === 0;
   }
 
-  get rootNode(): BinaryTreeNode<T> | null {
+  public get rootNode(): BinaryTreeNode<T> | null {
     return this.root;
   }
 

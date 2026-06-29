@@ -21,9 +21,9 @@ import { generateUserGroupId, generatePermGroupId } from './types.ts';
 const FACILITY = createFacility('perm');
 
 export class GroupManager {
-  readonly ugStore: CrudStore<UserGroup>;
-  readonly pgStore: CrudStore<PermissionGroup>;
-  readonly templates: Template[];
+  public readonly ugStore: CrudStore<UserGroup>;
+  public readonly pgStore: CrudStore<PermissionGroup>;
+  public readonly templates: Template[];
 
   public constructor(
     _atomic: IAtomicStore,

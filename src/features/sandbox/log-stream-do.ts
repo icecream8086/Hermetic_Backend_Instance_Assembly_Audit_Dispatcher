@@ -38,7 +38,7 @@ export class LogStreamDO implements DurableObject {
   readonly #sessions = new Set<WebSocket>();
   #abortController: AbortController | null = null;
 
-  public constructor(readonly ctx: DurableObjectState, readonly _env: unknown) {}
+  public constructor(public readonly ctx: DurableObjectState, public readonly _env: unknown) {}
 
   public async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);

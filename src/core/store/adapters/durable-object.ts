@@ -46,7 +46,7 @@ function originalKeyFromMarker(mk: string): string {
 export class AtomicStoreDO implements DurableObject {
   #alarmBootstrapped = false;
 
-  public constructor(readonly ctx: DurableObjectState, _env: unknown) {}
+  public constructor(public readonly ctx: DurableObjectState, _env: unknown) {}
 
   public async fetch(request: Request): Promise<Response> {
     // Lazy bootstrap alarm on first request
