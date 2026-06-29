@@ -114,7 +114,6 @@ interface RouteDoc {
   method: string;
   path: string;
   tag: string;
-  meta?: RouteMeta;
 }
 
 const routes: RouteDoc[] = [];
@@ -123,14 +122,12 @@ function collect(
   label: string,
   basePath: string,
   app: { routes: Array<{ method: string; path: string }> },
-  metaList?: RouteMeta[],
 ) {
   for (const r of app.routes) {
     const method = r.method.toUpperCase();
     const relPath = r.path;
     const absPath = `${basePath}${relPath}`.replace(/\/+/g, '/').replace(/\/$/, '') || '/';
-    const meta = metaList?.find(m => m.method === method && m.path === relPath);
-    routes.push({ method, path: absPath, tag: label, meta });
+    routes.push({ method, path: absPath, tag: label });
     tagSet.add(label);
   }
 }
@@ -237,24 +234,24 @@ const stubActionDeps2: any = {
 collect('Actions', '/api/actions', createActionsRouter(stubActionDeps2));
 
 // Manually-added routes
-function addRoute(method: string, path: string, tag: string, meta?: RouteMeta) {
-  routes.push({ method, path, tag, meta });
+function addRoute(method: string, path: string, tag: string) {
+  routes.push({ method, path, tag });
   tagSet.add(tag);
 }
-addRoute('POST', '/__tick', 'Dev', { method: 'POST', path: '/__tick', description: 'Manually trigger event loop tick', responseDescription: '{ ok, queueSize, processedCount, running }' });
-addRoute('POST', '/__admin/migrate-user-index', 'Dev', { method: 'POST', path: '/__admin/migrate-user-index', description: 'Rebuild sharded user index', requestBody: { ids: ['uuid-1'] }, responseDescription: '{ migrated: number }' });
-addRoute('GET', '/api/openapi.json', 'Public', { method: 'GET', path: '/api/openapi.json', description: 'OpenAPI 3.0 specification (no auth required)', responseDescription: 'OpenAPI 3.0 JSON' });
-addRoute('GET', '/api/ws/notifications', 'Notifications', { method: 'GET', path: '/api/ws/notifications', description: 'WebSocket upgrade to global notification channel (requires Workers deployment with DO binding)', responseDescription: '101 WebSocket upgrade' });
-addRoute('POST', '/api/events', 'Events', { method: 'POST', path: '/', description: 'Enqueue an event', requestBody: { type: 'my-event', payload: {} }, responseDescription: '{ id }' });
-addRoute('GET', '/api/events/loop/status', 'Events', { method: 'GET', path: '/loop/status', description: 'Event loop status', responseDescription: 'EventLoopStatus' });
-addRoute('POST', '/api/events/loop/start', 'Events', { method: 'POST', path: '/loop/start', description: 'Start event loop', responseDescription: '{ ok }' });
-addRoute('POST', '/api/events/loop/stop', 'Events', { method: 'POST', path: '/loop/stop', description: 'Stop event loop', responseDescription: '{ ok }' });
-addRoute('POST', '/api/events/loop/pause', 'Events', { method: 'POST', path: '/loop/pause', description: 'Pause event loop', responseDescription: '{ ok }' });
-addRoute('POST', '/api/events/loop/resume', 'Events', { method: 'POST', path: '/loop/resume', description: 'Resume event loop', responseDescription: '{ ok }' });
-addRoute('POST', '/api/events/loop/configure', 'Events', { method: 'POST', path: '/loop/configure', description: 'Reconfigure event loop', requestBody: { intervalMs: 5000 }, responseDescription: 'EventLoopConfig' });
+addRoute('POST', '/__tick', 'Dev');
+addRoute('POST', '/__admin/migrate-user-index', 'Dev');
+addRoute('GET', '/api/openapi.json', 'Public');
+addRoute('GET', '/api/ws/notifications', 'Notifications');
+addRoute('POST', '/api/events', 'Events');
+addRoute('GET', '/api/events/loop/status', 'Events');
+addRoute('POST', '/api/events/loop/start', 'Events');
+addRoute('POST', '/api/events/loop/stop', 'Events');
+addRoute('POST', '/api/events/loop/pause', 'Events');
+addRoute('POST', '/api/events/loop/resume', 'Events');
+addRoute('POST', '/api/events/loop/configure', 'Events');
 
 // Dev / Sudo
-addRoute('POST', '/api/sudo', 'Dev', { method: 'POST', path: '/api/sudo', description: '[DEV] Temporary privilege elevation for wheel members (30 min)', requestBody: {}, responseDescription: '{ expiry, durationMs }' });
+addRoute('POST', '/api/sudo', 'Dev');
 
 // ─── Convert routes to OpenAPI paths ───
 
@@ -263,16 +260,14 @@ for (const route of routes) {
   if (!spec.paths[openApiPath]) spec.paths[openApiPath] = {};
 
   const method = route.method.toLowerCase();
-  const meta = route.meta;
-
   const operation: Record<string, unknown> = {
     tags: [route.tag],
-    summary: meta?.description ?? `${route.method} ${route.path}`,
-    description: meta?.description ?? '',
+    summary: `${route.method} ${route.path}`,
+    description: '',
     parameters: [],
     responses: {
       '200': {
-        description: meta?.responseDescription ?? 'Success',
+        description: 'Success',
         content: { 'application/json': { schema: { type: 'object' } } },
       },
     },
@@ -288,20 +283,6 @@ for (const route of routes) {
       schema: { type: 'string' },
       description: pp,
     });
-  }
-
-  // Add requestBody for POST/PUT with examples
-  if (meta?.requestBody && !['GET', 'DELETE'].includes(route.method)) {
-    operation.requestBody = {
-      required: true,
-      content: {
-        'application/json': {
-          schema: inferSchema(meta.requestBody),
-          example: meta.requestBody,
-        },
-      },
-    };
-    operation['x-example-body'] = JSON.stringify(meta.requestBody, null, 2);
   }
 
   // Error responses

@@ -114,7 +114,7 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
 
   app.openapi(createRoute({ method: 'post', path: '/workflows', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => { await guard('create', 'action:workflow')(c);
     const body = await c.req.json();
-    const parsed = CreateWorkflowSchema.safeParse(body);
+    const parsed = CreateWorkflowSchema.parse(body);
     if (!parsed.success) throw new AppError(400, 'INVALID_WORKFLOW', parsed.error.message);
 
     const input = parsed.data;
@@ -170,7 +170,7 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
     if (!entry) throw new AppError(404, 'WORKFLOW_NOT_FOUND', 'Workflow not found');
 
     const body = await c.req.json();
-    const parsed = UpdateWorkflowSchema.safeParse(body);
+    const parsed = UpdateWorkflowSchema.parse(body);
     if (!parsed.success) throw new AppError(400, 'INVALID_WORKFLOW', parsed.error.message);
 
     const input = parsed.data;
@@ -209,7 +209,7 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
     if (!entry) throw new AppError(404, 'WORKFLOW_NOT_FOUND', 'Workflow not found');
 
     const body = await c.req.json().catch(() => ({}));
-    const parsed = TriggerWorkflowSchema.safeParse(body);
+    const parsed = TriggerWorkflowSchema.parse(body);
     const inputs = parsed.success && parsed.data.inputs ? parsed.data.inputs : {};
 
     const run = await runner.startRun(entry.value, 'manual', undefined, inputs,
@@ -254,7 +254,7 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
     if (!entry) throw new AppError(404, 'WORKFLOW_NOT_FOUND', 'Workflow not found');
 
     const body = await c.req.json().catch(() => ({}));
-    const parsed = TriggerWorkflowSchema.safeParse(body);
+    const parsed = TriggerWorkflowSchema.parse(body);
     const inputs = parsed.success && parsed.data.inputs ? parsed.data.inputs : {};
 
     // Build DAG and persist
