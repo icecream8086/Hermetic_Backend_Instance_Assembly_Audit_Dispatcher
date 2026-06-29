@@ -2,12 +2,12 @@ import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import type { Context } from 'hono';
 import { z } from 'zod';
 import { AppError } from '../../core/types.ts';
-
+import type { AppContext } from '../../core/deps.ts';
 import type { IUserService } from './service.ts';
 import { RegisterUserSchema, LoginUserSchema, UpdateUserSchema, UserResponseSchema, LoginResponseSchema, LoginPolicySchema, NoPasswordLoginSchema, PublicKeySchema } from './schema.ts';
 import type { UserResponse } from './schema.ts';
 import { createUserId, createSessionToken, createGid, UserRole } from './types.ts';
-import { ok, fail } from '../../core/response.ts';
+import { ok } from '../../core/response.ts';
 
 // ─── Avatar constants ───
 const AVATAR_MAX_SIZE = 1048576;
@@ -38,17 +38,16 @@ function userToResponse(user: { id: string; email: string; name: string; role: U
 interface PermissionCheckFn { check(params: { userId: string; action: string; resource: string; ip?: string; resourceOwnerId?: string }): Promise<{ allowed: boolean; reason: string }> }
 interface UsersEnv { Variables: AppContext }
 
-async function requirePerm(c: Context<UsersEnv>, checker: PermissionCheckFn | undefined, action: string, resource: string, resourceOwnerId?: string): Promise<Response | null> {
-  if (!checker) return null;
+async function requirePerm(c: Context<UsersEnv>, checker: PermissionCheckFn | undefined, action: string, resource: string, resourceOwnerId?: string): Promise<void> {
+  if (!checker) return;
   const user = c.var.currentUser;
-  if (!user) return null;
+  if (!user) return;
   const result = await checker.check({ userId: user.id, action, resource, ...(resourceOwnerId ? { resourceOwnerId } : {}) });
-  if (!result.allowed) return c.json(fail('FORBIDDEN', result.reason), 403);
-  return null;
+  if (!result.allowed) throw new AppError(403, 'FORBIDDEN', result.reason);
 }
 
-export function createUserRouter(userService: IUserService, permissionChecker?: PermissionCheckFn): OpenAPIHono {
-  const app = new OpenAPIHono();
+export function createUserRouter(userService: IUserService, permissionChecker?: PermissionCheckFn): OpenAPIHono<{ Variables: AppContext }> {
+  const app = new OpenAPIHono<{ Variables: AppContext }>();
 
   app.openapi(createRoute({ method: 'post', path: '/register', tags: ['users'], summary: '注册新用户', request: { body: { content: { 'application/json': { schema: RegisterUserSchema } } } }, responses: { 201: { description: 'LoginResponse', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const body = RegisterUserSchema.parse(await c.req.json());
@@ -91,7 +90,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
   app.openapi(createRoute({ method: 'put', path: '/{id}', tags: ['users'], summary: '更新用户', request: { params: z.object({ id: z.string() }), body: { content: { 'application/json': { schema: UpdateUserSchema } } } }, responses: { 200: { description: 'UserResponse', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const id = createUserId(c.req.param('id'));
     const body = UpdateUserSchema.parse(await c.req.json());
-    { const r = await requirePerm(c, permissionChecker, 'update', 'user', id); if (r) return r; }
+    await requirePerm(c, permissionChecker, 'update', 'user', id);
     const actorId = c.var.currentUser?.id;
     const user = await userService.update(id, {
       name: body.name, password: body.password, role: body.role, loginPolicy: body.loginPolicy,
@@ -103,7 +102,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
 
   app.openapi(createRoute({ method: 'delete', path: '/{id}', tags: ['users'], summary: '删除用户', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const id = createUserId(c.req.param('id'));
-    { const r = await requirePerm(c, permissionChecker, 'delete', 'user', id); if (r) return r; }
+    await requirePerm(c, permissionChecker, 'delete', 'user', id);
     await userService.delete(id, c.var.currentUser?.id);
     return c.json(ok(null));
   });
@@ -147,7 +146,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
 
   app.openapi(createRoute({ method: 'put', path: '/{id}/login-policy', tags: ['users'], summary: '更新用户登录策略', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'LoginPolicy', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const id = createUserId(c.req.param('id'));
-    { const r = await requirePerm(c, permissionChecker, 'update', 'user', id); if (r) return r; }
+    await requirePerm(c, permissionChecker, 'update', 'user', id);
     const body = LoginPolicySchema.parse(await c.req.json());
     const user = await userService.update(id, { name: undefined, password: undefined, role: undefined, loginPolicy: body, publicKeyEd25519: undefined, gecos: undefined, directory: undefined, shell: undefined, supplementaryGids: undefined });
     return c.json(ok(user.loginPolicy ?? null));
@@ -155,7 +154,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
 
   app.openapi(createRoute({ method: 'delete', path: '/{id}/login-policy', tags: ['users'], summary: '清除用户登录策略', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const id = createUserId(c.req.param('id'));
-    { const r = await requirePerm(c, permissionChecker, 'update', 'user', id); if (r) return r; }
+    await requirePerm(c, permissionChecker, 'update', 'user', id);
     await userService.clearLoginPolicy(id, c.var.currentUser?.id);
     return c.json(ok(null));
   });
@@ -170,14 +169,14 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
   app.openapi(createRoute({ method: 'put', path: '/{id}/public-key', tags: ['users'], summary: '设置用户 Ed25519 公钥', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'string', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const id = createUserId(c.req.param('id'));
     const data = z.object({ publicKey: PublicKeySchema }).parse(await c.req.json());
-    { const r = await requirePerm(c, permissionChecker, 'update', 'user', id); if (r) return r; }
+    await requirePerm(c, permissionChecker, 'update', 'user', id);
     const user = await userService.update(id, { name: undefined, password: undefined, role: undefined, loginPolicy: undefined, publicKeyEd25519: data.publicKey, gecos: undefined, directory: undefined, shell: undefined, supplementaryGids: undefined });
     return c.json(ok(user.publicKeyEd25519 ?? null));
   });
 
   app.openapi(createRoute({ method: 'delete', path: '/{id}/public-key', tags: ['users'], summary: '清除用户 Ed25519 公钥', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const id = createUserId(c.req.param('id'));
-    { const r = await requirePerm(c, permissionChecker, 'update', 'user', id); if (r) return r; }
+    await requirePerm(c, permissionChecker, 'update', 'user', id);
     await userService.clearPublicKey(id, c.var.currentUser?.id);
     return c.json(ok(null));
   });
@@ -204,13 +203,13 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
     const isAdmin = user.role === UserRole.Root || user.role === UserRole.Operator;
     if (user.id !== targetId && !isAdmin) throw new AppError(403, 'FORBIDDEN', 'Can only upload your own avatar');
     const blob = await c.req.blob();
-    if (blob.size > AVATAR_MAX_SIZE) return c.json(fail('AVATAR_TOO_LARGE', `Avatar must be under ${String(AVATAR_MAX_SIZE / 1024)} KB`), 413);
+    if (blob.size > AVATAR_MAX_SIZE) throw new AppError(413, 'AVATAR_TOO_LARGE', `Avatar must be under ${String(AVATAR_MAX_SIZE / 1024)} KB`);
     if (blob.size === 0) throw new AppError(400, 'AVATAR_EMPTY', 'Avatar cannot be empty');
     const buf = new Uint8Array(await blob.arrayBuffer());
     const detectedType = detectImageType(buf);
     if (!detectedType) throw new AppError(415, 'AVATAR_INVALID', 'File is not a valid image (JPEG/PNG/WebP/GIF)');
     const declaredType = blob.type;
-    if (declaredType && !ALLOWED_MIME.has(declaredType)) return c.json(fail('AVATAR_UNSUPPORTED_TYPE', `Unsupported image type: ${declaredType}`), 415);
+    if (declaredType && !ALLOWED_MIME.has(declaredType)) throw new AppError(415, 'AVATAR_UNSUPPORTED_TYPE', `Unsupported image type: ${declaredType}`);
     const blobStore = c.var.stores.blob;
     const atomic = c.var.stores.atomic;
     await blobStore.put(AVATAR_BLOB_PREFIX + targetId, buf as any, { contentType: detectedType, contentLength: buf.length });
@@ -248,7 +247,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
   app.openapi(createRoute({ method: 'delete', path: '/sessions/{token}', tags: ['users'], summary: '吊销 session', request: { params: z.object({ token: z.string() }) }, responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const user = c.var.currentUser;
     if (!user) throw new AppError(401, 'UNAUTHORIZED', 'Authentication required');
-    { const r = await requirePerm(c, permissionChecker, 'update', 'user', user.id); if (r) return r; }
+    await requirePerm(c, permissionChecker, 'update', 'user', user.id);
     await userService.revokeSession(createSessionToken(c.req.param('token')), user.id);
     return c.json(ok(null));
   });
@@ -263,7 +262,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
     const id = createUserId(c.req.param('id'));
     const gid = parseInt(c.req.param('gid'));
     if (isNaN(gid) || gid < 0) throw new AppError(400, 'VALIDATION_ERROR', 'Invalid GID');
-    { const r = await requirePerm(c, permissionChecker, 'update', 'user', id); if (r) return r; }
+    await requirePerm(c, permissionChecker, 'update', 'user', id);
     const user = await userService.addSupplementaryGroup(id, createGid(gid), c.var.currentUser?.id);
     return c.json(ok(userToResponse(user)));
   });
@@ -272,7 +271,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
     const id = createUserId(c.req.param('id'));
     const gid = parseInt(c.req.param('gid'));
     if (isNaN(gid) || gid < 0) throw new AppError(400, 'VALIDATION_ERROR', 'Invalid GID');
-    { const r = await requirePerm(c, permissionChecker, 'update', 'user', id); if (r) return r; }
+    await requirePerm(c, permissionChecker, 'update', 'user', id);
     const user = await userService.removeSupplementaryGroup(id, createGid(gid), c.var.currentUser?.id);
     return c.json(ok(userToResponse(user)));
   });

@@ -1,10 +1,11 @@
-import { Hono } from 'hono';
+import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
+import { z } from 'zod';
 import type { FeatureDeps, AppContext } from '../../core/deps.ts';
 import { AppError } from '../../core/types.ts';
 import { ok } from '../../core/response.ts';
 import { register as registerScheduler } from '../../core/scheduler/registry.ts';
 
-import type { RouteMeta } from '../../core/http-docs/types.ts';
+
 import { generateVersionId } from '../../core/brand.ts';
 import { CreateWorkflowSchema, UpdateWorkflowSchema, TriggerWorkflowSchema } from './schema.ts';
 import { WorkflowRunner } from './runner.ts';
@@ -41,8 +42,8 @@ import { JobOperator } from './job-operator.ts';
 import { buildDagFromWorkflow, createDagRunFromTrigger } from './dag-builder.ts';
 import { PodService } from '../../core/pod/service.ts';
 
-export function createActionsRouter(deps: FeatureDeps): Hono<any> {
-  const router = new Hono<{ Variables: AppContext }>();
+export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables: AppContext }> {
+  const app = new OpenAPIHono<{ Variables: AppContext }>();
   const atomic = deps.stores.atomic;
   const blob = deps.stores.blob;
 
@@ -89,16 +90,14 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
   registerScheduler('dagScheduler', dagScheduler);
 
   const guard = (action: string, resource: string) =>
-    async (c: any, next: () => Promise<void>) => {
-      if (deps.permissionChecker) {
-        const r = await deps.permissionChecker.check({
-          userId: c.get?.('userId') ?? 'anonymous',
-          action, resource,
-          ip: c.req.header?.('CF-Connecting-IP'),
-        });
-        if (!r.allowed) throw new AppError(403, 'FORBIDDEN', r.reason);
-      }
-      await next();
+    async (c: any) => {
+      if (!deps.permissionChecker) return;
+      const r = await deps.permissionChecker.check({
+        userId: c.var.currentUser?.id ?? c.get?.('userId') ?? 'anonymous',
+        action, resource,
+        ip: c.req.header?.('CF-Connecting-IP'),
+      });
+      if (!r.allowed) throw new AppError(403, 'FORBIDDEN', r.reason);
     };
 
   // ── Cron trigger registration ──
@@ -113,7 +112,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
 
   // ── Workflow CRUD ──
 
-  router.post('/workflows', guard('create', 'action:workflow'), async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/workflows', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => { await guard('create', 'action:workflow')(c);
     const body = await c.req.json();
     const parsed = CreateWorkflowSchema.safeParse(body);
     if (!parsed.success) throw new AppError(400, 'INVALID_WORKFLOW', parsed.error.message);
@@ -145,7 +144,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
     return c.json(ok(def), 201);
   });
 
-  router.get('/workflows', async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/workflows', tags: ['actions'], responses: { 200: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const idx = await atomic.get<string[]>(IDX_WORKFLOW_IDS);
     if (!idx) return c.json(ok({ items: [], total: 0, page: 1, limit: 50 }));
     const page = Math.max(1, parseInt(c.req.query('page') ?? '') || 1);
@@ -159,13 +158,13 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
     return c.json(ok({ items: entries.filter(e => e).map(e => e!.value), total, page, limit }));
   });
 
-  router.get('/workflows/:id', async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/workflows/:id', tags: ['actions'], responses: { 200: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const entry = await atomic.get<WorkflowDef>(PFX_WORKFLOW_DEF + c.req.param('id'));
     if (!entry) throw new AppError(404, 'WORKFLOW_NOT_FOUND', 'Workflow not found');
     return c.json(ok(entry.value));
   });
 
-  router.patch('/workflows/:id', guard('update', 'action:workflow'), async (c) => {
+  app.openapi(createRoute({ method: 'patch', path: '/workflows/:id', tags: ['actions'], responses: { 200: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => { await guard('update', 'action:workflow')(c);
     const wid = c.req.param('id');
     const entry = await atomic.get<WorkflowDef>(PFX_WORKFLOW_DEF + wid);
     if (!entry) throw new AppError(404, 'WORKFLOW_NOT_FOUND', 'Workflow not found');
@@ -191,7 +190,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
     return c.json(ok(updated));
   });
 
-  router.delete('/workflows/:id', guard('delete', 'action:workflow'), async (c) => {
+  app.openapi(createRoute({ method: 'delete', path: '/workflows/:id', tags: ['actions'], responses: { 200: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => { await guard('delete', 'action:workflow')(c);
     const wid = c.req.param('id');
     const entry = await atomic.get<WorkflowDef>(PFX_WORKFLOW_DEF + wid);
     if (!entry) throw new AppError(404, 'WORKFLOW_NOT_FOUND', 'Workflow not found');
@@ -204,7 +203,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
 
   // ── Triggers ──
 
-  router.post('/workflows/:id/trigger', guard('execute', 'action:workflow'), async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/workflows/:id/trigger', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => { await guard('execute', 'action:workflow')(c);
     const wid = c.req.param('id');
     const entry = await atomic.get<WorkflowDef>(PFX_WORKFLOW_DEF + wid);
     if (!entry) throw new AppError(404, 'WORKFLOW_NOT_FOUND', 'Workflow not found');
@@ -219,7 +218,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
   });
 
   /** HTTP trigger: POST /api/actions/workflows/:id/http */
-  router.post('/workflows/:id/http', async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/workflows/:id/http', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const wid = c.req.param('id');
     const entry = await atomic.get<WorkflowDef>(PFX_WORKFLOW_DEF + wid);
     if (!entry) throw new AppError(404, 'WORKFLOW_NOT_FOUND', 'Workflow not found');
@@ -249,7 +248,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
    *  Converts WorkflowDef → DagDef → DagRun and submits to the Airflow-style
    *  scheduler. The scheduler handles dependency resolution, concurrency, and
    *  retries via TriggerRule + 5-step filter. */
-  router.post('/workflows/:id/schedule', guard('execute', 'action:workflow'), async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/workflows/:id/schedule', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => { await guard('execute', 'action:workflow')(c);
     const wid = c.req.param('id');
     const entry = await atomic.get<WorkflowDef>(PFX_WORKFLOW_DEF + wid);
     if (!entry) throw new AppError(404, 'WORKFLOW_NOT_FOUND', 'Workflow not found');
@@ -282,7 +281,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
   /** Generic webhook endpoint: POST /api/actions/webhook
    *  Matches incoming webhook payloads against all workflows that have
    *  on.push configured.  Basic branch-name matching for now. */
-  router.post('/webhook', async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/webhook', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const payload = await c.req.json().catch(() => ({}));
     const branch = (payload)?.ref?.replace('refs/heads/', '') ?? '';
 
@@ -309,7 +308,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
 
   // ── Run management ──
 
-  router.get('/runs', async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/runs', tags: ['actions'], responses: { 200: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const idx = await atomic.get<string[]>(IDX_WORKFLOW_RUN_IDS);
     if (!idx) return c.json(ok({ items: [], total: 0, page: 1, limit: 50 }));
     const page = Math.max(1, parseInt(c.req.query('page') ?? '') || 1);
@@ -324,13 +323,13 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
     return c.json(ok({ items: entries.filter(e => e).map(e => e!.value), total, page, limit }));
   });
 
-  router.get('/runs/:id', async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/runs/:id', tags: ['actions'], responses: { 200: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const entry = await atomic.get<WorkflowRun>(PFX_WORKFLOW_RUN + c.req.param('id'));
     if (!entry) throw new AppError(404, 'RUN_NOT_FOUND', 'Workflow run not found');
     return c.json(ok(entry.value));
   });
 
-  router.get('/runs/:id/jobs', async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/runs/:id/jobs', tags: ['actions'], responses: { 200: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const wfEntry = await atomic.get<WorkflowRun>(PFX_WORKFLOW_RUN + c.req.param('id'));
     if (!wfEntry) throw new AppError(404, 'RUN_NOT_FOUND', 'Workflow run not found');
 
@@ -341,7 +340,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
   });
 
   /** DAG endpoint — returns nodes + edges with real-time status for dependency graph rendering. */
-  router.get('/runs/:id/dag', async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/runs/:id/dag', tags: ['actions'], responses: { 200: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const wfEntry = await atomic.get<WorkflowRun>(PFX_WORKFLOW_RUN + c.req.param('id'));
     if (!wfEntry) throw new AppError(404, 'RUN_NOT_FOUND', 'Workflow run not found');
     const run = wfEntry.value;
@@ -383,7 +382,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
     }));
   });
 
-  router.get('/jobs/:id', async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/jobs/:id', tags: ['actions'], responses: { 200: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const entry = await atomic.get<JobRun>(PFX_JOB_RUN + c.req.param('id'));
     if (!entry) throw new AppError(404, 'JOB_NOT_FOUND', 'Job run not found');
     return c.json(ok(entry.value));
@@ -391,7 +390,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
 
   // ── Step logs ──
 
-  router.get('/jobs/:id/logs', async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/jobs/:id/logs', tags: ['actions'], responses: { 200: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const jobId = c.req.param('id');
     const entry = await atomic.get<JobRun>(PFX_JOB_RUN + jobId);
     if (!entry) throw new AppError(404, 'JOB_NOT_FOUND', 'Job run not found');
@@ -407,7 +406,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
 
   // ── Action registry ──
 
-  router.post('/actions', async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/actions', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const body = await c.req.json();
     if (!body.name || !body.version || !body.runs) {
       throw new AppError(400, 'INVALID_ACTION', 'name, version, and runs are required');
@@ -416,7 +415,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
     return c.json(ok(def), 201);
   });
 
-  router.get('/actions', async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/actions', tags: ['actions'], responses: { 200: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const list = await actionRegistry.list();
     const page = Math.max(1, parseInt(c.req.query('page') ?? '') || 1);
     const limit = Math.min(Math.max(1, parseInt(c.req.query('limit') ?? '') || 50), 200);
@@ -430,39 +429,39 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
   const orgService = new OrgService(atomic);
   const projectService = new ProjectService(atomic, orgService);
 
-  router.post('/orgs', async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/orgs', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const body = await c.req.json();
     const ownerId = c.var.currentUser?.id ?? 'anonymous';
     const org = await orgService.create(ownerId, body);
     return c.json(ok(org), 201);
   });
 
-  router.get('/orgs', async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/orgs', tags: ['actions'], responses: { 200: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const memberId = c.req.query('member');
     const list = await orgService.list(memberId);
     return c.json(ok(list));
   });
 
-  router.get('/orgs/:id', async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/orgs/:id', tags: ['actions'], responses: { 200: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const o = await orgService.get(c.req.param('id'));
     if (!o) throw new AppError(404, 'ORG_NOT_FOUND', 'Organization not found');
     return c.json(ok(o));
   });
 
-  router.post('/orgs/:id/members', async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/orgs/:id/members', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const { userId } = await c.req.json();
     await orgService.addMember(c.req.param('id'), userId);
     return c.json(ok({ ok: true }));
   });
 
-  router.post('/projects', async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/projects', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const body = await c.req.json();
     const ownerId = c.var.currentUser?.id ?? 'anonymous';
     const proj = await projectService.create(ownerId, body);
     return c.json(ok(proj), 201);
   });
 
-  router.get('/projects', async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/projects', tags: ['actions'], responses: { 200: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const orgId = c.req.query('orgId');
     if (!orgId) throw new AppError(400, 'MISSING_ORG', 'orgId query param required');
     const list = await projectService.list(orgId);
@@ -473,20 +472,20 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
 
   const approvalService = new ApprovalService(atomic);
 
-  router.post('/runs/:id/approvals', async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/runs/:id/approvals', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const { jobName, approvers } = await c.req.json();
     const node = await approvalService.request(c.req.param('id'), jobName, approvers);
     return c.json(ok(node), 201);
   });
 
-  router.post('/approvals/:id/decide', async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/approvals/:id/decide', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const { approved, reason } = await c.req.json();
     const userId = c.var.currentUser?.id ?? 'anonymous';
     const node = await approvalService.decide(c.req.param('id'), userId, approved, reason);
     return c.json(ok(node));
   });
 
-  router.get('/runs/:id/approvals', async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/runs/:id/approvals', tags: ['actions'], responses: { 200: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const list = await approvalService.getForRun(c.req.param('id'));
     return c.json(ok(list));
   });
@@ -495,7 +494,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
 
   const secretService = new WorkflowSecretService(atomic, deps.secretEncryption);
 
-  router.post('/workflows/:id/secrets', async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/workflows/:id/secrets', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const wid = c.req.param('id');
     const wfEntry = await atomic.get<WorkflowDef>(PFX_WORKFLOW_DEF + wid);
     if (!wfEntry) throw new AppError(404, 'WORKFLOW_NOT_FOUND', 'Workflow not found');
@@ -507,13 +506,13 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
     return c.json(ok({ id: secret.id, key: secret.key, createdAt: secret.createdAt }), 201);
   });
 
-  router.get('/workflows/:id/secrets', async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/workflows/:id/secrets', tags: ['actions'], responses: { 200: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const wid = c.req.param('id');
     const list = await secretService.list(wid);
     return c.json(ok(list));
   });
 
-  router.delete('/secrets/:id', async (c) => {
+  app.openapi(createRoute({ method: 'delete', path: '/secrets/:id', tags: ['actions'], responses: { 200: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     await secretService.delete(c.req.param('id'));
     return c.json(ok({ deleted: true }));
   });
@@ -522,7 +521,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
 
   const sharedLinkService = new SharedLinkService(atomic, deps.audit);
 
-  router.post('/shared-links', async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/shared-links', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const body = await c.req.json();
     // Extract owner from auth context if available
     const ownerId = c.var.currentUser?.id ?? 'anonymous';
@@ -531,13 +530,13 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
     return c.json(ok(safe), 201);
   });
 
-  router.get('/shared-links', async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/shared-links', tags: ['actions'], responses: { 200: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const ownerId = c.var.currentUser?.id ?? 'anonymous';
     const links = await sharedLinkService.list(ownerId);
     return c.json(ok(links.map(({ passwordHash: _passwordHash, ...safe }) => safe)));
   });
 
-  router.get('/shared-links/:id', async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/shared-links/:id', tags: ['actions'], responses: { 200: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const link = await sharedLinkService.get(c.req.param('id'));
     if (!link) throw new AppError(404, 'LINK_NOT_FOUND', 'Shared link not found');
     const { passwordHash: _passwordHash, ...safe } = link;
@@ -545,7 +544,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
   });
 
   /** Guest access: validate and trigger. No auth required. */
-  router.post('/shared-links/:id/launch', async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/shared-links/:id/launch', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const body = await c.req.json().catch(() => ({}));
     const password = body.password as string | undefined;
 
@@ -561,7 +560,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
     return c.json(ok({ runId: run.id, status: run.status }), 201);
   });
 
-  router.post('/shared-links/:id/disable', async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/shared-links/:id/disable', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const ownerId = c.var.currentUser?.id ?? 'anonymous';
     await sharedLinkService.disable(c.req.param('id'), ownerId);
     return c.json(ok({ disabled: true }));
@@ -572,25 +571,25 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
   const runnerRegistry = new RunnerRegistry(atomic, deps.audit);
 
   /** Runner heartbeat: POST /api/actions/runners/heartbeat */
-  router.post('/runners/heartbeat', async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/runners/heartbeat', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const body = await c.req.json();
     const runner = await runnerRegistry.heartbeat(body);
     return c.json(ok(runner));
   });
 
-  router.get('/runners', async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/runners', tags: ['actions'], responses: { 200: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const labels = c.req.query('labels') ? parseJson(c.req.query('labels')!) : undefined;
     const runners = await runnerRegistry.listOnline(labels);
     return c.json(ok(runners));
   });
 
-  router.get('/runners/:id', async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/runners/:id', tags: ['actions'], responses: { 200: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const r = await runnerRegistry.get(c.req.param('id'));
     if (!r) throw new AppError(404, 'RUNNER_NOT_FOUND', 'Runner not found');
     return c.json(ok(r));
   });
 
-  router.post('/runners/:id/drain', async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/runners/:id/drain', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     await runnerRegistry.drain(c.req.param('id'));
     return c.json(ok({ draining: true }));
   });
@@ -612,7 +611,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
 
   const workspaceStore = new BlobWorkspaceStore(blob);
 
-  router.get('/workspace/:workflowRunId/:jobName', async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/workspace/:workflowRunId/:jobName', tags: ['actions'], responses: { 200: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const result = await workspaceStore.load(
       c.req.param('workflowRunId'),
       c.req.param('jobName'),
@@ -627,7 +626,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
 
   const dashboard = new DashboardService(atomic);
 
-  router.get('/dashboard', async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/dashboard', tags: ['actions'], responses: { 200: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const userId = c.var.currentUser?.id ?? 'anonymous';
     const metrics = await dashboard.getMetrics(userId);
     return c.json(ok(metrics));
@@ -636,7 +635,7 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
   // ── Templates ──
 
   // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
-  router.get('/templates', async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/templates', tags: ['actions'], responses: { 200: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const category = c.req.query('category');
     const items = category
       ? TEMPLATE_METAS.filter(t => t.category === category)
@@ -645,54 +644,11 @@ export function createActionsRouter(deps: FeatureDeps): Hono<any> {
   });
 
   // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
-  router.get('/templates/:id', async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/templates/:id', tags: ['actions'], responses: { 200: { description: '', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
     const t = TEMPLATES.find(tpl => tpl.id === c.req.param('id'));
     if (!t) throw new AppError(404, 'TEMPLATE_NOT_FOUND', 'Template not found');
     return c.json(ok(t));
   });
 
-  return router;
+  return app;
 }
-
-export const actionRouteMeta: RouteMeta[] = [
-  // Workflow CRUD
-  { method: 'POST', path: '/workflows', description: '创建工作流', requestBody: { name: 'my-workflow', on: { manual: true }, jobs: { build: { container: { image: 'node:20' }, steps: [{ run: 'echo hi' }] } } }, responseDescription: 'WorkflowDef' },
-  { method: 'GET', path: '/workflows', description: '列出工作流（分页）', queryExamples: [{ page: '1', limit: '50' }], responseDescription: '{ items: WorkflowDef[], total, page, limit }' },
-  { method: 'GET', path: '/workflows/:id', description: '获取工作流详情', responseDescription: 'WorkflowDef' },
-  { method: 'PATCH', path: '/workflows/:id', description: '更新工作流', requestBody: { name: 'updated-name' }, responseDescription: 'WorkflowDef' },
-  { method: 'DELETE', path: '/workflows/:id', description: '删除工作流', responseDescription: '{ deleted: true }' },
-  // Triggers
-  { method: 'POST', path: '/workflows/:id/trigger', description: '手动触发工作流', requestBody: { inputs: { key: 'value' } }, responseDescription: 'WorkflowRun' },
-  { method: 'POST', path: '/workflows/:id/http', description: 'HTTP 触发器（支持 HMAC 签名）', requestBody: { inputs: {} }, responseDescription: 'WorkflowRun' },
-  { method: 'POST', path: '/webhook', description: 'Webhook 端点（git push 事件）', requestBody: { ref: 'refs/heads/main' }, responseDescription: '{ triggered: string[], count }' },
-  // Runs & Jobs
-  { method: 'GET', path: '/runs', description: '列出工作流运行记录（分页，最新在前）', queryExamples: [{ page: '1', limit: '50' }], responseDescription: '{ items: WorkflowRun[], total, page, limit }' },
-  { method: 'GET', path: '/runs/:id', description: '获取运行详情', responseDescription: 'WorkflowRun' },
-  { method: 'GET', path: '/runs/:id/jobs', description: '获取运行中所有 Job', responseDescription: 'JobRun[]' },
-  { method: 'GET', path: '/runs/:id/dag', description: '获取 DAG 可视化数据 — 返回 nodes (id/label/status/stepCount/completedSteps) + edges (from→to)，配合 WebSocket workflow:job:status 实时更新', responseDescription: '{ workflowName, status, trigger, nodes: [{ id, label, status, startedAt, completedAt, stepCount, completedSteps }], edges: [{ from, to }] }' },
-  { method: 'GET', path: '/jobs/:id', description: '获取 Job 详情', responseDescription: 'JobRun' },
-  { method: 'GET', path: '/jobs/:id/logs', description: '获取 Job 步骤日志（分页）', queryExamples: [{ step: 'build', offset: '0', limit: '500' }], responseDescription: '{ text, totalBytes, offset, limit }' },
-  // Action Registry
-  { method: 'POST', path: '/actions', description: '注册 Action', requestBody: { name: 'my-action', version: '1.0.0', runs: { using: 'container', image: 'node:20' } }, responseDescription: 'ActionDef' },
-  { method: 'GET', path: '/actions', description: '列出已注册 Action（分页）', queryExamples: [{ page: '1', limit: '50' }], responseDescription: '{ items: ActionDef[], total, page, limit }' },
-  // Secrets
-  { method: 'POST', path: '/workflows/:id/secrets', description: '设置工作流密钥（AES-256-GCM 加密）', requestBody: { key: 'DOCKER_PASSWORD', value: 'my-secret' }, responseDescription: '{ id, key, createdAt }' },
-  { method: 'GET', path: '/workflows/:id/secrets', description: '列出工作流密钥（不返回 value）', responseDescription: '{ key, id }[]' },
-  { method: 'DELETE', path: '/secrets/:id', description: '删除密钥', responseDescription: '{ deleted: true }' },
-  // Shared Links
-  { method: 'POST', path: '/shared-links', description: '创建共享链接', requestBody: { workflowId: 'wf_xxx', name: 'my-game', password: 'optional', expiresAt: Date.now() + 86400000, maxUses: 10, defaultTtlSeconds: 3600 }, responseDescription: 'SharedLink (不含 passwordHash)' },
-  { method: 'GET', path: '/shared-links', description: '列出我的共享链接', responseDescription: 'SharedLink[]' },
-  { method: 'GET', path: '/shared-links/:id', description: '获取共享链接详情（不含 passwordHash）', responseDescription: 'SharedLink' },
-  { method: 'POST', path: '/shared-links/:id/launch', description: 'Guest 匿名触发共享服务启动', requestBody: { password: 'optional' }, responseDescription: '{ runId, status }' },
-  { method: 'POST', path: '/shared-links/:id/disable', description: '撤销共享链接', responseDescription: '{ disabled: true }' },
-  // Runner Registry
-  { method: 'POST', path: '/runners/heartbeat', description: 'Runner 注册/心跳', requestBody: { name: 'runner-01', labels: { os: 'linux' }, capacity: { cpu: 4, memory: 8192 } }, responseDescription: 'RunnerRegistration' },
-  { method: 'GET', path: '/runners', description: '列出在线 Runner（支持 labels 过滤）', queryExamples: [{ labels: '{"os":"linux"}' }], responseDescription: 'RunnerRegistration[]' },
-  { method: 'GET', path: '/runners/:id', description: '获取 Runner 详情', responseDescription: 'RunnerRegistration' },
-  { method: 'POST', path: '/runners/:id/drain', description: 'Runner 排水（停止接新任务）', responseDescription: '{ draining: true }' },
-  // Workspace
-  { method: 'GET', path: '/workspace/:workflowRunId/:jobName', description: '下载工作空间快照', responseDescription: '{ meta: WorkspaceMeta, data: base64 }' },
-  { method: 'GET', path: '/dashboard', description: '平台仪表盘聚合指标（含个人维度 myRuns/mySuccessRate/myRecentRuns）', responseDescription: '{ totalRuns, activeRuns, successRate, avgDurationMs, runnersOnline, byTrigger, byStatus, myRuns?, mySuccessRate?, myRecentRuns? }' },
-  { method: 'GET', path: '/templates', description: '列出工作流模板（?category=ci|deploy|service|maintenance|test）', queryExamples: [{ category: 'ci' }], responseDescription: '{ items: TemplateMeta[], total }' },
-  { method: 'GET', path: '/templates/:id', description: '获取模板详情（元数据）', responseDescription: 'TemplateMeta' },
-];

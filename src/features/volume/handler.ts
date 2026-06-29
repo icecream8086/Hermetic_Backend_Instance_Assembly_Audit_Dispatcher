@@ -2,18 +2,17 @@ import { z } from 'zod';
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import type { Context } from 'hono';
 import { AppError } from '../../core/types.ts';
-
+import type { AppContext } from '../../core/deps.ts';
 import type { IVolumeService } from './service.ts';
 import { CreateVolumeSchema, UpdateVolumeSchema } from './schema.ts';
 import type { CreateVolumeInput, UpdateVolumeInput } from './types.ts';
 import { ok } from '../../core/response.ts';
 
-function requireRoot(_c: Context<AppContext>): void {
+function isRoot<E extends { Variables: { currentUser?: { role?: string } } }>(c: Context<E>): void {
   const user = c.var?.currentUser;
-  if (!user) return null;
-  const isRoot = user.role === 'root' || user.role === 'Operator' || user.role === 'wheel';
-  if (!isRoot) throw new AppError(403, 'FORBIDDEN', 'Admin access required');
-  return null;
+  if (!user || !['root', 'Operator', 'wheel'].includes(user.role)) {
+    throw new AppError(403, 'FORBIDDEN', 'Admin access required');
+  }
 }
 
 export function createVolumeRouter(svc: IVolumeService): OpenAPIHono<{ Variables: AppContext }> {
@@ -29,7 +28,7 @@ export function createVolumeRouter(svc: IVolumeService): OpenAPIHono<{ Variables
       responses: { 201: { description: 'Volume created', content: { 'application/json': { schema: z.any() } } } },
     }),
     async (c) => {
-      requireRoot(c);
+      isRoot(c);
       const body = CreateVolumeSchema.parse(await c.req.json());
       const volume = await svc.create(body as CreateVolumeInput);
       return c.json(ok(volume), 201);
@@ -85,7 +84,7 @@ export function createVolumeRouter(svc: IVolumeService): OpenAPIHono<{ Variables
       responses: { 200: { description: 'Volume updated', content: { 'application/json': { schema: z.any() } } } },
     }),
     async (c) => {
-      requireRoot(c);
+      isRoot(c);
       const body = UpdateVolumeSchema.parse(await c.req.json());
       return c.json(ok(await svc.update(c.req.param('id'), body as UpdateVolumeInput)));
     },
@@ -101,7 +100,7 @@ export function createVolumeRouter(svc: IVolumeService): OpenAPIHono<{ Variables
       responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: z.any() } } } },
     }),
     async (c) => {
-      requireRoot(c);
+      isRoot(c);
       await svc.delete(c.req.param('id'));
       return c.json(ok(null));
     },

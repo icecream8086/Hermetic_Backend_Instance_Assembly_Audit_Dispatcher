@@ -216,6 +216,14 @@ export default tseslint.config(
           message:
             '禁止裸 JSON.parse()。请用 schema.parse(JSON.parse(str)) 或 decode(schema, json) 统一入口，确保解析结果经过 Zod 校验。',
         },
+        {
+          // 13. 禁止 z.any() — Zod 运行时 any 逃逸，等同于 TypeScript any
+          selector: 'CallExpression[callee.property.name="any"][callee.object.name="z"]',
+          message:
+            '禁止使用 z.any() 逃逸 Zod 类型校验。这是运行时等价于 TypeScript any 的逃逸舱口。' +
+            '对于 OpenAPI 响应体，请用 z.object({...}) 描述完整响应结构；' +
+            '对于不可预测的负载，请用 z.unknown() 替代——它至少强制消费端做类型收窄。',
+        },
       ],
 
       // ════════════════════════════════════════════════════════
