@@ -12,11 +12,21 @@ import { createRegionId } from '../region/types.ts';
 import { generateVersionId } from '../brand.ts';
 import { AppError } from '../types.ts';
 import { PodStore } from './store.ts';
-import type { PodSpec, PodPhase, PodEntity, PodNetwork, PodId, ContainerState } from './types.ts';
+import type { PodSpec, PodPhase, PodEntity, PodNetwork, PodId, ContainerState, PodHealth } from './types.ts';
 import { createPodId } from './types.ts';
+import type { IAuditWriter } from '../audit/types.ts';
+import { KernLevel } from '../audit/kern-level.ts';
+import type { EventBus } from '../event-bus/bus.ts';
+import { createEvent } from '../event-bus/types.ts';
+import type { QuotaService } from '../quota/service.ts';
+
+/** Context passed to PodService.provision() for sandbox-level concerns. */
+export interface ProvisionContext {
+  readonly creatorId?: string | undefined;
+}
 
 // ═══════════════════════════════════════════════════════════════
-// Adapters (to be replaced by PodCodec injection)
+// v2 PodSpec → v1 Provider 协议翻译器。PodService 内部使用。
 // ═══════════════════════════════════════════════════════════════
 
 function podSpecToGroupInput(spec: PodSpec): CreateContainerGroupInput {
@@ -112,6 +122,9 @@ export class PodService {
     private readonly providerRegistry?: IProviderRegistry | undefined,
     /** Fallback provider when no registry is available. */
     private readonly fallbackProvider?: IContainerProvider | undefined,
+    private readonly audit?: IAuditWriter | undefined,
+    private readonly eventBus?: EventBus | undefined,
+    private readonly quotaService?: QuotaService | undefined,
   ) {
     this.store = new PodStore(atomic);
   }
@@ -125,8 +138,16 @@ export class PodService {
     throw new ProviderResolutionError('No container provider available for PodService');
   }
 
-  public async provision(spec: PodSpec): Promise<PodEntity> {
+  public async provision(spec: PodSpec, context?: ProvisionContext): Promise<PodEntity> {
     const podId = createPodId(crypto.randomUUID());
+    const cpu = spec.spec.containers.reduce((s, c) => s + (c.resources?.limits?.cpu ?? 0), 0) || 1;
+    const memory = spec.spec.containers.reduce((s, c) => s + (c.resources?.limits?.memory ?? 0), 0) || 512;
+
+    // Check quota before provisioning
+    if (context?.creatorId && this.quotaService) {
+      await this.quotaService.checkQuota(context.creatorId, cpu, memory);
+    }
+
     const provider = await this.resolveProvider();
     const groupInput = podSpecToGroupInput(spec);
     const { providerId } = await provider.create(groupInput);
@@ -145,12 +166,34 @@ export class PodService {
       createdAt: Date.now(),
       updatedAt: Date.now(),
       version: generateVersionId(),
-      creatorId: undefined,
+      creatorId: context?.creatorId,
     };
 
     const written = await this.store.insert(entity);
     if (!written) throw new AppError(500, 'CREATE_FAILED', 'Failed to persist Pod');
     await this.store.addToIndex(podId);
+
+    // Record quota usage
+    if (context?.creatorId && this.quotaService) {
+      void this.quotaService.recordCreate(context.creatorId, cpu, memory);
+    }
+
+    // Audit + event
+    this.audit?.write({
+      level: KernLevel.NOTICE,
+      facility: 'pod-service',
+      message: `Pod provisioned — ${spec.metadata.name}`,
+      actorId: context?.creatorId,
+      metadata: { eventType: 'pod.provisioned', podId, providerId },
+    });
+    void this.eventBus?.dispatch(createEvent('pod.provisioned', {
+      podId,
+      name: spec.metadata.name,
+      phase: initialPhase,
+      creatorId: context?.creatorId,
+      providerId,
+    }));
+
     return entity;
   }
 
@@ -169,7 +212,17 @@ export class PodService {
       const provider = await this.resolveProvider();
       try { await provider.stop?.(pod.providerId); } catch { /* best-effort */ }
     }
-    return this.store.transition(podId, 'Succeeded');
+    const result = await this.store.transition(podId, 'Succeeded');
+    this.audit?.write({
+      level: KernLevel.INFO, facility: 'pod-service',
+      message: `Pod stopped — ${pod.name}`,
+      actorId: pod.creatorId,
+      metadata: { eventType: 'pod.stop', podId, fromPhase: pod.phase, toPhase: 'Succeeded' },
+    });
+    void this.eventBus?.dispatch(createEvent('pod.status', {
+      podId, fromPhase: pod.phase, toPhase: 'Succeeded', reason: 'user requested stop',
+    }));
+    return result;
   }
 
   public async start(podId: PodId): Promise<PodEntity> {
@@ -179,7 +232,73 @@ export class PodService {
       const provider = await this.resolveProvider();
       try { await provider.start?.(pod.providerId); } catch { /* best-effort */ }
     }
-    return this.store.transition(podId, 'Running');
+    const result = await this.store.transition(podId, 'Running');
+    this.audit?.write({
+      level: KernLevel.INFO, facility: 'pod-service',
+      message: `Pod started — ${pod.name}`,
+      actorId: pod.creatorId,
+      metadata: { eventType: 'pod.start', podId, fromPhase: pod.phase, toPhase: 'Running' },
+    });
+    void this.eventBus?.dispatch(createEvent('pod.status', {
+      podId, fromPhase: pod.phase, toPhase: 'Running', reason: 'user requested start',
+    }));
+    return result;
+  }
+
+  public async restart(podId: PodId): Promise<PodEntity> {
+    const pod = await this.store.getById(podId);
+    if (!pod) throw new AppError(404, 'POD_NOT_FOUND', `Pod ${podId} not found`);
+    if (!pod.providerId) throw new AppError(400, 'NO_PROVIDER', `Pod ${podId} has no providerId`);
+    const provider = await this.resolveProvider();
+    if (!provider.restart) throw new AppError(501, 'NOT_IMPLEMENTED', 'Provider does not support restart');
+    try { await provider.restart(pod.providerId); } catch { /* best-effort */ }
+    const updated = await this.store.getById(podId);
+    this.audit?.write({
+      level: KernLevel.INFO, facility: 'pod-service',
+      message: `Pod restarted — ${pod.name}`,
+      actorId: pod.creatorId,
+      metadata: { eventType: 'pod.restart', podId },
+    });
+    void this.eventBus?.dispatch(createEvent('pod.status', {
+      podId, fromPhase: pod.phase, toPhase: pod.phase, reason: 'user requested restart',
+    }));
+    return updated ?? pod;
+  }
+
+  public async getHealth(podId: PodId): Promise<readonly PodHealth[]> {
+    const pod = await this.store.getById(podId);
+    if (!pod) throw new AppError(404, 'POD_NOT_FOUND', `Pod ${podId} not found`);
+
+    // Try sync for Running pods to get fresh container state
+    if (pod.phase === 'Running' && pod.providerId) {
+      try { await this.syncRuntime(podId); } catch { /* stale OK */ }
+    }
+
+    const current = (await this.store.getById(podId)) ?? pod;
+
+    // Non-Running/Pending pods: all containers stopped
+    if (current.phase !== 'Running' && current.phase !== 'Pending') {
+      return current.containers.map(c => ({
+        containerName: c.name,
+        status: 'stopped',
+        ready: false,
+        startedAt: c.state.state === 'Running' ? c.state.startedAt : undefined,
+        message: `Pod is in ${current.phase} phase`,
+      }));
+    }
+
+    // Running/Pending: derive from cached container state
+    return current.containers.map(c => {
+      const st = c.state;
+      switch (st.state) {
+        case 'Running':
+          return { containerName: c.name, status: 'running', ready: true, startedAt: st.startedAt, message: undefined };
+        case 'Waiting':
+          return { containerName: c.name, status: 'starting', ready: false, startedAt: undefined, message: st.reason };
+        case 'Terminated':
+          return { containerName: c.name, status: 'stopped', ready: false, startedAt: st.startedAt, message: st.reason };
+      }
+    });
   }
 
   public async terminate(podId: PodId): Promise<void> {
@@ -191,6 +310,23 @@ export class PodService {
     }
     await this.store.transition(podId, 'Failed');
     await this.store.removeFromIndex(podId);
+
+    // Record quota release
+    if (pod.creatorId && this.quotaService) {
+      const cpu = pod.spec.spec.containers.reduce((s, c) => s + (c.resources?.limits?.cpu ?? 0), 0) || 1;
+      const memory = pod.spec.spec.containers.reduce((s, c) => s + (c.resources?.limits?.memory ?? 0), 0) || 512;
+      void this.quotaService.recordDelete(pod.creatorId, cpu, memory);
+    }
+
+    this.audit?.write({
+      level: KernLevel.WARNING, facility: 'pod-service',
+      message: `Pod terminated — ${pod.name}`,
+      actorId: pod.creatorId,
+      metadata: { eventType: 'pod.terminated', podId },
+    });
+    void this.eventBus?.dispatch(createEvent('pod.status', {
+      podId, fromPhase: pod.phase, toPhase: 'Failed', reason: 'user requested termination',
+    }));
   }
 
   public async getAllIds(): Promise<string[]> {
@@ -238,8 +374,8 @@ export class PodService {
     const pod = await this.store.getById(podId);
     if (!pod?.providerId) throw new AppError(404, 'POD_NOT_FOUND', `Pod ${podId} not found or has no providerId`);
     const provider = await this.resolveProvider();
-    const result = await provider.describe({ region: createRegionId('cn-hangzhou'), sandboxId: pod.providerId });
-    const runtime = result.sandboxes[0];
+    const describeResult = await provider.describe({ region: createRegionId('cn-hangzhou'), sandboxId: pod.providerId });
+    const runtime = describeResult.sandboxes[0];
     if (!runtime) throw new AppError(404, 'RUNTIME_NOT_FOUND', `No runtime found for pod ${podId}`);
 
     const containers = toContainers(runtime);
@@ -260,7 +396,15 @@ export class PodService {
       updatedAt: Date.now(),
       version: generateVersionId(),
     };
-    return this.store.update(podId, updated, pod.version);
+    const result = await this.store.update(podId, updated, pod.version);
+
+    this.audit?.write({
+      level: KernLevel.DEBUG, facility: 'pod-service',
+      message: `Pod runtime synced (${runtime.status})`,
+      metadata: { eventType: 'pod.sync', podId, providerStatus: runtime.status, containers: runtime.containers.length },
+    });
+
+    return result;
   }
 
   public async getLogs(podId: PodId, containerName: string, options?: { limitBytes?: number; sinceSeconds?: number; timestamps?: boolean }): Promise<ContainerLogResult> {

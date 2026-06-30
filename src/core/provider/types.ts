@@ -338,7 +338,7 @@ export interface ContainerGroupNetworkInput {
   } | undefined;
 }
 
-/** @deprecated Use PodSpec + buildPodCreateParams() for the v3 direct path. Retained for Sandbox v1 backward compat. */
+/** Provider-layer container group creation input. Active contract — not deprecated. */
 export interface CreateContainerGroupInput {
   readonly name: string;
   readonly description?: string | undefined;

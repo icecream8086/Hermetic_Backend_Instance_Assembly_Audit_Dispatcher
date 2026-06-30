@@ -6,12 +6,14 @@ import { PodService } from '../../core/pod/service.ts';
 import { createSandboxRouter } from './handler.ts';
 import { createAtomicNetworkResolver } from '../../core/network/resolver.ts';
 import { InstanceService } from '../../core/region/instance.ts';
+import { QuotaService } from '../../core/quota/service.ts';
 
 export function createRouter(deps: FeatureDeps): Hono<any> {
   const resolveNetwork = createAtomicNetworkResolver(deps.stores.atomic);
   const instanceService = new InstanceService(deps.stores.atomic);
-  const podService = new PodService(deps.stores.atomic, deps.providers);
-  const svc = new SandboxService(deps.stores.atomic, new ConsoleLogger(), null!, deps.providers, deps.eventBus, deps.audit, resolveNetwork, instanceService, deps.queueProducer, podService);
+  const quotaService = new QuotaService(deps.stores.atomic, deps.audit);
+  const podService = new PodService(deps.stores.atomic, deps.providers, undefined, deps.audit, deps.eventBus, quotaService);
+  const svc = new SandboxService(deps.stores.atomic, new ConsoleLogger(), podService, deps.providers, deps.eventBus, deps.audit, resolveNetwork, instanceService, deps.queueProducer);
 
   return createSandboxRouter(svc, deps.providers, deps.permissionChecker, podService);
 }

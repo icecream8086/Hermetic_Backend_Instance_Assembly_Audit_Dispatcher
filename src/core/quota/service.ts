@@ -1,6 +1,6 @@
-import type { IAtomicStore } from '../../core/store/interfaces.ts';
-import type { IAuditWriter } from '../../core/audit/types.ts';
-import { KernLevel } from '../../core/audit/kern-level.ts';
+import type { IAtomicStore } from '../store/interfaces.ts';
+import type { IAuditWriter } from '../audit/types.ts';
+import { KernLevel } from '../audit/kern-level.ts';
 
 /** Quota key prefix per user. */
 const QUOTA_KEY = 'quota:user:';

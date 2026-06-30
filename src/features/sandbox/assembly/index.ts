@@ -32,4 +32,4 @@ export type {
 export { TEMPLATE_KEY_PREFIX } from './interfaces.ts';
 
 export { resolveAssembly } from './resolver.ts';
-export { InfraManager } from './infra.ts';
+

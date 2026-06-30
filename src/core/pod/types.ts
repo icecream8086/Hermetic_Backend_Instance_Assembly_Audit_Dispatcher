@@ -231,6 +231,18 @@ export interface PodEvent {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// PodHealth — per-container health (derived from ContainerState)
+// ═══════════════════════════════════════════════════════════════
+
+export interface PodHealth {
+  readonly containerName: string;
+  readonly status: string;
+  readonly ready: boolean;
+  readonly startedAt?: string | undefined;
+  readonly message?: string | undefined;
+}
+
+// ═══════════════════════════════════════════════════════════════
 // PodEntity — persisted pod with OCC versioning
 // ═══════════════════════════════════════════════════════════════
 

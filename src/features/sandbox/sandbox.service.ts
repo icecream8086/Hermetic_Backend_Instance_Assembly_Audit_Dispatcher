@@ -1,17 +1,11 @@
-import { z } from 'zod';
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
 import type {
   IContainerProvider,
-  IMetricsProvider,
   IProviderRegistry,
-  MetricSnapshot,
   ContainerGroupRuntime,
-  CreateContainerGroupInput,
-  SecretMountConfig,
 } from '../../core/provider/index.ts';
 import {
   SandboxStatus,
-  ContainerStatus,
   isValidTransition,
   createSandboxId,
 } from './types.ts';
@@ -24,22 +18,16 @@ import type {
 } from './types.ts';
 import type {
   ISandboxService,
-  ISandboxMetricsService,
-  ISandboxLogService,
   ContainerHealth,
-  LogQueryOptions,
-  MetricTimeRange,
 } from './interfaces.ts';
-import type { ContainerLogResult } from '../../core/provider/interfaces.ts';
 import { KernLevel } from '../../core/audit/kern-level.ts';
 import { createFacility, generateVersionId } from '../../core/brand.ts';
-import type { RegionId } from '../../core/region/types.ts';
 import { createRegionId } from '../../core/region/types.ts';
 import type { InstanceId } from '../../core/region/instance.ts';
 import { createInstanceId } from '../../core/region/instance.ts';
 import { ContainerGroupState, toSandboxStatus } from '../../core/provider/container-lifecycle.ts';
 import type { PodService } from '../../core/pod/service.ts';
-import type { PodSpec } from '../../core/pod/types.ts';
+import { createPodId, type PodSpec } from '../../core/pod/types.ts';
 import { AppError } from '../../core/types.ts';
 import { ProviderResolutionError, ProviderOperationError } from '../../core/provider/errors.ts';
 import type { EventBus } from '../../core/event-bus/bus.ts';
@@ -47,8 +35,6 @@ import { createEvent } from '../../core/event-bus/types.ts';
 import type { NetworkResolverFn } from '../../core/network/types.ts';
 import type { InstanceService } from '../../core/region/instance.ts';
 import type { IMessageQueue } from '../../queue/interfaces.ts';
-import { mapEnvVars, mapPorts, mapVolumeMounts, mapVolumes, mapTags, mapNetwork } from '../../core/provider/mapper.ts';
-import { QuotaService } from './quota.ts';
 import { SandboxStore } from './sandbox-store.ts';
 import { runtimeToNetwork, runtimeToContainers, runtimeToEvents } from './runtime-mapper.ts';
 
@@ -62,15 +48,14 @@ export class SandboxService implements ISandboxService {
   public constructor(
     private readonly atomic: IAtomicStore,
     private readonly logger: IAuditWriter,
-    _containerProvider: IContainerProvider, // deprecated — retained for constructor signature compat, unused
+    /** PodService for unified lifecycle. All compute operations delegate here. */
+    private readonly podService: PodService,
     private readonly providerRegistry?: IProviderRegistry | undefined,
     private readonly eventBus?: EventBus,
     private readonly audit?: IAuditWriter,
     private readonly resolveNetwork?: NetworkResolverFn | undefined,
     private readonly instanceService?: InstanceService | undefined,
     private readonly queueProducer?: IMessageQueue,
-    /** Optional: PodService for unified lifecycle. When set, provision delegates to PodService. */
-    private readonly podService?: PodService,
   ) {
     this.store = new SandboxStore(atomic);
   }
@@ -151,12 +136,6 @@ export class SandboxService implements ISandboxService {
       credentialRef: resolvedInst.credentialRef,
     } : undefined;
 
-    // 0c. Check user quota before provisioning
-    if (input.creatorId) {
-      const quotaService = new QuotaService(this.atomic, this.audit);
-      await quotaService.checkQuota(input.creatorId, input.resourceSpec.cpu, input.resourceSpec.memory);
-    }
-
     // 1. Generate sandbox identity and persist as Scheduling
     const id = createSandboxId(crypto.randomUUID());
     const initial: Sandbox = {
@@ -181,35 +160,10 @@ export class SandboxService implements ISandboxService {
     // Add to sandbox ID index
     await this.store.addToIndex(id);
 
-    // 2. Build provider input (with merged VNet + cluster settings) and create cloud resource
-    // 3. Resolve SecurityGroup system UID (sg_*) → cloud ID + bandwidth
-    let effectiveSecurityGroupId = mergedNetwork?.securityGroupId;
-    let effectiveBandwidth: number | undefined;
-    if (mergedNetwork?.securityGroupId?.startsWith('sg_')) {
-      const sgEntry = await this.atomic.get<Record<string, unknown>>('secgroup:' + mergedNetwork.securityGroupId);
-      if (sgEntry?.value) {
-        const sgSchema = z.object({ securityGroupId: z.string().optional(), bandwidth: z.number().optional() });
-        const sg = sgSchema.parse(sgEntry.value);
-        effectiveSecurityGroupId = sg.securityGroupId ?? mergedNetwork.securityGroupId;
-        effectiveBandwidth = sg.bandwidth;
-      }
-    }
-    const networkPatch: Record<string, unknown> = {};
-    if (effectiveSecurityGroupId !== mergedNetwork?.securityGroupId) networkPatch.securityGroupId = effectiveSecurityGroupId;
-    if (effectiveBandwidth !== undefined) networkPatch.bandwidth = effectiveBandwidth;
-
-    const clusterEnriched = resolvedInst
-      ? { ...input, instanceId: resolvedInst.id, network: { ...mergedNetwork, ...networkPatch }, zoneId: z.string().optional().parse(resolvedInst.zone) }
-      : { ...input, network: { ...mergedNetwork, ...networkPatch } };
-
-    const baseInput = toContainerGroupInput(clusterEnriched);
-
-    // 3b. Auto-generate S3 access keys for buckets with autoGenerateKeys
+    // 2. Auto-generate S3 access keys for buckets with autoGenerateKeys (binding persistence)
     const BINDING_PREFIX = 'bucket-key:';
     const BINDING_INDEX_KEY = 'bucket-key:ids';
-    let providerInput = baseInput;
     if (input.bucketMounts?.length) {
-      const secretMounts: SecretMountConfig[] = [];
       for (const bm of input.bucketMounts) {
         if (!bm.autoGenerateKeys) continue;
         const ak = `auto_${crypto.randomUUID().slice(0, 12)}`;
@@ -230,50 +184,25 @@ export class SandboxService implements ISandboxService {
         await this.atomic.set(BINDING_PREFIX + id, binding, null);
         const idx_ = await this.atomic.get<string[]>(BINDING_INDEX_KEY);
         await this.atomic.set(BINDING_INDEX_KEY, [...(idx_?.value ?? []), id as string], idx_?.version ?? null);
-        secretMounts.push({
-          mountPath: bm.mountPath,
-          data: secretValue,
-          mode: 0o600,
-        });
-      }
-      if (secretMounts.length > 0) {
-        providerInput = { ...baseInput, secretMounts };
       }
     }
 
-    // ── Delegate to PodService when available (v3 unified lifecycle) ──
+    // ── Delegate to PodService (v3 unified lifecycle) ──
     let providerId: string;
     let podId: string | undefined;
 
-    // ── Delegate to PodService when available (v3 unified lifecycle) ──
-    let createdStatus: SandboxStatus;
-
-    if (this.podService) {
-      const podSpec = toPodSpec(input);
-      try {
-        const pod = await this.podService.provision(podSpec);
-        providerId = pod.providerId ?? id;
-        podId = pod.podId;
-      } catch (e) {
-        try { await this.atomic.set(`${KEY_PREFIX}${id}`, { ...initial, status: SandboxStatus.Failed, updatedAt: Date.now() }, created); } catch { /* best-effort cleanup */ }
-        throw translateProviderError(e, input.name);
-      }
-      createdStatus = SandboxStatus.Scheduling;
-    } else {
-      const containerProvider = await this.#resolveProvider(input.instanceId);
-      try {
-        ({ providerId } = await containerProvider.create(providerInput));
-      } catch (e) {
-        try { await this.atomic.set(`${KEY_PREFIX}${id}`, { ...initial, status: SandboxStatus.Failed, updatedAt: Date.now() }, created); } catch { /* best-effort cleanup */ }
-        throw translateProviderError(e, input.name);
-      }
-      createdStatus = containerProvider.lifecycle.asyncInit
-        ? SandboxStatus.Scheduling
-        : SandboxStatus.Running;
+    const podSpec = toPodSpec(input);
+    try {
+      const pod = await this.podService.provision(podSpec);
+      providerId = pod.providerId ?? id;
+      podId = pod.podId;
+    } catch (e) {
+      try { await this.atomic.set(`${KEY_PREFIX}${id}`, { ...initial, status: SandboxStatus.Failed, updatedAt: Date.now() }, created); } catch { /* best-effort cleanup */ }
+      throw new AppError(502, 'PROVIDER_ERROR', `Cloud provider failed for sandbox "${input.name}": ${e instanceof Error ? e.message : String(e)}`);
     }
     const provisioned: Sandbox = {
       ...initial,
-      status: createdStatus,
+      status: SandboxStatus.Scheduling,
       providerId,
       updatedAt: Date.now(),
       version: generateVersionId(),
@@ -282,12 +211,6 @@ export class SandboxService implements ISandboxService {
 
     const updated = await this.atomic.set(`${KEY_PREFIX}${id}`, provisioned, created);
     if (!updated) throw new AppError(409, 'CONFLICT', 'Concurrent modification during provision');
-
-    // Record quota usage
-    if (input.creatorId) {
-      const quotaService = new QuotaService(this.atomic, this.audit);
-      await quotaService.recordCreate(input.creatorId, input.resourceSpec.cpu, input.resourceSpec.memory);
-    }
 
     if (idempotencyKey) {
       await this.atomic.set(`${KEY_PREFIX}idem:${idempotencyKey}`, provisioned, null);
@@ -333,20 +256,8 @@ export class SandboxService implements ISandboxService {
     const sandbox = await this.getById(id);
     if (!sandbox) throw new AppError(404, 'SANDBOX_NOT_FOUND', `Sandbox ${id} not found`);
 
-    // Tell the provider to stop the container (best-effort)
-    const provider = await this.#resolveProvider(sandbox.config.instanceId);
-    if (provider.lifecycle.stopIsDelete) {
-      // ECI: stop() = delete() — resource is destroyed immediately.
-      // Transition directly to Terminated so GC can clean up, rather than
-      // going through Stopped which implies the resource still exists.
-      try { await provider.stop?.(sandbox.providerId ?? String(id)); } catch { /* best-effort */ }
-      return this.transition(id, SandboxStatus.Terminating, 'user requested stop (ECI stop = delete)');
-    }
-
-    try {
-      await provider.stop?.(sandbox.providerId ?? String(id));
-    } catch {
-      // Provider may be unreachable or container already stopped — proceed.
+    if (sandbox.podUid) {
+      await this.podService.stop(createPodId(sandbox.podUid));
     }
 
     return this.transition(id, SandboxStatus.Succeeded, 'user requested stop');
@@ -356,14 +267,8 @@ export class SandboxService implements ISandboxService {
     const sandbox = await this.getById(id);
     if (!sandbox) throw new AppError(404, 'SANDBOX_NOT_FOUND', `Sandbox ${id} not found`);
 
-    try {
-      const provider = await this.#resolveProvider(sandbox.config.instanceId);
-      if (!provider.lifecycle.startable) {
-        throw new AppError(400, 'START_NOT_SUPPORTED', `Provider "${provider.lifecycle.stopIsDelete ? 'ECI' : 'unknown'}" does not support start — sandboxes are ephemeral`);
-      }
-      await provider.start?.(sandbox.providerId ?? String(id));
-    } catch {
-      // Provider unreachable or start not supported — proceed with local state
+    if (sandbox.podUid) {
+      await this.podService.start(createPodId(sandbox.podUid));
     }
 
     return this.transition(id, SandboxStatus.Running, 'user requested start');
@@ -386,9 +291,11 @@ export class SandboxService implements ISandboxService {
     // Idempotent: already deleted
     if (sandbox.status === SandboxStatus.Deleted) return;
 
-    // Already terminating — re-trigger provider delete for safety, then return
+    // Already terminating — re-trigger cleanup for safety, then return
     if (sandbox.status === SandboxStatus.Terminating) {
-      if (sandbox.providerId) {
+      if (sandbox.podUid) {
+        await this.podService.terminate(createPodId(sandbox.podUid));
+      } else if (sandbox.providerId) {
         try {
           const provider = await this.#resolveProvider(sandbox.config.instanceId);
           await provider.delete({ region: sandbox.config.region, providerId: sandbox.providerId });
@@ -412,6 +319,15 @@ export class SandboxService implements ISandboxService {
     // Hard terminals with no cloud resource — delete directly
     if (sandbox.status === SandboxStatus.ScheduleFailed || sandbox.status === SandboxStatus.Expired) {
       await this.transition(id, SandboxStatus.Deleted, 'user requested termination (no cloud resource)', actorId);
+      await this.store.removeFromIndex(id);
+      await this.logTerminated(id, actorId);
+      return;
+    }
+
+    // PodService delegation: let PodService handle provider-level cleanup
+    if (sandbox.podUid) {
+      await this.podService.terminate(createPodId(sandbox.podUid));
+      await this.transition(id, SandboxStatus.Deleted, 'user requested termination', actorId);
       await this.store.removeFromIndex(id);
       await this.logTerminated(id, actorId);
       return;
@@ -482,40 +398,19 @@ export class SandboxService implements ISandboxService {
     const sandbox = await this.getById(id);
     if (!sandbox) throw new AppError(404, 'SANDBOX_NOT_FOUND', `Sandbox ${id} not found`);
 
-    // Sync from provider only when Running to get real-time health
-    if (sandbox.status === SandboxStatus.Running) {
-      try {
-        await this.syncRuntime(id);
-      } catch { /* stale data is acceptable */ }
-    }
-
-    const updated = await this.getById(id);
-    const target = updated ?? sandbox;
-
-    // Non-Running sandboxes: containers are not healthy regardless of cached state
-    const sandboxDone = target.status !== SandboxStatus.Running && target.status !== SandboxStatus.Pending && target.status !== SandboxStatus.Scheduling;
-
-    if (sandboxDone) {
-      return target.containers.map(c => ({
-        containerName: c.name,
-        status: 'stopped',
-        ready: false,
-        startedAt: c.state.startTime,
-        message: `Sandbox is ${target.status.toLowerCase()}`,
+    if (sandbox.podUid) {
+      const podHealth = await this.podService.getHealth(createPodId(sandbox.podUid));
+      return podHealth.map(h => ({
+        containerName: h.containerName,
+        status: h.status,
+        ready: h.ready,
+        startedAt: h.startedAt,
+        message: h.message,
       }));
     }
 
-    const provider = await this.#resolveProvider(target.config.instanceId);
-    return target.containers.map(c => ({
-      containerName: c.name,
-      status: c.health?.status
-        ?? ((c.state.state === ContainerStatus.Running && !provider.lifecycle.healthProbes) ? 'provider'
-          : c.state.state === ContainerStatus.Running ? 'running'
-          : c.state.state === ContainerStatus.Waiting ? 'starting' : 'none'),
-      ready: c.state.ready,
-      startedAt: c.state.startTime,
-      message: c.health?.message ?? c.state.message,
-    }));
+    // Fallback (unreachable once podService is required in Phase F)
+    throw new AppError(501, 'NOT_IMPLEMENTED', 'getHealth requires PodService');
   }
 
 	  public async restart(id: SandboxId): Promise<Sandbox> {
@@ -526,18 +421,10 @@ export class SandboxService implements ISandboxService {
 	      throw new AppError(409, 'RESTART_NOT_ALLOWED', `Cannot restart sandbox in ${sandbox.status} state — only Running is valid`);
 	    }
 
-	    const provider = await this.#resolveProvider(sandbox.config.instanceId);
-	    if (!provider.restart) {
-	      throw new AppError(501, 'RESTART_NOT_SUPPORTED', `Provider does not support restart`);
-	    }
-
 	    await this.transition(id, SandboxStatus.Restarting, 'user requested restart');
 
-	    try {
-	      await provider.restart(sandbox.providerId ?? String(id));
-	    } catch (e) {
-	      console.error(`[sandbox] restart: provider call failed name=${sandbox.name} id=${id} — ${e instanceof Error ? e.message : String(e)}`);
-	      // Sandbox stays in Restarting — syncRuntime or health-check will converge
+	    if (sandbox.podUid) {
+	      await this.podService.restart(createPodId(sandbox.podUid));
 	    }
 
 	    return (await this.getById(id)) ?? sandbox;
@@ -552,21 +439,15 @@ export class SandboxService implements ISandboxService {
 	      throw new AppError(409, 'UPDATE_NOT_ALLOWED', `Cannot update sandbox in ${sandbox.status} state`);
 	    }
 
-	    const provider = await this.#resolveProvider(sandbox.config.instanceId);
-	    if (!provider.update) {
-	      throw new AppError(501, 'UPDATE_NOT_SUPPORTED', `Provider does not support update`);
+	    if (sandbox.podUid) {
+	      const specPatch = partialInputToPodSpecPatch(input);
+	      await this.podService.update(createPodId(sandbox.podUid), specPatch);
 	    }
 
 	    await this.transition(id, SandboxStatus.Updating, 'user requested update');
 
-	    const mapped = toPartialContainerGroupInput(input, sandbox.config);
-	    try {
-	      await provider.update(sandbox.providerId ?? String(id), mapped);
-	    } catch (e) {
-	      console.error(`[sandbox] update: provider call failed name=${sandbox.name} id=${id} -- ${e instanceof Error ? e.message : String(e)}`);
-	    }
-
-	    if (Object.keys(mapped).length > 0) {
+	    // Config merge always runs for sandbox state
+	    if (Object.keys(input).length > 0) {
 	      const entry = await this.atomic.get<Sandbox>(`${KEY_PREFIX}${id}`);
 	      if (entry) {
 	        const mergedConfig = { ...entry.value.config, ...input, network: { ...entry.value.config.network, ...(input.network ?? {}) } };
@@ -584,6 +465,11 @@ export class SandboxService implements ISandboxService {
     const entry = await this.atomic.get<Sandbox>(`${KEY_PREFIX}${id}`);
     if (!entry) throw new AppError(404, 'SANDBOX_NOT_FOUND', `Sandbox ${id} not found`);
     const sandbox = entry.value;
+
+    // Delegate Pod sync when PodService is available
+    if (sandbox.podUid) {
+      await this.podService.syncRuntime(createPodId(sandbox.podUid));
+    }
 
     if (!sandbox.providerId) {
       throw new AppError(404, 'PROVIDER_ID_MISSING', `Sandbox ${id} has no providerId — provider resource was never created or was cleaned up`);
@@ -701,51 +587,7 @@ export class SandboxService implements ISandboxService {
   }
 }
 
-// ─── Metrics service ───
 
-export class SandboxMetricsService implements ISandboxMetricsService {
-  public constructor(
-    private readonly metricsProvider: IMetricsProvider,
-    private readonly defaultRegion: RegionId = createRegionId('unknown'),
-  ) {}
-
-  public async collect(sandboxId: SandboxId): Promise<readonly MetricSnapshot[]> {
-    const result = await this.metricsProvider.fetchMetrics({
-      region: this.defaultRegion,
-      providerId: String(sandboxId),
-    });
-    return result.snapshots;
-  }
-
-  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
-  public async query(_sandboxId: SandboxId, _range: MetricTimeRange): Promise<readonly MetricSnapshot[]> {
-    throw new AppError(501, 'NOT_IMPLEMENTED', 'MetricSnapshot query is not yet implemented');
-  }
-}
-
-// ─── Log service ───
-
-export class SandboxLogService implements ISandboxLogService {
-  public constructor(
-    private readonly containerProvider: IContainerProvider,
-    private readonly defaultRegion: RegionId = createRegionId('unknown'),
-  ) {}
-
-  public async getLogs(
-    sandboxId: SandboxId,
-    containerName: string,
-    options?: LogQueryOptions,
-  ): Promise<ContainerLogResult> {
-    return this.containerProvider.getLogs({
-      region: this.defaultRegion,
-      providerId: String(sandboxId),
-      containerName,
-      ...(options?.limitBytes !== undefined ? { limitBytes: options.limitBytes } : {}),
-      ...(options?.sinceSeconds !== undefined ? { sinceSeconds: options.sinceSeconds } : {}),
-      ...(options?.timestamps !== undefined ? { timestamps: options.timestamps } : {}),
-    });
-  }
-}
 
 // ─── Input mapping ───
 
@@ -825,136 +667,11 @@ function parseMemoryString(s: string): number {
   return num * (multipliers[unit] ?? 1);
 }
 
-export function toContainerGroupInput(input: CreateSandboxInput): CreateContainerGroupInput {
-  return {
-    name: sanitizeName(input.name),
-    description: input.description,
-    region: input.region,
-    ...(input.instanceId ? { instanceId: input.instanceId } : {}),
-    ...(input.zoneId ? { zoneId: input.zoneId } : {}),
-    cpu: input.resourceSpec.cpu,
-    memory: Math.max(1, Math.ceil(input.resourceSpec.memory / 1024)), // ECI expects GB, applicator provides MB
-    gpu: input.resourceSpec.gpu,
-    gpuType: input.resourceSpec.gpuType,
-    // spotStrategy moved to providerOverrides.alibaba — provider-specific, not neutral.
-    restartPolicy: input.restartPolicy,
-    containers: input.containers.map(c => ({
-      name: c.name,
-      image: c.image,
-      command: c.command,
-      args: c.args,
-      env: mapEnvVars(c.env),
-      tty: c.tty,
-      stdin: c.stdin,
-      imagePullPolicy: c.imagePullPolicy,
-      resources: c.resources,
-      livenessProbe: c.livenessProbe,
-      readinessProbe: c.readinessProbe,
-      startupProbe: c.startupProbe,
-      ports: mapPorts(c.ports),
-      networkMode: c.networkMode,
-      volumeMounts: mapVolumeMounts(c.volumeMounts?.map(vm => ({
-        volumeId: String(vm.volumeId),
-        mountPath: vm.mountPath,
-        readOnly: vm.readOnly,
-        mountPropagation: vm.mountPropagation,
-      }))),
-      providerOverrides: c.providerOverrides,
-    })),
-    volumes: mapVolumes(input.volumes?.map(v => ({
-      id: String(v.id),
-      type: v.type,
-      nfs: v.nfs,
-      disk: v.disk,
-      secret: v.secret,
-    }))),
-    network: mapNetwork(mergeNetworkWithExtensions(input)),
-    tags: mapTags(input.tags),
-    providerOverrides: input.providerOverrides,
-  };
-}
 
-/** Merge Alibaba-specific network settings from extensions into the standard network config.
- *  NetworkSpec.publicIp/vpc are deprecated in favor of extensions.providerOverrides.alibaba.
- *  Extensions take priority when both are present. */
-function mergeNetworkWithExtensions(input: CreateSandboxInput): {
-  subnetIds?: readonly string[] | undefined; securityGroupId?: string | undefined;
-  allocatePublicIp: boolean; publicIpBandwidth?: number | undefined;
-  bandwidth?: any;
-} {
-  const nw = input.network;
-  const ext = (input.providerOverrides)?.alibaba as Record<string, unknown> | undefined;
 
-  // EIP: extensions ONLY. Standard network.publicIp is silently ignored (EIP costs money).
-  // VPC: standard network first, extensions as override.
-  return {
-    allocatePublicIp: ext?.autoCreateEip === true || ext?.autoCreateEip === 'true',
-    ...(ext?.eipBandwidth !== undefined
-      ? { publicIpBandwidth: Number(ext.eipBandwidth) }
-      : {}),
-    subnetIds: nw.subnetIds?.length
-      ? nw.subnetIds
-      : (ext?.vSwitchId !== undefined && typeof ext.vSwitchId === 'string' ? ext.vSwitchId.split(',').map(s => s.trim()) : undefined),
-    securityGroupId: nw.securityGroupId ?? ext?.securityGroupId as string | undefined,
-    bandwidth: nw.bandwidth,
-  };
-}
 
-/** Map a Partial<CreateSandboxInput> to Partial<CreateContainerGroupInput> for UpdateContainerGroup.
- *  Only maps fields that are present in the input, leaving everything else undefined. */
-// eslint-disable-next-line @typescript-eslint/no-restricted-types -- maps Partial sandbox input to Partial container group input, both are naturally sparse
-function toPartialContainerGroupInput(
-  input: Partial<CreateSandboxInput>,
-  _existing: CreateSandboxInput,
-): Partial<CreateContainerGroupInput> {
-  const region = input.region ?? _existing.region;
 
-  return {
-    ...(region ? { region } : {}),
-    ...(input.name ? { name: sanitizeName(input.name) } : {}),
-    ...(input.restartPolicy ? { restartPolicy: input.restartPolicy } : {}),
-    ...(input.resourceSpec ? {
-      cpu: input.resourceSpec.cpu,
-      memory: Math.max(1, Math.ceil(input.resourceSpec.memory / 1024)),
-      ...(input.resourceSpec.gpu !== undefined ? { gpu: input.resourceSpec.gpu } : {}),
-      ...(input.resourceSpec.gpuType ? { gpuType: input.resourceSpec.gpuType } : {}),
-    } : {}),
-    ...(input.containers ? {
-      containers: input.containers.map(c => ({
-        name: c.name, image: c.image,
-        ...(c.command ? { command: c.command } : {}),
-        ...(c.args ? { args: c.args } : {}),
-        ...(c.env ? { env: mapEnvVars(c.env) } : {}),
-        ...(c.tty !== undefined ? { tty: c.tty } : {}),
-        ...(c.stdin !== undefined ? { stdin: c.stdin } : {}),
-        ...(c.imagePullPolicy ? { imagePullPolicy: c.imagePullPolicy } : {}),
-        ...(c.resources ? { resources: c.resources } : {}),
-        ...(c.livenessProbe ? { livenessProbe: c.livenessProbe } : {}),
-        ...(c.readinessProbe ? { readinessProbe: c.readinessProbe } : {}),
-        ...(c.startupProbe ? { startupProbe: c.startupProbe } : {}),
-        ...(c.ports ? { ports: mapPorts(c.ports) } : {}),
-        ...(c.networkMode ? { networkMode: c.networkMode } : {}),
-      })),
-    } : {}),
-    ...(input.volumes ? {
-      volumes: mapVolumes(input.volumes.map(v => ({
-        id: String(v.id), type: v.type, nfs: v.nfs, disk: v.disk, secret: v.secret,
-      }))),
-    } : {}),
-    ...(input.network ? {
-      network: mapNetwork({
-        subnetIds: input.network.subnetIds ?? _existing.network.subnetIds,
-        securityGroupId: input.network.securityGroupId ?? _existing.network.securityGroupId,
-        allocatePublicIp: input.network.allocatePublicIp ?? _existing.network.allocatePublicIp,
-        publicIpBandwidth: input.network.publicIpBandwidth ?? _existing.network.publicIpBandwidth,
-        bandwidth: input.network.bandwidth ?? _existing.network.bandwidth,
-      }),
-    } : {}),
-    ...(input.tags ? { tags: mapTags(input.tags) } : {}),
-    ...(input.providerOverrides ? { providerOverrides: input.providerOverrides } : {}),
-    ...(input.zoneId ? { zoneId: input.zoneId } : {}),
-  };
-}
+
 
 function toPodSpec(input: CreateSandboxInput): PodSpec {
   return {
@@ -997,46 +714,34 @@ function toPodSpec(input: CreateSandboxInput): PodSpec {
   };
 }
 
-/** 将云厂商错误翻译为用户可读的 AppError */
-function translateProviderError(e: unknown, sandboxName: string): AppError {
-  const msg = e instanceof Error ? e.message : String(e);
-  const lower = msg.toLowerCase();
-
-  if (lower.includes('fetch failed') || lower.includes('econnrefused') || lower.includes('connection refused')) {
-    return new AppError(503, 'PROVIDER_UNREACHABLE',
-      `Cannot reach container provider for sandbox "${sandboxName}". Is Podman running? Check PODMAN_ENDPOINT or instance connectivity. (detail: ${msg.slice(0, 200)})`);
-  }
-  if (lower.includes('401') || lower.includes('unauthorized') || lower.includes('invalid security token') || lower.includes('signature') || lower.includes('invalidaccesskeyid')) {
-    return new AppError(401, 'PROVIDER_AUTH_FAILED',
-      `Authentication failed for sandbox "${sandboxName}". Check your cloud credentials (ALIBABA_ACCESS_KEY_ID / ALIBABA_ACCESS_KEY_SECRET). (detail: ${msg.slice(0, 200)})`);
-  }
-  if (lower.includes('403') || lower.includes('forbidden') || lower.includes('accessdenied')) {
-    return new AppError(403, 'PROVIDER_FORBIDDEN',
-      `Access denied by cloud provider for sandbox "${sandboxName}". Check IAM/RAM permissions. (detail: ${msg.slice(0, 200)})`);
-  }
-  if (lower.includes('timeout') || lower.includes('timed out') || lower.includes('etimedout')) {
-    return new AppError(504, 'PROVIDER_TIMEOUT',
-      `Cloud provider timed out for sandbox "${sandboxName}". Check network connectivity and provider health. (detail: ${msg.slice(0, 200)})`);
-  }
-  if (lower.includes('not found') || lower.includes('404') || lower.includes('nosuchbucket') || lower.includes('nosuchkey')) {
-    return new AppError(404, 'PROVIDER_NOT_FOUND',
-      `Cloud resource not found for sandbox "${sandboxName}". Check that the target resource exists. (detail: ${msg.slice(0, 200)})`);
-  }
-  if (lower.includes('quota') || lower.includes('limit exceeded') || lower.includes('throttl')) {
-    return new AppError(429, 'PROVIDER_QUOTA_EXCEEDED',
-      `Cloud provider quota exceeded for sandbox "${sandboxName}". Check your account limits. (detail: ${msg.slice(0, 200)})`);
-  }
-
-  // Generic fallback with original message preserved
-  return new AppError(502, 'PROVIDER_ERROR',
-    `Cloud provider failed for sandbox "${sandboxName}": ${msg.slice(0, 300)}`);
+// eslint-disable-next-line @typescript-eslint/no-restricted-types -- partial sandbox input to PodSpec patch
+function partialInputToPodSpecPatch(input: Partial<CreateSandboxInput>): Partial<PodSpec> {
+  const metadata: PodSpec['metadata'] | undefined = input.name || input.tags?.length
+    ? {
+        name: input.name ?? '',
+        ...(input.tags?.length ? { labels: Object.fromEntries(input.tags.map(t => [t.key, t.value])) } : {}),
+      }
+    : undefined;
+  const containers = input.containers?.length
+    ? input.containers.map(c => ({
+        name: c.name, image: c.image, command: c.command, args: c.args, env: c.env,
+        resources: c.resources?.limits ? { limits: c.resources.limits } : undefined,
+        ports: c.ports, volumeMounts: c.volumeMounts,
+        livenessProbe: c.livenessProbe, readinessProbe: c.readinessProbe, startupProbe: c.startupProbe,
+        imagePullPolicy: c.imagePullPolicy, tty: c.tty, stdin: c.stdin, networkMode: c.networkMode,
+        providerOverrides: c.providerOverrides,
+      }))
+    : undefined;
+  const spec: PodSpec['spec'] | undefined = containers || input.restartPolicy
+    ? { containers: containers ?? [], restartPolicy: input.restartPolicy ?? 'Always' }
+    : undefined;
+  return {
+    ...(metadata !== undefined ? { metadata } : {}),
+    ...(spec !== undefined ? { spec } : {}),
+    ...(input.providerOverrides ? { providerOverrides: input.providerOverrides } : {}),
+  };
 }
 
-/** Sanitize sandbox name for provider API constraints.
- *  Alibaba ECI: [a-zA-Z][a-zA-Z0-9]{1,62} — letters + digits only, no hyphens. */
-function sanitizeName(name: string): string {
-  let s = name.replace(/\s+/g, '').replace(/[^a-zA-Z0-9]/g, '').slice(0, 63);
-  if (!s || s.length < 2) s = 'sbx' + Date.now().toString(36);
-  if (!/^[a-zA-Z]/.test(s)) s = 's' + s;
-  return s;
-}
+
+
+
