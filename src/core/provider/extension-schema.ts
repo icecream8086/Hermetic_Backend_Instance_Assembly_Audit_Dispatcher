@@ -86,6 +86,7 @@ export function applyExtensionOverrides(
         out[field.eciParam] = typeof val === 'object' ? JSON.stringify(val) : String(val);
         break;
       case 'boolean-string':
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- extension boundary: overrides values from external input may be falsy
         out[field.eciParam] = val ? 'true' : 'false';
         break;
       case 'number-string':
@@ -133,7 +134,7 @@ export function validateExtensionOverrides(
         if (typeof val !== 'string') errors.push(`${field.key} must be a string`);
         break;
       case 'object':
-        if (typeof val !== 'object' || val === null) errors.push(`${field.key} must be an object`);
+        if (typeof val !== 'object') errors.push(`${field.key} must be an object`);
         break;
       case 'string[]':
         if (!Array.isArray(val) || val.some(v => typeof v !== 'string')) errors.push(`${field.key} must be a string array`);

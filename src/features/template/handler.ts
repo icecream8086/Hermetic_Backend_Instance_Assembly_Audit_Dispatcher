@@ -3,6 +3,7 @@ import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import type { Context } from 'hono';
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
 import { ok, fail } from '../../core/response.ts';
+import { OkResponse } from '../../core/http-docs/response-schema.ts';
 import { AppError } from '../../core/types.ts';
 import type { AppContext } from '../../core/deps.ts';
 import type { ISandboxService } from '../sandbox/interfaces.ts';
@@ -159,7 +160,6 @@ function resolveDag(tpls: SandboxTemplate[], seedIds: string[]): SandboxTemplate
 
 /** Deep-merge two plain objects — child values override parents. */
 export function deepMerge(parent: Record<string, unknown>, child: Record<string, unknown>): Record<string, unknown> {
-  if (!parent) return child ?? {};
   if (!child) return parent;
   const out = { ...parent };
   for (const k of Object.keys(child)) {
@@ -227,7 +227,7 @@ async function resolveTemplateWithChain(atomic: IAtomicStore, id: string): Promi
       ...(t.podSpec ? { podSpec: t.podSpec } : {}),
     });
   }
-  return { template: { ...tpl, ...mergedSpec } as SandboxTemplate, chain: chainIds };
+  return { template: { ...tpl, ...mergedSpec }, chain: chainIds };
 }
 
 async function listStored(atomic: IAtomicStore): Promise<SandboxTemplate[]> {
@@ -264,7 +264,7 @@ async function countRunningForTemplate(atomic: IAtomicStore, tplId: string): Pro
   let count = 0;
   for (const sid of idx.value) {
     const entry = await atomic.get<Record<string, unknown>>(SANDBOX_PREFIX + sid);
-    if (entry?.value?.config?.templateRef === tplId && LIVE_STATUSES.includes(entry.value.status)) {
+    if (entry.value?.config?.templateRef === tplId && LIVE_STATUSES.includes(entry.value.status)) {
       count++;
     }
   }
@@ -305,26 +305,24 @@ async function claimInstanceSlot(
     return;
   }
 
-  if (type === 'perUser') {
-    const idx = await atomic.get<string[]>(SANDBOX_INDEX_KEY);
-    let userCount = 0;
-    if (idx) {
-      for (const sid of idx.value) {
-        const entry = await atomic.get<Record<string, unknown>>(SANDBOX_PREFIX + sid);
-        if (entry?.value?.config?.templateRef === tpl.id
-            && LIVE_STATUSES.includes(entry.value.status)
-            && entry.value.config?.creatorId === userId) {
-          userCount++;
-        }
+  const idx = await atomic.get<string[]>(SANDBOX_INDEX_KEY);
+  let userCount = 0;
+  if (idx) {
+    for (const sid of idx.value) {
+      const entry = await atomic.get<Record<string, unknown>>(SANDBOX_PREFIX + sid);
+      if (entry?.value?.config?.templateRef === tpl.id
+          && LIVE_STATUSES.includes(entry.value.status)
+          && entry.value.config?.creatorId === userId) {
+        userCount++;
       }
     }
-    if (userCount >= max) {
-      throw new AppError(429, 'TEMPLATE_PER_USER_LIMIT', `Template "${tpl.name}" per-user limit of ${String(max)} reached (${String(userCount)} running)`);
-    }
-    const entry = await atomic.get<number>(userKey);
-    await atomic.set(userKey, (entry?.value ?? 0) + 1, entry?.version ?? null);
-    return;
   }
+    if (userCount >= max) {
+    throw new AppError(429, 'TEMPLATE_PER_USER_LIMIT', `Template "${tpl.name}" per-user limit of ${String(max)} reached (${String(userCount)} running)`);
+  }
+  const entry = await atomic.get<number>(userKey);
+  await atomic.set(userKey, (entry?.value ?? 0) + 1, entry?.version ?? null);
+  return;
 }
 
 function bindingKey(domain: string, port: number): string { return `tpl:bind:${domain}:${String(port)}`; }
@@ -373,10 +371,7 @@ async function releaseInstanceSlot(atomic: IAtomicStore, tpl: SandboxTemplate, _
 function canAccessTemplate(tpl: SandboxTemplate, user: { id: string; role?: string } | undefined): boolean {
   if (isUserRoot(user)) return true;
   if (!tpl.visibility || tpl.visibility === TemplateVisibility.PUBLIC) return true;
-  if (tpl.visibility === TemplateVisibility.PRIVATE) {
-    return tpl.creatorId === user?.id;
-  }
-  return true;
+  return tpl.creatorId === user?.id;
 }
 
 // ─── Router ───
@@ -385,7 +380,7 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
   const app = new OpenAPIHono<{ Variables: AppContext }>();
 
   // POST / — 创建模板
-  app.openapi(createRoute({ method: 'post', path: '/', tags: ['templates'], summary: '创建模板', responses: { 201: { description: 'SandboxTemplate', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/', tags: ['templates'], summary: '创建模板', responses: { 201: { description: 'SandboxTemplate', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
       await requirePerm(c, permissionChecker, 'create', 'template');
       const body: CreateTemplateInput = await c.req.json();
       if (!body.name) throw new AppError(400, 'VALIDATION_ERROR', 'name is required');
@@ -424,7 +419,7 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
       await atomic.set(PREFIX + tpl.id, tpl, null);
       const idx = await atomic.get<string[]>(INDEX_KEY);
       await atomic.set(INDEX_KEY, [...(idx?.value ?? []), tpl.id], idx?.version ?? null);
-      c.var.audit?.write({
+      c.var.audit.write({
         level: KernLevel.NOTICE,
         facility: 'template',
         message: `Template created — ${tpl.name}`,
@@ -434,7 +429,7 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
     });
 
   // GET / —
-  app.openapi(createRoute({ method: 'get', path: '/', tags: ['templates'], summary: '列出所有模板', responses: { 200: { description: 'SandboxTemplate[]', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/', tags: ['templates'], summary: '列出所有模板', responses: { 200: { description: 'SandboxTemplate[]', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
       const user = c.var.currentUser;
       const page = parseInt(c.req.query('page') ?? '') || 1;
       const limit = parseInt(c.req.query('limit') ?? '') || 50;
@@ -453,7 +448,7 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
     });
 
   // GET /:id
-  app.openapi(createRoute({ method: 'get', path: '/{id}', tags: ['templates'], summary: '获取模板', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'SandboxTemplate', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/{id}', tags: ['templates'], summary: '获取模板', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'SandboxTemplate', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
     const resolved = await resolveTemplateSource(atomic, c.req.param('id'));
     if (!resolved) throw new AppError(404, 'TEMPLATE_NOT_FOUND', 'Template not found');
     const user = c.var.currentUser;
@@ -464,7 +459,7 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
   });
 
   // PUT /:id
-  app.openapi(createRoute({ method: 'put', path: '/{id}', tags: ['templates'], summary: '更新模板', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'SandboxTemplate', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'put', path: '/{id}', tags: ['templates'], summary: '更新模板', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'SandboxTemplate', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
     const id = c.req.param('id');
     const user = c.var.currentUser;
     const resolved = await resolveTemplateSource(atomic, id);
@@ -507,11 +502,11 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
     await atomic.set(PREFIX + id, updated, existingVersion ?? null);
     if (resolved.source === 'generated') {
       const idx = await atomic.get<string[]>(INDEX_KEY);
-      if (!idx?.value?.includes(id)) {
+      if (!idx.value?.includes(id)) {
         await atomic.set(INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
       }
     }
-    c.var.audit?.write({
+    c.var.audit.write({
       level: KernLevel.INFO,
       facility: 'template',
       message: `Template ${resolved.source === 'generated' ? 'overridden' : 'updated'} — ${updated.name}`,
@@ -521,7 +516,7 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
   });
 
   // DELETE /:id
-  app.openapi(createRoute({ method: 'delete', path: '/{id}', tags: ['templates'], summary: '删除模板', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'delete', path: '/{id}', tags: ['templates'], summary: '删除模板', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
     const id = c.req.param('id');
     const user = c.var.currentUser;
     const resolved = await resolveTemplateSource(atomic, id);
@@ -538,7 +533,7 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
         deletedAt: now,
         __originalId: id,
       }, null);
-      c.var.audit?.write({
+      c.var.audit.write({
         level: KernLevel.WARNING,
         facility: 'template',
         message: `Template masked — ${resolved.template.name} (tombstone)`,
@@ -558,7 +553,7 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
     await atomic.set(PREFIX + id, null, entry.version);
     const idx = await atomic.get<string[]>(INDEX_KEY);
     if (idx) await atomic.set(INDEX_KEY, idx.value.filter((i: string) => i !== id), idx.version);
-    c.var.audit?.write({
+    c.var.audit.write({
       level: KernLevel.WARNING,
       facility: 'template',
       message: `Template deleted — ${entry.value.name}`,
@@ -568,7 +563,7 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
   });
 
   // GET /:id/resolved
-  app.openapi(createRoute({ method: 'get', path: '/{id}/resolved', tags: ['templates'], summary: '获取模板解析结果', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'SandboxTemplate', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/{id}/resolved', tags: ['templates'], summary: '获取模板解析结果', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'SandboxTemplate', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
     try {
       const { template: resolved, chain } = await resolveTemplateWithChain(atomic, c.req.param('id'));
       const user = c.var.currentUser;
@@ -582,7 +577,7 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
   });
 
   // POST /:id/apply
-  app.openapi(createRoute({ method: 'post', path: '/{id}/apply', tags: ['templates'], summary: '应用模板', request: { params: z.object({ id: z.string() }) }, responses: { 201: { description: 'Sandbox', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/{id}/apply', tags: ['templates'], summary: '应用模板', request: { params: z.object({ id: z.string() }) }, responses: { 201: { description: 'Sandbox', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
     await requirePerm(c, permissionChecker, 'create', 'sandbox');
     let resolved;
     try {
@@ -628,7 +623,7 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
 
         if (!svc) throw new AppError(503, 'SERVICE_UNAVAILABLE', 'Sandbox service not available');
         const sandbox = await svc.provision(finalInput);
-        c.var.audit?.write({
+        c.var.audit.write({
           level: KernLevel.NOTICE,
           facility: 'template',
           message: `Template applied (v2) — ${resolved.name} → sandbox ${sandbox.id}`,
@@ -674,7 +669,7 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
       const sandbox = await svc.provision(
         user?.id ? { ...input, creatorId: user.id } : input,
       );
-      c.var.audit?.write({
+      c.var.audit.write({
         level: KernLevel.NOTICE,
         facility: 'template',
         message: `Template applied — ${resolved.name} → sandbox ${sandbox.id}`,

@@ -120,7 +120,7 @@ export class LogStreamDO implements DurableObject {
 
       const reader = resp.body.getReader();
       const decoder = new TextDecoder();
-      while (true) {
+      for (;;) {
         const { done, value } = await reader.read();
         if (done) break; // stream ended → container stopped
         const text = decoder.decode(value, { stream: true });
@@ -131,6 +131,7 @@ export class LogStreamDO implements DurableObject {
       this.#broadcast(JSON.stringify({ event: 'container_stopped' }));
       await this.#checkContainer(endpoint, containerId);
     } catch (e: unknown) {
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Runtime boundary: caught error type unknown
       if ((e as Error)?.name === 'AbortError') return;
       this.#broadcast(JSON.stringify({ event: 'error', message: String(e) }));
     }

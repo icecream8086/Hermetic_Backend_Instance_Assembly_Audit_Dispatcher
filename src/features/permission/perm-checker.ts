@@ -200,8 +200,8 @@ export class PermissionChecker {
 
     const allPermGroups = await this.#cachedPermGroupList();
     const matchedGroups = allPermGroups.filter(pg =>
-      pg.userGroupIds?.some(ugId => userGroupIds.includes(ugId))
-      || pg.userIds?.includes(userId)
+      pg.userGroupIds.some(ugId => userGroupIds.includes(ugId))
+      || pg.userIds.includes(userId)
     );
 
     const dag = new PermissionDag();
@@ -271,7 +271,7 @@ function resolveDagGroupIds(groups: UserGroup[], userId: string): string[] {
   const visited = new Set<string>();
   const byId = new Map<string, UserGroup>(groups.map(g => [g.id as string, g]));
 
-  const directIds = groups.filter(g => g.memberIds?.includes(userId)).map(g => g.id as string);
+  const directIds = groups.filter(g => g.memberIds.includes(userId)).map(g => g.id as string);
   const queue = [...directIds];
   while (queue.length > 0) {
     const gid = queue.shift()!;
@@ -295,7 +295,7 @@ function ruleToNode(rule: PermissionRule, source: string, resourceOwnerId?: stri
     effect: rule.effect === 'deny' ? PermissionEffect.DENY : PermissionEffect.ALLOW,
     description: rule.description ?? source,
     match: (params) => {
-      if (rule.actions && rule.actions.length > 0) {
+      if (rule.actions.length > 0) {
         if (!matchPattern(rule.actions, params.action)) return false;
       }
       if (rule.resource) {

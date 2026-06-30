@@ -28,7 +28,7 @@ export async function applyTemplate(
   resolveBucket?: (id: string) => Promise<Record<string, unknown> | null>,
 ): Promise<CreateSandboxInput> {
   const container: ContainerSpec = tpl.container ?? { region: createRegionId('local'), containers: [] };
-  const containers = container.containers ?? [];
+  const containers = container.containers;
   const cpu = containers.reduce((s, c) => s + (c.resources?.limits?.cpu ?? c.resources?.requests?.cpu ?? 1), 0);
   const memory = containers.reduce((s, c) => s + (c.resources?.limits?.memory ?? c.resources?.requests?.memory ?? 2048), 0);
   const gpu = Math.max(...containers.map(c => c.resources?.limits?.gpu ?? 0));
@@ -60,7 +60,7 @@ export async function applyTemplate(
   return {
     name: name ?? `${tpl.name}-${crypto.randomUUID().slice(0, 6)}`,
     templateRef: tpl.id,
-    region: createRegionId(region ?? String(container.region) ?? 'local'),
+    region: createRegionId(region ?? String(container.region)),
     resourceSpec: { cpu, memory, ...(gpu > 0 ? { gpu, ...(gpuType ? { gpuType } : {}) } : {}) },
     restartPolicy,
     containers: containers.map((c: ContainerDef, i: number) => ({
@@ -222,7 +222,7 @@ export async function mapStorage(
     switch (s.type) {
       // ConfigMap is env-only — handled inline, no Volume entity needed
       case 'configMap': {
-        if (!s.configMap?.env?.length) break;
+        if (!s.configMap?.env.length) break;
         configMapEnv.push(...s.configMap.env.map(e => ({ name: e.key, value: e.value })));
         break;
       }

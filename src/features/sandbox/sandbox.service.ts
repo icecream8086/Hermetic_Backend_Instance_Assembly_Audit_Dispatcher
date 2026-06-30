@@ -86,16 +86,12 @@ export class SandboxService implements ISandboxService {
         );
       }
       const p = await this.providerRegistry.resolveContainer(createInstanceId(instanceId));
-      if (p) return p;
-      throw new ProviderResolutionError(
-        `Failed to resolve container provider for instance "${instanceId}". Check that the instance is online and its credential is valid.`,
-        instanceId,
-      );
+      return p;
     }
     // No instanceId and no global default — pick first online instance
     if (this.providerRegistry?.resolveContainer) {
       const p = await this.providerRegistry.resolveContainer(undefined);
-      if (p) return p;
+      return p;
     }
     throw new ProviderResolutionError(
       'Cannot resolve provider: no instanceId specified and no global default configured. Pass an explicit instanceId or ensure an online container-capable instance is registered.',
@@ -636,8 +632,8 @@ export function podSpecToSandboxInput(spec: {
     };
   });
 
-  const totalCpu = spec.resources?.cpu ? parseFloat(spec.resources.cpu) : containers.reduce((s, c) => s + (c.resources?.limits?.cpu ?? 1), 0);
-  const totalMem = spec.resources?.memory ? parseMemoryString(spec.resources.memory) : containers.reduce((s, c) => s + (c.resources?.limits?.memory ?? 2048), 0);
+  const totalCpu = spec.resources?.cpu ? parseFloat(spec.resources.cpu) : containers.reduce((s, c) => s + c.resources.limits.cpu, 0);
+  const totalMem = spec.resources?.memory ? parseMemoryString(spec.resources.memory) : containers.reduce((s, c) => s + c.resources.limits.memory, 0);
 
   return {
     name: spec.name,

@@ -96,7 +96,7 @@ export function selectEntriesToPrune(
 /** Estimate the storage footprint of a single entry. */
 export function estimateEntrySize(entry: StoredAuditEntry): number {
   // Rough estimate: JSON serialized size
-  const textLen = entry.message?.length ?? 0;
+  const textLen = entry.message.length;
   const metaLen = entry.metadata ? JSON.stringify(entry.metadata).length : 0;
   return textLen + metaLen + 200; // 200 bytes overhead
 }
@@ -123,7 +123,7 @@ export async function pruneBackend(
   let cursor: string | undefined;
   const batchSize = 500;
 
-  while (true) {
+  for (;;) {
     const result = await reader.query({ limit: batchSize, ...(cursor ? { afterCursor: cursor } : {}) });
     allEntries.push(...(result.entries));
     if (!result.nextCursor || result.entries.length < batchSize) break;

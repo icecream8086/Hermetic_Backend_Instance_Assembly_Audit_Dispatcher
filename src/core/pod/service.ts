@@ -55,8 +55,8 @@ function podSpecToGroupInput(spec: PodSpec): CreateContainerGroupInput {
   return {
     name: spec.metadata.name,
     region: createRegionId('cn-hangzhou'),
-    cpu: containers.reduce((s, c) => s + (c.resources?.limits?.cpu ?? 0), 0) || 1,
-    memory: containers.reduce((s, c) => s + (c.resources?.limits?.memory ?? 0), 0) || 512,
+    cpu: containers.reduce((s, c) => s + (c.resources?.limits.cpu ?? 0), 0) || 1,
+    memory: containers.reduce((s, c) => s + (c.resources?.limits.memory ?? 0), 0) || 512,
     restartPolicy: spec.spec.restartPolicy,
     containers,
     volumes: spec.spec.volumes?.map(v => ({ id: v.id, type: v.type, options: v.options })),
@@ -132,7 +132,7 @@ export class PodService {
   private async resolveProvider(): Promise<IContainerProvider> {
     if (this.providerRegistry?.resolveContainer) {
       const p = await this.providerRegistry.resolveContainer(undefined);
-      if (p) return p;
+      return p;
     }
     if (this.fallbackProvider) return this.fallbackProvider;
     throw new ProviderResolutionError('No container provider available for PodService');

@@ -90,7 +90,7 @@ export class R2AuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
   async #process(entry: AuditEntry): Promise<LogId> {
     const id = generateLogId();
     const now = Date.now();
-    const facility = entry.facility ?? 'audit';
+    const facility = entry.facility;
     const facilityCode = resolveFacility(facility);
 
     // Strip _-prefixed keys from metadata to prevent trusted field forgery (journald convention).
@@ -133,7 +133,7 @@ export class R2AuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
   #consoleOut(entry: AuditEntry, stored: StoredAuditEntry): void {
     const ts = new Date(stored.timestamp).toISOString();
     const levelName = kernLevelName(entry.level);
-    const facility = entry.facility ?? 'audit';
+    const facility = entry.facility;
     const line = `[${ts}] ${levelName}: [${facility}] ${entry.message}`;
     const meta = stored.metadata ? JSON.stringify(stored.metadata) : undefined;
 
@@ -201,8 +201,8 @@ export class R2AuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
           return ec ? ec.i > cursor.i : true;
         });
         const total = filtered.length;
-        const sliced = params?.offset ? filtered.slice(params.offset) : filtered;
-        const page = params?.limit ? sliced.slice(0, params.limit) : sliced;
+        const sliced = params.offset ? filtered.slice(params.offset) : filtered;
+        const page = params.limit ? sliced.slice(0, params.limit) : sliced;
         const lastCursor: string | undefined = page.at(-1)?.cursor;
         return { entries: page, total, ...(lastCursor ? { nextCursor: lastCursor } : {}) };
       }

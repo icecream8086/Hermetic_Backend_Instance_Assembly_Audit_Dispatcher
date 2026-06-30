@@ -112,7 +112,7 @@ export class InstanceProviderResolver {
       // credentialRef may be a credential ID (cred_xxx) or a name (eci_profile@...)
       const cred = await this.credentialService.get(credentialRef as any)
         ?? await this.credentialService.findByName(credentialRef, instanceId);
-      if (cred?.accessKeyId && cred?.accessKeySecret) {
+      if (cred?.accessKeyId && cred.accessKeySecret) {
         return {
           type: cred.type,
           accessKeyId: cred.accessKeyId,

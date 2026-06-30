@@ -46,13 +46,13 @@ export function createPermissionGate(
       if (path === p || path.startsWith(p + '/') || path.startsWith(p + '?')) return next();
     }
 
-    const userId = c.get?.('userId');
+    const userId = c.get('userId');
     // No user context — let the auth middleware handle rejection
     if (!userId) return next();
 
     const action = methodToAction(method);
     const resource = pathToResource(path);
-    const ip = c.req.header?.('CF-Connecting-IP') ?? c.req.header?.('x-forwarded-for')?.split(',')[0]?.trim();
+    const ip = c.req.header('CF-Connecting-IP') ?? c.req.header('x-forwarded-for')?.split(',')[0]?.trim();
 
     const result = await checker.check({
       actor: userId,

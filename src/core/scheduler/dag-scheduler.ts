@@ -175,7 +175,7 @@ export class DagScheduler {
           return depTi?.state ?? 'NONE';
         });
 
-        const rule = task.triggerRule ?? DEFAULT_TRIGGER_RULE;
+        const rule = task.triggerRule;
         if (ti.state === 'NONE' && evaluateTriggerRule(rule, upstreamStates)) {
           ti = transitionState(ti, 'SCHEDULED');
           await this.ctx.saveTaskInstance(ti);
@@ -184,7 +184,7 @@ export class DagScheduler {
 
         // UP_FOR_RETRY → QUEUED (when retry delay elapsed)
         if (ti.state === 'UP_FOR_RETRY') {
-          const retryDelay = task.retryDelayMs ?? 30_000;
+          const retryDelay = task.retryDelayMs;
           if (ti.completedAt && Date.now() - ti.completedAt >= retryDelay) {
             ti = transitionState(ti, 'QUEUED');
             ti = { ...ti, tryNumber: ti.tryNumber + 1 };

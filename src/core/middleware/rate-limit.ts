@@ -100,8 +100,8 @@ export function rateLimit(config: RateLimitConfig): MiddlewareHandler {
   const enabled = config.enabled !== false;
   const bypassIps = config.bypassIps ?? [];
   const bypassToken = config.bypassToken;
-  const burst = config.burst ?? 10;
-  const intervalMs = config.intervalMs ?? 5000;
+  const burst = config.burst;
+  const intervalMs = config.intervalMs;
   const buckets = new Map<string, TokenBucket>();
 
   for (const cidr of bypassIps) {

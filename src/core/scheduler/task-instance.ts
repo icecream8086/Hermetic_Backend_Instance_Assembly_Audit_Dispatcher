@@ -32,7 +32,7 @@ export function createTaskInstance(input: CreateTaskInstanceInput): TaskInstance
 // ─── State transitions ───
 
 export function transitionState(ti: TaskInstance, to: TaskInstanceState): TaskInstance {
-  if (!TASK_VALID_TRANSITIONS[ti.state]?.includes(to)) {
+  if (!TASK_VALID_TRANSITIONS[ti.state].includes(to)) {
     if (isTaskTerminal(ti.state)) return ti;
     throw new Error(
       `Invalid TaskInstance transition: ${ti.state} → ${to} (instance ${ti.id})`,

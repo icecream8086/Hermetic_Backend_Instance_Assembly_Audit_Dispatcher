@@ -129,7 +129,7 @@ export const TASK_VALID_TRANSITIONS: Readonly<Record<TaskInstanceState, readonly
 };
 
 export function isValidTaskTransition(from: TaskInstanceState, to: TaskInstanceState): boolean {
-  return TASK_VALID_TRANSITIONS[from]?.includes(to) ?? false;
+  return TASK_VALID_TRANSITIONS[from].includes(to);
 }
 
 // ─── TaskInstance (runtime) ───

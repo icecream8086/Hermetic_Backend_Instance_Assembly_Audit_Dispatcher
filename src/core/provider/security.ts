@@ -29,7 +29,7 @@ export function sanitizeProbe(p: ProbeSpec): ProbeSpec {
       ...p,
       httpGet: {
         port: p.httpGet.port,
-        path: (p.httpGet.path ?? '/').replace(SHELL_META, ''),
+        path: p.httpGet.path.replace(SHELL_META, ''),
         ...(p.httpGet.scheme !== undefined ? { scheme: p.httpGet.scheme } : {}),
       },
     };

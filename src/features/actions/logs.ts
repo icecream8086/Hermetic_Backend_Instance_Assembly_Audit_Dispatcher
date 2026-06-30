@@ -30,7 +30,7 @@ export async function appendStepLog(
     // Merge: read existing + new line
     const chunks: Uint8Array[] = [];
     const reader = existing.getReader();
-    while (true) {
+    for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
       chunks.push(value);
@@ -74,7 +74,7 @@ export async function readStepLogs(
   // Read full content
   const chunks: Uint8Array[] = [];
   const reader = existing.getReader();
-  while (true) {
+  for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
     chunks.push(value);

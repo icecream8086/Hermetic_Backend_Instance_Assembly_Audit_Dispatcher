@@ -228,7 +228,7 @@ export class PermissionService implements IPermissionService {
     // Root role bypasses all route ACLs (capability model still applies at permission gate)
     if (userEntry.value.role === 'root') return true;
     const allGroups = await this.#groupMgr.listUserGroups();
-    const groupIds = allGroups.filter(g => g.memberIds?.includes(userId)).map(g => g.id);
+    const groupIds = allGroups.filter(g => g.memberIds.includes(userId)).map(g => g.id);
     return this.#routeAclMgr.checkAccess(method, path, userId, groupIds);
   }
 
@@ -313,7 +313,7 @@ export class PermissionService implements IPermissionService {
   public async loadMacRules(): Promise<void> {
     try {
       const entry = await this.atomic.get<PermissionRule[]>(MAC_KEY);
-      if (entry) this.#macRules = entry.value ?? [];
+      if (entry) this.#macRules = entry.value;
     } catch { this.#macRules = []; }
   }
 

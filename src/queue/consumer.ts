@@ -216,7 +216,7 @@ async function handleSandboxGc(
     // Podman (or vice-versa) would silently orphan the cloud resource.
     try {
       // Must have instanceId to resolve the right provider — no global default.
-      if (!instanceId || !providers.resolveContainer) return { success: true };
+      if (!instanceId) return { success: true };
       const provider = await providers.resolveContainer(instanceId as any);
       await Promise.race([
         provider.delete({ region: region as any, providerId }),
@@ -254,7 +254,7 @@ async function handleSandboxGc(
         `uptime=${String(Date.now() - createdAt)}ms [via-queue]`,
       ));
 
-      audit?.write({
+      audit.write({
         level: 4,
         facility: 'sandbox-service',
         message: `Sandbox auto-deleted (${reason}) — ${sid} [via-queue]`,
@@ -344,7 +344,7 @@ async function handleWorkflowJobRun(
       stores,
       providers: {
         dns: providers.dns,
-        resolveContainer: providers.resolveContainer?.bind(providers),
+        resolveContainer: providers.resolveContainer.bind(providers),
       },
       audit,
       eventBus,

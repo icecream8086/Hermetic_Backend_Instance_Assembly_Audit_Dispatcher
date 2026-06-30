@@ -163,26 +163,24 @@ export class ContainerSecretService implements IContainerSecretService {
       if (!secret.value) throw new AppError(500, 'SECRET_EMPTY', 'Inline secret has no value');
       return secret.value;
     }
-    if (secret.type === 'upload') {
-      if (!this.blob || !secret.blobKey) throw new AppError(500, 'SECRET_NO_BLOB', 'Upload secret has no blob');
-      const stream = await this.blob.get(secret.blobKey);
-      if (!stream) throw new AppError(500, 'SECRET_BLOB_MISSING', 'Secret blob not found in store');
-      const reader = stream.getReader();
-      const chunks: Uint8Array[] = [];
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-      }
-      const total = chunks.reduce((sum, c) => sum + c.byteLength, 0);
-      const buf = new Uint8Array(total);
-      let offset = 0;
-      for (const chunk of chunks) {
-        buf.set(chunk, offset);
-        offset += chunk.byteLength;
-      }
-      return new TextDecoder().decode(buf);
+    if (!this.blob || !secret.blobKey) throw new AppError(500, 'SECRET_NO_BLOB', 'Upload secret has no blob');
+    const stream = await this.blob.get(secret.blobKey);
+    if (!stream) throw new AppError(500, 'SECRET_BLOB_MISSING', 'Secret blob not found in store');
+    const reader = stream.getReader();
+    const chunks: Uint8Array[] = [];
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
     }
+    const total = chunks.reduce((sum, c) => sum + c.byteLength, 0);
+    const buf = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      buf.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return new TextDecoder().decode(buf);
     throw new AppError(500, 'SECRET_INVALID_TYPE', `Unknown secret type: ${String(secret.type)}`);
   }
 
@@ -236,15 +234,12 @@ export class ContainerSecretService implements IContainerSecretService {
 function visibleTo(s: ContainerSecret, scopeId: string): boolean {
   if (s.visibility === 'all') return true;
   if (s.visibility === 'private') return false; // only accessible by explicit scope match
-  if (s.visibility === 'selected') return s.selectedScopeIds.includes(scopeId);
+  return s.selectedScopeIds.includes(scopeId);
   return false;
 }
 
 /** Normalize old stored secrets missing fields added in Phase 5.2. */
 function normalizeSecret(s: ContainerSecret): ContainerSecret {
-  if (!s.visibility) (s as any).visibility = 'all';
-  if (!s.selectedScopeIds) (s as any).selectedScopeIds = [];
-  if (!s.keyType) (s as any).keyType = 'aes-gcm';
   if (!s.version) (s as any).version = 1;
   return s;
 }

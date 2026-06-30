@@ -64,7 +64,7 @@ const regionIdSchema = z.string().min(1).brand('RegionId');
 export type RegionId = z.infer<typeof regionIdSchema>;
 
 export function createRegionId(raw: string): RegionId {
-  if (!raw?.trim()) throw new TypeError('RegionId must not be empty');
+  if (!raw.trim()) throw new TypeError('RegionId must not be empty');
   return regionIdSchema.parse(raw);
 }
 
@@ -95,7 +95,7 @@ const ALIBABA_ZONE_RE = /^[a-z]+(?:-[a-z0-9]+)+-[a-z]$/;
 const PODMAN_ZONE_RE = /^local(?:-[a-zA-Z0-9_-]+)?$/;
 
 export function createZoneId(raw: string, platform: Platform): ZoneId {
-  if (!raw?.trim()) throw new TypeError('ZoneId must not be empty');
+  if (!raw.trim()) throw new TypeError('ZoneId must not be empty');
   switch (platform) {
     case 'alibaba':
       if (!ALIBABA_ZONE_RE.test(raw)) {

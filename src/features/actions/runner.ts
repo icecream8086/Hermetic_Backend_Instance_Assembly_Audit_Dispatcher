@@ -413,7 +413,7 @@ export class WorkflowRunner {
     }
 
     // v2 fallback: direct provider.create()
-    if (!instanceId || !this.deps.providers.resolveContainer) {
+    if (!instanceId) {
       throw new Error('Workflow job requires an instanceId to resolve a container provider');
     }
     const provider = await this.deps.providers.resolveContainer(createInstanceId(instanceId));
@@ -481,10 +481,10 @@ export class WorkflowRunner {
     jobRunId: string,
   ): Promise<StepRun[]> {
     const stepRuns: StepRun[] = [];
-    const provider = await this.deps.providers.resolveContainer?.(undefined) as any;
+    const provider = await this.deps.providers.resolveContainer(undefined) as any;
 
     for (const step of steps) {
-      const name = step.name ?? (('run' in step) ? step.run.slice(0, 60) : ('dns' in step) ? `dns:${step.dns.name}` : step.uses ?? 'unknown');
+      const name = step.name ?? (('run' in step) ? step.run.slice(0, 60) : ('dns' in step) ? `dns:${step.dns.name}` : step.uses);
       const startedAt = Date.now();
 
       // Log step start
@@ -621,7 +621,7 @@ export class WorkflowRunner {
   }
 
   #defToStepRun(step: StepDef): StepRun {
-    const name = step.name ?? (('run' in step) ? step.run.slice(0, 60) : ('dns' in step) ? `dns:${step.dns.name}` : step.uses ?? 'unknown');
+    const name = step.name ?? (('run' in step) ? step.run.slice(0, 60) : ('dns' in step) ? `dns:${step.dns.name}` : step.uses);
     return { name, status: 'Queued' };
   }
 

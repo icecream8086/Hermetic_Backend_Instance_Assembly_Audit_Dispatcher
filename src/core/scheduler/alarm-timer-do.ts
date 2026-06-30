@@ -73,7 +73,7 @@ export class AlarmTimerDO implements DurableObject {
         running: this._running,
         intervalMs: this._intervalMs,
         tickCount: this._tickCount,
-        hasCallback: this._callbackUrl != null,
+        hasCallback: this._callbackUrl !== '',
         nextAlarm,
       });
     }

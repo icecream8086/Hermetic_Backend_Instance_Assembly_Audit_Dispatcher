@@ -7,9 +7,10 @@ import type { IVolumeService } from './service.ts';
 import { CreateVolumeSchema, UpdateVolumeSchema } from './schema.ts';
 import type { CreateVolumeInput, UpdateVolumeInput } from './types.ts';
 import { ok } from '../../core/response.ts';
+import { OkResponse } from '../../core/http-docs/response-schema.ts';
 
 function isRoot<E extends { Variables: { currentUser?: { role?: string } } }>(c: Context<E>): void {
-  const user = c.var?.currentUser;
+  const user = c.var.currentUser;
   if (!user || !['root', 'Operator', 'wheel'].includes(user.role)) {
     throw new AppError(403, 'FORBIDDEN', 'Admin access required');
   }
@@ -25,7 +26,7 @@ export function createVolumeRouter(svc: IVolumeService): OpenAPIHono<{ Variables
       tags: ['volumes'],
       summary: '创建数据卷',
       request: { body: { content: { 'application/json': { schema: CreateVolumeSchema } } } },
-      responses: { 201: { description: 'Volume created', content: { 'application/json': { schema: z.any() } } } },
+      responses: { 201: { description: 'Volume created', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } },
     }),
     async (c) => {
       isRoot(c);
@@ -41,7 +42,7 @@ export function createVolumeRouter(svc: IVolumeService): OpenAPIHono<{ Variables
       path: '/',
       tags: ['volumes'],
       summary: '列出数据卷',
-      responses: { 200: { description: 'Volume[]', content: { 'application/json': { schema: z.any() } } } },
+      responses: { 200: { description: 'Volume[]', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } },
     }),
     async (c) => {
       const page = parseInt(c.req.query('page') ?? '') || 1;
@@ -62,7 +63,7 @@ export function createVolumeRouter(svc: IVolumeService): OpenAPIHono<{ Variables
       tags: ['volumes'],
       summary: '获取数据卷详情',
       request: { params: z.object({ id: z.string() }) },
-      responses: { 200: { description: 'Volume', content: { 'application/json': { schema: z.any() } } } },
+      responses: { 200: { description: 'Volume', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } },
     }),
     async (c) => {
       const vol = await svc.get(c.req.param('id'));
@@ -81,7 +82,7 @@ export function createVolumeRouter(svc: IVolumeService): OpenAPIHono<{ Variables
         params: z.object({ id: z.string() }),
         body: { content: { 'application/json': { schema: UpdateVolumeSchema } } },
       },
-      responses: { 200: { description: 'Volume updated', content: { 'application/json': { schema: z.any() } } } },
+      responses: { 200: { description: 'Volume updated', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } },
     }),
     async (c) => {
       isRoot(c);
@@ -97,7 +98,7 @@ export function createVolumeRouter(svc: IVolumeService): OpenAPIHono<{ Variables
       tags: ['volumes'],
       summary: '删除数据卷',
       request: { params: z.object({ id: z.string() }) },
-      responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: z.any() } } } },
+      responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } },
     }),
     async (c) => {
       isRoot(c);

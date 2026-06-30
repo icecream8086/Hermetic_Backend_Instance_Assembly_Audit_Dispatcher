@@ -75,7 +75,7 @@ export function permLogAudit(
   message?: string,
 ): void {
   permLog(logger, eventType, actor, fields, level, message);
-  return permAudit(audit, eventType, actor, fields, level, message);
+  permAudit(audit, eventType, actor, fields, level, message);
 }
 
 // ─── Entity type ───

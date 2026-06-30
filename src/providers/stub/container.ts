@@ -224,8 +224,8 @@ export class StubContainerProvider implements IContainerProvider {
     const run = this.#runtimes.get(providerId);
     if (!run) return { cpuUsage: 0, memoryUsage: 0 };
     return {
-      cpuUsage: run.cpu ?? 1,
-      memoryUsage: run.memory ?? 512,
+      cpuUsage: run.cpu,
+      memoryUsage: run.memory,
       networkIO: { rx: 1000, tx: 500 },
     };
   }

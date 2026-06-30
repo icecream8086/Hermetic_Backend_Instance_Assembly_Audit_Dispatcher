@@ -101,7 +101,7 @@ export const VALID_TRANSITIONS: Readonly<Record<SandboxStatus, readonly SandboxS
 };
 
 export function isValidTransition(from: SandboxStatus, to: SandboxStatus): boolean {
-  return VALID_TRANSITIONS[from]?.includes(to) ?? false;
+  return VALID_TRANSITIONS[from].includes(to);
 }
 
 export function isTerminal(status: SandboxStatus): boolean {

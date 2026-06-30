@@ -112,7 +112,7 @@ export function resetPersistencePolicy(): PersistencePolicy {
 export function shouldPersist(entry: AuditEntry): boolean {
   if (!_persistencePolicy.enabled) return false;
 
-  const facility = entry.facility ?? 'audit';
+  const facility = entry.facility;
   const level = entry.level;
 
   // ERR (3) and below are NEVER suppressed — kernel invariant

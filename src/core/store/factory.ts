@@ -106,11 +106,11 @@ async function createBlobStore(
   }
 
   return {
-    // eslint-disable-next-line @typescript-eslint/no-empty-function -- noop adapter
+     
     async put() { /* noop */ },
     // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
     async get() { return null; },
-    // eslint-disable-next-line @typescript-eslint/no-empty-function -- noop adapter
+     
     async delete() { /* noop */ },
   };
 }

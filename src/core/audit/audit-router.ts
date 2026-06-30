@@ -26,7 +26,7 @@ function intParam(raw: string | undefined, fallback: number, min: number, max: n
 }
 
 function requireRoot(c: Context<AuditEnv>): Response | null {
-  const user = c.var?.currentUser;
+  const user = c.var.currentUser;
   if (!user) return null;
   const isRoot = user.role === 'root' || user.role === 'Operator' || user.role === 'wheel';
   if (!isRoot) return c.json(fail('FORBIDDEN', 'Admin access required'), 403);

@@ -278,7 +278,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
   // 10c. Sudo endpoint — temporary privilege elevation for wheel members
   app.post('/api/sudo', async (c) => {
     if (!permService) return c.json({ error: 'Permission service unavailable' }, 503);
-    const user = c.var?.currentUser as { id: string } | undefined;
+    const user = c.var.currentUser as { id: string } | undefined;
     if (!user) return c.json({ error: 'Authentication required' }, 401);
     try {
       const expiry = await permService.grantTempElevation(user.id);

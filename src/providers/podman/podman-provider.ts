@@ -126,7 +126,7 @@ export class PodmanContainerProvider implements IContainerProvider {
 
     // Env: flatten to KEY=VALUE strings
     const env: string[] = [];
-    if (c?.env) {
+    if (c.env) {
       for (const e of c.env) {
         if (e.value !== undefined) env.push(`${e.name}=${e.value}`);
       }
@@ -135,7 +135,7 @@ export class PodmanContainerProvider implements IContainerProvider {
     // Port mappings
     const exposedPorts: Record<string, Record<string, unknown>> = {};
     const portBindings: Record<string, { HostPort?: string }[]> = {};
-    if (c?.ports) {
+    if (c.ports) {
       for (const p of c.ports) {
         const key = `${String(p.containerPort)}/${p.protocol ?? 'tcp'}`;
         exposedPorts[key] = {};
@@ -145,12 +145,12 @@ export class PodmanContainerProvider implements IContainerProvider {
 
     // Health check from livenessProbe
     let healthcheck: Record<string, unknown> | undefined;
-    if (c?.livenessProbe) {
+    if (c.livenessProbe) {
       const lp = c.livenessProbe;
       if (lp.exec) {
         healthcheck = { Test: ['CMD', ...lp.exec.command] };
       } else if (lp.httpGet) {
-        healthcheck = { Test: ['CMD', 'curl', '-sf', `http://localhost:${String(lp.httpGet.port)}${lp.httpGet.path ?? '/'}`] };
+        healthcheck = { Test: ['CMD', 'curl', '-sf', `http://localhost:${String(lp.httpGet.port)}${lp.httpGet.path}`] };
       } else if (lp.tcpSocket) {
         healthcheck = { Test: ['CMD', '/bin/bash', '-c', `exec 3<>/dev/tcp/localhost/${String(lp.tcpSocket.port)} || exit 1`] };
       }
@@ -163,21 +163,21 @@ export class PodmanContainerProvider implements IContainerProvider {
     }
 
     const hostConfig: Record<string, unknown> = {};
-    const networkMode = c?.networkMode
-      ?? (c?.providerOverrides)?.networkMode as string | undefined;
+    const networkMode = c.networkMode
+      ?? c.providerOverrides?.networkMode as string | undefined;
     if (networkMode) {
       hostConfig.NetworkMode = networkMode;
     }
     if (Object.keys(portBindings).length > 0) hostConfig.PortBindings = portBindings;
-    if (c?.resources?.limits) {
-      hostConfig.Memory = (c.resources.limits.memory ?? 0) * 1024 * 1024;
-      hostConfig.NanoCpus = (c.resources.limits.cpu ?? 0) * 1e9;
+    if (c.resources?.limits) {
+      hostConfig.Memory = c.resources.limits.memory * 1024 * 1024;
+      hostConfig.NanoCpus = c.resources.limits.cpu * 1e9;
       if (c.resources.limits.gpu && c.resources.limits.gpu > 0) {
         hostConfig.DeviceRequests = [{ Driver: 'nvidia', Count: c.resources.limits.gpu, Capabilities: [['gpu']] }];
       }
     }
     // Volume mounts via Binds (local host paths)
-    if (input.volumes?.length && c?.volumeMounts) {
+    if (input.volumes?.length && c.volumeMounts) {
       const binds: string[] = [];
       for (const vm of c.volumeMounts) {
         const vol = input.volumes.find(v => v.id === vm.volumeId);
@@ -195,7 +195,7 @@ export class PodmanContainerProvider implements IContainerProvider {
     // The container sees them as regular files in a tmpfs (memory-backed).
     const createdSecrets: string[] = [];
     if (input.secretMounts?.length) {
-      const mounts = (hostConfig.Mounts as Record<string, unknown>[]) ?? [];
+      const mounts = (hostConfig.Mounts as Record<string, unknown>[]);
       for (const sm of input.secretMounts) {
         const secretName = `hbi_${crypto.randomUUID().slice(0, 8)}`;
         try {
@@ -222,9 +222,9 @@ export class PodmanContainerProvider implements IContainerProvider {
     }
 
     const body: Record<string, unknown> = {
-      Image: c?.image ?? '',
-      Entrypoint: c?.command ? [...c.command] : undefined,
-      Cmd: c?.args ? [...c.args] : undefined,
+      Image: c.image,
+      Entrypoint: c.command ? [...c.command] : undefined,
+      Cmd: c.args ? [...c.args] : undefined,
       Env: env.length ? env : undefined,
       Labels: { 'managed-by': 'hbi-aad', sandbox: input.name },
       ...(Object.keys(exposedPorts).length > 0 ? { ExposedPorts: exposedPorts } : {}),
@@ -235,7 +235,7 @@ export class PodmanContainerProvider implements IContainerProvider {
     // No container name — Podman auto-assigns a unique one.
     // We always refer to containers by their ID (providerId), so the name is irrelevant.
     const nameParam = '';
-    debugLog('sandbox-service', 'Podman create: apiBase=%s, image=%s', this.#apiBase, c?.image);
+    debugLog('sandbox-service', 'Podman create: apiBase=%s, image=%s', this.#apiBase, c.image);
     let resp: Response;
     try {
       resp = await fetch(`${this.#apiBase}/containers/create${nameParam}`, {
@@ -407,7 +407,7 @@ export class PodmanContainerProvider implements IContainerProvider {
     if (!resp) throw new Error('Podman daemon unreachable');
     if (!resp.ok) throw new Error(`Podman wait failed (${String(resp.status)})`);
     const data: PodmanWaitResponse = await resp.json();
-    return { statusCode: data.StatusCode ?? -1 };
+    return { statusCode: data.StatusCode };
   }
 
   public async exec(providerId: string, cmd: readonly string[], _containerName?: string): Promise<{ execId: string; webSocketUri?: string }> {
@@ -481,7 +481,7 @@ export class PodmanContainerProvider implements IContainerProvider {
 
     return {
       providerId: info.Id,
-      name: info.Name.replace(/^\//, '') ?? '',
+      name: info.Name.replace(/^\//, ''),
       status: mapPodmanState(info.State.Status),
       regionId: createRegionId('local'),
       creationTime: created,
@@ -492,21 +492,21 @@ export class PodmanContainerProvider implements IContainerProvider {
         ...(info.NetworkSettings?.IPAddress ? { privateIp: info.NetworkSettings.IPAddress } : {}),
       },
       associatedResources: [],
-      restartPolicy: info.HostConfig?.RestartPolicy?.Name ?? 'OnFailure',
+      restartPolicy: info.HostConfig.RestartPolicy.Name,
       containers: [{
-        id: createContainerId(info.Id ?? 'unknown'),
+        id: createContainerId(info.Id),
         name: info.Name.replace(/^\//, ''),
-        image: info.Config?.Image ?? '',
-        args: info.Config?.Cmd ?? [],
-        env: parseEnv(info.Config?.Env),
-        workingDir: info.Config?.WorkingDir ?? '',
+        image: info.Config.Image,
+        args: info.Config.Cmd ?? [],
+        env: parseEnv(info.Config.Env),
+        workingDir: info.Config.WorkingDir ?? '',
         status: podmanToOciStatus(info.State.Status),
         alive: info.State.Running,
         createdAt: created,
         startedAt: info.State.StartedAt,
         finishedAt: info.State.FinishedAt,
         exitCode: info.State.ExitCode,
-        labels: info.Config?.Labels ?? {},
+        labels: info.Config.Labels ?? {},
         annotations: {},
         mounts: (info.Mounts ?? []).map((m: { Source?: string; Destination?: string; Type?: string; Mode?: string }) => ({
           source: m.Source ?? '',
@@ -531,21 +531,21 @@ export class PodmanContainerProvider implements IContainerProvider {
 /** Synthesize ContainerGroupRuntimeEvent[] from Podman container inspect. */
 function runtimeEvents(info: PodmanInspectResult): { reason: string; type: 'Normal' | 'Warning'; message: string; count: number; lastTimestamp?: string }[] {
   const events: { reason: string; type: 'Normal' | 'Warning'; message: string; count: number; lastTimestamp?: string }[] = [];
-  const ts = info.State?.StartedAt ?? info.Created;
+  const ts = info.State.StartedAt ?? info.Created;
 
-  if (info.State?.Running && info.State?.StartedAt) {
+  if (info.State.Running && info.State.StartedAt) {
     events.push({ reason: 'Started', type: 'Normal', message: 'Container started', count: 1, lastTimestamp: info.State.StartedAt });
   }
-  if (info.State?.Status === 'exited' || info.State?.Status === 'stopped') {
+  if (info.State.Status === 'exited' || info.State.Status === 'stopped') {
     events.push({ reason: 'Stopped', type: 'Normal', message: `Container exited with code ${String(info.State.ExitCode ?? '?')}`, count: 1, lastTimestamp: info.State.FinishedAt ?? ts });
   }
-  if (info.State?.Health?.Status === 'healthy') {
+  if (info.State.Health?.Status === 'healthy') {
     events.push({ reason: 'HealthCheck', type: 'Normal', message: 'Health check passed', count: info.State.Health.Log?.length ?? 1, lastTimestamp: info.State.Health.Log?.[info.State.Health.Log.length - 1]?.End ?? ts });
   }
-  if (info.State?.Health?.Status === 'unhealthy') {
-    events.push({ reason: 'Unhealthy', type: 'Warning', message: `Health check failed (${String(info.State.Health.FailingStreak)}x)`, count: info.State.Health.FailingStreak ?? 1, lastTimestamp: ts });
+  if (info.State.Health?.Status === 'unhealthy') {
+    events.push({ reason: 'Unhealthy', type: 'Warning', message: `Health check failed (${String(info.State.Health.FailingStreak)}x)`, count: info.State.Health.FailingStreak, lastTimestamp: ts });
   }
-  if (info.State?.Error && info.State.Error !== '') {
+  if (info.State.Error && info.State.Error !== '') {
     events.push({ reason: 'Error', type: 'Warning', message: info.State.Error, count: 1, lastTimestamp: ts });
   }
 

@@ -45,7 +45,7 @@ export function registerLogFetchHandler(deps: LogFetchDeps): void {
 
   eventBus.on('log:fetch', async (event: { type: string; payload?: unknown }) => {
     const payload = event.payload as LogFetchPayload | undefined;
-    if (!payload?.sandboxId || !payload?.containerName) return;
+    if (!payload?.sandboxId || !payload.containerName) return;
     const { sandboxId, providerId, region, containerName, tail, sinceSeconds } = payload;
 
     try {
@@ -58,11 +58,10 @@ export function registerLogFetchHandler(deps: LogFetchDeps): void {
 
       // Fetch logs from provider — resolve per-instance for correct credential binding
       const resolved = payload.instanceId
-        ? await providers.resolveContainer?.(payload.instanceId as any)
+        ? await providers.resolveContainer(payload.instanceId as any)
         : undefined;
       if (!resolved) return;
       const containerProvider = resolved;
-      if (!containerProvider.getLogs) return;
 
       const result = await containerProvider.getLogs({
         region: region as any,

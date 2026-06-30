@@ -6,9 +6,10 @@ import { AppError } from '../../core/types.ts';
 import type { AppContext } from '../../core/deps.ts';
 import { CreateSysGroupSchema, UpdateSysGroupSchema } from './schema.ts';
 import { ok } from '../../core/response.ts';
+import { OkResponse } from '../../core/http-docs/response-schema.ts';
 
 function requireRoot<E extends { Variables: { currentUser?: { role?: string } } }>(c: Context<E>): void {
-  const user = c.var?.currentUser;
+  const user = c.var.currentUser;
   if (!user || !['root', 'Operator', 'wheel'].includes(user.role)) {
     throw new AppError(403, 'FORBIDDEN', 'Admin access required');
   }
@@ -24,12 +25,12 @@ export function createSysGroupRouter(svc: ISysGroupService): OpenAPIHono<{ Varia
       tags: ['system-groups'],
       summary: '创建系统权限组',
       request: { body: { content: { 'application/json': { schema: CreateSysGroupSchema } } } },
-      responses: { 201: { description: 'SysGroup created', content: { 'application/json': { schema: z.any() } } }, 400: { description: 'Bad request', content: { 'application/json': { schema: z.any() } } }, 403: { description: 'Forbidden', content: { 'application/json': { schema: z.any() } } }, 500: { description: 'Internal error', content: { 'application/json': { schema: z.any() } } } },
+      responses: { 201: { description: 'SysGroup created', content: { 'application/json': { schema: OkResponse(z.unknown()) } } }, 400: { description: 'Bad request', content: { 'application/json': { schema: OkResponse(z.unknown()) } } }, 403: { description: 'Forbidden', content: { 'application/json': { schema: OkResponse(z.unknown()) } } }, 500: { description: 'Internal error', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } },
     }),
     async (c) => {
       requireRoot(c);
       const body = CreateSysGroupSchema.parse(await c.req.json());
-      const group = await svc.create(body, c.var?.currentUser?.id);
+      const group = await svc.create(body, c.var.currentUser?.id);
       return c.json(ok(group), 201);
     },
   );
@@ -40,7 +41,7 @@ export function createSysGroupRouter(svc: ISysGroupService): OpenAPIHono<{ Varia
       path: '/',
       tags: ['system-groups'],
       summary: '列出所有系统权限组',
-      responses: { 200: { description: 'SysGroup[]', content: { 'application/json': { schema: z.any() } } }, 403: { description: 'Forbidden', content: { 'application/json': { schema: z.any() } } }, 500: { description: 'Internal error', content: { 'application/json': { schema: z.any() } } } },
+      responses: { 200: { description: 'SysGroup[]', content: { 'application/json': { schema: OkResponse(z.unknown()) } } }, 403: { description: 'Forbidden', content: { 'application/json': { schema: OkResponse(z.unknown()) } } }, 500: { description: 'Internal error', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } },
     }),
     async (c) => {
       requireRoot(c);
@@ -59,7 +60,7 @@ export function createSysGroupRouter(svc: ISysGroupService): OpenAPIHono<{ Varia
       tags: ['system-groups'],
       summary: '获取系统权限组详情',
       request: { params: z.object({ id: z.string() }) },
-      responses: { 200: { description: 'SysGroup', content: { 'application/json': { schema: z.any() } } }, 403: { description: 'Forbidden', content: { 'application/json': { schema: z.any() } } }, 404: { description: 'Not found', content: { 'application/json': { schema: z.any() } } }, 500: { description: 'Internal error', content: { 'application/json': { schema: z.any() } } } },
+      responses: { 200: { description: 'SysGroup', content: { 'application/json': { schema: OkResponse(z.unknown()) } } }, 403: { description: 'Forbidden', content: { 'application/json': { schema: OkResponse(z.unknown()) } } }, 404: { description: 'Not found', content: { 'application/json': { schema: OkResponse(z.unknown()) } } }, 500: { description: 'Internal error', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } },
     }),
     async (c) => {
       requireRoot(c);
@@ -79,12 +80,12 @@ export function createSysGroupRouter(svc: ISysGroupService): OpenAPIHono<{ Varia
         params: z.object({ id: z.string() }),
         body: { content: { 'application/json': { schema: UpdateSysGroupSchema } } },
       },
-      responses: { 200: { description: 'SysGroup updated', content: { 'application/json': { schema: z.any() } } } },
+      responses: { 200: { description: 'SysGroup updated', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } },
     }),
     async (c) => {
       requireRoot(c);
       const body = UpdateSysGroupSchema.parse(await c.req.json());
-      return c.json(ok(await svc.update(c.req.param('id'), body, c.var?.currentUser?.id)));
+      return c.json(ok(await svc.update(c.req.param('id'), body, c.var.currentUser?.id)));
     },
   );
 
@@ -95,11 +96,11 @@ export function createSysGroupRouter(svc: ISysGroupService): OpenAPIHono<{ Varia
       tags: ['system-groups'],
       summary: '删除系统权限组',
       request: { params: z.object({ id: z.string() }) },
-      responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: z.any() } } } },
+      responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } },
     }),
     async (c) => {
       requireRoot(c);
-      await svc.delete(c.req.param('id'), c.var?.currentUser?.id);
+      await svc.delete(c.req.param('id'), c.var.currentUser?.id);
       return c.json(ok(null));
     },
   );

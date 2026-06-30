@@ -45,7 +45,7 @@ export class WorkersAuditLogger implements IAuditWriter, IAuditReader, IAuditAdm
 
   #output(entry: AuditEntry): void {
     const ts = new Date().toISOString();
-    const facility = entry.facility ?? 'audit';
+    const facility = entry.facility;
     const levelName = kernLevelName(entry.level);
 
     if (!shouldLogAudit(facility, entry.level)) return;

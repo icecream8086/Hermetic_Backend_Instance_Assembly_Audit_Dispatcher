@@ -29,7 +29,7 @@ function normalizeUser(user: User): User {
     ...user,
     uid: user.uid || createUid(UID_MIN),
     gid: user.gid || createGid(GID_MIN),
-    gecos: user.gecos ?? user.name ?? '',
+    gecos: user.gecos,
     directory: user.directory || `${DEFAULT_HOME_PREFIX}${user.email}`,
     shell: user.shell || DEFAULT_SHELL,
     supplementaryGids: user.supplementaryGids.length > 0 ? user.supplementaryGids : [],
@@ -721,7 +721,7 @@ export class UserService implements IUserService {
   public async validateToken(token: SessionToken): Promise<User | null> {
     const entry = await this.atomic.get<Session>(TOKEN_PREFIX + token);
     if (!entry) return null;
-    const expiresAt = entry.value.expiresAt ?? entry.value.createdAt + SESSION_TTL_MS;
+    const expiresAt = entry.value.expiresAt;
     if (Date.now() >= expiresAt) return null;
     const userId = createUserId(entry.value.userId);
     const user = await this.getById(userId);
@@ -735,7 +735,7 @@ export class UserService implements IUserService {
       const existingToken = createSessionToken(idxEntry.value);
       const sessEntry = await this.atomic.get<Session>(TOKEN_PREFIX + existingToken);
       if (sessEntry) {
-        const expiresAt = sessEntry.value.expiresAt ?? sessEntry.value.createdAt + SESSION_TTL_MS;
+        const expiresAt = sessEntry.value.expiresAt;
         if (Date.now() < expiresAt) {
           return existingToken;
         }
@@ -773,7 +773,7 @@ export class UserService implements IUserService {
       const t = createSessionToken(raw);
       const s = await this.atomic.get<Session>(TOKEN_PREFIX + t);
       if (s) {
-        const expiresAt = s.value.expiresAt ?? s.value.createdAt + SESSION_TTL_MS;
+        const expiresAt = s.value.expiresAt;
         if (now < expiresAt) live.push(t);
         else expired.push(t);
       }

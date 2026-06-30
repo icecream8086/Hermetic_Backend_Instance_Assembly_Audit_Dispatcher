@@ -10,7 +10,7 @@ import { createVolumeId } from './types.ts';
 export function eipFromResources(
   resources: ContainerGroupRuntime['associatedResources'],
 ): string | undefined {
-  const eip = resources.find(r => r.type === 'eip');
+  const eip = resources[0];
   return eip?.ip;
 }
 

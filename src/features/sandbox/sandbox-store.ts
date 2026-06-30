@@ -35,7 +35,7 @@ export class SandboxStore {
     let items = entries.filter(e => e !== null).map(e => e.value);
     if (status) items = items.filter(s => s.status === status);
 
-    const nextCursorVal = startIdx + limit < (idx?.value.length ?? 0)
+    const nextCursorVal = startIdx + limit < (idx.value.length)
       ? String(startIdx + limit)
       : undefined;
 

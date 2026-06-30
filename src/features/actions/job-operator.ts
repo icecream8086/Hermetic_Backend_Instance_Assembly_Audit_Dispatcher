@@ -107,7 +107,7 @@ export class JobOperator implements ITaskExecutor {
   private stepLabel(step: StepDef): string {
     if ('run' in step) return step.run.slice(0, 60);
     if ('dns' in step) return `dns:${step.dns.name}`;
-    return step.uses ?? 'unknown';
+    return step.uses;
   }
 
   private async provisionSandbox(config: any): Promise<string> {
@@ -148,7 +148,7 @@ export class JobOperator implements ITaskExecutor {
 
     // v2 fallback: direct provider.create()
     const instanceId = config.instanceId;
-    if (!instanceId || !this.deps.providers.resolveContainer) {
+    if (!instanceId) {
       throw new Error('Job requires an instanceId to resolve a container provider');
     }
 
@@ -183,7 +183,7 @@ export class JobOperator implements ITaskExecutor {
     env: Record<string, string>,
     sandboxId: string,
   ): Promise<void> {
-    const provider = await this.deps.providers.resolveContainer?.(undefined) as any;
+    const provider = await this.deps.providers.resolveContainer(undefined) as any;
     if (typeof provider?.exec !== 'function') return;
 
     const shell = step.shell ?? '/bin/sh';
@@ -207,7 +207,7 @@ export class JobOperator implements ITaskExecutor {
     sandboxId: string,
   ): Promise<void> {
     const registry = this.deps.actionRegistry;
-    const provider = await this.deps.providers.resolveContainer?.(undefined) as any;
+    const provider = await this.deps.providers.resolveContainer(undefined) as any;
 
     if (!registry && typeof provider?.exec !== 'function') {
       throw new Error(`Cannot execute uses: step — no action registry or provider exec`);

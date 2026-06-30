@@ -12,7 +12,7 @@ import { createInstanceId } from '../region/instance.ts';
 import { runtimeToNetwork, runtimeToContainers, runtimeToEvents } from '../../features/sandbox/runtime-mapper.ts';
 import { formatDmesgLine } from '../utils/dmesg.ts';
 
-type ContainerResolver = { resolveContainer: IProviderRegistry['resolveContainer'] };
+interface ContainerResolver { resolveContainer: IProviderRegistry['resolveContainer'] }
 
 export interface HealthCheckDeps {
   stores: { atomic: IAtomicStore };
@@ -133,7 +133,7 @@ export function registerHealthCheck(deps: HealthCheckDeps): void {
             // Try provider status check (only if we have instance routing info)
             if (resolvedInstanceId) {
               try {
-                const p = resolvedInstanceId ? await providers.resolveContainer?.(createInstanceId(resolvedInstanceId)) : undefined;
+                const p = resolvedInstanceId ? await providers.resolveContainer(createInstanceId(resolvedInstanceId)) : undefined;
                 if (p?.getStatus) {
                   const rt = await p.getStatus(entry.value.providerId ?? sid);
                   if (!rt) {
@@ -185,8 +185,6 @@ export function registerHealthCheck(deps: HealthCheckDeps): void {
             continue;
           }
 
-          if (entry.value.status !== SandboxStatus.Running) continue;
-
           const maxRetries = entry.value.config.healthMaxRetries ?? 3;
           if (maxRetries === -1) { stableSince.delete(sid); continue; }
 
@@ -194,9 +192,9 @@ export function registerHealthCheck(deps: HealthCheckDeps): void {
           const lastStableAt = stableSince.get(sid);
           if (lastStableAt !== undefined && entry.value.updatedAt <= lastStableAt) continue;
 
-          if (!instanceId || !providers.resolveContainer) continue;
+          if (!instanceId) continue;
           const provider = await providers.resolveContainer(instanceId);
-          if (!provider?.getStatus) continue;
+          if (!provider.getStatus) continue;
 
           const runtime = await provider.getStatus(entry.value.providerId ?? sid);
           if (!runtime) {
@@ -366,7 +364,7 @@ async function dispatchGc(
   if (qSent) return; // Queue accepted — consumer will process
 
   // 4. Queue unavailable — inline fallback. Resolve per-instance provider.
-  if (params.instanceId && providers.resolveContainer) {
+  if (params.instanceId) {
     try {
       const resolved = await providers.resolveContainer(createInstanceId(params.instanceId));
       await resolved.delete({ region: createRegionId(params.region), providerId: params.providerId });
@@ -559,16 +557,14 @@ export function registerPodHealthCheck(deps: PodHealthCheckDeps): void {
           }
 
           // ── Unknown — unexpected phase, GC after long timeout ──
-          if (phase === 'Unknown') {
-            if (Date.now() - pod.updatedAt > 24 * 60 * 60 * 1000) {
-              await dispatchPodGc(stores.atomic, queueProducer, providers, audit, {
-                podId: pid, reason: 'stuck-gc', providerId: providerId ?? pid,
-                podName: pod.name, createdAt: pod.createdAt,
-                ...(instanceId ? { instanceId } : {}),
-              });
-            }
-            continue;
+          if (Date.now() - pod.updatedAt > 24 * 60 * 60 * 1000) {
+            await dispatchPodGc(stores.atomic, queueProducer, providers, audit, {
+              podId: pid, reason: 'stuck-gc', providerId: providerId ?? pid,
+              podName: pod.name, createdAt: pod.createdAt,
+              ...(instanceId ? { instanceId } : {}),
+            });
           }
+          continue;
         } catch { /* skip individual pod errors */ }
       }
     } finally {
@@ -624,7 +620,7 @@ async function dispatchPodGc(
 
   // Queue unavailable — inline fallback
   const instId = resolvePodGcInstanceId(params.instanceId);
-  if (instId && providers.resolveContainer) {
+  if (instId) {
     try {
       const resolved = await providers.resolveContainer(instId);
       await resolved.delete({ region: createRegionId('cn-hangzhou'), providerId: params.providerId });

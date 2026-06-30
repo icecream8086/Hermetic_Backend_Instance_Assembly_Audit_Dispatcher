@@ -113,7 +113,7 @@ export class RouteAclManager {
     const currentVersion = verEntry?.value ?? 0;
     if (this.#cachedAcls === null || this.#cachedAclsVersion !== currentVersion) {
       const raw = await this.store.list();
-      this.#cachedAcls = [...raw].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
+      this.#cachedAcls = [...raw].sort((a, b) => b.priority - a.priority);
       this.#cachedAclsVersion = currentVersion;
     }
     return this.#cachedAcls;

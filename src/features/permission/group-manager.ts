@@ -127,7 +127,7 @@ export class GroupManager {
   public async deletePermGroup(id: string, actor?: AuditActor): Promise<void> {
     const old = await this.pgStore.get(id);
     if (!old) throw new AppError(404, 'PERMGROUP_NOT_FOUND', 'Permission group not found');
-    if (this.templates.some(t => t.id === old.name?.toLowerCase())) {
+    if (this.templates.some(t => t.id === old.name.toLowerCase())) {
       throw new AppError(403, 'MAC_DENIED', `Cannot delete seed permission group "${old.name}" — protected by system policy`);
     }
     await this.pgStore.delete(id);

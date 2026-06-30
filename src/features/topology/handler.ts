@@ -7,6 +7,7 @@ import type { CreateImageInput } from '../../core/region/image.ts';
 import { AlibabaRegion, AwsRegion, PodmanRegion } from '../../core/region/types.ts';
 import type { AppContext } from '../../core/deps.ts';
 import { ok } from '../../core/response.ts';
+import { OkResponse } from '../../core/http-docs/response-schema.ts';
 import { AppError } from '../../core/types.ts';
 import type { CreateBucketBody, CreateInstanceBody, HeartbeatBody, CreateCredentialBody } from './types.ts';
 import type { CredentialService } from '../../core/auth/credential.ts';
@@ -17,7 +18,7 @@ import type { IS3Provider } from '../../core/provider/s3.ts';
 import type { S3MultipartUploadSession, S3MultipartDownloadSession } from '../../core/provider/s3-types.ts';
 
 function isRoot<E extends { Variables: { currentUser?: { role?: string } } }>(c: Context<E>): void {
-  const user = c.var?.currentUser;
+  const user = c.var.currentUser;
   if (!user || !['root', 'Operator', 'wheel'].includes(user.role)) {
     throw new AppError(403, 'FORBIDDEN', 'Admin access required');
   }
@@ -43,13 +44,13 @@ function mkTopoCrud<T, TC = unknown, TU = unknown>(
   const idFn = (raw: string): any => idTransform ? idTransform(raw) : raw;
   const map = (item: T): any => mapResult ? mapResult(item) : item;
 
-  app.openapi(createRoute({ method: 'get', path: '/', tags: ['topology'], summary: 'List', responses: { 200: { description: 'Items', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/', tags: ['topology'], summary: 'List', responses: { 200: { description: 'Items', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
     const filter = extractFilter(c);
     const items = await svc.list(Object.keys(filter).length ? filter : undefined);
     return c.json(ok({ items: items.map(map), total: items.length }));
   });
 
-  app.openapi(createRoute({ method: 'post', path: '/', tags: ['topology'], summary: 'Create', responses: { 201: { description: 'Created', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/', tags: ['topology'], summary: 'Create', responses: { 201: { description: 'Created', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
     if (guard) guard(c);
     const body = await c.req.json<TC>();
     const err = validateCreate(body);
@@ -58,20 +59,20 @@ function mkTopoCrud<T, TC = unknown, TU = unknown>(
     return c.json(ok(map(entity)), 201);
   });
 
-  app.openapi(createRoute({ method: 'get', path: '/{id}', tags: ['topology'], summary: 'Get', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Item', content: { 'application/json': { schema: z.any() } } }, 404: { description: 'Not found' } } }), async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/{id}', tags: ['topology'], summary: 'Get', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Item', content: { 'application/json': { schema: OkResponse(z.unknown()) } } }, 404: { description: 'Not found' } } }), async (c) => {
     const entity = await svc.get(idFn(c.req.param('id')));
     if (!entity) throw new AppError(404, 'NOT_FOUND', notFoundMsg);
     return c.json(ok(map(entity)));
   });
 
-  app.openapi(createRoute({ method: 'put', path: '/{id}', tags: ['topology'], summary: 'Update', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Updated', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'put', path: '/{id}', tags: ['topology'], summary: 'Update', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Updated', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
     if (guard) guard(c);
     const body = await c.req.json<TU>();
     const entity = await svc.update(idFn(c.req.param('id')), body);
     return c.json(ok(map(entity)));
   });
 
-  app.openapi(createRoute({ method: 'delete', path: '/{id}', tags: ['topology'], summary: 'Delete', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'delete', path: '/{id}', tags: ['topology'], summary: 'Delete', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
     if (guard) guard(c);
     await svc.delete(idFn(c.req.param('id')));
     return c.json(ok(null));
@@ -91,7 +92,7 @@ export function createTopologyRouter(
   const app = new OpenAPIHono<{ Variables: AppContext }>();
 
   // GET /regions
-  app.openapi(createRoute({ method: 'get', path: '/regions', tags: ['topology'], summary: '列出已知 region', responses: { 200: { description: '{ platform, regions[] }', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/regions', tags: ['topology'], summary: '列出已知 region', responses: { 200: { description: '{ platform, regions[] }', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
     const platform = c.req.query('platform');
     let regionList: string[];
     if (!platform) {
@@ -111,6 +112,7 @@ export function createTopologyRouter(
   {
     const sub = new OpenAPIHono<any>();
     mkTopoCrud(sub, instances, (body: CreateInstanceBody) => {
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- API boundary: body keys are runtime-optional
       if (!body.name || !body.platform || !body.region) return 'name, platform, and region are required';
       if (body.platform === 'podman' && !body.endpoint?.trim()) return 'endpoint is required for podman platform';
       return null;
@@ -119,7 +121,7 @@ export function createTopologyRouter(
   }
 
   // POST /instances/:id/heartbeat
-  app.openapi(createRoute({ method: 'post', path: '/instances/{id}/heartbeat', tags: ['topology'], summary: '上报实例心跳', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'OK', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/instances/{id}/heartbeat', tags: ['topology'], summary: '上报实例心跳', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'OK', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
     const id = createInstanceId(c.req.param('id'));
     const body = await c.req.json<HeartbeatBody>();
     await instances.heartbeat(id, body.capacity, body.status ?? 'online');
@@ -130,6 +132,7 @@ export function createTopologyRouter(
   if (credentials) {
     const sub = new OpenAPIHono<any>();
     mkTopoCrud(sub, credentials, (body: CreateCredentialBody) => {
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- API boundary
       if (!body.name || !body.type || !body.platform) return 'name, type, and platform are required';
       if (body.type === 'aksk' && (!body.accessKeyId || !body.accessKeySecret)) return 'accessKeyId and accessKeySecret are required for aksk type';
       if (body.type === 'token' && !body.token) return 'token is required for token type';
@@ -143,6 +146,7 @@ export function createTopologyRouter(
   {
     const sub = new OpenAPIHono<any>();
     mkTopoCrud(sub, buckets, (body: CreateBucketBody) => {
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- API boundary
       if (!body.name || !body.bucketType || !body.instanceId) return 'name, bucketType, and instanceId are required';
       return null;
     }, 'Bucket not found');
@@ -151,32 +155,32 @@ export function createTopologyRouter(
 
   // ─── S3 Policy ───
   if (policyManager) {
-    app.openapi(createRoute({ method: 'get', path: '/buckets/{id}/policies', tags: ['topology'], summary: '列出 bucket 的 S3 策略', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: '{ items: S3Policy[] }', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
+    app.openapi(createRoute({ method: 'get', path: '/buckets/{id}/policies', tags: ['topology'], summary: '列出 bucket 的 S3 策略', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: '{ items: S3Policy[] }', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
       const items = await policyManager.list(c.req.param('id'));
       return c.json(ok({ items, total: items.length }));
     });
 
-    app.openapi(createRoute({ method: 'post', path: '/buckets/{id}/policies', tags: ['topology'], summary: '创建 S3 策略', request: { params: z.object({ id: z.string() }) }, responses: { 201: { description: 'S3Policy', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
+    app.openapi(createRoute({ method: 'post', path: '/buckets/{id}/policies', tags: ['topology'], summary: '创建 S3 策略', request: { params: z.object({ id: z.string() }) }, responses: { 201: { description: 'S3Policy', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
       isRoot(c);
       const body: unknown = await c.req.json();
       const policy = await policyManager.create(c.req.param('id'), body as CreateS3PolicyInput);
       return c.json(ok(policy), 201);
     });
 
-    app.openapi(createRoute({ method: 'get', path: '/policies/{id}', tags: ['topology'], summary: '获取 S3 策略详情', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'S3Policy', content: { 'application/json': { schema: z.any() } } }, 404: { description: 'Not found' } } }), async (c) => {
+    app.openapi(createRoute({ method: 'get', path: '/policies/{id}', tags: ['topology'], summary: '获取 S3 策略详情', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'S3Policy', content: { 'application/json': { schema: OkResponse(z.unknown()) } } }, 404: { description: 'Not found' } } }), async (c) => {
       const policy = await policyManager.get(c.req.param('id'));
       if (!policy) throw new AppError(404, 'NOT_FOUND', 'S3 policy not found');
       return c.json(ok(policy));
     });
 
-    app.openapi(createRoute({ method: 'put', path: '/policies/{id}', tags: ['topology'], summary: '更新 S3 策略', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'S3Policy', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
+    app.openapi(createRoute({ method: 'put', path: '/policies/{id}', tags: ['topology'], summary: '更新 S3 策略', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'S3Policy', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
       isRoot(c);
       const body: unknown = await c.req.json();
       const policy = await policyManager.update(c.req.param('id'), body as UpdateS3PolicyInput);
       return c.json(ok(policy));
     });
 
-    app.openapi(createRoute({ method: 'delete', path: '/policies/{id}', tags: ['topology'], summary: '删除 S3 策略', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
+    app.openapi(createRoute({ method: 'delete', path: '/policies/{id}', tags: ['topology'], summary: '删除 S3 策略', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
       isRoot(c);
       await policyManager.delete(c.req.param('id'));
       return c.json(ok(null));
@@ -194,7 +198,7 @@ export function createTopologyRouter(
   }
 
   // ─── Image Pull ───
-  app.openapi(createRoute({ method: 'post', path: '/images/{id}/pull', tags: ['topology'], summary: '异步拉取镜像', request: { params: z.object({ id: z.string() }) }, responses: { 202: { description: '{ taskId }', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/images/{id}/pull', tags: ['topology'], summary: '异步拉取镜像', request: { params: z.object({ id: z.string() }) }, responses: { 202: { description: '{ taskId }', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
     const id = c.req.param('id');
     const repo = await images.get(id);
     if (!repo) throw new AppError(404, 'NOT_FOUND', 'ImageRepository not found');
@@ -215,14 +219,14 @@ export function createTopologyRouter(
     return c.json(ok({ taskId }), 202);
   });
 
-  app.openapi(createRoute({ method: 'get', path: '/pull-tasks/{taskId}', tags: ['topology'], summary: '查询拉取任务状态', request: { params: z.object({ taskId: z.string() }) }, responses: { 200: { description: 'PullTask', content: { 'application/json': { schema: z.any() } } }, 404: { description: 'Not found' } } }), async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/pull-tasks/{taskId}', tags: ['topology'], summary: '查询拉取任务状态', request: { params: z.object({ taskId: z.string() }) }, responses: { 200: { description: 'PullTask', content: { 'application/json': { schema: OkResponse(z.unknown()) } } }, 404: { description: 'Not found' } } }), async (c) => {
     const taskId = c.req.param('taskId');
     const entry = await c.var.stores.atomic.get('pull-task:' + taskId) as any;
     if (!entry) throw new AppError(404, 'NOT_FOUND', 'Pull task not found');
     return c.json(ok(entry.value));
   });
 
-  app.openapi(createRoute({ method: 'get', path: '/images/{id}/tasks', tags: ['topology'], summary: '列出仓库的历史拉取任务', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: '{ items: PullTask[] }', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/images/{id}/tasks', tags: ['topology'], summary: '列出仓库的历史拉取任务', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: '{ items: PullTask[] }', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
     const idx: any = await c.var.stores.atomic.get('pull-task:repo:' + c.req.param('id'));
     if (!idx) return c.json(ok({ items: [], total: 0 }));
     const entries = await Promise.all((idx.value ?? []).map((tid: string) => c.var.stores.atomic.get('pull-task:' + tid))) as any;
@@ -235,7 +239,7 @@ export function createTopologyRouter(
     const DEFAULT_PART_SIZE = 5 * 1024 * 1024;
     const DEFAULT_EXPIRES = 3600;
 
-    app.openapi(createRoute({ method: 'post', path: '/buckets/{id}/uploads', tags: ['topology'], summary: '创建分片上传会话', request: { params: z.object({ id: z.string() }) }, responses: { 201: { description: 'UploadSession', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
+    app.openapi(createRoute({ method: 'post', path: '/buckets/{id}/uploads', tags: ['topology'], summary: '创建分片上传会话', request: { params: z.object({ id: z.string() }) }, responses: { 201: { description: 'UploadSession', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
       const bucketId = c.req.param('id');
       const bucket = await buckets.get(bucketId);
       if (!bucket) throw new AppError(404, 'NOT_FOUND', 'Bucket not found');
@@ -254,18 +258,19 @@ export function createTopologyRouter(
       return c.json(ok(session), 201);
     });
 
-    app.openapi(createRoute({ method: 'post', path: '/buckets/{id}/uploads/{uploadId}/complete', tags: ['topology'], summary: '合并分片', request: { params: z.object({ id: z.string(), uploadId: z.string() }) }, responses: { 200: { description: 'Result', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
+    app.openapi(createRoute({ method: 'post', path: '/buckets/{id}/uploads/{uploadId}/complete', tags: ['topology'], summary: '合并分片', request: { params: z.object({ id: z.string(), uploadId: z.string() }) }, responses: { 200: { description: 'Result', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
       const bucketId = c.req.param('id');
       const bucket = await buckets.get(bucketId);
       if (!bucket) throw new AppError(404, 'NOT_FOUND', 'Bucket not found');
       if (!s3Provider.completeMultipartUpload) throw new AppError(400, 'NOT_SUPPORTED', 'Not supported');
       const body = await c.req.json<{ key: string; parts: { partNumber: number; etag: string }[] }>();
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- API boundary: body from c.req.json<>
       if (!body.key || !body.parts) throw new AppError(400, 'VALIDATION_ERROR', 'key and parts are required');
       const result = await s3Provider.completeMultipartUpload({ bucket: bucket.name, key: body.key, uploadId: c.req.param('uploadId'), parts: body.parts });
       return c.json(ok(result));
     });
 
-    app.openapi(createRoute({ method: 'delete', path: '/buckets/{id}/uploads/{uploadId}', tags: ['topology'], summary: '取消分片上传', request: { params: z.object({ id: z.string(), uploadId: z.string() }) }, responses: { 200: { description: '{ aborted: true }', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
+    app.openapi(createRoute({ method: 'delete', path: '/buckets/{id}/uploads/{uploadId}', tags: ['topology'], summary: '取消分片上传', request: { params: z.object({ id: z.string(), uploadId: z.string() }) }, responses: { 200: { description: '{ aborted: true }', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
       const bucketId = c.req.param('id');
       const bucket = await buckets.get(bucketId);
       if (!bucket) throw new AppError(404, 'NOT_FOUND', 'Bucket not found');
@@ -275,7 +280,7 @@ export function createTopologyRouter(
       return c.json(ok({ aborted: true }));
     });
 
-    app.openapi(createRoute({ method: 'get', path: '/buckets/{id}/uploads/{uploadId}/parts', tags: ['topology'], summary: '列出已上传的分片', request: { params: z.object({ id: z.string(), uploadId: z.string() }) }, responses: { 200: { description: 'Parts', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
+    app.openapi(createRoute({ method: 'get', path: '/buckets/{id}/uploads/{uploadId}/parts', tags: ['topology'], summary: '列出已上传的分片', request: { params: z.object({ id: z.string(), uploadId: z.string() }) }, responses: { 200: { description: 'Parts', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
       const bucketId = c.req.param('id');
       const bucket = await buckets.get(bucketId);
       if (!bucket) throw new AppError(404, 'NOT_FOUND', 'Bucket not found');
@@ -286,7 +291,7 @@ export function createTopologyRouter(
       return c.json(ok(parts));
     });
 
-    app.openapi(createRoute({ method: 'get', path: '/buckets/{id}/objects/{key}/download', tags: ['topology'], summary: '获取分片下载 presigned URL', request: { params: z.object({ id: z.string(), key: z.string() }) }, responses: { 200: { description: 'DownloadSession', content: { 'application/json': { schema: z.any() } } } } }), async (c) => {
+    app.openapi(createRoute({ method: 'get', path: '/buckets/{id}/objects/{key}/download', tags: ['topology'], summary: '获取分片下载 presigned URL', request: { params: z.object({ id: z.string(), key: z.string() }) }, responses: { 200: { description: 'DownloadSession', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
       const bucketId = c.req.param('id');
       const bucket = await buckets.get(bucketId);
       if (!bucket) throw new AppError(404, 'NOT_FOUND', 'Bucket not found');

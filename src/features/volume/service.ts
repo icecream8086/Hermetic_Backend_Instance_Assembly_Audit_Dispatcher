@@ -95,7 +95,7 @@ export class VolumeService implements IVolumeService {
 
     if (hasFilter) {
       items = allItems.filter(v => {
-        if (filters.name && !(v.name ?? '').toLowerCase().includes(filters.name.toLowerCase())) return false;
+        if (filters.name && !v.name.toLowerCase().includes(filters.name.toLowerCase())) return false;
         // eslint-disable-next-line @typescript-eslint/no-unsafe-enum-comparison -- same enum type on both sides
         if (filters.type && v.type !== filters.type) return false;
         // eslint-disable-next-line @typescript-eslint/no-unsafe-enum-comparison -- same enum type on both sides

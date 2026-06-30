@@ -39,7 +39,7 @@ export function createTimerBackend(type: SchedulerBackendType, options?: TimerBa
   // Auto-upgrade only when callbackUrl is set (production-ready).
   // In dev without WORKER_URL, keep setInterval — DO alarm in workerd
   // requires continuous I/O to fire, and stalls when the Worker is idle.
-  if (type === 'worker' && options?.doNamespace && options?.callbackUrl) {
+  if (type === 'worker' && options?.doNamespace && options.callbackUrl) {
     type = 'do-alarm';
   }
 

@@ -5,9 +5,10 @@ import type { IProviderRegistry } from '../../core/provider/interfaces.ts';
 import { AppError } from '../../core/types.ts';
 import type { AppContext } from '../../core/deps.ts';
 import { ok } from '../../core/response.ts';
+import { OkResponse } from '../../core/http-docs/response-schema.ts';
 
 function requireRoot<E extends { Variables: { currentUser?: { role?: string } } }>(c: Context<E>): void {
-  const user = c.var?.currentUser;
+  const user = c.var.currentUser;
   if (!user || !['root', 'Operator', 'wheel'].includes(user.role)) {
     throw new AppError(403, 'FORBIDDEN', 'Admin access required');
   }
@@ -17,7 +18,7 @@ export function createImagesRouter(providers: IProviderRegistry): OpenAPIHono<{ 
   const app = new OpenAPIHono<{ Variables: AppContext }>();
 
   app.openapi(
-    createRoute({ method: 'get', path: '/', tags: ['images'], summary: '列出镜像', responses: { 200: { description: 'ImageInfo[]', content: { 'application/json': { schema: z.any() } } } } }),
+    createRoute({ method: 'get', path: '/', tags: ['images'], summary: '列出镜像', responses: { 200: { description: 'ImageInfo[]', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }),
     async (c) => {
       const search = c.req.query('search');
       const limit = parseInt(c.req.query('limit') ?? '') || undefined;
@@ -30,7 +31,7 @@ export function createImagesRouter(providers: IProviderRegistry): OpenAPIHono<{ 
   );
 
   app.openapi(
-    createRoute({ method: 'post', path: '/pull', tags: ['images'], summary: '拉取镜像', responses: { 201: { description: 'ImageInfo', content: { 'application/json': { schema: z.any() } } } } }),
+    createRoute({ method: 'post', path: '/pull', tags: ['images'], summary: '拉取镜像', responses: { 201: { description: 'ImageInfo', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }),
     async (c) => {
       requireRoot(c);
       const { image, instanceId, clusterId, credentialRef } = await c.req.json();
@@ -42,7 +43,7 @@ export function createImagesRouter(providers: IProviderRegistry): OpenAPIHono<{ 
   );
 
   app.openapi(
-    createRoute({ method: 'get', path: '/{id}', tags: ['images'], summary: '查看镜像详情', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'ImageInfo', content: { 'application/json': { schema: z.any() } } } } }),
+    createRoute({ method: 'get', path: '/{id}', tags: ['images'], summary: '查看镜像详情', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'ImageInfo', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }),
     async (c) => {
       const id = c.req.param('id');
       const instanceId = c.req.query('instanceId');
@@ -54,7 +55,7 @@ export function createImagesRouter(providers: IProviderRegistry): OpenAPIHono<{ 
   );
 
   app.openapi(
-    createRoute({ method: 'delete', path: '/{id}', tags: ['images'], summary: '删除镜像', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: z.any() } } } } }),
+    createRoute({ method: 'delete', path: '/{id}', tags: ['images'], summary: '删除镜像', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }),
     async (c) => {
       requireRoot(c);
       const id = c.req.param('id');
@@ -66,7 +67,7 @@ export function createImagesRouter(providers: IProviderRegistry): OpenAPIHono<{ 
   );
 
   app.openapi(
-    createRoute({ method: 'post', path: '/{id}/tag', tags: ['images'], summary: '给镜像打标签', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'OK', content: { 'application/json': { schema: z.any() } } } } }),
+    createRoute({ method: 'post', path: '/{id}/tag', tags: ['images'], summary: '给镜像打标签', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'OK', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }),
     async (c) => {
       requireRoot(c);
       const id = c.req.param('id');
@@ -81,7 +82,7 @@ export function createImagesRouter(providers: IProviderRegistry): OpenAPIHono<{ 
   );
 
   app.openapi(
-    createRoute({ method: 'get', path: '/search', tags: ['images'], summary: '搜索远程镜像仓库', responses: { 200: { description: 'Search results', content: { 'application/json': { schema: z.any() } } } } }),
+    createRoute({ method: 'get', path: '/search', tags: ['images'], summary: '搜索远程镜像仓库', responses: { 200: { description: 'Search results', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }),
     async (c) => {
       const term = c.req.query('term');
       if (!term) throw new AppError(400, 'VALIDATION_ERROR', 'term is required');
@@ -94,7 +95,7 @@ export function createImagesRouter(providers: IProviderRegistry): OpenAPIHono<{ 
   );
 
   app.openapi(
-    createRoute({ method: 'post', path: '/prune', tags: ['images'], summary: '清理未使用的镜像', responses: { 200: { description: 'Result', content: { 'application/json': { schema: z.any() } } } } }),
+    createRoute({ method: 'post', path: '/prune', tags: ['images'], summary: '清理未使用的镜像', responses: { 200: { description: 'Result', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }),
     async (c) => {
       requireRoot(c);
       const instanceId = c.req.query('instanceId');
@@ -107,7 +108,7 @@ export function createImagesRouter(providers: IProviderRegistry): OpenAPIHono<{ 
   );
 
   app.openapi(
-    createRoute({ method: 'get', path: '/{id}/history', tags: ['images'], summary: '查看镜像分层历史', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'History', content: { 'application/json': { schema: z.any() } } } } }),
+    createRoute({ method: 'get', path: '/{id}/history', tags: ['images'], summary: '查看镜像分层历史', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'History', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }),
     async (c) => {
       const id = c.req.param('id');
       const instanceId = c.req.query('instanceId');
@@ -119,7 +120,7 @@ export function createImagesRouter(providers: IProviderRegistry): OpenAPIHono<{ 
   );
 
   app.openapi(
-    createRoute({ method: 'post', path: '/build', tags: ['images'], summary: '构建镜像', responses: { 201: { description: 'ImageInfo', content: { 'application/json': { schema: z.any() } } } } }),
+    createRoute({ method: 'post', path: '/build', tags: ['images'], summary: '构建镜像', responses: { 201: { description: 'ImageInfo', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }),
     async (c) => {
       requireRoot(c);
       const instanceId = c.req.query('instanceId');

@@ -274,7 +274,7 @@ export const API_PRECONDITIONS: Readonly<Record<ApiOperation, ReadonlySet<Contai
 export function canApplyOperation(state: ContainerGroupState, op: ApiOperation): boolean {
   if (op === 'CreateContainerGroup') return true; // creates new, no pre-state
   const allowed = API_PRECONDITIONS[op];
-  return allowed?.has(state) ?? false;
+  return allowed.has(state);
 }
 
 /** Check if a Delete can be applied — non-terminal, non-Terminating (§4 + P4). */
