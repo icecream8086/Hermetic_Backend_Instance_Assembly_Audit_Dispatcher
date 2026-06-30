@@ -24,4 +24,7 @@ AGENTS.md
 dependency-graph.json
 module-metrics.txt
 code-stats.json
+eslint_out.json
+eslint_src.json
+eslint_src_out.json
 docs

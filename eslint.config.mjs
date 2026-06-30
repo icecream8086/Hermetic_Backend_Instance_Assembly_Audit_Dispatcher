@@ -1,6 +1,133 @@
 import eslint from '@eslint/js';
 import tseslint from 'typescript-eslint';
 import eslintComments from '@eslint-community/eslint-plugin-eslint-comments';
+import ts from 'typescript';
+
+// ═══════════════════════════════════════════════════════════════
+// CEA Phase 2 — TypeChecker 自定义规则
+// ═══════════════════════════════════════════════════════════════
+
+/** no-unknown-leak: 禁止 unknown 类型离开 decoder/provider 层 */
+const noUnknownLeak = {
+  meta: {
+    type: 'problem',
+    docs: { description: 'Disallow unknown types from leaking outside decoder/provider layers', requiresTypeChecking: true },
+    schema: [],
+    messages: { unknownLeak: 'Unknown type is leaking from this function. Decoder/provider layers must resolve unknown via Zod schema.parse() before returning.' },
+  },
+  create(context) {
+    const filename = context.filename;
+    const isDecoderOrProvider = filename.includes('/decode/') || filename.includes('/providers/');
+    if (isDecoderOrProvider) return {};
+
+    const parserServices = context.sourceCode?.parserServices;
+    if (!parserServices?.program) return {};
+    const checker = parserServices.program.getTypeChecker();
+
+    function containsUnknown(type) {
+      if (type.flags & ts.TypeFlags.Unknown) return true;
+      if (type.isUnion()) return type.types.some((t) => containsUnknown(t));
+      return false;
+    }
+
+    function checkReturnType(node) {
+      try {
+        const tsNode = parserServices.esTreeNodeToTSNodeMap.get(node);
+        if (!tsNode) return;
+        if (!ts.isFunctionLike(tsNode)) return;
+        const signature = checker.getSignatureFromDeclaration(tsNode);
+        if (!signature) return;
+        const returnType = checker.getReturnTypeOfSignature(signature);
+        if (containsUnknown(returnType)) {
+          context.report({ node, messageId: 'unknownLeak' });
+        }
+      } catch (e) {
+        console.error('[local-rules/no-unknown-leak]', e instanceof Error ? e.message : String(e));
+      }
+    }
+    return { 'FunctionDeclaration, FunctionExpression, ArrowFunctionExpression': checkReturnType };
+  },
+};
+
+/** no-handwritten-guard: 禁止 typeof/instanceof/in 手写类型守卫（排除 Error 子类） */
+const noHandwrittenGuard = {
+  meta: {
+    type: 'problem',
+    docs: { description: 'Disallow handwritten type guards in favor of Zod', recommended: 'strict' },
+    schema: [],
+    messages: {
+      typeofGuard: 'Handwritten typeof type guard detected. Use Zod schema.parse() instead.',
+      instanceofGuard: 'Handwritten instanceof type guard detected (Error subclasses excluded). Use Zod schema.parse() instead.',
+      inGuard: 'Handwritten "in" type guard detected. Use Zod schema.parse() instead.',
+    },
+  },
+  create(context) {
+    const errorLikeNames = new Set([
+      'Error', 'TypeError', 'RangeError', 'SyntaxError', 'ReferenceError', 'URIError',
+      'AppError', 'ZodError', 'TransactConflictError', 'AggregateError', 'BodyDepthError',
+    ]);
+    function isErrorSubclass(node) {
+      if (node.right?.type === 'Identifier' && errorLikeNames.has(node.right.name)) return true;
+      return false;
+    }
+    return {
+      'IfStatement > BinaryExpression[operator="==="] > UnaryExpression[operator="typeof"]'(node) {
+        context.report({ node, messageId: 'typeofGuard' });
+      },
+      'IfStatement > BinaryExpression[operator="!=="] > UnaryExpression[operator="typeof"]'(node) {
+        context.report({ node, messageId: 'typeofGuard' });
+      },
+      'ConditionalExpression > BinaryExpression[operator="==="] > UnaryExpression[operator="typeof"]'(node) {
+        context.report({ node, messageId: 'typeofGuard' });
+      },
+      'ConditionalExpression > BinaryExpression[operator="!=="] > UnaryExpression[operator="typeof"]'(node) {
+        context.report({ node, messageId: 'typeofGuard' });
+      },
+      'BinaryExpression[operator="instanceof"]'(node) {
+        if (!isErrorSubclass(node)) context.report({ node, messageId: 'instanceofGuard' });
+      },
+      // Only flag 'key' in obj when used as a type guard (inside if/ternary condition)
+      'IfStatement > BinaryExpression[operator="in"]'(node) {
+        context.report({ node, messageId: 'inGuard' });
+      },
+      'ConditionalExpression > BinaryExpression[operator="in"]'(node) {
+        context.report({ node, messageId: 'inGuard' });
+      },
+    };
+  },
+};
+
+/** enforce-decode-layer: 强制 JSON.parse() / c.req.json() 经过 Zod schema.parse() */
+const enforceDecodeLayer = {
+  meta: {
+    type: 'problem',
+    docs: { description: 'Enforce JSON.parse() and c.req.json() go through Zod schema.parse()', recommended: 'strict' },
+    schema: [],
+    messages: {
+      bareJsonParse: 'Bare JSON.parse() detected. Wrap in schema.parse(JSON.parse(str)).',
+      bareReqJson: 'c.req.json() detected without Zod .parse(). Use schema.parse(await c.req.json()).',
+    },
+  },
+  create(context) {
+    if (context.filename.includes('/providers/')) return {};
+    return {
+      'CallExpression[callee.object.name="JSON"][callee.property.name="parse"]'(node) {
+        const parent = node.parent;
+        if (parent?.callee?.property?.name === 'parse') return; // wrapped in .parse()
+        context.report({ node, messageId: 'bareJsonParse' });
+      },
+      'CallExpression[callee.property.name="json"]'(node) {
+        const obj = node.callee?.object;
+        if (!obj || obj.type !== 'MemberExpression' || obj.object?.name !== 'c' || obj.property?.name !== 'req') return;
+        const parent = node.parent;
+        if (parent?.callee?.property?.name === 'parse') return; // wrapped in .parse()
+        context.report({ node, messageId: 'bareReqJson' });
+      },
+    };
+  },
+};
+
+const localRules = { rules: { 'no-unknown-leak': noUnknownLeak, 'no-handwritten-guard': noHandwrittenGuard, 'enforce-decode-layer': enforceDecodeLayer } };
 
 export default tseslint.config(
   eslint.configs.recommended,
@@ -15,6 +142,7 @@ export default tseslint.config(
     },
     plugins: {
       '@eslint-community/eslint-comments': eslintComments,
+      'local-rules': localRules,
     },
     rules: {
 
@@ -224,7 +352,21 @@ export default tseslint.config(
             '对于 OpenAPI 响应体，请用 z.object({...}) 描述完整响应结构；' +
             '对于不可预测的负载，请用 z.unknown() 替代——它至少强制消费端做类型收窄。',
         },
+        {
+          // 14. 禁止空 catch 块 — 静默吞错
+          selector: 'CatchClause > BlockStatement[body.length=0]',
+          message:
+            '禁止空 catch 块静默吞错。请至少记录错误（console.error/audit.write）或重新抛出。',
+        },
       ],
+
+      // ════════════════════════════════════════════════════════
+      // CEA Phase 2 — TypeChecker 规则（自定义）
+      // ════════════════════════════════════════════════════════
+
+      'local-rules/no-unknown-leak': 'error',
+      'local-rules/no-handwritten-guard': 'error',
+      'local-rules/enforce-decode-layer': 'error',
 
       // ════════════════════════════════════════════════════════
       // CEA — 锁死 ESLint 逃逸通道
