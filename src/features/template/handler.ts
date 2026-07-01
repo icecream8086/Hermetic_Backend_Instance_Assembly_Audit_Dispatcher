@@ -3,7 +3,9 @@ import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import type { Context } from 'hono';
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
 import { ok, fail } from '../../core/response.ts';
-import { OkResponse } from '../../core/http-docs/response-schema.ts';
+import { OkResponse, PaginatedResponse } from '../../core/http-docs/response-schema.ts';
+import { SandboxTemplateSchema, ResolvedTemplateSchema, TemplateDeleteResponseSchema } from './response-schema.ts';
+import { SandboxSchema } from '../sandbox/response-schema.ts';
 import { AppError } from '../../core/types.ts';
 import type { AppContext } from '../../core/deps.ts';
 import type { ISandboxService } from '../sandbox/interfaces.ts';
@@ -403,7 +405,7 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
   const app = new OpenAPIHono<{ Variables: AppContext }>();
 
   // POST / — 创建模板
-  app.openapi(createRoute({ method: 'post', path: '/', tags: ['templates'], summary: '创建模板', responses: { 201: { description: 'SandboxTemplate', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/', tags: ['templates'], summary: '创建模板', responses: { 201: { description: 'SandboxTemplate', content: { 'application/json': { schema: OkResponse(SandboxTemplateSchema) } } } } }), async (c) => {
       await requirePerm(c, permissionChecker, 'create', 'template');
       const body = await z.unknown().parse(c.req.json());
       if (!body.name) throw new AppError(400, 'VALIDATION_ERROR', 'name is required');
@@ -452,7 +454,7 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
     });
 
   // GET / —
-  app.openapi(createRoute({ method: 'get', path: '/', tags: ['templates'], summary: '列出所有模板', responses: { 200: { description: 'SandboxTemplate[]', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/', tags: ['templates'], summary: '列出所有模板', responses: { 200: { description: 'SandboxTemplate[]', content: { 'application/json': { schema: PaginatedResponse(SandboxTemplateSchema) } } } } }), async (c) => {
       const user = c.var.currentUser;
       const page = parseInt(c.req.query('page') ?? '') || 1;
       const limit = parseInt(c.req.query('limit') ?? '') || 50;
@@ -471,7 +473,7 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
     });
 
   // GET /:id
-  app.openapi(createRoute({ method: 'get', path: '/{id}', tags: ['templates'], summary: '获取模板', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'SandboxTemplate', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/{id}', tags: ['templates'], summary: '获取模板', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'SandboxTemplate', content: { 'application/json': { schema: OkResponse(SandboxTemplateSchema) } } } } }), async (c) => {
     const resolved = await resolveTemplateSource(atomic, c.req.param('id'));
     if (!resolved) throw new AppError(404, 'TEMPLATE_NOT_FOUND', 'Template not found');
     const user = c.var.currentUser;
@@ -482,7 +484,7 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
   });
 
   // PUT /:id
-  app.openapi(createRoute({ method: 'put', path: '/{id}', tags: ['templates'], summary: '更新模板', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'SandboxTemplate', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'put', path: '/{id}', tags: ['templates'], summary: '更新模板', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'SandboxTemplate', content: { 'application/json': { schema: OkResponse(SandboxTemplateSchema) } } } } }), async (c) => {
     const id = c.req.param('id');
     const user = c.var.currentUser;
     const resolved = await resolveTemplateSource(atomic, id);
@@ -540,7 +542,7 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
   });
 
   // DELETE /:id
-  app.openapi(createRoute({ method: 'delete', path: '/{id}', tags: ['templates'], summary: '删除模板', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'delete', path: '/{id}', tags: ['templates'], summary: '删除模板', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: OkResponse(z.union([TemplateDeleteResponseSchema, z.null()])) } } } } }), async (c) => {
     const id = c.req.param('id');
     const user = c.var.currentUser;
     const resolved = await resolveTemplateSource(atomic, id);
@@ -569,7 +571,7 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
     const entry = await atomic.get<SandboxTemplate>(PREFIX + id);
     if (!entry) throw new AppError(404, 'TEMPLATE_NOT_FOUND', 'Template not found');
     if (!entry.value.creatorId) {
-      return c.json(fail('MAC_DENIED', `Cannot delete seed template "${entry.value.name}" — protected by system policy`), 403);
+      throw new AppError(403, 'FORBIDDEN', `Cannot delete seed template "${entry.value.name}" — protected by system policy`);
     }
     if (!isUserRoot(user) && entry.value.creatorId !== user?.id) {
       throw new AppError(403, 'FORBIDDEN', 'Not your template');
@@ -587,7 +589,7 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
   });
 
   // GET /:id/resolved
-  app.openapi(createRoute({ method: 'get', path: '/{id}/resolved', tags: ['templates'], summary: '获取模板解析结果', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'SandboxTemplate', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/{id}/resolved', tags: ['templates'], summary: '获取模板解析结果', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'SandboxTemplate with _chain', content: { 'application/json': { schema: OkResponse(ResolvedTemplateSchema) } } } } }), async (c) => {
     try {
       const { template: resolved, chain } = await resolveTemplateWithChain(atomic, c.req.param('id'));
       const user = c.var.currentUser;
@@ -595,18 +597,22 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
         throw new AppError(404, 'TEMPLATE_NOT_FOUND', 'Template not found');
       }
       return c.json(ok({ ...resolved, _chain: chain }));
-    } catch (e: any) {
-      return c.json(fail(e.status === 404 ? 'TEMPLATE_NOT_FOUND' : 'RESOLVE_ERROR', e.message), e.status ?? 500);
+    } catch (e: unknown) {
+      if (e instanceof AppError) {
+        console.error(`[template] resolve failed for ${c.req.param('id')}:`, e);
+        throw e;
+      }
+      throw new AppError(500, 'INTERNAL_ERROR', e instanceof Error ? e.message : String(e));
     }
   });
 
   // POST /:id/apply
-  app.openapi(createRoute({ method: 'post', path: '/{id}/apply', tags: ['templates'], summary: '应用模板', request: { params: z.object({ id: z.string() }) }, responses: { 201: { description: 'Sandbox', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/{id}/apply', tags: ['templates'], summary: '应用模板', request: { params: z.object({ id: z.string() }) }, responses: { 201: { description: 'Sandbox', content: { 'application/json': { schema: OkResponse(SandboxSchema) } } } } }), async (c) => {
     await requirePerm(c, permissionChecker, 'create', 'sandbox');
     let resolved;
     try {
       resolved = await resolveTemplate(atomic, c.req.param('id'));
-      const body = await z.object({ provider: z.string().optional(), instanceId: z.string().optional(), region: z.string().optional(), name: z.string().optional() }).passthrough().parse(c.req.json());
+      const body = await z.object({ provider: z.string().optional(), instanceId: z.string().optional(), region: z.string().optional(), name: z.string().optional() }).parse(c.req.json());
 
       const user = c.var.currentUser;
 
@@ -677,7 +683,7 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
         }
       } else if (providerName && providers) {
         const entry = providers.provider(providerName);
-        if (!entry) return c.json(fail('PROVIDER_NOT_FOUND', `Provider "${String(providerName)}" not available`), 400);
+        if (!entry) throw new AppError(400, 'PROVIDER_NOT_FOUND', `Provider "${String(providerName)}" not available`);
         svc = new SandboxService(atomic, new ConsoleLogger(), entry.container, providers, undefined, undefined, createAtomicNetworkResolver(atomic), new InstanceService(atomic));
       }
       if (!svc) throw new AppError(503, 'SERVICE_UNAVAILABLE', 'Sandbox service not available');
@@ -701,12 +707,7 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
       });
       return c.json(ok(sandbox), 201);
     } catch (e: unknown) {
-      const errorSchema = z.object({ status: z.number().optional(), statusCode: z.number().optional(), code: z.string().optional(), message: z.string().optional() }).passthrough() /* TODO: Zod v4 z.looseObject() */;
-      let err: z.infer<typeof errorSchema>;
-      try { err = errorSchema.parse(e); } catch { err = { message: String(e) }; }
-      const status = err.status ?? err.statusCode ?? 500;
-      const code = err.code ?? (status === 404 ? 'TEMPLATE_NOT_FOUND' : 'APPLY_FAILED');
-      console.error(`[template] apply failed for ${c.req.param('id')}:`, { code, status, message: e.message });
+      console.error(`[template] apply failed for ${c.req.param('id')}:`, e);
       if (resolved) {
         try { await releaseInstanceSlot(atomic, resolved, c.var.currentUser?.id ?? 'anonymous'); } catch {
           console.debug("noop");
@@ -715,7 +716,8 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
           console.debug("noop");
         }
       }
-      return c.json(fail(code, e.message), status);
+      if (e instanceof AppError) throw e;
+      throw new AppError(500, 'INTERNAL_ERROR', e instanceof Error ? e.message : String(e));
     }
   });
 

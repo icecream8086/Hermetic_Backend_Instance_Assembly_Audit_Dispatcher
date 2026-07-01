@@ -5,7 +5,8 @@ import type { ISecurityGroupService } from './service.ts';
 import { AppError } from '../../core/types.ts';
 import type { AppContext } from '../../core/deps.ts';
 import { ok } from '../../core/response.ts';
-import { OkResponse } from '../../core/http-docs/response-schema.ts';
+import { OkResponse, PaginatedResponse } from '../../core/http-docs/response-schema.ts';
+import { SecurityGroupSchema } from './response-schema.ts';
 import type { CreateSecurityGroupInput, UpdateSecurityGroupInput } from './types.ts';
 
 function requireRoot<E extends { Variables: { currentUser?: { role?: string } } }>(c: Context<E>): void {
@@ -28,7 +29,7 @@ export function createSecurityGroupRouter(svc: ISecurityGroupService): OpenAPIHo
       path: '/',
       tags: ['networks'],
       summary: '列出安全组（分页）',
-      responses: { 200: { description: '{ items: SecurityGroup[], total, page, limit }', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } },
+      responses: { 200: { description: '{ items: SecurityGroup[], total, page, limit }', content: { 'application/json': { schema: PaginatedResponse(SecurityGroupSchema) } } } },
     }),
     async (c) => {
       const page = parseInt(c.req.query('page') ?? '') || 1;
@@ -45,7 +46,7 @@ export function createSecurityGroupRouter(svc: ISecurityGroupService): OpenAPIHo
       path: '/',
       tags: ['networks'],
       summary: '创建安全组',
-      responses: { 201: { description: 'SecurityGroup', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } },
+      responses: { 201: { description: 'SecurityGroup', content: { 'application/json': { schema: OkResponse(SecurityGroupSchema) } } } },
     }),
     async (c) => {
       requireRoot(c);
@@ -63,7 +64,7 @@ export function createSecurityGroupRouter(svc: ISecurityGroupService): OpenAPIHo
       tags: ['networks'],
       summary: '获取安全组详情',
       request: { params: z.object({ id: z.string() }) },
-      responses: { 200: { description: 'SecurityGroup', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } },
+      responses: { 200: { description: 'SecurityGroup', content: { 'application/json': { schema: OkResponse(SecurityGroupSchema) } } } },
     }),
     async (c) => {
       const id = c.req.param('id') as any;
@@ -80,7 +81,7 @@ export function createSecurityGroupRouter(svc: ISecurityGroupService): OpenAPIHo
       tags: ['networks'],
       summary: '更新安全组',
       request: { params: z.object({ id: z.string() }) },
-      responses: { 200: { description: 'SecurityGroup', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } },
+      responses: { 200: { description: 'SecurityGroup', content: { 'application/json': { schema: OkResponse(SecurityGroupSchema) } } } },
     }),
     async (c) => {
       requireRoot(c);
@@ -98,7 +99,7 @@ export function createSecurityGroupRouter(svc: ISecurityGroupService): OpenAPIHo
       tags: ['networks'],
       summary: '删除安全组',
       request: { params: z.object({ id: z.string() }) },
-      responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } },
+      responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: OkResponse(z.null()) } } } },
     }),
     async (c) => {
       requireRoot(c);

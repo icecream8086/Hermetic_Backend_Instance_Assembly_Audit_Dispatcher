@@ -11,6 +11,20 @@ import type { IProviderRegistry } from '../../core/provider/interfaces.ts';
 import type { AppContext } from '../../core/deps.ts';
 import { ok } from '../../core/response.ts';
 import { OkResponse } from '../../core/http-docs/response-schema.ts';
+import {
+  PodCreateResponseSchema,
+  PodPhaseChangeResponseSchema,
+  PodHealthSchema,
+  PodExecResponseSchema,
+  ContainerLogResultSchema,
+  PodEntitySchema,
+  PodListResponseSchema,
+  SandboxSchema,
+  SandboxWithPodPhaseSchema,
+  SandboxListResponseSchema,
+  SandboxSyncResponseSchema,
+  ContainerHealthSchema,
+} from './response-schema.ts';
 import { AppError } from '../../core/types.ts';
 
 interface PermissionCheckFn { check(params: { userId: string; action: string; resource: string; ip?: string }): Promise<{ allowed: boolean; reason: string }> }
@@ -39,7 +53,7 @@ export function createSandboxRouter(
 
   // ─── Pod API ───
 
-  app.openapi(createRoute({ method: 'post', path: '/pod', tags: ['sandboxes'], summary: '从 PodSpec 创建 Pod', responses: { 201: { description: 'Pod created', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/pod', tags: ['sandboxes'], summary: '从 PodSpec 创建 Pod', responses: { 201: { description: 'Pod created', content: { 'application/json': { schema: OkResponse(PodCreateResponseSchema) } } } } }), async (c) => {
     await requirePerm(c, permissionChecker, 'create', 'pod');
     if (!podService) notConfigured();
     const spec = await z.unknown().parse(c.req.json());
@@ -48,7 +62,7 @@ export function createSandboxRouter(
     return c.json(ok({ podId: pod.podId, providerId: pod.providerId, phase: pod.phase, name: pod.name }), 201);
   });
 
-  app.openapi(createRoute({ method: 'get', path: '/pod', tags: ['sandboxes'], summary: '列出所有 Pod', responses: { 200: { description: '{ items, nextCursor }', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/pod', tags: ['sandboxes'], summary: '列出所有 Pod', responses: { 200: { description: '{ items, nextCursor }', content: { 'application/json': { schema: OkResponse(PodListResponseSchema) } } } } }), async (c) => {
     await requirePerm(c, permissionChecker, 'read', 'pod');
     if (!podService) notConfigured();
     const phase = (c.req.query('phase') || undefined) as PodPhase | undefined;
@@ -58,7 +72,7 @@ export function createSandboxRouter(
     return c.json(ok(result));
   });
 
-  app.openapi(createRoute({ method: 'get', path: '/pod/{id}', tags: ['sandboxes'], summary: '获取 Pod 详情', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'PodEntity', content: { 'application/json': { schema: OkResponse(z.unknown()) } } }, 404: { description: 'Not found' } } }), async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/pod/{id}', tags: ['sandboxes'], summary: '获取 Pod 详情', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'PodEntity', content: { 'application/json': { schema: OkResponse(PodEntitySchema) } } }, 404: { description: 'Not found' } } }), async (c) => {
     if (!podService) notConfigured();
     const podId = createPodId(c.req.param('id'));
     const pod = await podService.getById(podId);
@@ -67,7 +81,7 @@ export function createSandboxRouter(
     return c.json(ok(pod));
   });
 
-  app.openapi(createRoute({ method: 'post', path: '/pod/{id}/stop', tags: ['sandboxes'], summary: '停止 Pod', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: '{ podId, phase }', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/pod/{id}/stop', tags: ['sandboxes'], summary: '停止 Pod', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: '{ podId, phase }', content: { 'application/json': { schema: OkResponse(PodPhaseChangeResponseSchema) } } } } }), async (c) => {
     if (!podService) notConfigured();
     const podId = createPodId(c.req.param('id'));
     const pod = await podService.getById(podId);
@@ -76,7 +90,7 @@ export function createSandboxRouter(
     return c.json(ok({ podId: stopped.podId, phase: stopped.phase }));
   });
 
-  app.openapi(createRoute({ method: 'delete', path: '/pod/{id}', tags: ['sandboxes'], summary: '终止 Pod', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'delete', path: '/pod/{id}', tags: ['sandboxes'], summary: '终止 Pod', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: OkResponse(z.null()) } } } } }), async (c) => {
     if (!podService) notConfigured();
     const podId = createPodId(c.req.param('id'));
     const pod = await podService.getById(podId);
@@ -85,7 +99,7 @@ export function createSandboxRouter(
     return c.json(ok(null));
   });
 
-  app.openapi(createRoute({ method: 'post', path: '/pod/{id}/sync', tags: ['sandboxes'], summary: '同步 Pod 运行状态', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'PodEntity', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/pod/{id}/sync', tags: ['sandboxes'], summary: '同步 Pod 运行状态', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'PodEntity', content: { 'application/json': { schema: OkResponse(PodEntitySchema) } } } } }), async (c) => {
     if (!podService) notConfigured();
     const podId = createPodId(c.req.param('id'));
     const pod = await podService.getById(podId);
@@ -96,7 +110,7 @@ export function createSandboxRouter(
 
   // ─── Pod API: lifecycle extensions (start / restart / health) ───
 
-  app.openapi(createRoute({ method: 'post', path: '/pod/{id}/start', tags: ['sandboxes'], summary: '启动 Pod', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: '{ podId, phase }', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/pod/{id}/start', tags: ['sandboxes'], summary: '启动 Pod', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: '{ podId, phase }', content: { 'application/json': { schema: OkResponse(PodPhaseChangeResponseSchema) } } } } }), async (c) => {
     if (!podService) notConfigured();
     const podId = createPodId(c.req.param('id'));
     const pod = await podService.getById(podId);
@@ -105,7 +119,7 @@ export function createSandboxRouter(
     return c.json(ok({ podId: started.podId, phase: started.phase }));
   });
 
-  app.openapi(createRoute({ method: 'post', path: '/pod/{id}/restart', tags: ['sandboxes'], summary: '重启 Pod', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: '{ podId, phase }', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/pod/{id}/restart', tags: ['sandboxes'], summary: '重启 Pod', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: '{ podId, phase }', content: { 'application/json': { schema: OkResponse(PodPhaseChangeResponseSchema) } } } } }), async (c) => {
     if (!podService) notConfigured();
     const podId = createPodId(c.req.param('id'));
     const pod = await podService.getById(podId);
@@ -114,7 +128,7 @@ export function createSandboxRouter(
     return c.json(ok({ podId: restarted.podId, phase: restarted.phase }));
   });
 
-  app.openapi(createRoute({ method: 'get', path: '/pod/{id}/health', tags: ['sandboxes'], summary: 'Pod 容器健康状态', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'PodHealth[]', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/pod/{id}/health', tags: ['sandboxes'], summary: 'Pod 容器健康状态', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'PodHealth[]', content: { 'application/json': { schema: OkResponse(z.array(PodHealthSchema).readonly()) } } } } }), async (c) => {
     if (!podService) notConfigured();
     const podId = createPodId(c.req.param('id'));
     const pod = await podService.getById(podId);
@@ -123,7 +137,7 @@ export function createSandboxRouter(
     return c.json(ok(health));
   });
 
-  app.openapi(createRoute({ method: 'get', path: '/pod/{id}/logs', tags: ['sandboxes'], summary: 'Pod 容器日志', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'ContainerLogResult', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/pod/{id}/logs', tags: ['sandboxes'], summary: 'Pod 容器日志', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'ContainerLogResult', content: { 'application/json': { schema: OkResponse(ContainerLogResultSchema) } } } } }), async (c) => {
     if (!podService) notConfigured();
     const podId = createPodId(c.req.param('id'));
     const pod = await podService.getById(podId);
@@ -138,7 +152,7 @@ export function createSandboxRouter(
     return c.json(ok(result));
   });
 
-  app.openapi(createRoute({ method: 'post', path: '/pod/{id}/exec', tags: ['sandboxes'], summary: 'Pod 容器执行命令', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Exec result', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/pod/{id}/exec', tags: ['sandboxes'], summary: 'Pod 容器执行命令', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Exec result', content: { 'application/json': { schema: OkResponse(PodExecResponseSchema) } } } } }), async (c) => {
     if (!podService) notConfigured();
     const podId = createPodId(c.req.param('id'));
     const pod = await podService.getById(podId);
@@ -149,7 +163,7 @@ export function createSandboxRouter(
     return c.json(ok(result));
   });
 
-  app.openapi(createRoute({ method: 'patch', path: '/pod/{id}', tags: ['sandboxes'], summary: '部分更新 PodSpec', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'PodEntity', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'patch', path: '/pod/{id}', tags: ['sandboxes'], summary: '部分更新 PodSpec', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'PodEntity', content: { 'application/json': { schema: OkResponse(PodEntitySchema) } } } } }), async (c) => {
     if (!podService) notConfigured();
     const podId = createPodId(c.req.param('id'));
     const pod = await podService.getById(podId);
@@ -161,7 +175,7 @@ export function createSandboxRouter(
 
   // ─── Sandbox API ───
 
-  app.openapi(createRoute({ method: 'get', path: '/', tags: ['sandboxes'], summary: '列出所有沙箱', responses: { 200: { description: '{ items, nextCursor }', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/', tags: ['sandboxes'], summary: '列出所有沙箱', responses: { 200: { description: '{ items, nextCursor }', content: { 'application/json': { schema: OkResponse(SandboxListResponseSchema) } } } } }), async (c) => {
     await requirePerm(c, permissionChecker, 'read', 'sandbox');
     const status = (c.req.query('status') || undefined) as SandboxStatus | undefined;
     const apiVer = c.req.query('apiVersion');
@@ -184,7 +198,7 @@ export function createSandboxRouter(
     return c.json(ok(result));
   });
 
-  app.openapi(createRoute({ method: 'get', path: '/{id}', tags: ['sandboxes'], summary: '获取沙箱详情', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Sandbox', content: { 'application/json': { schema: OkResponse(z.unknown()) } } }, 404: { description: 'Not found' } } }), async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/{id}', tags: ['sandboxes'], summary: '获取沙箱详情', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Sandbox', content: { 'application/json': { schema: OkResponse(SandboxWithPodPhaseSchema) } } }, 404: { description: 'Not found' } } }), async (c) => {
     const id = createSandboxId(c.req.param('id'));
     const sandbox = await svc.getById(id);
     await requirePerm(c, permissionChecker, 'read', 'sandbox', sandbox.config.creatorId);
@@ -197,7 +211,7 @@ export function createSandboxRouter(
     return c.json(ok({ ...sandbox, podPhase }));
   });
 
-  app.openapi(createRoute({ method: 'post', path: '/{id}/stop', tags: ['sandboxes'], summary: '停止沙箱', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Sandbox', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/{id}/stop', tags: ['sandboxes'], summary: '停止沙箱', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Sandbox', content: { 'application/json': { schema: OkResponse(SandboxSchema) } } } } }), async (c) => {
     const id = createSandboxId(c.req.param('id'));
     const sandbox = await svc.getById(id);
     await requirePerm(c, permissionChecker, 'update', 'sandbox', sandbox.config.creatorId);
@@ -205,7 +219,7 @@ export function createSandboxRouter(
     return c.json(ok(stopped));
   });
 
-  app.openapi(createRoute({ method: 'post', path: '/{id}/start', tags: ['sandboxes'], summary: '启动沙箱', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Sandbox', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/{id}/start', tags: ['sandboxes'], summary: '启动沙箱', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Sandbox', content: { 'application/json': { schema: OkResponse(SandboxSchema) } } } } }), async (c) => {
     const id = createSandboxId(c.req.param('id'));
     const sandbox = await svc.getById(id);
     await requirePerm(c, permissionChecker, 'update', 'sandbox', sandbox.config.creatorId);
@@ -214,7 +228,7 @@ export function createSandboxRouter(
     return c.json(ok(started));
   });
 
-  app.openapi(createRoute({ method: 'delete', path: '/{id}', tags: ['sandboxes'], summary: '删除沙箱', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'delete', path: '/{id}', tags: ['sandboxes'], summary: '删除沙箱', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: OkResponse(z.null()) } } } } }), async (c) => {
     const id = createSandboxId(c.req.param('id'));
     const sandbox = await svc.getById(id);
     await requirePerm(c, permissionChecker, 'delete', 'sandbox', sandbox.config.creatorId);
@@ -222,7 +236,7 @@ export function createSandboxRouter(
     return c.json(ok(null));
   });
 
-  app.openapi(createRoute({ method: 'post', path: '/{id}/sync', tags: ['sandboxes'], summary: '同步沙箱状态', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Sync result', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/{id}/sync', tags: ['sandboxes'], summary: '同步沙箱状态', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Sync result', content: { 'application/json': { schema: OkResponse(SandboxSyncResponseSchema) } } } } }), async (c) => {
     const id = createSandboxId(c.req.param('id'));
     const sandbox = await svc.getById(id);
     await requirePerm(c, permissionChecker, 'update', 'sandbox', sandbox.config.creatorId);
@@ -231,7 +245,7 @@ export function createSandboxRouter(
     return c.json(ok({ runtime, sandbox: updated }));
   });
 
-  app.openapi(createRoute({ method: 'get', path: '/{id}/health', tags: ['sandboxes'], summary: '容器健康状态', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'ContainerHealth[]', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/{id}/health', tags: ['sandboxes'], summary: '容器健康状态', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'ContainerHealth[]', content: { 'application/json': { schema: OkResponse(z.array(ContainerHealthSchema).readonly()) } } } } }), async (c) => {
     const id = createSandboxId(c.req.param('id'));
     const sandbox = await svc.getById(id);
     await requirePerm(c, permissionChecker, 'read', 'sandbox', sandbox.config.creatorId);
@@ -239,7 +253,7 @@ export function createSandboxRouter(
     return c.json(ok(health));
   });
 
-  app.openapi(createRoute({ method: 'post', path: '/{id}/restart', tags: ['sandboxes'], summary: '重启沙箱', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Sandbox', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/{id}/restart', tags: ['sandboxes'], summary: '重启沙箱', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Sandbox', content: { 'application/json': { schema: OkResponse(SandboxSchema) } } } } }), async (c) => {
     const id = createSandboxId(c.req.param('id'));
     const sandbox = await svc.getById(id);
     await requirePerm(c, permissionChecker, 'update', 'sandbox', sandbox.config.creatorId);
@@ -247,7 +261,7 @@ export function createSandboxRouter(
     return c.json(ok(result));
   });
 
-  app.openapi(createRoute({ method: 'patch', path: '/{id}', tags: ['sandboxes'], summary: '更新沙箱规格', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Sandbox', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'patch', path: '/{id}', tags: ['sandboxes'], summary: '更新沙箱规格', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Sandbox', content: { 'application/json': { schema: OkResponse(SandboxSchema) } } } } }), async (c) => {
     const id = createSandboxId(c.req.param('id'));
     const sandbox = await svc.getById(id);
     await requirePerm(c, permissionChecker, 'update', 'sandbox', sandbox.config.creatorId);

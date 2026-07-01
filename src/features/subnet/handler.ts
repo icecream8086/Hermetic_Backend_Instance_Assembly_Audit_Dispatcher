@@ -4,7 +4,8 @@ import type { ISubnetService } from './service.ts';
 import { AppError } from '../../core/types.ts';
 import type { AppContext } from '../../core/deps.ts';
 import { ok } from '../../core/response.ts';
-import { OkResponse } from '../../core/http-docs/response-schema.ts';
+import { OkResponse, PaginatedResponse } from '../../core/http-docs/response-schema.ts';
+import { SubnetSchema } from './response-schema.ts';
 import type { CreateSubnetInput, UpdateSubnetInput } from './types.ts';
 
 export function createSubnetRouter(svc: ISubnetService): OpenAPIHono<{ Variables: AppContext }> {
@@ -16,7 +17,7 @@ export function createSubnetRouter(svc: ISubnetService): OpenAPIHono<{ Variables
       path: '/',
       tags: ['subnets'],
       summary: '列出子网（分页）',
-      responses: { 200: { description: '{ items: Subnet[], total, page, limit }', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } },
+      responses: { 200: { description: '{ items: Subnet[], total, page, limit }', content: { 'application/json': { schema: PaginatedResponse(SubnetSchema) } } } },
     }),
     async (c) => {
       const page = parseInt(c.req.query('page') ?? '') || 1;
@@ -33,7 +34,7 @@ export function createSubnetRouter(svc: ISubnetService): OpenAPIHono<{ Variables
       path: '/',
       tags: ['subnets'],
       summary: '创建子网',
-      responses: { 201: { description: 'Subnet', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } },
+      responses: { 201: { description: 'Subnet', content: { 'application/json': { schema: OkResponse(SubnetSchema) } } } },
     }),
     async (c) => {
       const body = await z.unknown().parse(c.req.json());
@@ -54,7 +55,7 @@ export function createSubnetRouter(svc: ISubnetService): OpenAPIHono<{ Variables
       tags: ['subnets'],
       summary: '获取子网详情',
       request: { params: z.object({ id: z.string() }) },
-      responses: { 200: { description: 'Subnet', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } },
+      responses: { 200: { description: 'Subnet', content: { 'application/json': { schema: OkResponse(SubnetSchema) } } } },
     }),
     async (c) => {
       const id = c.req.param('id') as any;
@@ -71,7 +72,7 @@ export function createSubnetRouter(svc: ISubnetService): OpenAPIHono<{ Variables
       tags: ['subnets'],
       summary: '更新子网',
       request: { params: z.object({ id: z.string() }) },
-      responses: { 200: { description: 'Subnet', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } },
+      responses: { 200: { description: 'Subnet', content: { 'application/json': { schema: OkResponse(SubnetSchema) } } } },
     }),
     async (c) => {
       const id = c.req.param('id') as any;
@@ -89,7 +90,7 @@ export function createSubnetRouter(svc: ISubnetService): OpenAPIHono<{ Variables
       tags: ['subnets'],
       summary: '删除子网',
       request: { params: z.object({ id: z.string() }) },
-      responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } },
+      responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: OkResponse(z.null()) } } } },
     }),
     async (c) => {
       const id = c.req.param('id') as any;

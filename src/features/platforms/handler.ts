@@ -8,7 +8,8 @@ import { InstanceService } from '../../core/region/instance.ts';
 import { ALIBABA_REGIONS } from '../../core/region/types.ts';
 import { getExtensionSchema } from '../../core/provider/extension-schema.ts';
 import { ok } from '../../core/response.ts';
-import { OkResponse } from '../../core/http-docs/response-schema.ts';
+import { OkResponse, PaginatedResponse } from '../../core/http-docs/response-schema.ts';
+import { PlatformItemSchema, ExtensionFieldsSchema, PlatformRegionsResponseSchema } from './response-schema.ts';
 
 export function createPlatformsRouter(
   registry: IProviderRegistry,
@@ -22,7 +23,7 @@ export function createPlatformsRouter(
       path: '/',
       tags: ['platforms'],
       summary: '列出所有可用平台',
-      responses: { 200: { description: '{ name }[]', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } },
+      responses: { 200: { description: '{ name }[]', content: { 'application/json': { schema: PaginatedResponse(PlatformItemSchema) } } } },
     }),
     // eslint-disable-next-line @typescript-eslint/require-await
     async (c) => {
@@ -44,7 +45,7 @@ export function createPlatformsRouter(
       path: '/extension-fields',
       tags: ['platforms'],
       summary: '获取指定计算实例的可用扩展字段',
-      responses: { 200: { description: '{ provider, label, fields }', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } },
+      responses: { 200: { description: '{ provider, label, fields }', content: { 'application/json': { schema: OkResponse(ExtensionFieldsSchema) } } } },
     }),
     async (c) => {
       const instanceId = c.req.query('instanceId');
@@ -77,7 +78,7 @@ export function createPlatformsRouter(
       path: '/regions',
       tags: ['platforms'],
       summary: '获取实例所属平台的可选地域列表',
-      responses: { 200: { description: '{ regions[] }', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } },
+      responses: { 200: { description: '{ regions[] }', content: { 'application/json': { schema: OkResponse(PlatformRegionsResponseSchema) } } } },
     }),
     async (c) => {
       const platform = c.req.query('platform');

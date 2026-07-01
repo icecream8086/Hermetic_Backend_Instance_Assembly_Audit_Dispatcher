@@ -1,5 +1,5 @@
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
-import { z, type ZodType } from 'zod';
+import { z } from 'zod';
 import type { Context } from 'hono';
 import type { AppContext } from '../../core/deps.ts';
 import type { IPermissionService } from './service.ts';
@@ -19,7 +19,14 @@ import {
 } from './schema.ts';
 import { ok, fail } from '../../core/response.ts';
 import { OkResponse } from '../../core/http-docs/response-schema.ts';
+import {
+  TemplateSchema, InvitationSchema,
+  UserCapsSchema, UserCapsResultSchema, GroupCapsSchema, GroupCapsResultSchema,
+  ElevationGrantSchema, ElevationEntrySchema, CompareResultSchema,
+  PolicyMatchResultSchema,
+} from './response-schema.ts';
 import type { ErrorCode } from '../../core/error-codes.ts';
+import { AppError } from '../../core/types.ts';
 import type { AuditActor } from './audit.ts';
 import type { CrudHandlerMap } from '../../core/crud/router.ts';
 import { registerCrudRoutes } from '../../core/crud/router.ts';
@@ -52,42 +59,42 @@ function actorFrom(c: Ctx): AuditActor | undefined {
   return { userId: u.id, ip: c.req.header('x-forwarded-for')?.split(',')[0]?.trim() };
 }
 
-function requireRoot(c: Ctx): Response | null {
+function requireRoot(c: Ctx): null {
   const user = c.var.currentUser;
   if (!user) return null;
   const isRoot = user.role === 'root' || user.role === 'Operator' || user.role === 'wheel';
-  if (!isRoot) return c.json(fail('FORBIDDEN', 'Admin access required'), 403);
+  if (!isRoot) throw new AppError(403, 'FORBIDDEN', 'Admin access required');
   return null;
 }
 
-function requireWheel(c: Ctx): Response | null {
+function requireWheel(c: Ctx): null {
   const user = c.var.currentUser;
   if (!user) return null;
-  if (user.role !== 'wheel') return c.json(fail('FORBIDDEN', 'Wheel privilege required'), 403);
+  if (user.role !== 'wheel') throw new AppError(403, 'FORBIDDEN', 'Wheel privilege required');
   return null;
 }
 
 // ─── CRUD sub-resource factory ───
 
-interface SubCrudOpts<T> {
-  guard: (c: Ctx) => Response | null;
-  createSchema: ZodType;
-  createFn: (data: Record<string, unknown>, actor: AuditActor | undefined) => Promise<T>;
+interface SubCrudOpts<T, I_Create extends Record<string, unknown> = Record<string, unknown>, I_Update extends Record<string, unknown> = Record<string, unknown>> {
+  guard: (c: Ctx) => null;
+  createSchema: z.ZodType<I_Create>;
+  createFn: (data: I_Create, actor: AuditActor | undefined) => Promise<T>;
   listUrlFilter: (c: Ctx) => ((item: T) => boolean) | undefined;
   listFn: (page: number, limit: number, filter: ((item: T) => boolean) | undefined) => Promise<PaginatedResult<T>>;
   getFn: (id: string) => Promise<T | null>;
-  updateSchema: ZodType;
-  updateFn: (id: string, data: Record<string, unknown>, actor: AuditActor | undefined) => Promise<T>;
+  updateSchema: z.ZodType<I_Update>;
+  updateFn: (id: string, data: I_Update, actor: AuditActor | undefined) => Promise<T>;
   deleteFn: (id: string, actor: AuditActor | undefined) => Promise<void>;
   notFoundCode: ErrorCode;
   notFoundMsg: string;
 }
 
 /** Build a CrudHandlerMap for a sub-resource. TypeScript enforces all 5 actions are present. */
-function subCrud<T>(opts: SubCrudOpts<T>): CrudHandlerMap {
+function subCrud<T, I_Create extends Record<string, unknown> = Record<string, unknown>, I_Update extends Record<string, unknown> = Record<string, unknown>>(opts: SubCrudOpts<T, I_Create, I_Update>): CrudHandlerMap {
   return {
     create: (r) => r.post('/', async (c) => {
-      { const rv = opts.guard(c); if (rv) return rv; }
+      opts.guard(c);
       const raw = await c.req.json();
       const data = opts.createSchema.parse(raw);
       const result = await opts.createFn(data, actorFrom(c));
@@ -108,14 +115,14 @@ function subCrud<T>(opts: SubCrudOpts<T>): CrudHandlerMap {
     }),
 
     update: (r) => r.put('/:id', async (c) => {
-      { const rv = opts.guard(c); if (rv) return rv; }
+      opts.guard(c);
       const raw = await c.req.json();
       const data = opts.updateSchema.parse(raw);
       return c.json(ok(await opts.updateFn(c.req.param('id'), data, actorFrom(c))));
     }),
 
     delete: (r) => r.delete('/:id', async (c) => {
-      { const rv = opts.guard(c); if (rv) return rv; }
+      opts.guard(c);
       await opts.deleteFn(c.req.param('id'), actorFrom(c));
       return c.json(ok(null));
     }),
@@ -204,7 +211,7 @@ export function createPermissionRouter(svc: IPermissionService): OpenAPIHono<{ V
 
     // Extra route: create from template
     permGroups.post('/from-template/:templateId', async (c) => {
-      { const r = requireRoot(c); if (r) return r; }
+      requireRoot(c);
       const body = await z.unknown().parse(c.req.json());
       const templateData = CreatePermGroupSchema.partial().parse(body);
       const group = await svc.createPermGroupFromTemplate(c.req.param('templateId'), {
@@ -222,14 +229,14 @@ export function createPermissionRouter(svc: IPermissionService): OpenAPIHono<{ V
 
   // ─── Templates (read-only) ───
   // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
-  app.openapi(createRoute({ method: 'get', path: '/templates', tags: ['permission'], responses: { 200: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/templates', tags: ['permission'], responses: { 200: { description: '', content: { 'application/json': { schema: OkResponse(z.array(TemplateSchema)) } } } } }), async (c) => {
     return c.json(ok(svc.listTemplates()));
   });
 
   // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
-  app.openapi(createRoute({ method: 'get', path: '/templates/:id', tags: ['permission'], responses: { 200: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/templates/:id', tags: ['permission'], responses: { 200: { description: '', content: { 'application/json': { schema: OkResponse(TemplateSchema) } } } } }), async (c) => {
     const tpl = svc.getTemplate(c.req.param('id'));
-    if (!tpl) return c.json(fail('TEMPLATE_NOT_FOUND', 'Template not found'), 404);
+    if (!tpl) throw new AppError(404, 'TEMPLATE_NOT_FOUND', 'Template not found');
     return c.json(ok(tpl));
   });
 
@@ -274,32 +281,32 @@ export function createPermissionRouter(svc: IPermissionService): OpenAPIHono<{ V
   }
 
   // ─── Invitations ───
-  app.openapi(createRoute({ method: 'post', path: '/invite', tags: ['permission'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/invite', tags: ['permission'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(InvitationSchema) } } } } }), async (c) => {
     const body = await z.unknown().parse(c.req.json());
     const inviteData = CreateInviteSchema.parse(body);
     const user = c.var.currentUser;
-    if (!user) return c.json(fail('UNAUTHORIZED', 'Authentication required'), 401);
+    if (!user) throw new AppError(401, 'UNAUTHORIZED', 'Authentication required');
     const invite = await svc.sendInvite(inviteData, user.id);
     return c.json(ok(invite), 201);
   });
 
-  app.openapi(createRoute({ method: 'get', path: '/invitations', tags: ['permission'], responses: { 200: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/invitations', tags: ['permission'], responses: { 200: { description: '', content: { 'application/json': { schema: OkResponse(z.array(InvitationSchema)) } } } } }), async (c) => {
     const user = c.var.currentUser;
-    if (!user) return c.json(fail('UNAUTHORIZED', 'Authentication required'), 401);
+    if (!user) throw new AppError(401, 'UNAUTHORIZED', 'Authentication required');
     const invites = await svc.listInvitations(user.id);
     return c.json(ok(invites));
   });
 
-  app.openapi(createRoute({ method: 'post', path: '/invitations/:id/accept', tags: ['permission'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/invitations/:id/accept', tags: ['permission'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(z.null()) } } } } }), async (c) => {
     const user = c.var.currentUser;
-    if (!user) return c.json(fail('UNAUTHORIZED', 'Authentication required'), 401);
+    if (!user) throw new AppError(401, 'UNAUTHORIZED', 'Authentication required');
     await svc.acceptInvite(c.req.param('id'), user.id);
     return c.json(ok(null));
   });
 
-  app.openapi(createRoute({ method: 'post', path: '/invitations/:id/reject', tags: ['permission'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/invitations/:id/reject', tags: ['permission'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(z.null()) } } } } }), async (c) => {
     const user = c.var.currentUser;
-    if (!user) return c.json(fail('UNAUTHORIZED', 'Authentication required'), 401);
+    if (!user) throw new AppError(401, 'UNAUTHORIZED', 'Authentication required');
     await svc.rejectInvite(c.req.param('id'), user.id);
     return c.json(ok(null));
   });
@@ -310,79 +317,78 @@ export function createPermissionRouter(svc: IPermissionService): OpenAPIHono<{ V
   });
 
   app.openapi(createRoute({ method: 'put', path: '/log-policy', tags: ['permission'], responses: { 200: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
-    { const r = requireRoot(c); if (r) return r; }
+    requireRoot(c);
     const body = await UpdateLogPolicySchema.parse(c.req.json());
     const policy = await svc.updateLogPolicy(body as Record<string, unknown>, actorFrom(c));
     return c.json(ok(policy));
   });
 
   // ─── Capability management ───
-  app.openapi(createRoute({ method: 'put', path: '/caps/user/:userId', tags: ['permission'], responses: { 200: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
-    { const r = requireRoot(c); if (r) return r; }
+  app.openapi(createRoute({ method: 'put', path: '/caps/user/:userId', tags: ['permission'], responses: { 200: { description: '', content: { 'application/json': { schema: OkResponse(UserCapsSchema) } } } } }), async (c) => {
+    requireRoot(c);
     const raw = await c.req.json();
     const caps = z.number().parse(z.object({ caps: z.unknown() }).parse(raw).caps);
     await svc.setUserCaps(c.req.param('userId'), caps, actorFrom(c));
     return c.json(ok({ userId: c.req.param('userId'), caps }));
   });
 
-  app.openapi(createRoute({ method: 'get', path: '/caps/user/:userId', tags: ['permission'], responses: { 200: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/caps/user/:userId', tags: ['permission'], responses: { 200: { description: '', content: { 'application/json': { schema: OkResponse(UserCapsResultSchema) } } } } }), async (c) => {
     const result = await svc.getUserCaps(c.req.param('userId'));
     return c.json(ok(result));
   });
 
-  app.openapi(createRoute({ method: 'put', path: '/caps/group/:groupId', tags: ['permission'], responses: { 200: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
-    { const r = requireRoot(c); if (r) return r; }
+  app.openapi(createRoute({ method: 'put', path: '/caps/group/:groupId', tags: ['permission'], responses: { 200: { description: '', content: { 'application/json': { schema: OkResponse(GroupCapsSchema) } } } } }), async (c) => {
+    requireRoot(c);
     const raw = await c.req.json();
     const caps = z.number().parse(z.object({ caps: z.unknown() }).parse(raw).caps);
     await svc.setGroupCaps(c.req.param('groupId'), caps, actorFrom(c));
     return c.json(ok({ groupId: c.req.param('groupId'), caps }));
   });
 
-  app.openapi(createRoute({ method: 'get', path: '/caps/group/:groupId', tags: ['permission'], responses: { 200: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/caps/group/:groupId', tags: ['permission'], responses: { 200: { description: '', content: { 'application/json': { schema: OkResponse(GroupCapsResultSchema) } } } } }), async (c) => {
     const result = await svc.getGroupCaps(c.req.param('groupId'));
     return c.json(ok(result));
   });
 
   // ─── Temporary elevation (sudo) ───
-  app.openapi(createRoute({ method: 'post', path: '/elevate', tags: ['permission'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
-    { const r = requireRoot(c); if (r) return r; }
-    const { userId, durationMs, capabilities } = await z.unknown().parse(c.req.json());
-    if (!userId) return c.json(fail('VALIDATION_ERROR', 'userId required'), 400);
+  app.openapi(createRoute({ method: 'post', path: '/elevate', tags: ['permission'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(ElevationGrantSchema) } } } } }), async (c) => {
+    requireRoot(c);
+    const { userId, durationMs, capabilities } = await z.object({
+      userId: z.string(),
+      durationMs: z.number().optional(),
+      capabilities: z.number().optional(),
+    }).parse(c.req.json());
     const expiry = await svc.grantTempElevation(userId, durationMs, capabilities);
-    return c.json(ok({ userId, expiry, capabilities }));
+    return c.json(ok({ userId, expiry, capabilities }), 201);
   });
 
-  app.openapi(createRoute({ method: 'delete', path: '/elevate/:userId', tags: ['permission'], responses: { 200: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
-    { const r = requireRoot(c); if (r) return r; }
+  app.openapi(createRoute({ method: 'delete', path: '/elevate/:userId', tags: ['permission'], responses: { 200: { description: '', content: { 'application/json': { schema: OkResponse(z.object({ revoked: z.boolean() })) } } } } }), async (c) => {
+    requireRoot(c);
     await svc.revokeTempElevation(c.req.param('userId'));
     return c.json(ok({ revoked: true }));
   });
 
-  app.openapi(createRoute({ method: 'get', path: '/elevations', tags: ['permission'], responses: { 200: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/elevations', tags: ['permission'], responses: { 200: { description: '', content: { 'application/json': { schema: OkResponse(z.array(ElevationEntrySchema)) } } } } }), async (c) => {
     const list = await svc.listTempElevations();
     return c.json(ok(list));
   });
 
   // ─── Compare ───
-  app.openapi(createRoute({ method: 'post', path: '/compare/perm-groups', tags: ['permission'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
-    { const r = requireRoot(c); if (r) return r; }
-    const { idA, idB } = await z.unknown().parse(c.req.json());
-    if (!idA || !idB) return c.json(fail('VALIDATION_ERROR', 'idA and idB required'), 400);
-    try { return c.json(ok(await svc.comparePermGroups(idA, idB))); }
-    catch (e: unknown) { return c.json(fail('NOT_FOUND', e instanceof Error ? e.message : String(e)), 404); }
+  app.openapi(createRoute({ method: 'post', path: '/compare/perm-groups', tags: ['permission'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(CompareResultSchema) } } } } }), async (c) => {
+    requireRoot(c);
+    const { idA, idB } = await z.object({ idA: z.string(), idB: z.string() }).parse(c.req.json());
+    return c.json(ok(await svc.comparePermGroups(idA, idB)), 201);
   });
 
-  app.openapi(createRoute({ method: 'post', path: '/compare/user-groups', tags: ['permission'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
-    { const r = requireRoot(c); if (r) return r; }
-    const { idA, idB } = await z.unknown().parse(c.req.json());
-    if (!idA || !idB) return c.json(fail('VALIDATION_ERROR', 'idA and idB required'), 400);
-    try { return c.json(ok(await svc.compareUserGroups(idA, idB))); }
-    catch (e: unknown) { return c.json(fail('NOT_FOUND', e instanceof Error ? e.message : String(e)), 404); }
+  app.openapi(createRoute({ method: 'post', path: '/compare/user-groups', tags: ['permission'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(CompareResultSchema) } } } } }), async (c) => {
+    requireRoot(c);
+    const { idA, idB } = await z.object({ idA: z.string(), idB: z.string() }).parse(c.req.json());
+    return c.json(ok(await svc.compareUserGroups(idA, idB)), 201);
   });
 
   // ─── Permission check ───
-  app.openapi(createRoute({ method: 'post', path: '/check', tags: ['permission'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
-    { const r = requireRoot(c); if (r) return r; }
+  app.openapi(createRoute({ method: 'post', path: '/check', tags: ['permission'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(PolicyMatchResultSchema) } } } } }), async (c) => {
+    requireRoot(c);
     const body = await z.unknown().parse(c.req.json());
     const checkData = PermissionCheckSchema.parse(body);
     return c.json(ok(await svc.check(checkData)));

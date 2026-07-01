@@ -8,7 +8,7 @@ import { RegisterUserSchema, LoginUserSchema, UpdateUserSchema, UserResponseSche
 import type { UserResponse } from './schema.ts';
 import { createUserId, createSessionToken, createGid, UserRole } from './types.ts';
 import { ok } from '../../core/response.ts';
-import { OkResponse } from '../../core/http-docs/response-schema.ts';
+import { OkResponse, PaginatedResponse } from '../../core/http-docs/response-schema.ts';
 
 // ─── Avatar constants ───
 const AVATAR_MAX_SIZE = 1048576;
@@ -50,7 +50,7 @@ async function requirePerm(c: Context<UsersEnv>, checker: PermissionCheckFn | un
 export function createUserRouter(userService: IUserService, permissionChecker?: PermissionCheckFn): OpenAPIHono<{ Variables: AppContext }> {
   const app = new OpenAPIHono<{ Variables: AppContext }>();
 
-  app.openapi(createRoute({ method: 'post', path: '/register', tags: ['users'], summary: '注册新用户', request: { body: { content: { 'application/json': { schema: RegisterUserSchema } } } }, responses: { 201: { description: 'LoginResponse', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/register', tags: ['users'], summary: '注册新用户', request: { body: { content: { 'application/json': { schema: RegisterUserSchema } } } }, responses: { 201: { description: 'LoginResponse', content: { 'application/json': { schema: OkResponse(LoginResponseSchema) } } } } }), async (c) => {
     const body = await RegisterUserSchema.parse(c.req.json());
     const atomic = c.var.stores.atomic;
     const initKey = '_sys:initialized';
@@ -65,14 +65,14 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
     return c.json(ok(LoginResponseSchema.parse({ token, user: userToResponse(user) })), 201);
   });
 
-  app.openapi(createRoute({ method: 'post', path: '/login', tags: ['users'], summary: '用户登录', request: { body: { content: { 'application/json': { schema: LoginUserSchema } } } }, responses: { 200: { description: 'LoginResponse', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/login', tags: ['users'], summary: '用户登录', request: { body: { content: { 'application/json': { schema: LoginUserSchema } } } }, responses: { 200: { description: 'LoginResponse', content: { 'application/json': { schema: OkResponse(LoginResponseSchema) } } } } }), async (c) => {
     const body = await LoginUserSchema.parse(c.req.json());
     const loginIp = c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ?? c.req.header('cf-connecting-ip');
     const { user, token } = await userService.login({ email: body.email, password: body.password }, { ip: loginIp, siteContext: undefined });
     return c.json(ok(LoginResponseSchema.parse({ token, user: userToResponse(user) })));
   });
 
-  app.openapi(createRoute({ method: 'get', path: '/login-info', tags: ['users'], summary: '查询邮箱的登录方式', responses: { 200: { description: 'LoginInfo', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/login-info', tags: ['users'], summary: '查询邮箱的登录方式', responses: { 200: { description: 'LoginInfo', content: { 'application/json': { schema: OkResponse(z.object({ exists: z.boolean(), methods: z.array(z.enum(['password', 'no-password'])), policy: z.object({ enabled: z.boolean(), disabled: z.boolean(), timeRestricted: z.boolean(), timeRanges: z.array(z.object({ start: z.string(), end: z.string() })) }).optional() })) } } } } }), async (c) => {
     const email = c.req.query('email');
     if (!email) throw new AppError(400, 'VALIDATION_ERROR', 'email query param required');
     const parsedEmail = z.email().parse(email);
@@ -80,14 +80,14 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
     return c.json(ok(info));
   });
 
-  app.openapi(createRoute({ method: 'get', path: '/{id}', tags: ['users'], summary: '获取用户', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'UserResponse', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/{id}', tags: ['users'], summary: '获取用户', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'UserResponse', content: { 'application/json': { schema: OkResponse(UserResponseSchema) } } } } }), async (c) => {
     const id = createUserId(c.req.param('id'));
     const user = await userService.getById(id);
     if (!user) throw new AppError(404, 'USER_NOT_FOUND', 'User not found');
     return c.json(ok(userToResponse(user)));
   });
 
-  app.openapi(createRoute({ method: 'put', path: '/{id}', tags: ['users'], summary: '更新用户', request: { params: z.object({ id: z.string() }), body: { content: { 'application/json': { schema: UpdateUserSchema } } } }, responses: { 200: { description: 'UserResponse', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'put', path: '/{id}', tags: ['users'], summary: '更新用户', request: { params: z.object({ id: z.string() }), body: { content: { 'application/json': { schema: UpdateUserSchema } } } }, responses: { 200: { description: 'UserResponse', content: { 'application/json': { schema: OkResponse(UserResponseSchema) } } } } }), async (c) => {
     const id = createUserId(c.req.param('id'));
     const body = await UpdateUserSchema.parse(c.req.json());
     await requirePerm(c, permissionChecker, 'update', 'user', id);
@@ -100,7 +100,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
     return c.json(ok(userToResponse(user)));
   });
 
-  app.openapi(createRoute({ method: 'delete', path: '/{id}', tags: ['users'], summary: '删除用户', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'delete', path: '/{id}', tags: ['users'], summary: '删除用户', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: OkResponse(z.null()) } } } } }), async (c) => {
     const id = createUserId(c.req.param('id'));
     await requirePerm(c, permissionChecker, 'delete', 'user', id);
     await userService.delete(id, c.var.currentUser?.id);
@@ -108,7 +108,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
   });
 
   const refreshTimestamps = new Map<string, number>();
-  app.openapi(createRoute({ method: 'post', path: '/{id}/refresh', tags: ['users'], summary: '刷新用户缓存', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'UserResponse', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/{id}/refresh', tags: ['users'], summary: '刷新用户缓存', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'UserResponse', content: { 'application/json': { schema: OkResponse(UserResponseSchema) } } } } }), async (c) => {
     const id = createUserId(c.req.param('id'));
     const now = Date.now();
     const last = refreshTimestamps.get(id);
@@ -119,14 +119,14 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
     return c.json(ok(userToResponse(user)));
   });
 
-  app.openapi(createRoute({ method: 'get', path: '/', tags: ['users'], summary: '列出所有用户', responses: { 200: { description: 'UserResponse[]', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/', tags: ['users'], summary: '列出所有用户', responses: { 200: { description: 'UserResponse[]', content: { 'application/json': { schema: PaginatedResponse(UserResponseSchema) } } } } }), async (c) => {
     const page = parseInt(c.req.query('page') ?? '') || 1;
     const limit = parseInt(c.req.query('limit') ?? '') || 50;
     const { items, total } = await userService.listPaginated(page, limit);
     return c.json(ok({ items: items.map(userToResponse), total, page, limit }));
   });
 
-  app.openapi(createRoute({ method: 'get', path: '/search', tags: ['users'], summary: '搜索用户', responses: { 200: { description: 'User | null', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/search', tags: ['users'], summary: '搜索用户', responses: { 200: { description: 'User | null', content: { 'application/json': { schema: OkResponse(z.union([UserResponseSchema, z.null()])) } } } } }), async (c) => {
     const q = c.req.query('q');
     if (!q) throw new AppError(400, 'VALIDATION_ERROR', 'query parameter q is required');
     const atomic = c.var.stores.atomic;
@@ -137,14 +137,14 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
     return c.json(ok(userToResponse(user)));
   });
 
-  app.openapi(createRoute({ method: 'get', path: '/{id}/login-policy', tags: ['users'], summary: '获取用户登录策略', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'LoginPolicy', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/{id}/login-policy', tags: ['users'], summary: '获取用户登录策略', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'LoginPolicy', content: { 'application/json': { schema: OkResponse(LoginPolicySchema) } } } } }), async (c) => {
     const id = createUserId(c.req.param('id'));
     const user = await userService.getById(id);
     if (!user) throw new AppError(404, 'USER_NOT_FOUND', 'User not found');
     return c.json(ok(user.loginPolicy ?? { enabled: true, timeRanges: [], allowedCIDRs: [] }));
   });
 
-  app.openapi(createRoute({ method: 'put', path: '/{id}/login-policy', tags: ['users'], summary: '更新用户登录策略', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'LoginPolicy', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'put', path: '/{id}/login-policy', tags: ['users'], summary: '更新用户登录策略', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'LoginPolicy', content: { 'application/json': { schema: OkResponse(LoginPolicySchema.nullable()) } } } } }), async (c) => {
     const id = createUserId(c.req.param('id'));
     await requirePerm(c, permissionChecker, 'update', 'user', id);
     const body = await LoginPolicySchema.parse(c.req.json());
@@ -152,21 +152,21 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
     return c.json(ok(user.loginPolicy ?? null));
   });
 
-  app.openapi(createRoute({ method: 'delete', path: '/{id}/login-policy', tags: ['users'], summary: '清除用户登录策略', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'delete', path: '/{id}/login-policy', tags: ['users'], summary: '清除用户登录策略', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: OkResponse(z.null()) } } } } }), async (c) => {
     const id = createUserId(c.req.param('id'));
     await requirePerm(c, permissionChecker, 'update', 'user', id);
     await userService.clearLoginPolicy(id, c.var.currentUser?.id);
     return c.json(ok(null));
   });
 
-  app.openapi(createRoute({ method: 'get', path: '/{id}/public-key', tags: ['users'], summary: '获取用户 Ed25519 公钥', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'string | null', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/{id}/public-key', tags: ['users'], summary: '获取用户 Ed25519 公钥', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'string | null', content: { 'application/json': { schema: OkResponse(z.union([z.string(), z.null()])) } } } } }), async (c) => {
     const id = createUserId(c.req.param('id'));
     const user = await userService.getById(id);
     if (!user) throw new AppError(404, 'USER_NOT_FOUND', 'User not found');
     return c.json(ok(user.publicKeyEd25519 ?? null));
   });
 
-  app.openapi(createRoute({ method: 'put', path: '/{id}/public-key', tags: ['users'], summary: '设置用户 Ed25519 公钥', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'string', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'put', path: '/{id}/public-key', tags: ['users'], summary: '设置用户 Ed25519 公钥', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'string', content: { 'application/json': { schema: OkResponse(z.union([z.string(), z.null()])) } } } } }), async (c) => {
     const id = createUserId(c.req.param('id'));
     const data = await z.object({ publicKey: PublicKeySchema }).parse(c.req.json());
     await requirePerm(c, permissionChecker, 'update', 'user', id);
@@ -174,7 +174,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
     return c.json(ok(user.publicKeyEd25519 ?? null));
   });
 
-  app.openapi(createRoute({ method: 'delete', path: '/{id}/public-key', tags: ['users'], summary: '清除用户 Ed25519 公钥', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'delete', path: '/{id}/public-key', tags: ['users'], summary: '清除用户 Ed25519 公钥', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: OkResponse(z.null()) } } } } }), async (c) => {
     const id = createUserId(c.req.param('id'));
     await requirePerm(c, permissionChecker, 'update', 'user', id);
     await userService.clearPublicKey(id, c.var.currentUser?.id);
@@ -193,7 +193,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
     return new Response(stream as any, { status: 200, headers: { 'Content-Type': metaEntry?.value.contentType ?? 'application/octet-stream', 'Cache-Control': 'public, max-age=86400' } });
   });
 
-  app.openapi(createRoute({ method: 'put', path: '/{id}/avatar', tags: ['users'], summary: '上传用户头像', request: { params: z.object({ id: z.string() }) }, responses: { 201: { description: '{ size, contentType }', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'put', path: '/{id}/avatar', tags: ['users'], summary: '上传用户头像', request: { params: z.object({ id: z.string() }) }, responses: { 201: { description: '{ size, contentType }', content: { 'application/json': { schema: OkResponse(z.object({ size: z.number(), contentType: z.string() })) } } } } }), async (c) => {
     const user = c.var.currentUser;
     if (!user) throw new AppError(401, 'UNAUTHORIZED', 'Authentication required');
     const rawId = c.req.param('id');
@@ -218,7 +218,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
     return c.json(ok({ size: buf.length, contentType: detectedType }), 201);
   });
 
-  app.openapi(createRoute({ method: 'delete', path: '/{id}/avatar', tags: ['users'], summary: '删除用户头像', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'delete', path: '/{id}/avatar', tags: ['users'], summary: '删除用户头像', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: OkResponse(z.null()) } } } } }), async (c) => {
     const user = c.var.currentUser;
     if (!user) throw new AppError(401, 'UNAUTHORIZED', 'Authentication required');
     const rawId = c.req.param('id');
@@ -235,7 +235,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
     return c.json(ok(null));
   });
 
-  app.openapi(createRoute({ method: 'get', path: '/sessions', tags: ['users'], summary: '列出活跃 session', responses: { 200: { description: 'Session[]', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/sessions', tags: ['users'], summary: '列出活跃 session', responses: { 200: { description: 'Session[]', content: { 'application/json': { schema: OkResponse(z.array(z.object({ token: z.string(), tokenHint: z.string() }))) } } } } }), async (c) => {
     const user = c.var.currentUser;
     if (!user) throw new AppError(401, 'UNAUTHORIZED', 'Authentication required');
     const targetId = c.req.query('userId');
@@ -244,7 +244,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
     return c.json(ok(sessions.map(s => ({ token: s, tokenHint: s.slice(-4) }))));
   });
 
-  app.openapi(createRoute({ method: 'delete', path: '/sessions/{token}', tags: ['users'], summary: '吊销 session', request: { params: z.object({ token: z.string() }) }, responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'delete', path: '/sessions/{token}', tags: ['users'], summary: '吊销 session', request: { params: z.object({ token: z.string() }) }, responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: OkResponse(z.null()) } } } } }), async (c) => {
     const user = c.var.currentUser;
     if (!user) throw new AppError(401, 'UNAUTHORIZED', 'Authentication required');
     await requirePerm(c, permissionChecker, 'update', 'user', user.id);
@@ -252,13 +252,13 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
     return c.json(ok(null));
   });
 
-  app.openapi(createRoute({ method: 'get', path: '/{id}/supplementary-groups', tags: ['users'], summary: '列出用户辅助组 GID', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'number[]', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/{id}/supplementary-groups', tags: ['users'], summary: '列出用户辅助组 GID', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'number[]', content: { 'application/json': { schema: OkResponse(z.array(z.number())) } } } } }), async (c) => {
     const id = createUserId(c.req.param('id'));
     const gids = await userService.listSupplementaryGroups(id);
     return c.json(ok(gids));
   });
 
-  app.openapi(createRoute({ method: 'put', path: '/{id}/supplementary-groups/{gid}', tags: ['users'], summary: '添加辅助组', request: { params: z.object({ id: z.string(), gid: z.string() }) }, responses: { 200: { description: 'UserResponse', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'put', path: '/{id}/supplementary-groups/{gid}', tags: ['users'], summary: '添加辅助组', request: { params: z.object({ id: z.string(), gid: z.string() }) }, responses: { 200: { description: 'UserResponse', content: { 'application/json': { schema: OkResponse(UserResponseSchema) } } } } }), async (c) => {
     const id = createUserId(c.req.param('id'));
     const gid = parseInt(c.req.param('gid'));
     if (isNaN(gid) || gid < 0) throw new AppError(400, 'VALIDATION_ERROR', 'Invalid GID');
@@ -267,7 +267,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
     return c.json(ok(userToResponse(user)));
   });
 
-  app.openapi(createRoute({ method: 'delete', path: '/{id}/supplementary-groups/{gid}', tags: ['users'], summary: '移除辅助组', request: { params: z.object({ id: z.string(), gid: z.string() }) }, responses: { 200: { description: 'UserResponse', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'delete', path: '/{id}/supplementary-groups/{gid}', tags: ['users'], summary: '移除辅助组', request: { params: z.object({ id: z.string(), gid: z.string() }) }, responses: { 200: { description: 'UserResponse', content: { 'application/json': { schema: OkResponse(UserResponseSchema) } } } } }), async (c) => {
     const id = createUserId(c.req.param('id'));
     const gid = parseInt(c.req.param('gid'));
     if (isNaN(gid) || gid < 0) throw new AppError(400, 'VALIDATION_ERROR', 'Invalid GID');
@@ -276,7 +276,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
     return c.json(ok(userToResponse(user)));
   });
 
-  app.openapi(createRoute({ method: 'post', path: '/no-password-login', tags: ['users'], summary: '无密码登录', request: { body: { content: { 'application/json': { schema: NoPasswordLoginSchema } } } }, responses: { 200: { description: 'LoginResponse', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/no-password-login', tags: ['users'], summary: '无密码登录', request: { body: { content: { 'application/json': { schema: NoPasswordLoginSchema } } } }, responses: { 200: { description: 'LoginResponse', content: { 'application/json': { schema: OkResponse(LoginResponseSchema) } } } } }), async (c) => {
     const data = await NoPasswordLoginSchema.parse(c.req.json());
     const loginIp = c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ?? c.req.header('cf-connecting-ip');
     const siteContext = c.req.header('origin') ?? c.req.header('referer') ?? '';
