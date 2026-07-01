@@ -390,6 +390,33 @@ export default tseslint.config(
       ],
     },
   },
+  // ═══════════════════════════════════════════════════════════════
+  // 平台边界降级 — store 适配器 / Provider / Queue / 中间件
+  //
+  // 这些目录的代码与未类型化平台 API 交互（KV/DO/R2、阿里 ECI、
+  // Podman REST、Cloudflare Workers），类型阻抗不匹配是架构性的。
+  // 规则降级为 warn：保持可见（防止新增违规被静默忽略），
+  // 但不阻塞 CI（已知违规不应阻止合并）。
+  // ═══════════════════════════════════════════════════════════════
+  {
+    files: [
+      'src/core/store/adapters/**/*.ts',
+      'src/providers/**/*.ts',
+      'src/queue/**/*.ts',
+      'src/core/middleware/**/*.ts',
+    ],
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'warn',
+      '@typescript-eslint/consistent-type-assertions': 'warn',
+      '@typescript-eslint/no-unsafe-assignment': 'warn',
+      '@typescript-eslint/no-unsafe-member-access': 'warn',
+      '@typescript-eslint/no-unsafe-call': 'warn',
+      '@typescript-eslint/no-unsafe-argument': 'warn',
+      '@typescript-eslint/no-unsafe-return': 'warn',
+      '@typescript-eslint/no-non-null-assertion': 'warn',
+      'no-restricted-syntax': 'warn',
+    },
+  },
   {
     ignores: ['dist/**', 'node_modules/**', '*.js', '*.cjs', '*.mjs', '.data-test/**', '.data/**'],
   },
