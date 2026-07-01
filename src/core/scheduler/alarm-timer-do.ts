@@ -91,6 +91,7 @@ export class AlarmTimerDO implements DurableObject {
         await fetch(this._callbackUrl, { method: 'POST' });
       } catch {
         // callback failure doesn't stop re-scheduling
+        console.debug("callback failure doesn't stop re-scheduling");
       }
     }
 

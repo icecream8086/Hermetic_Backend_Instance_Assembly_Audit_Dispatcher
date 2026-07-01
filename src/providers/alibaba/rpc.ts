@@ -50,7 +50,10 @@ export async function rpcCall(
 
   const resp = await fetch(signedUrl, { method: 'POST' });
   if (!resp.ok) {
-    const text = await resp.text().catch(() => '<unreadable>');
+    let text = '<unreadable>';
+    try { text = await resp.text(); } catch {
+      console.debug("ignore");
+    }
     throw new Error(`Alibaba ${action} HTTP ${String(resp.status)}: ${text.slice(0, 500)}`);
   }
 
@@ -58,7 +61,10 @@ export async function rpcCall(
   try {
     body = await resp.json();
   } catch {
-    const text = await resp.text().catch(() => '<unreadable>');
+    let text = '<unreadable>';
+    try { text = await resp.text(); } catch {
+      console.debug("ignore");
+    }
     throw new Error(`Alibaba ${action} returned non-JSON response: ${text.slice(0, 500)}`);
   }
 

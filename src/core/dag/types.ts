@@ -24,10 +24,18 @@ export type DagRunId = string & { readonly [DAG_RUN_ID_BRAND]: true };
 export type TaskId = string & { readonly [TASK_ID_BRAND]: true };
 export type TaskInstanceId = string & { readonly [TASK_INSTANCE_ID_BRAND]: true };
 
-export function createDagId(raw: string): DagId { return raw as DagId; }
-export function createDagRunId(raw: string): DagRunId { return raw as DagRunId; }
-export function createTaskId(raw: string): TaskId { return raw as TaskId; }
-export function createTaskInstanceId(raw: string): TaskInstanceId { return raw as TaskInstanceId; }
+export function createDagId(raw: string): DagId {
+  return raw as DagId;
+}
+export function createDagRunId(raw: string): DagRunId {
+  return raw as DagRunId;
+}
+export function createTaskId(raw: string): TaskId {
+  return raw as TaskId;
+}
+export function createTaskInstanceId(raw: string): TaskInstanceId {
+  return raw as TaskInstanceId;
+}
 
 // ─── Trigger rule (Airflow 9) ───
 

@@ -72,8 +72,9 @@ export class LogStreamDO implements DurableObject {
     });
 
     // Refresh idle alarm
-    this.ctx.storage.setAlarm(Date.now() + IDLE_ALARM_MS).catch(() => { /* noop */ });
-
+    try { this.ctx.storage.setAlarm(Date.now() + IDLE_ALARM_MS); } catch {
+      console.debug("noop");
+    }
     // Start streaming (only on first connection)
     if (!this.#abortController) {
       if (content !== null) {
@@ -148,17 +149,22 @@ export class LogStreamDO implements DurableObject {
       // Container exists but stopped → stay alive, wait for restart
     } catch {
       // Network error — stay alive, retry logic could go here
+      console.debug("Network error — stay alive, retry logic could go here");
     }
   }
 
   #broadcast(data: string): void {
     for (const ws of this.#sessions) {
-      try { ws.send(data); } catch { /* client gone */ }
+      try { ws.send(data); } catch {
+        console.debug("client gone");
+      }
     }
   }
 
   #scheduleCleanup(delayMs: number): void {
-    this.ctx.storage.setAlarm(Date.now() + delayMs).catch(() => { /* noop */ });
+    try { this.ctx.storage.setAlarm(Date.now() + delayMs); } catch {
+      console.debug("noop");
+    }
   }
 
   #stop(): void {
@@ -170,7 +176,9 @@ export class LogStreamDO implements DurableObject {
   public async alarm(): Promise<void> {
     this.#stop();
     for (const ws of this.#sessions) {
-      try { ws.close(1001, 'DO idle timeout'); } catch { /* already closed */ }
+      try { ws.close(1001, 'DO idle timeout'); } catch {
+        console.debug("already closed");
+      }
     }
     this.#sessions.clear();
   }

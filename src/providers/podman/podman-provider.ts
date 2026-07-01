@@ -216,6 +216,7 @@ export class PodmanContainerProvider implements IContainerProvider {
           }
         } catch {
           // libpod API unavailable — skip; secret data stays encrypted at rest
+          console.debug("libpod API unavailable — skip; secret data stays encrypted at rest");
         }
       }
       if (mounts.length > 0) hostConfig.Mounts = mounts;
@@ -306,7 +307,11 @@ export class PodmanContainerProvider implements IContainerProvider {
       for (const sid of secretIds) {
         try {
           await fetch(`${this.#apiBase.replace('/v1.24', '')}/libpod/secrets/${sid}`, { method: 'DELETE' });
-        } catch { /* best-effort cleanup */ }
+        } catch {
+
+          console.debug("best-effort cleanup");
+
+        }
       }
       this.#createdSecrets.delete(input.providerId);
     }
@@ -350,7 +355,12 @@ export class PodmanContainerProvider implements IContainerProvider {
     if (!resp) throw new Error('Podman daemon unreachable');
     if (resp.status === 304) return; // already stopped
     if (!resp.ok) {
-      const body = await resp.text().catch(() => '');
+      let body = '';
+      try { body = await resp.text(); } catch {
+
+        console.debug("ignore");
+
+      }
       throw new Error(`Podman stop failed (${String(resp.status)}): ${body.slice(0, 200)}`);
     }
   }
@@ -361,7 +371,12 @@ export class PodmanContainerProvider implements IContainerProvider {
     if (!resp) throw new Error('Podman daemon unreachable');
     if (resp.status === 304) return; // already started
     if (!resp.ok) {
-      const body = await resp.text().catch(() => '');
+      let body = '';
+      try { body = await resp.text(); } catch {
+
+        console.debug("ignore");
+
+      }
       throw new Error(`Podman start failed (${String(resp.status)}): ${body.slice(0, 200)}`);
     }
   }
@@ -373,7 +388,12 @@ export class PodmanContainerProvider implements IContainerProvider {
     if (!resp) throw new Error('Podman daemon unreachable');
     if (resp.status === 304) return; // already restarting
     if (!resp.ok) {
-      const body = await resp.text().catch(() => '');
+      let body = '';
+      try { body = await resp.text(); } catch {
+
+        console.debug("ignore");
+
+      }
       throw new Error(`Podman restart failed (${String(resp.status)}): ${body.slice(0, 200)}`);
     }
   }
@@ -385,7 +405,12 @@ export class PodmanContainerProvider implements IContainerProvider {
     if (!resp) throw new Error('Podman daemon unreachable');
     if (resp.status === 304) return; // already stopped/killed
     if (!resp.ok) {
-      const body = await resp.text().catch(() => '');
+      let body = '';
+      try { body = await resp.text(); } catch {
+
+        console.debug("ignore");
+
+      }
       throw new Error(`Podman kill failed (${String(resp.status)}): ${body.slice(0, 200)}`);
     }
   }
@@ -467,7 +492,9 @@ export class PodmanContainerProvider implements IContainerProvider {
     try {
       return await fetch(url, init);
     } catch {
-      return null;
+
+      console.debug("");
+
     }
   }
 

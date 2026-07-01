@@ -29,7 +29,9 @@ export function idempotency(): MiddlewareHandler<IdempotencyEnv> {
       try {
         const cached = parseJson(existing.value) as { status: number; body: unknown };
         return c.json(cached.body, cached.status as ContentfulStatusCode);
-      } catch { /* corrupted data — fall through to re-execute */ }
+      } catch {
+        console.debug("corrupted data — fall through to re-execute");
+      }
     }
 
     await next();
@@ -42,7 +44,9 @@ export function idempotency(): MiddlewareHandler<IdempotencyEnv> {
           JSON.stringify({ status: c.res.status, body: clone }),
           null,
         );
-      } catch { /* non-JSON response — skip caching */ }
+      } catch {
+        console.debug("non-JSON response — skip caching");
+      }
     }
   };
 }

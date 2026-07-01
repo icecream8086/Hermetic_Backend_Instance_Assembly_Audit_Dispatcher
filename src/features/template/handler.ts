@@ -47,34 +47,53 @@ function fromGeneratedTemplate(def: InstanceTemplateDef, defaultInstanceId?: str
   const now = Date.now();
   const cid = defaultInstanceId;
 
+  // Extract typed spec fields (Record<string, unknown> → domain types)
+  const apiVersion = s.apiVersion as string | undefined;
+  const kind = s.kind as SandboxTemplate['kind'] | undefined;
+  const dependsOn = s.dependsOn as string[] | undefined;
+  const region = s.region as RegionId | undefined;
+  const restartPolicy = s.restartPolicy as ContainerSpec['restartPolicy'] | undefined;
+  const containers = s.containers as ContainerDef[] | undefined;
+  const initContainers = s.initContainers as ContainerDef[] | undefined;
+  const singleton = s.singleton as boolean | undefined;
+  const healthChecks = s.healthChecks as HealthCheckDef[] | undefined;
+  const network = s.network as Record<string, unknown> | undefined;
+  const extensions = s.extensions as Record<string, unknown> | undefined;
+  const podSpec = s.podSpec as PodSpec | undefined;
+  const instanceLimit = s.instanceLimit as TemplateInstanceLimit | undefined;
+
   // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- boolean OR chain for feature detection, not default values
-  const hasContainer = s.containers || s.initContainers || s.region !== undefined
-    || s.restartPolicy !== undefined || (cid && !s.instanceId);
+  const hasContainer = containers || initContainers || region !== undefined
+    || restartPolicy !== undefined || (cid && !s.instanceId);
+
+  const containerPart: { container: ContainerSpec } | Record<string, never> = hasContainer
+    ? {
+        container: {
+          ...(region !== undefined ? { region } : {}),
+          ...(cid && !s.instanceId ? { instanceId: cid } : {}),
+          ...(restartPolicy !== undefined ? { restartPolicy } : {}),
+          ...(containers !== undefined ? { containers } : {}),
+          ...(initContainers !== undefined ? { initContainers } : {}),
+        },
+      }
+    : {};
 
   return {
     id: def.id,
     name: def.name,
     description: def.description,
-    apiVersion: (s.apiVersion as string | undefined) ?? 'hbi-aad/v1',
-    kind: ((s.kind as string | undefined) ?? 'Container') as SandboxTemplate['kind'],
-    dependsOn: (s.dependsOn as string[] | undefined) ?? [],
+    apiVersion: apiVersion ?? 'hbi-aad/v1',
+    kind: kind ?? 'Container',
+    dependsOn: dependsOn ?? [],
     createdAt: now,
     updatedAt: now,
-    ...(hasContainer ? {
-      container: {
-        ...(s.region !== undefined ? { region: s.region as RegionId } : {}),
-        ...(cid && !s.instanceId ? { instanceId: cid as InstanceId } : {}),
-        ...(s.restartPolicy !== undefined ? { restartPolicy: s.restartPolicy as ContainerSpec['restartPolicy'] } : {}),
-        ...(s.containers ? { containers: s.containers as ContainerDef[] } : {}),
-        ...(s.initContainers ? { initContainers: s.initContainers as ContainerDef[] } : {}),
-      } as ContainerSpec,
-    } : {}),
-    ...(s.singleton !== undefined ? { singleton: s.singleton as boolean } : {}),
-    ...(s.healthChecks ? { healthChecks: s.healthChecks as HealthCheckDef[] } : {}),
-    ...(s.network ? { network: s.network } : {}),
-    ...(s.extensions ? { extensions: s.extensions } : {}),
-    ...(s.podSpec ? { podSpec: s.podSpec as PodSpec } : {}),
-    ...(s.instanceLimit ? { instanceLimit: s.instanceLimit as TemplateInstanceLimit } : {}),
+    ...containerPart,
+    ...(singleton !== undefined ? { singleton } : {}),
+    ...(healthChecks !== undefined ? { healthChecks } : {}),
+    ...(network ? { network } : {}),
+    ...(extensions ? { extensions } : {}),
+    ...(podSpec ? { podSpec } : {}),
+    ...(instanceLimit ? { instanceLimit } : {}),
   };
 }
 
@@ -95,7 +114,8 @@ async function resolveTemplateSource(atomic: IAtomicStore, id: string): Promise<
   const storeEntry = await atomic.get<Record<string, unknown>>(PREFIX + id);
   if (storeEntry) {
     if (storeEntry.value.__deleted === true) return null;
-    return { source: 'store', template: storeEntry.value as SandboxTemplate };
+    const template = storeEntry.value as SandboxTemplate;
+    return { source: 'store', template };
   }
   const gen = INSTANCE_TEMPLATES.find(d => d.id === id);
   if (gen) return { source: 'generated', template: fromGeneratedTemplate(gen) };
@@ -112,6 +132,7 @@ async function listAllLive(atomic: IAtomicStore): Promise<SandboxTemplate[]> {
   const result: SandboxTemplate[] = [];
   for (const t of map.values()) {
     const entry = await atomic.get<Record<string, unknown>>(PREFIX + t.id);
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- atomic.get returns T | null
     if (entry?.value?.__deleted === true) continue;
     result.push(t);
   }
@@ -139,8 +160,7 @@ function resolveDag(tpls: SandboxTemplate[], seedIds: string[]): SandboxTemplate
       continue;
     }
     if (inStack.has(frame.id)) {
-      // eslint-disable-next-line no-restricted-syntax -- Error with status code: spread doesn't work with Error prototype chain
-      throw Object.assign(new Error(`Cycle detected: template "${frame.id}" depends on itself (directly or transitively)`), { status: 400 });
+      throw new AppError(400, 'CYCLE_DETECTED', `Cycle detected: template "${frame.id}" depends on itself (directly or transitively)`);
     }
     if (visited.has(frame.id)) continue;
     inStack.add(frame.id);
@@ -160,7 +180,6 @@ function resolveDag(tpls: SandboxTemplate[], seedIds: string[]): SandboxTemplate
 
 /** Deep-merge two plain objects — child values override parents. */
 export function deepMerge(parent: Record<string, unknown>, child: Record<string, unknown>): Record<string, unknown> {
-  if (!child) return parent;
   const out = { ...parent };
   for (const k of Object.keys(child)) {
     if (k === 'containers' || k === 'initContainers') {
@@ -212,8 +231,7 @@ async function resolveTemplate(atomic: IAtomicStore, id: string): Promise<Sandbo
 async function resolveTemplateWithChain(atomic: IAtomicStore, id: string): Promise<{ template: SandboxTemplate; chain: readonly string[] }> {
   const allTemplates = await listAllLive(atomic);
   const tpl = allTemplates.find(t => t.id === id);
-  // eslint-disable-next-line no-restricted-syntax -- Error with status code: spread doesn't work with Error prototype chain
-  if (!tpl) throw Object.assign(new Error('Template not found'), { status: 404 });
+  if (!tpl) throw new AppError(404, 'TEMPLATE_NOT_FOUND', 'Template not found');
 
   const chain = resolveDag(allTemplates, [id]).reverse();
   const chainIds = chain.map(t => t.id);
@@ -264,7 +282,8 @@ async function countRunningForTemplate(atomic: IAtomicStore, tplId: string): Pro
   let count = 0;
   for (const sid of idx.value) {
     const entry = await atomic.get<Record<string, unknown>>(SANDBOX_PREFIX + sid);
-    if (entry.value?.config?.templateRef === tplId && LIVE_STATUSES.includes(entry.value.status)) {
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- atomic.get returns T | null, tsc narrows inconsistently
+    if (entry?.value?.config?.templateRef === tplId && LIVE_STATUSES.includes(entry.value.status)) {
       count++;
     }
   }
@@ -310,9 +329,9 @@ async function claimInstanceSlot(
   if (idx) {
     for (const sid of idx.value) {
       const entry = await atomic.get<Record<string, unknown>>(SANDBOX_PREFIX + sid);
-      if (entry?.value?.config?.templateRef === tpl.id
+      if (entry.value.config.templateRef === tpl.id
           && LIVE_STATUSES.includes(entry.value.status)
-          && entry.value.config?.creatorId === userId) {
+          && entry.value.config.creatorId === userId) {
         userCount++;
       }
     }
@@ -337,9 +356,7 @@ async function claimResourceBinding(
   const key = bindingKey(binding.domain, binding.port);
   const entry = await atomic.get<string>(key);
   if (entry) {
-    const err: any = new Error(`Domain ${binding.domain}:${String(binding.port)} is already bound to another instance`);
-    err.status = 409;
-    throw err;
+    throw new AppError(409, 'RESOURCE_BOUND', `Domain ${binding.domain}:${String(binding.port)} is already bound to another instance`);
   }
   await atomic.set(key, tpl.id, null);
 }
@@ -349,7 +366,9 @@ async function releaseResourceBinding(atomic: IAtomicStore, tpl: SandboxTemplate
   if (!binding?.domain || !binding.port) return;
   const key = bindingKey(binding.domain, binding.port);
   const entry = await atomic.get<string>(key);
-  if (entry) await atomic.set(key, null, entry.version).catch(() => { /* noop */ });
+  try { if (entry) await atomic.set(key, null, entry.version); } catch {
+    console.debug("noop");
+  }
 }
 
 async function releaseInstanceSlot(atomic: IAtomicStore, tpl: SandboxTemplate, _userId: string): Promise<void> {
@@ -357,13 +376,17 @@ async function releaseInstanceSlot(atomic: IAtomicStore, tpl: SandboxTemplate, _
   const baseKey = lockKey(tpl.id);
   const entry = await atomic.get<number>(baseKey);
   if (entry && entry.value > 0) {
-    await atomic.set(baseKey, entry.value - 1, entry.version).catch(() => { /* noop */ });
+    try { await atomic.set(baseKey, entry.value - 1, entry.version); } catch {
+      console.debug("noop");
+    }
   }
   if (tpl.instanceLimit?.type === 'perUser') {
     const userKey = lockKey(tpl.id, ':' + _userId);
     const uEntry = await atomic.get<number>(userKey);
     if (uEntry && uEntry.value > 0) {
-      await atomic.set(userKey, uEntry.value - 1, uEntry.version).catch(() => { /* noop */ });
+      try { await atomic.set(userKey, uEntry.value - 1, uEntry.version); } catch {
+        console.debug("noop");
+      }
     }
   }
 }
@@ -382,7 +405,7 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
   // POST / — 创建模板
   app.openapi(createRoute({ method: 'post', path: '/', tags: ['templates'], summary: '创建模板', responses: { 201: { description: 'SandboxTemplate', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
       await requirePerm(c, permissionChecker, 'create', 'template');
-      const body: CreateTemplateInput = await c.req.json();
+      const body = await z.unknown().parse(c.req.json());
       if (!body.name) throw new AppError(400, 'VALIDATION_ERROR', 'name is required');
 
       const user = c.var.currentUser;
@@ -472,7 +495,7 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
       throw new AppError(403, 'FORBIDDEN', 'Not your template');
     }
 
-    const body: UpdateTemplateInput = await c.req.json();
+    const body = await z.unknown().parse(c.req.json());
     if (body.singleton && body.instanceLimit) {
       throw new AppError(400, 'VALIDATION_ERROR', 'singleton and instanceLimit are mutually exclusive');
     }
@@ -502,7 +525,8 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
     await atomic.set(PREFIX + id, updated, existingVersion ?? null);
     if (resolved.source === 'generated') {
       const idx = await atomic.get<string[]>(INDEX_KEY);
-      if (!idx.value?.includes(id)) {
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- atomic.get returns T | null
+      if (!idx?.value?.includes(id)) {
         await atomic.set(INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
       }
     }
@@ -582,7 +606,7 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
     let resolved;
     try {
       resolved = await resolveTemplate(atomic, c.req.param('id'));
-      const body: any = await c.req.json().catch(() => ({}));
+      const body = await z.object({ provider: z.string().optional(), instanceId: z.string().optional(), region: z.string().optional(), name: z.string().optional() }).passthrough().parse(c.req.json());
 
       const user = c.var.currentUser;
 
@@ -684,8 +708,12 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
       const code = err.code ?? (status === 404 ? 'TEMPLATE_NOT_FOUND' : 'APPLY_FAILED');
       console.error(`[template] apply failed for ${c.req.param('id')}:`, { code, status, message: e.message });
       if (resolved) {
-        await releaseInstanceSlot(atomic, resolved, c.var.currentUser?.id ?? 'anonymous').catch(() => { /* noop */ });
-        await releaseResourceBinding(atomic, resolved).catch(() => { /* noop */ });
+        try { await releaseInstanceSlot(atomic, resolved, c.var.currentUser?.id ?? 'anonymous'); } catch {
+          console.debug("noop");
+        }
+        try { await releaseResourceBinding(atomic, resolved); } catch {
+          console.debug("noop");
+        }
       }
       return c.json(fail(code, e.message), status);
     }

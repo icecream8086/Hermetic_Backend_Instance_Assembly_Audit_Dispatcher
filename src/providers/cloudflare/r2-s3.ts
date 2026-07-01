@@ -35,7 +35,12 @@ export class CloudflareR2S3Provider extends S3ClientBase {
       const res = await fetch(url, { method, headers: { ...headers, ...authHeaders }, ...(body !== undefined ? { body } : {}) });
       if (res.ok || res.status === 404) return res;
       if (res.status === 403 && attempt < CLOCK_SKEW_RETRIES) {
-        const bodyText = await res.clone().text().catch(() => '');
+        let bodyText = '';
+        try { bodyText = await res.clone().text(); } catch {
+
+          console.debug("ignore");
+
+        }
         if (bodyText.includes('RequestTimeTooSkewed') || bodyText.includes('Skewed')) continue;
       }
       throw new Error(`R2 ${method} failed: ${String(res.status)} ${await res.text()}`);

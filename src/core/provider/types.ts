@@ -24,8 +24,7 @@ declare const CONTAINER_ID_BRAND: unique symbol;
 export type ContainerId = string & { readonly [CONTAINER_ID_BRAND]: true };
 
 export function createContainerId(raw: string): ContainerId {
-  if (!raw) throw new TypeError('ContainerId must not be empty');
-  return raw as ContainerId;
+  if (!raw) throw new TypeError('ContainerId must not be empty');  return raw as ContainerId;
 }
 
 /** Standard OCI container states — used by both cloud provider and OCI Runtime. */

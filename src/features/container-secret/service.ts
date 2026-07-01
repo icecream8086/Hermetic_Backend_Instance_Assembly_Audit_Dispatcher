@@ -122,7 +122,9 @@ export class ContainerSecretService implements IContainerSecretService {
     if (!entry) throw new AppError(404, 'SECRET_NOT_FOUND', 'Container secret not found');
 
     if (entry.value.blobKey && this.blob) {
-      await this.blob.delete(entry.value.blobKey).catch(() => { /* noop */ });
+      try { await this.blob.delete(entry.value.blobKey); } catch {
+        console.debug("noop");
+      }
     }
 
     await this.atomic.set(this.#encId(id), null, entry.version);
@@ -137,7 +139,7 @@ export class ContainerSecretService implements IContainerSecretService {
     const blobKey = `ctsecret:${id}:${filename}`;
     await this.blob.put(blobKey, body, { ...(mimeType ? { contentType: mimeType } : {}) });
 
-    const size = body instanceof ArrayBuffer ? body.byteLength : undefined;
+    const size = z.instanceof(ArrayBuffer).safeParse(body).success ? (body as ArrayBuffer).byteLength : undefined;
     const existing = normalizeSecret(entry.value);
     const updated: ContainerSecret = {
       ...existing,

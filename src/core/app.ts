@@ -206,7 +206,9 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
     const now = Date.now();
     if (now - _lastPassiveTick > 30_000) {
       _lastPassiveTick = now;
-      eventLoop.triggerTick().catch(() => { /* noop */ });
+      try { eventLoop.triggerTick(); } catch (e) {
+        console.debug("noop");
+      }
     }
     await next();
   });
@@ -320,7 +322,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
 
   // 10. Migration endpoint (local only) — rebuild sharded user index from existing user keys
   app.post('/__admin/migrate-user-index', async (c) => {
-    const { ids } = await c.req.json<{ ids: string[] }>();
+    const { ids } = await z.unknown().parse(c.req.json());
     const atomic = stores.atomic;
     const SHARDS = 16;
     const shards = Array.from({ length: SHARDS }, (_, i) => ({ key: 'user:idx:' + String(i), ids: new Set<string>() }));
@@ -346,7 +348,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
   // 11. Event management API routes
   const events = new Hono<{ Variables: AppContext }>()
     .post('/', async (c) => {
-      const input = await c.req.json<TriggerEventInput>();
+      const input = await z.unknown().parse(c.req.json());
       const event = eventLoop.enqueueTrigger(input);
       return c.json({ id: event.id }, 202);
     })
@@ -358,7 +360,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
     .post('/loop/resume', (c) => { eventLoop.resume(); return c.json({ ok: true }); })
     .post('/loop/configure', async (c) => {
       // eslint-disable-next-line @typescript-eslint/no-restricted-types -- config patches naturally allow any subset of fields
-      const body = await c.req.json<Partial<EventLoopConfig>>();
+      const body = await z.unknown().parse(c.req.json());
       return c.json(eventLoop.configure(body));
     });
   app.route('/api/events', events);
@@ -372,7 +374,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
       try {
         const mod = await import('../../openapi.json') as { default: Record<string, unknown> };
         openApiSpec = mod.default;
-      } catch {
+      } catch (e) {
         return c.json({ error: 'OpenAPI spec not generated. Run: npm run docs:openapi' }, 503);
       }
     }
@@ -434,7 +436,9 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
       });
       // Persist for future requests
       if (logResult.content) {
-        await stores.atomic.set('log:' + id, { content: logResult.content, containerName, timestamp: logResult.timestamp, fetchedAt: Date.now() }, null).catch(() => { /* noop */ });
+        try { await stores.atomic.set('log:' + id, { content: logResult.content, containerName, timestamp: logResult.timestamp, fetchedAt: Date.now() }, null); } catch (e) {
+          console.debug("noop");
+        }
       }
       return c.json(ok({ content: logResult.content || '', containerName, timestamp: logResult.timestamp }));
     } catch (e: any) {

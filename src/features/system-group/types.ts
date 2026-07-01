@@ -3,8 +3,7 @@ import type { Gid } from '../users/types.ts';
 declare const SYSGROUP_ID_BRAND: unique symbol;
 export type SysGroupId = string & { readonly [SYSGROUP_ID_BRAND]: true };
 
-export function generateSysGroupId(): SysGroupId {
-  return `sysgrp_${crypto.randomUUID()}` as SysGroupId;
+export function generateSysGroupId(): SysGroupId {  return `sysgrp_${crypto.randomUUID()}` as SysGroupId;
 }
 
 export interface PermissionRule {

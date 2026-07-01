@@ -14,8 +14,7 @@ export class SandboxStore {
   public constructor(private readonly atomic: IAtomicStore) {}
 
   public async getById(id: SandboxId): Promise<Sandbox | null> {
-    const validated = await getValidated(this.atomic, `${KEY_PREFIX}${id}`, SandboxSchema);
-    return validated as unknown as Sandbox | null;
+    const validated = await getValidated(this.atomic, `${KEY_PREFIX}${id}`, SandboxSchema);    return validated as unknown as Sandbox | null;
   }
 
   public async list(status?: SandboxStatus, limit = 50, cursor?: string): Promise<{ items: Sandbox[]; nextCursor?: string }> {

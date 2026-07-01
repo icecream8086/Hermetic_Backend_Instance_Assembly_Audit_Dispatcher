@@ -32,8 +32,9 @@ try {
       process.env[key] = val;
     }
   }
-} catch { /* .env not found — use env vars / defaults */ }
-
+} catch {
+  console.debug(".env not found — use env vars / defaults");
+}
 const config = loadConfig({
   provider: {
     container: 'podman',
@@ -61,7 +62,7 @@ const instance = await createApp(config);
 // Run seeding synchronously in dev mode — no ctx.waitUntil() available locally.
 // On first run this seeds policy lib, default instance, and templates (~100 I/O ops).
 // Subsequent starts only check gate keys (negligible cost).
-instance.seed().catch((err: unknown) => { console.error('[dev] seed error:', err); });
+instance.seed().then(undefined, (err: unknown) => { console.error('[dev] seed error:', err); });
 
 serve({ fetch: instance.app.fetch, port: config.server.port }, (info) => {
    

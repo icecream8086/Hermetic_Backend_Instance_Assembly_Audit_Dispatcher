@@ -34,7 +34,7 @@ export function createImagesRouter(providers: IProviderRegistry): OpenAPIHono<{ 
     createRoute({ method: 'post', path: '/pull', tags: ['images'], summary: '拉取镜像', responses: { 201: { description: 'ImageInfo', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }),
     async (c) => {
       requireRoot(c);
-      const { image, instanceId, clusterId, credentialRef } = await c.req.json();
+      const { image, instanceId, clusterId, credentialRef } = await z.unknown().parse(c.req.json());
       if (!image) throw new AppError(400, 'VALIDATION_ERROR', 'image is required');
       const provider = instanceId ? await providers.resolveImage(instanceId) : providers.image;
       const info = await provider.pull(image, clusterId ?? credentialRef);
@@ -72,7 +72,7 @@ export function createImagesRouter(providers: IProviderRegistry): OpenAPIHono<{ 
       requireRoot(c);
       const id = c.req.param('id');
       const instanceId = c.req.query('instanceId');
-      const { tag } = await c.req.json();
+      const { tag } = await z.unknown().parse(c.req.json());
       if (!tag) throw new AppError(400, 'VALIDATION_ERROR', 'tag is required');
       const provider = instanceId ? await providers.resolveImage(instanceId as any) : providers.image;
       if (!provider.tag) throw new AppError(501, 'NOT_IMPLEMENTED', 'tag is not supported by the current provider');
@@ -101,7 +101,7 @@ export function createImagesRouter(providers: IProviderRegistry): OpenAPIHono<{ 
       const instanceId = c.req.query('instanceId');
       const provider = instanceId ? await providers.resolveImage(instanceId as any) : providers.image;
       if (!provider.prune) throw new AppError(501, 'NOT_IMPLEMENTED', 'prune is not supported by the current provider');
-      const { dangling } = await c.req.json();
+      const { dangling } = await z.unknown().parse(c.req.json());
       const result = await provider.prune({ dangling });
       return c.json(ok(result));
     },
@@ -126,7 +126,7 @@ export function createImagesRouter(providers: IProviderRegistry): OpenAPIHono<{ 
       const instanceId = c.req.query('instanceId');
       const provider = instanceId ? await providers.resolveImage(instanceId as any) : providers.image;
       if (!provider.build) throw new AppError(501, 'NOT_IMPLEMENTED', 'build is not supported by the current provider');
-      const { context, dockerfile, tag } = await c.req.json();
+      const { context, dockerfile, tag } = await z.unknown().parse(c.req.json());
       const result = await provider.build(context, { dockerfile, tag });
       return c.json(ok(result), 201);
     },

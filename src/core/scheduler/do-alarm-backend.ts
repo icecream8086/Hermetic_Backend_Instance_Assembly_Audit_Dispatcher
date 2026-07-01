@@ -39,18 +39,23 @@ export class DoAlarmBackend implements ITimerBackend {
     }
 
     // Configure DO alarm in both modes (for observability / production path)
-    this.#doStub.fetch('http://do/start', {
-      method: 'POST',
-      body: JSON.stringify({ intervalMs, callbackUrl: this.#callbackUrl }),
-    }).catch(() => { /* noop */ });
-
+    try {
+      this.#doStub.fetch('http://do/start', {
+        method: 'POST',
+        body: JSON.stringify({ intervalMs, callbackUrl: this.#callbackUrl }),
+      });
+    } catch {
+      console.debug("noop");
+    }
     return {
       clear: () => {
         if (this.#localTimerId !== null) {
           clearInterval(this.#localTimerId);
           this.#localTimerId = null;
         }
-        this.#doStub.fetch('http://do/stop', { method: 'POST' }).catch(() => { /* noop */ });
+        try { this.#doStub.fetch('http://do/stop', { method: 'POST' }); } catch {
+          console.debug("noop");
+        }
       },
     };
   }

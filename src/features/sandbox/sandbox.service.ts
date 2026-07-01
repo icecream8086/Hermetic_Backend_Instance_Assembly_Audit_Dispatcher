@@ -73,7 +73,11 @@ export class SandboxService implements ISandboxService {
         sandboxName: sandbox.name,
         createdAt: sandbox.createdAt,
       });
-    } catch { /* fire-and-forget: queue may be unavailable */ }
+    } catch {
+
+      console.debug("fire-and-forget: queue may be unavailable");
+
+    }
   }
 
   /** Resolve the container provider for a specific instance. Never silently falls back when instanceId is set. */
@@ -193,7 +197,10 @@ export class SandboxService implements ISandboxService {
       providerId = pod.providerId ?? id;
       podId = pod.podId;
     } catch (e) {
-      try { await this.atomic.set(`${KEY_PREFIX}${id}`, { ...initial, status: SandboxStatus.Failed, updatedAt: Date.now() }, created); } catch { /* best-effort cleanup */ }
+      try { await this.atomic.set(`${KEY_PREFIX}${id}`, { ...initial, status: SandboxStatus.Failed, updatedAt: Date.now() }, created); } catch {
+        /* best-effort cleanup */
+        console.debug("best-effort cleanup");
+      }
       throw new AppError(502, 'PROVIDER_ERROR', `Cloud provider failed for sandbox "${input.name}": ${e instanceof Error ? e.message : String(e)}`);
     }
     const provisioned: Sandbox = {
@@ -295,7 +302,11 @@ export class SandboxService implements ISandboxService {
         try {
           const provider = await this.#resolveProvider(sandbox.config.instanceId);
           await provider.delete({ region: sandbox.config.region, providerId: sandbox.providerId });
-        } catch { /* GC will retry */ }
+        } catch {
+
+          console.debug("GC will retry");
+
+        }
       }
       return;
     }
@@ -612,7 +623,7 @@ export function podSpecToSandboxInput(spec: {
   const containers = names.map(name => {
     const svc = spec.services[name]!;
     let args: string[] | undefined;
-    if (typeof svc.command === 'string') {
+    if (z.string().safeParse(svc.command).success) {
       args = [svc.command];
     } else if (svc.command !== undefined) {
       args = [...svc.command];

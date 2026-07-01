@@ -40,7 +40,15 @@ export class PodmanImageProvider implements IImageProvider {
     }
     const resp = await this.#fetch(url, { method: 'POST' });
     if (!resp) throw new Error('Podman daemon unreachable');
-    if (!resp.ok) throw new Error(`Podman pull failed (${String(resp.status)}):${await resp.text().catch(() => '')}`);
+    if (!resp.ok) {
+      let errBody = '';
+      try { errBody = await resp.text(); } catch {
+
+        console.debug("ignore");
+
+      }
+      throw new Error(`Podman pull failed (${String(resp.status)}):${errBody}`);
+    }
     return this.inspect(image).then(r => r!);
   }
 
@@ -87,7 +95,15 @@ export class PodmanImageProvider implements IImageProvider {
   public async push(imageOrId: string): Promise<ImageInfo> {
     const resp = await this.#fetch(`${this.#apiBase}/images/${encodeURIComponent(imageOrId)}/push`, { method: 'POST' });
     if (!resp) throw new Error('Podman daemon unreachable');
-    if (!resp.ok) throw new Error(`Podman push failed (${String(resp.status)}):${await resp.text().catch(() => '')}`);
+    if (!resp.ok) {
+      let errBody = '';
+      try { errBody = await resp.text(); } catch {
+
+        console.debug("ignore");
+
+      }
+      throw new Error(`Podman push failed (${String(resp.status)}):${errBody}`);
+    }
     return this.inspect(imageOrId).then(r => r!);
   }
 
@@ -129,7 +145,15 @@ export class PodmanImageProvider implements IImageProvider {
     const query = params.toString() ? '?' + params.toString() : '';
     const resp = await this.#fetch(`${this.#apiBase}/build${query}`, { method: 'POST' });
     if (!resp) throw new Error('Podman daemon unreachable');
-    if (!resp.ok) throw new Error(`Podman build failed (${String(resp.status)}):${await resp.text().catch(() => '')}`);
+    if (!resp.ok) {
+      let errBody = '';
+      try { errBody = await resp.text(); } catch {
+
+        console.debug("ignore");
+
+      }
+      throw new Error(`Podman build failed (${String(resp.status)}):${errBody}`);
+    }
     // build returns a stream — resolve the image from the tag
     if (options?.tag) {
       return this.inspect(options.tag).then(r => r ?? this.inspect(options.tag!.split(':')[0]!).then(r2 => r2!));
@@ -144,7 +168,9 @@ export class PodmanImageProvider implements IImageProvider {
     try {
       return await fetch(url, init);
     } catch {
-      return null;
+
+      console.debug("");
+
     }
   }
 }

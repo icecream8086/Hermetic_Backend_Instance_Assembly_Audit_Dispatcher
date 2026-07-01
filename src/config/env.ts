@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z, ZodError } from 'zod';
 import type { Credential } from './types.ts';
 
 const { parse: parseJson } = JSON;
@@ -77,7 +77,9 @@ export function loadConfig(overrides?: Record<string, unknown>): ReturnType<type
           ...(a.extra ? { extra: a.extra } : {}),
           ...(a.registryCredentials ? { extra: { registryCredentials: a.registryCredentials } } : {}),
         }));
-      } catch { /* fall through to legacy */ }
+      } catch {
+        console.debug("fall through to legacy");
+      }
     }
     const legacyAk = process.env.ALIBABA_ACCESS_KEY_ID;
     const legacySk = process.env.ALIBABA_ACCESS_KEY_SECRET;
@@ -117,7 +119,9 @@ export function loadConfig(overrides?: Record<string, unknown>): ReturnType<type
           bucket: a.bucket,
           ...(a.extra ? { extra: a.extra } : {}),
         }));
-      } catch { /* fall through */ }
+      } catch {
+        console.debug("fall through");
+      }
     }
     const legacyAk = process.env.S3_ACCESS_KEY_ID ?? process.env.MINIO_ACCESS_KEY ?? process.env.MINIO_ROOT_USER;
     const legacySk = process.env.S3_SECRET_ACCESS_KEY ?? process.env.MINIO_SECRET_KEY ?? process.env.MINIO_ROOT_PASSWORD;
@@ -187,7 +191,7 @@ export function loadConfig(overrides?: Record<string, unknown>): ReturnType<type
   try {
     return AppConfigSchema.parse(assembled);
   } catch (e) {
-    if (e instanceof z.ZodError) {
+    if (e instanceof ZodError) {
       const issues = e.issues
         .map(i => `  - ${i.path.join('.') || '(root)'}: ${i.message}`)
         .join('\n');

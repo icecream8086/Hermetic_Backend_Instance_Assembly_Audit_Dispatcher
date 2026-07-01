@@ -74,7 +74,9 @@ export class HybridAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmi
     // Gate durable persistence with persistence policy (KV/DO costs real money).
     // Memory ring buffer and console output are free — always allowed.
     if (this.#atomic && shouldPersist(entry)) {
-      await this.#persistToStore(stored).catch(() => { /* noop */ });
+      try { await this.#persistToStore(stored); } catch {
+        console.debug("noop");
+      }
     }
 
     if (shouldLogAudit(entry.facility, entry.level)) {

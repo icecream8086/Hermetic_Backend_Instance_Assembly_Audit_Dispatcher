@@ -163,8 +163,7 @@ export class InstanceProviderResolver {
         const cred = await this.#resolveCredential(instance.credentialRef, instance.id);
         return new AlibabaEciImageProvider(
           cred.accessKeyId ?? '', cred.accessKeySecret ?? '', instance.endpoint,
-          instance.region,
-          cred.registryCredentials as { server: string; userName: string; password: string }[] | undefined,
+          instance.region,          cred.registryCredentials as { server: string; userName: string; password: string }[] | undefined,
         );
       }
       case 'aws':

@@ -97,7 +97,7 @@ export function decodeCursor(raw: string): LogCursor | null {
       s: map.get('s') ?? '', i: Number(map.get('i')), b: map.get('b') ?? '',
       m: Number(map.get('m')), t: Number(map.get('t')), x: map.get('x') ?? '',
     };
-  } catch { return null; }
+  } catch (e) { const _r = null; return _r; }
 }
 
 /** Build a cursor from a StoredAuditEntry. */

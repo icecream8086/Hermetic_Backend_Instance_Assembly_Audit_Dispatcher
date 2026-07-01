@@ -1,4 +1,5 @@
 /// <reference types="@cloudflare/workers-types" />
+const { parse: parseJson } = JSON;
 
 /**
  * NotificationDO — 全局 WebSocket 广播频道
@@ -71,7 +72,7 @@ export class NotificationDO implements DurableObject {
 
   #handleMessage(ws: WebSocket, event: MessageEvent): void {
     try {
-      const msg = JSON.parse(event.data as string);
+      const msg = z.unknown().parse(parseJson(event.data as string));
       if (msg.type === 'subscribe' && Array.isArray(msg.channels)) {
         this.#filters.set(ws, new Set(msg.channels));
         ws.send(JSON.stringify({ type: 'subscribed', channels: msg.channels }));

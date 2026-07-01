@@ -114,8 +114,7 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
   // ── Workflow CRUD ──
 
   app.openapi(createRoute({ method: 'post', path: '/workflows', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => { await guard('create', 'action:workflow')(c);
-    const body = await c.req.json();
-    const parsed = CreateWorkflowSchema.parse(body);
+    const parsed = await CreateWorkflowSchema.parse(c.req.json());
     if (!parsed.success) throw new AppError(400, 'INVALID_WORKFLOW', parsed.error.message);
 
     const input = parsed.data;
@@ -170,8 +169,7 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
     const entry = await atomic.get<WorkflowDef>(PFX_WORKFLOW_DEF + wid);
     if (!entry) throw new AppError(404, 'WORKFLOW_NOT_FOUND', 'Workflow not found');
 
-    const body = await c.req.json();
-    const parsed = UpdateWorkflowSchema.parse(body);
+    const parsed = await UpdateWorkflowSchema.parse(c.req.json());
     if (!parsed.success) throw new AppError(400, 'INVALID_WORKFLOW', parsed.error.message);
 
     const input = parsed.data;
@@ -209,7 +207,8 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
     const entry = await atomic.get<WorkflowDef>(PFX_WORKFLOW_DEF + wid);
     if (!entry) throw new AppError(404, 'WORKFLOW_NOT_FOUND', 'Workflow not found');
 
-    const body = await c.req.json().catch(() => ({}));
+    let body;
+    try { body = await z.unknown().parse(c.req.json()); } catch { body = {}; }
     const parsed = TriggerWorkflowSchema.parse(body);
     const inputs = parsed.success && parsed.data.inputs ? parsed.data.inputs : {};
 
@@ -237,7 +236,10 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
     }
 
     let payload: Record<string, unknown> = {};
-    try { payload = parseJson(rawBody || '{}'); } catch { /* not JSON */ }
+    try { payload = parseJson(rawBody || '{}'); } catch {
+      /* not JSON */
+      console.debug("not JSON, using empty payload");
+    }
     const inputs = payload.inputs as Record<string, string> | undefined ?? {};
 
     const run = await runner.startRun(entry.value, 'http', payload, inputs,
@@ -254,7 +256,8 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
     const entry = await atomic.get<WorkflowDef>(PFX_WORKFLOW_DEF + wid);
     if (!entry) throw new AppError(404, 'WORKFLOW_NOT_FOUND', 'Workflow not found');
 
-    const body = await c.req.json().catch(() => ({}));
+    let body;
+    try { body = await z.unknown().parse(c.req.json()); } catch { body = {}; }
     const parsed = TriggerWorkflowSchema.parse(body);
     const inputs = parsed.success && parsed.data.inputs ? parsed.data.inputs : {};
 
@@ -283,7 +286,8 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
    *  Matches incoming webhook payloads against all workflows that have
    *  on.push configured.  Basic branch-name matching for now. */
   app.openapi(createRoute({ method: 'post', path: '/webhook', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
-    const payload = await c.req.json().catch(() => ({}));
+    let payload;
+    try { payload = await z.unknown().parse(c.req.json()); } catch { payload = {}; }
     const branch = (payload)?.ref?.replace('refs/heads/', '') ?? '';
 
     const idx = await atomic.get<string[]>(IDX_WORKFLOW_IDS);
@@ -408,7 +412,7 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
   // ── Action registry ──
 
   app.openapi(createRoute({ method: 'post', path: '/actions', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
-    const body = await c.req.json();
+    const body = await z.unknown().parse(c.req.json());
     if (!body.name || !body.version || !body.runs) {
       throw new AppError(400, 'INVALID_ACTION', 'name, version, and runs are required');
     }
@@ -431,7 +435,7 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
   const projectService = new ProjectService(atomic, orgService);
 
   app.openapi(createRoute({ method: 'post', path: '/orgs', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
-    const body = await c.req.json();
+    const body = await z.unknown().parse(c.req.json());
     const ownerId = c.var.currentUser?.id ?? 'anonymous';
     const org = await orgService.create(ownerId, body);
     return c.json(ok(org), 201);
@@ -450,13 +454,13 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
   });
 
   app.openapi(createRoute({ method: 'post', path: '/orgs/:id/members', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
-    const { userId } = await c.req.json();
+    const {} = await z.unknown().parse(c.req.json());
     await orgService.addMember(c.req.param('id'), userId);
     return c.json(ok({ ok: true }));
   });
 
   app.openapi(createRoute({ method: 'post', path: '/projects', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
-    const body = await c.req.json();
+    const body = await z.unknown().parse(c.req.json());
     const ownerId = c.var.currentUser?.id ?? 'anonymous';
     const proj = await projectService.create(ownerId, body);
     return c.json(ok(proj), 201);
@@ -474,13 +478,13 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
   const approvalService = new ApprovalService(atomic);
 
   app.openapi(createRoute({ method: 'post', path: '/runs/:id/approvals', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
-    const { jobName, approvers } = await c.req.json();
+    const {} = await z.unknown().parse(c.req.json());
     const node = await approvalService.request(c.req.param('id'), jobName, approvers);
     return c.json(ok(node), 201);
   });
 
   app.openapi(createRoute({ method: 'post', path: '/approvals/:id/decide', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
-    const { approved, reason } = await c.req.json();
+    const {} = await z.unknown().parse(c.req.json());
     const userId = c.var.currentUser?.id ?? 'anonymous';
     const node = await approvalService.decide(c.req.param('id'), userId, approved, reason);
     return c.json(ok(node));
@@ -500,7 +504,7 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
     const wfEntry = await atomic.get<WorkflowDef>(PFX_WORKFLOW_DEF + wid);
     if (!wfEntry) throw new AppError(404, 'WORKFLOW_NOT_FOUND', 'Workflow not found');
 
-    const { key, value } = await c.req.json();
+    const {} = await z.unknown().parse(c.req.json());
     if (!key || value === undefined) throw new AppError(400, 'INVALID_SECRET', 'key and value required');
 
     const secret = await secretService.set(wid, key, value);
@@ -523,7 +527,7 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
   const sharedLinkService = new SharedLinkService(atomic, deps.audit);
 
   app.openapi(createRoute({ method: 'post', path: '/shared-links', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
-    const body = await c.req.json();
+    const body = await z.unknown().parse(c.req.json());
     // Extract owner from auth context if available
     const ownerId = c.var.currentUser?.id ?? 'anonymous';
     const link = await sharedLinkService.create(ownerId, body);
@@ -546,7 +550,8 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
 
   /** Guest access: validate and trigger. No auth required. */
   app.openapi(createRoute({ method: 'post', path: '/shared-links/:id/launch', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
-    const body = await c.req.json().catch(() => ({}));
+    let body;
+    try { body = await z.unknown().parse(c.req.json()); } catch { body = {}; }
     const password = body.password as string | undefined;
 
     const link = await sharedLinkService.validate(c.req.param('id'), password);
@@ -573,7 +578,7 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
 
   /** Runner heartbeat: POST /api/actions/runners/heartbeat */
   app.openapi(createRoute({ method: 'post', path: '/runners/heartbeat', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
-    const body = await c.req.json();
+    const body = await z.unknown().parse(c.req.json());
     const runner = await runnerRegistry.heartbeat(body);
     return c.json(ok(runner));
   });

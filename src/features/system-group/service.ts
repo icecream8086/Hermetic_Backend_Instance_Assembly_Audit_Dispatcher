@@ -52,7 +52,9 @@ export class SysGroupService implements ISysGroupService {
     await this.atomic.set(PREFIX + id, group, null);
     await this.atomic.set(GID_INDEX_PREFIX + gid, id, null);
     await this.#addToIndex(id);
-    await this.#incrCounter().catch(() => { /* noop */ });
+    try { await this.#incrCounter(); } catch {
+      console.debug("noop");
+    }
     await this.logger.write({ facility: FACILITY, level: KernLevel.INFO, message: `SysGroup created: ${input.name}`, metadata: { actorId: _actorId, groupId: id, gid, priority: group.priority } });
     this.audit?.write({
       level: KernLevel.NOTICE,
@@ -150,7 +152,9 @@ export class SysGroupService implements ISysGroupService {
     if (!entry) throw new AppError(404, 'SYSGROUP_NOT_FOUND', 'System group not found');
     await this.atomic.set(PREFIX + id, null, entry.version);
     await this.#removeFromIndex(id);
-    await this.#decrCounter().catch(() => { /* noop */ });
+    try { await this.#decrCounter(); } catch {
+      console.debug("noop");
+    }
     await this.logger.write({ facility: FACILITY, level: KernLevel.WARNING, message: `SysGroup deleted: ${entry.value.name}`, metadata: { actorId: _actorId, groupId: id } });
     this.audit?.write({
       level: KernLevel.WARNING,

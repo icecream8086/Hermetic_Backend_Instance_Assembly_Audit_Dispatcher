@@ -121,7 +121,7 @@ export class CachedAtomicStore implements IAtomicStore {
       const lastVer = this.#storeVersion.get(key) ?? null;
       void this.store.set(key, cacheEntry, lastVer, this.storeTtlSeconds)
         .then(v => { if (v) this.#storeVersion.set(key, v); })
-        .catch(() => { /* noop */ });
+        .then(undefined, () => { /* noop */ });
     }
     return miss;
   }
@@ -153,13 +153,19 @@ export class CachedAtomicStore implements IAtomicStore {
   }
 
   public async invalidateCache(key: string): Promise<void> {
-    const current = await this.store.get<CacheEntry<unknown>>(key).catch(() => null);
+    let current: { value: CacheEntry<unknown>; version: VersionId } | null;
+    try { current = await this.store.get<CacheEntry<unknown>>(key); } catch {
+      console.debug("");
+    }
     if (current !== null) {
-      const ver = await this.store.set(
-        key,
-        { data: null, cachedAt: 0, coordinatorVersion: null },
-        current.version,
-      ).catch(() => null);
+      let ver: VersionId | null;
+      try {
+        ver = await this.store.set(
+          key,
+          { data: null, cachedAt: 0, coordinatorVersion: null },
+          current.version,
+        );
+      } catch { ver = null; }
       if (ver) this.#storeVersion.set(key, ver);
     }
   }

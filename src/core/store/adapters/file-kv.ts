@@ -60,15 +60,16 @@ export class FileKVAtomicStore implements IAtomicStore {
         const entry = parseJson(raw) as FileEntry<T>;
         if (entry.metadata.e && Date.now() > entry.metadata.e) {
           // TTL expired — delete file and return null
-          try { await rm(this.#filePath(key), { force: true }); } catch { /* file may not exist */ }
+          try { await rm(this.#filePath(key), { force: true }); } catch (e) {
+            /* file may not exist */
+            console.debug("file may not exist");
+          }
           return null;
         }
         // null value = deleted — consistent with DO adapter behavior
         if (entry.value === null) return null;
         return { value: entry.value, version: entry.metadata.v as VersionId };
-      } catch {
-        return null;
-      }
+      } catch (e) { const _r = null; return _r; }
     });
   }
 
@@ -81,10 +82,9 @@ export class FileKVAtomicStore implements IAtomicStore {
       let current: FileEntry | null = null;
       try {
         current = parseJson(await readFile(fp, 'utf-8')) as FileEntry;
-      } catch {
-        // file doesn't exist
+      } catch (e) {
+        console.debug("");
       }
-
       if (expectedVersion === null && current !== null) return null;
       if (expectedVersion !== null && current?.metadata.v !== expectedVersion) return null;
 
@@ -113,9 +113,10 @@ export class FileKVAtomicStore implements IAtomicStore {
             const entry = parseJson(raw) as FileEntry<V>;
             readSet.set(key, entry.metadata.v);
             return entry.value;
-          } catch {
-            readSet.set(key, null);
-            return null;
+          } catch (e) {
+
+            console.debug("");
+
           }
         },
         getMany: async <V>(keys: string[]) => {
@@ -131,9 +132,8 @@ export class FileKVAtomicStore implements IAtomicStore {
               const entry = parseJson(raw) as FileEntry<V>;
               readSet.set(key, entry.metadata.v);
               results.push(entry.value);
-            } catch {
-              readSet.set(key, null);
-              results.push(null);
+            } catch (e) {
+              console.debug("");
             }
           }
           return results;
@@ -156,10 +156,9 @@ export class FileKVAtomicStore implements IAtomicStore {
           const raw = await readFile(this.#filePath(key), 'utf-8');
           const entry = parseJson(raw) as FileEntry;
           currentVersion = entry.metadata.v;
-        } catch {
-          currentVersion = null;
+        } catch (e) {
+          console.debug("");
         }
-
         if (currentVersion !== expectedVersion) {
           throw new TransactConflictError(
             `Transaction conflict: key "${key}" was modified concurrently.`,

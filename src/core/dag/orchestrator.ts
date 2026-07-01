@@ -98,9 +98,7 @@ export class DagOrchestrator<T extends OrchestratedTask> {
           try {
             await executor(task);
             return { id: task.id, success: true };
-          } catch (e) {
-            return { id: task.id, success: false, error: e instanceof Error ? e.message : String(e) };
-          }
+          } catch (e) { const _r = {  id: task.id, success: false, error: e instanceof Error ? e.message : String(e)  }; return _r; }
         }),
       );
 

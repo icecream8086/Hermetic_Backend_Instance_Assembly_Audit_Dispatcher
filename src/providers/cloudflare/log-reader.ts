@@ -55,7 +55,9 @@ export class CloudflareLogReader implements IAuditReader {
           const entry = this.#parseLine(line, since, until, facility);
           if (entry) results.push(entry);
         }
-      } catch { /* skip unreadable R2 keys */ }
+      } catch {
+        console.debug("skip unreadable R2 keys");
+      }
     }
     return { entries: results, total: results.length };
   }

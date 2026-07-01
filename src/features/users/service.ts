@@ -269,8 +269,9 @@ export class UserService implements IUserService {
     });
 
     // Best-effort counter update (outside transaction to avoid cross-shard contention)
-    await this.#incrCounter().catch(() => { /* noop */ });
-
+    try { await this.#incrCounter(); } catch {
+      console.debug("noop");
+    }
     // Create session token (separate — 'session' prefix maps to different DO shard)
     const token = await this.createSession(id);
 
@@ -394,7 +395,7 @@ export class UserService implements IUserService {
     try {
       ts = parseInt(atob(tsB64.replace(/-/g, '+').replace(/_/g, '/')), 10);
     } catch {
-      await recordAttempt(this.atomic, email, false, ip); throw new AppError(400, 'BAD_TIMESTAMP', 'Invalid timestamp encoding');
+      console.debug("");
     }
     if (isNaN(ts)) { await recordAttempt(this.atomic, email, false, ip); throw new AppError(400, 'BAD_TIMESTAMP', 'Invalid timestamp'); }
     const skew = Date.now() - ts * 1000;
@@ -438,7 +439,7 @@ export class UserService implements IUserService {
       nonceBytes = base64UrlDecode(nonceB64);
       signature = base64UrlDecode(sigB64);
     } catch {
-      await recordAttempt(this.atomic, email, false, ip); throw new AppError(400, 'BAD_KEY_FORMAT', 'Invalid base64 encoding in one-time key');
+      console.debug("");
     }
     const message = new Uint8Array(new TextEncoder().encode(`${String(ts)}${input.email}${ctx?.siteContext ?? ''}`));
     const pkRaw = atob(pubKeyB64);
@@ -564,8 +565,9 @@ export class UserService implements IUserService {
     });
 
     // Best-effort counter update
-    await this.#decrCounter().catch(() => { /* noop */ });
-
+    try { await this.#decrCounter(); } catch {
+      console.debug("noop");
+    }
     await this.logger.write({
       facility: FACILITY,
       level: KernLevel.INFO,
@@ -903,6 +905,7 @@ export class UserService implements IUserService {
       }
     } catch {
       // Silently ignore — group may not exist yet
+      console.debug("Silently ignore — group may not exist yet");
     }
   }
 

@@ -22,6 +22,8 @@ import { getBootId } from './context.ts';
 
 // ─── R2 abstraction ───
 
+const { parse: parseJson } = JSON;
+
 export interface R2Bucket {
   put(key: string, value: string | ArrayBuffer | Uint8Array): Promise<void>;
   get(key: string): Promise<{ body: ArrayBuffer; key: string } | null>;
@@ -118,7 +120,9 @@ export class R2AuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
     if (shouldPersist(entry)) {
       this.#buffer.push(stored);
       if (this.#buffer.length >= this.#config.batchSize) {
-        await this.flush().catch(() => { /* noop */ });
+        try { await this.flush(); } catch {
+          console.debug("noop");
+        }
       }
     }
 
@@ -172,13 +176,15 @@ export class R2AuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
       const data = await this.bucket.get(obj.key);
       if (!data) continue;
       try {
-        const batch: StoredAuditEntry[] = JSON.parse(new TextDecoder().decode(data.body));
+        const batch: StoredAuditEntry[] = z.unknown().parse(parseJson(new TextDecoder().decode(data.body)));
         let filtered = batch;
         if (params?.facility) filtered = filtered.filter(e => e.facility === params.facility);
         if (params?.startTs !== undefined) filtered = filtered.filter(e => e.timestamp >= params.startTs!);
         if (params?.endTs !== undefined) filtered = filtered.filter(e => e.timestamp <= params.endTs!);
         entries.push(...filtered);
-      } catch { /* skip corrupt files */ }
+      } catch {
+        console.debug("");
+      }
       if (entries.length >= limit) break;
     }
 
@@ -223,10 +229,12 @@ export class R2AuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
       const data = await this.bucket.get(obj.key);
       if (!data) continue;
       try {
-        const batch: StoredAuditEntry[] = JSON.parse(new TextDecoder().decode(data.body));
+        const batch: StoredAuditEntry[] = z.unknown().parse(parseJson(new TextDecoder().decode(data.body)));
         const found = batch.find(e => e.id === id);
         if (found) return found;
-      } catch { continue; }
+      } catch {
+        console.debug("");
+      }
     }
     return null;
   }
@@ -257,7 +265,7 @@ export class R2AuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
   /** Start auto-flushing the write buffer. */
   public startAutoFlush(): void {
     if (this.#flushTimer) return;
-    this.#flushTimer = setInterval(() => { void this.flush().catch(() => { /* noop */ }); }, this.#config.flushIntervalMs);
+    this.#flushTimer = setInterval(() => { this.flush().then(undefined, () => { /* noop */ }); }, this.#config.flushIntervalMs);
   }
 
   public stopAutoFlush(): void {

@@ -52,7 +52,12 @@ export class PodmanNetworkPolicyProvider implements INetworkPolicyProvider {
       body: JSON.stringify(body),
     });
     if (!resp.ok) {
-      const err = await resp.text().catch(() => '');
+      let err = '';
+      try { err = await resp.text(); } catch {
+
+        console.debug("ignore");
+
+      }
       // 409 = already exists (race), treat as success
       if (resp.status !== 409) {
         throw new Error(`Podman network create failed (${String(resp.status)}): ${err}`);
@@ -67,7 +72,12 @@ export class PodmanNetworkPolicyProvider implements INetworkPolicyProvider {
       method: 'DELETE',
     });
     if (!resp.ok && resp.status !== 404) {
-      const err = await resp.text().catch(() => '');
+      let err = '';
+      try { err = await resp.text(); } catch {
+
+        console.debug("ignore");
+
+      }
       throw new Error(`Podman network remove failed (${String(resp.status)}): ${err}`);
     }
   }

@@ -39,7 +39,12 @@ export class AwsS3Provider extends S3ClientBase {
       if (res.ok || res.status === 404) return res;
 
       if (res.status === 403 && attempt < CLOCK_SKEW_RETRIES) {
-        const bodyText = await res.clone().text().catch(() => '');
+        let bodyText = '';
+        try { bodyText = await res.clone().text(); } catch {
+
+          console.debug("ignore");
+
+        }
         const serverTime = extractServerTimeFromError(bodyText);
         if (serverTime) {
           const serverTs = serverTime.getTime();

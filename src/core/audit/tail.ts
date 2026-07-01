@@ -62,7 +62,9 @@ export async function pollTail(
   if (entries.length > 0) {
     session.cursor = newCursor;
     for (const sub of session.subscribers) {
-      try { sub(entries); } catch { /* subscriber error */ }
+      try { sub(entries); } catch {
+        console.debug("subscriber error");
+      }
     }
   }
 
@@ -76,7 +78,9 @@ export function startTail(
   options: TailOptions = {},
 ): () => void {
   const timer = setInterval(() => {
-    pollTail(reader, session, options).catch(() => { /* noop */ });
+    try { pollTail(reader, session, options); } catch {
+      console.debug("noop");
+    }
   }, session.intervalMs);
   session.timer = timer;
   return () => { clearInterval(timer); };

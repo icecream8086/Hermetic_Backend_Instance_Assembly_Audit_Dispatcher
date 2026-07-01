@@ -326,8 +326,7 @@ export class WorkflowRunner {
       if (needs.length > 0) {
         const depStatuses = await Promise.all(
           needs.map(async (needName) => {
-            const depRef = run.jobRunRefs.find(r => r.jobName === needName);
-            if (!depRef) return { name: needName, status: 'Queued' as const };
+            const depRef = run.jobRunRefs.find(r => r.jobName === needName);            if (!depRef) return { name: needName, status: 'Queued' as const };
             const depEntry = await atomic.get<JobRun>(PFX_JOB_RUN + depRef.jobRunId);
             return { name: needName, status: (depEntry?.value.status ?? 'Queued') };
           }),
@@ -484,7 +483,7 @@ export class WorkflowRunner {
     const provider = await this.deps.providers.resolveContainer(undefined) as any;
 
     for (const step of steps) {
-      const name = step.name ?? (('run' in step) ? step.run.slice(0, 60) : ('dns' in step) ? `dns:${step.dns.name}` : step.uses);
+      const name = step.name ?? (step.run != null ? step.run.slice(0, 60) : step.dns != null ? `dns:${step.dns.name}` : step.uses);
       const startedAt = Date.now();
 
       // Log step start
@@ -496,22 +495,22 @@ export class WorkflowRunner {
       });
 
       try {
-        if ('run' in step) {
+        if (step.run != null) {
           await this.#executeRunStep(step, env, sandboxId, provider);
           await appendStepLog(this.deps.stores.blob, jobRunId, name,
             `Step completed: ${name} (exit 0)`);
           stepRuns.push({ name, status: 'Success', startedAt, completedAt: Date.now(), exitCode: 0 });
 
-        } else if ('dns' in step) {
+        } else if (step.dns != null) {
           await executeDnsStep(step, this.deps.providers.dns, this.deps.audit);
           await appendStepLog(this.deps.stores.blob, jobRunId, name,
-            `DNS ${(step).dns.action} ${(step).dns.name}`);
+            `DNS ${step.dns.action} ${step.dns.name}`);
           stepRuns.push({ name, status: 'Success', startedAt, completedAt: Date.now() });
 
-        } else if ('uses' in step) {
+        } else if (step.uses != null) {
           await this.#executeUsesStep(step, env, sandboxId, provider);
           await appendStepLog(this.deps.stores.blob, jobRunId, name,
-            `Action completed: ${(step).uses}`);
+            `Action completed: ${step.uses}`);
           stepRuns.push({ name, status: 'Success', startedAt, completedAt: Date.now(), exitCode: 0 });
         }
 
@@ -547,7 +546,7 @@ export class WorkflowRunner {
     const shell = step.shell ?? '/bin/sh';
     const script = step.run;
 
-    if (typeof provider.exec !== 'function') {
+    if (provider.exec == null) {
       // Provider doesn't support exec — mark as success
       // (the container's entrypoint handles execution)
       return;
@@ -581,7 +580,7 @@ export class WorkflowRunner {
     const registry = this.deps.actionRegistry;
     if (!registry) {
       // No registry configured — try container image fallback
-      if (typeof provider.exec === 'function') {
+      if (provider.exec != null) {
         const mergedEnv = { ...env, ...step.env, ...step.with };
         const envList = Object.entries(mergedEnv).map(([k, v]) => `${k}=${v}`);
         const result = await provider.exec({
@@ -604,7 +603,7 @@ export class WorkflowRunner {
     }
 
     // For container-based actions, exec the entrypoint inside the sandbox
-    if (typeof provider.exec === 'function') {
+    if (provider.exec != null) {
       const mergedEnv = { ...env, ...step.env, ...step.with };
       const envList = Object.entries(mergedEnv).map(([k, v]) => `${k}=${v}`);
       const cmd = resolved.entrypoint ?? ['/bin/sh', '-c', `echo 'Action: ${step.uses}'`];
@@ -621,7 +620,7 @@ export class WorkflowRunner {
   }
 
   #defToStepRun(step: StepDef): StepRun {
-    const name = step.name ?? (('run' in step) ? step.run.slice(0, 60) : ('dns' in step) ? `dns:${step.dns.name}` : step.uses);
+    const name = step.name ?? (step.run != null ? step.run.slice(0, 60) : step.dns != null ? `dns:${step.dns.name}` : step.uses);
     return { name, status: 'Queued' };
   }
 

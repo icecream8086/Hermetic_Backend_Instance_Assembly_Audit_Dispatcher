@@ -198,7 +198,8 @@ async function handleImagePull(
       error: e.message,
       failedAt: Date.now(),
     }, entry.version);
-    return { success: false, error: e.message };
+    const errResult = { success: false, error: e.message };
+    return errResult;
   }
 }
 
@@ -222,8 +223,9 @@ async function handleSandboxGc(
         provider.delete({ region: region as any, providerId }),
         new Promise((_, reject) => setTimeout(() => { reject(new Error('GC delete timeout after 10s')); }, 10_000)),
       ]);
-    } catch { /* best-effort — provider may be unreachable or the resource already gone */ }
-
+    } catch {
+      console.debug("best-effort — provider may be unreachable or the resource already gone");
+    }
     // Update sandbox state to Deleted with OCC retry
     let deleted = false;
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -275,11 +277,13 @@ async function handleSandboxGc(
     // Clear GC marker so the tick doesn't re-enqueue
     const markerKey = 'gc:queued:' + sid;
     const marker = await stores.atomic.get<{ version: number }>(markerKey);
-    if (marker) await stores.atomic.set(markerKey, null, marker.version).catch(() => { /* noop */ });
-
+    try { if (marker) await stores.atomic.set(markerKey, null, marker.version); } catch {
+      console.debug("noop");
+    }
     return { success: true };
   } catch (err) {
-    return { success: false, error: err instanceof Error ? err.message : String(err) };
+    const errResult = { success: false, error: err instanceof Error ? err.message : String(err) };
+    return errResult;
   }
 }
 
@@ -300,7 +304,8 @@ async function handleSandboxProvision(
 
     return { success: true };
   } catch (err) {
-    return { success: false, error: err instanceof Error ? err.message : String(err) };
+    const errResult = { success: false, error: err instanceof Error ? err.message : String(err) };
+    return errResult;
   }
 }
 
@@ -331,7 +336,8 @@ async function handleBucketKeyRotate(
 
     return { success: true };
   } catch (err) {
-    return { success: false, error: err instanceof Error ? err.message : String(err) };
+    const errResult = { success: false, error: err instanceof Error ? err.message : String(err) };
+    return errResult;
   }
 }
 
@@ -353,6 +359,7 @@ async function handleWorkflowJobRun(
     await runner.executeJob(payload.jobRunId as any);
     return { success: true };
   } catch (err) {
-    return { success: false, error: err instanceof Error ? err.message : String(err) };
+    const errResult = { success: false, error: err instanceof Error ? err.message : String(err) };
+    return errResult;
   }
 }

@@ -49,7 +49,8 @@ export class CfQueueProducer implements IMessageQueue {
       return messages.length;
     } catch (err) {
       console.error('[cf-queue] sendBatch failed:', err instanceof Error ? err.message : err);
-      return 0;
+      const n = 0;
+      return n;
     }
   }
 
@@ -62,7 +63,8 @@ export class CfQueueProducer implements IMessageQueue {
       return true;
     } catch (err) {
       console.error('[cf-queue] send failed:', err instanceof Error ? err.message : err);
-      return false;
+      const ok = false;
+      return ok;
     }
   }
 

@@ -52,7 +52,7 @@ function mkTopoCrud<T, TC = unknown, TU = unknown>(
 
   app.openapi(createRoute({ method: 'post', path: '/', tags: ['topology'], summary: 'Create', responses: { 201: { description: 'Created', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
     if (guard) guard(c);
-    const body = await c.req.json<TC>();
+    const body = await z.unknown().parse(c.req.json());
     const err = validateCreate(body);
     if (err) throw new AppError(400, 'VALIDATION_ERROR', err);
     const entity = await svc.create(body);
@@ -67,7 +67,7 @@ function mkTopoCrud<T, TC = unknown, TU = unknown>(
 
   app.openapi(createRoute({ method: 'put', path: '/{id}', tags: ['topology'], summary: 'Update', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Updated', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
     if (guard) guard(c);
-    const body = await c.req.json<TU>();
+    const body = await z.unknown().parse(c.req.json());
     const entity = await svc.update(idFn(c.req.param('id')), body);
     return c.json(ok(map(entity)));
   });
@@ -123,7 +123,7 @@ export function createTopologyRouter(
   // POST /instances/:id/heartbeat
   app.openapi(createRoute({ method: 'post', path: '/instances/{id}/heartbeat', tags: ['topology'], summary: '上报实例心跳', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'OK', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
     const id = createInstanceId(c.req.param('id'));
-    const body = await c.req.json<HeartbeatBody>();
+    const body = await z.unknown().parse(c.req.json());
     await instances.heartbeat(id, body.capacity, body.status ?? 'online');
     return c.json(ok(null));
   });
@@ -162,7 +162,7 @@ export function createTopologyRouter(
 
     app.openapi(createRoute({ method: 'post', path: '/buckets/{id}/policies', tags: ['topology'], summary: '创建 S3 策略', request: { params: z.object({ id: z.string() }) }, responses: { 201: { description: 'S3Policy', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
       isRoot(c);
-      const body: unknown = await c.req.json();
+      const body = await z.unknown().parse(c.req.json());
       const policy = await policyManager.create(c.req.param('id'), body as CreateS3PolicyInput);
       return c.json(ok(policy), 201);
     });
@@ -175,7 +175,7 @@ export function createTopologyRouter(
 
     app.openapi(createRoute({ method: 'put', path: '/policies/{id}', tags: ['topology'], summary: '更新 S3 策略', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'S3Policy', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
       isRoot(c);
-      const body: unknown = await c.req.json();
+      const body = await z.unknown().parse(c.req.json());
       const policy = await policyManager.update(c.req.param('id'), body as UpdateS3PolicyInput);
       return c.json(ok(policy));
     });
@@ -244,7 +244,7 @@ export function createTopologyRouter(
       const bucket = await buckets.get(bucketId);
       if (!bucket) throw new AppError(404, 'NOT_FOUND', 'Bucket not found');
       if (!s3Provider.createMultipartUpload || !s3Provider.putPresignedUrl) throw new AppError(400, 'NOT_SUPPORTED', 'Multi-part upload not supported');
-      const body = await c.req.json<{ key: string; contentType?: string; partSize?: number; parts: number; expiresIn?: number }>();
+      const body = await z.unknown().parse(c.req.json());
       if (!body.key || !body.parts) throw new AppError(400, 'VALIDATION_ERROR', 'key and parts are required');
       const partSize = body.partSize ?? DEFAULT_PART_SIZE;
       const expiresIn = body.expiresIn ?? DEFAULT_EXPIRES;
@@ -263,7 +263,7 @@ export function createTopologyRouter(
       const bucket = await buckets.get(bucketId);
       if (!bucket) throw new AppError(404, 'NOT_FOUND', 'Bucket not found');
       if (!s3Provider.completeMultipartUpload) throw new AppError(400, 'NOT_SUPPORTED', 'Not supported');
-      const body = await c.req.json<{ key: string; parts: { partNumber: number; etag: string }[] }>();
+      const body = await z.unknown().parse(c.req.json());
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- API boundary: body from c.req.json<>
       if (!body.key || !body.parts) throw new AppError(400, 'VALIDATION_ERROR', 'key and parts are required');
       const result = await s3Provider.completeMultipartUpload({ bucket: bucket.name, key: body.key, uploadId: c.req.param('uploadId'), parts: body.parts });
@@ -275,7 +275,8 @@ export function createTopologyRouter(
       const bucket = await buckets.get(bucketId);
       if (!bucket) throw new AppError(404, 'NOT_FOUND', 'Bucket not found');
       if (!s3Provider.abortMultipartUpload) throw new AppError(400, 'NOT_SUPPORTED', 'Not supported');
-      const body = await c.req.json<{ key: string }>().catch(() => ({ key: '' }));
+      let body: { key: string };
+      try { body = await z.unknown().parse(c.req.json()); } catch { body = { key: '' }; }
       await s3Provider.abortMultipartUpload({ bucket: bucket.name, key: body.key || '', uploadId: c.req.param('uploadId') });
       return c.json(ok({ aborted: true }));
     });

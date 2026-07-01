@@ -118,7 +118,7 @@ export function emptyPayloadHash(): string {
 /** Compute the SHA-256 payload hash for a body. */
 export async function payloadHash(body: BufferSource | string): Promise<string> {
   let enc: BufferSource;
-  if (typeof body === 'string') enc = new TextEncoder().encode(body);
+  if (z.string().safeParse(body).success) enc = new TextEncoder().encode(body);
   else enc = body;
   const hash = await crypto.subtle.digest('SHA-256', enc);
   return bytesToHex(new Uint8Array(hash));

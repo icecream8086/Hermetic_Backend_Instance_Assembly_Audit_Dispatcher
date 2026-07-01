@@ -79,11 +79,10 @@ export function secureContainerProvider(inner: IContainerProvider): IContainerPr
       }
       if (prop === 'update' && target.update) {
         // eslint-disable-next-line @typescript-eslint/no-restricted-types -- proxy delegates to target with same Partial signature
-        return (providerId: string, input: Partial<CreateContainerGroupInput>) =>
-          target.update!(providerId, sanitizeContainerInput(input as CreateContainerGroupInput));
+        return (providerId: string, input: Partial<CreateContainerGroupInput>) =>          target.update!(providerId, sanitizeContainerInput(input as CreateContainerGroupInput));
       }
       const val = Reflect.get(target, prop, receiver);
-      if (typeof val === 'function') return val.bind(target);
+      if (z.function().safeParse(val).success) return val.bind(target);
       return val;
     },
   });
@@ -120,7 +119,7 @@ export function secureContainerGroupProvider(inner: IContainerGroupProvider): IC
         return (input: PodSpec) => target.createPod(sanitizePodSpec(input));
       }
       const val = Reflect.get(target, prop, receiver);
-      if (typeof val === 'function') return val.bind(target);
+      if (z.function().safeParse(val).success) return val.bind(target);
       return val;
     },
   });

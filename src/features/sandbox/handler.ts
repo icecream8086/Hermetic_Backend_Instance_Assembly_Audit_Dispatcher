@@ -42,7 +42,7 @@ export function createSandboxRouter(
   app.openapi(createRoute({ method: 'post', path: '/pod', tags: ['sandboxes'], summary: '从 PodSpec 创建 Pod', responses: { 201: { description: 'Pod created', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
     await requirePerm(c, permissionChecker, 'create', 'pod');
     if (!podService) notConfigured();
-    const spec = await c.req.json<PodSpec>();
+    const spec = await z.unknown().parse(c.req.json());
     if (!spec.metadata.name || !spec.spec.containers.length) throw new AppError(400, 'VALIDATION_ERROR', 'PodSpec requires metadata.name and spec.containers');
     const pod = await podService.provision(spec, { creatorId: c.var.currentUser?.id });
     return c.json(ok({ podId: pod.podId, providerId: pod.providerId, phase: pod.phase, name: pod.name }), 201);
@@ -143,7 +143,7 @@ export function createSandboxRouter(
     const podId = createPodId(c.req.param('id'));
     const pod = await podService.getById(podId);
     await requirePerm(c, permissionChecker, 'update', 'pod', pod.creatorId);
-    const body = await c.req.json<{ cmd: string[]; containerName?: string }>();
+    const body = await z.unknown().parse(c.req.json());
     if (!body.cmd.length) throw new AppError(400, 'VALIDATION_ERROR', 'Body.cmd (string array) is required');
     const result = await podService.exec(podId, body.cmd, body.containerName);
     return c.json(ok(result));
@@ -154,7 +154,7 @@ export function createSandboxRouter(
     const podId = createPodId(c.req.param('id'));
     const pod = await podService.getById(podId);
     await requirePerm(c, permissionChecker, 'update', 'pod', pod.creatorId);
-    const specPatch = await c.req.json<Partial<PodSpec>>();
+    const specPatch = await z.unknown().parse(c.req.json());
     const updated = await podService.update(podId, specPatch);
     return c.json(ok(updated));
   });
@@ -176,7 +176,7 @@ export function createSandboxRouter(
         const podUid = (s as unknown as Record<string, unknown>).podUid as string | undefined;
         if (!podUid) return { ...s, podPhase: null };
         try { const pod = await podService.getById(createPodId(podUid)); return { ...s, podPhase: pod?.phase ?? null }; }
-        catch { return { ...s, podPhase: null }; }
+        catch (e) { const fallback = { ...s, podPhase: null }; return fallback; }
       }));
       if (podPhase) result = { ...result, items: enriched.filter(s => (s as Record<string, unknown>).podPhase === podPhase) };
       else result = { ...result, items: enriched };
@@ -192,7 +192,7 @@ export function createSandboxRouter(
     let podPhase: string | null = null;
     if (podService) {
       const podUid = (sandbox as unknown as Record<string, unknown>).podUid as string | undefined;
-      if (podUid) { try { const pod = await podService.getById(createPodId(podUid)); podPhase = pod?.phase ?? null; } catch { podPhase = null; } }
+      if (podUid) { try { const pod = await podService.getById(createPodId(podUid)); podPhase = pod?.phase ?? null; } catch (e) { podPhase = null; } }
     }
     return c.json(ok({ ...sandbox, podPhase }));
   });
@@ -251,7 +251,7 @@ export function createSandboxRouter(
     const id = createSandboxId(c.req.param('id'));
     const sandbox = await svc.getById(id);
     await requirePerm(c, permissionChecker, 'update', 'sandbox', sandbox.config.creatorId);
-    const body = await c.req.json<Partial<CreateSandboxInput>>();
+    const body = await z.unknown().parse(c.req.json());
     const result = await svc.update(id, body);
     return c.json(ok(result));
   });

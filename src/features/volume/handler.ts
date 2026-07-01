@@ -30,7 +30,7 @@ export function createVolumeRouter(svc: IVolumeService): OpenAPIHono<{ Variables
     }),
     async (c) => {
       isRoot(c);
-      const body = CreateVolumeSchema.parse(await c.req.json());
+      const body = await CreateVolumeSchema.parse(c.req.json());
       const volume = await svc.create(body as CreateVolumeInput);
       return c.json(ok(volume), 201);
     },
@@ -86,8 +86,7 @@ export function createVolumeRouter(svc: IVolumeService): OpenAPIHono<{ Variables
     }),
     async (c) => {
       isRoot(c);
-      const body = UpdateVolumeSchema.parse(await c.req.json());
-      return c.json(ok(await svc.update(c.req.param('id'), body as UpdateVolumeInput)));
+      const body = await UpdateVolumeSchema.parse(c.req.json());      return c.json(ok(await svc.update(c.req.param('id'), body as UpdateVolumeInput)));
     },
   );
 

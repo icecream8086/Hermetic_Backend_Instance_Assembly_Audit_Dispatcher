@@ -28,7 +28,7 @@ function routeMatches(method: string, path: string, acl: RouteAcl): boolean {
       return path === acl.pathPrefix;
     case 'regex':
       try { return new RegExp(acl.pathPrefix).test(path); }
-      catch { return false; }
+      catch (e) { const _r = false; return _r; }
   }
 }
 

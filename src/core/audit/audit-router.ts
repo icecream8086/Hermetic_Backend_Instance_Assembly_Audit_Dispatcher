@@ -86,8 +86,9 @@ export function createAuditRouter(reader: IAuditReader): Hono<AuditEnv> {
   router.put('/logs/persistence', async (c) => {
     { const r = requireRoot(c); if (r) return r; }
     const userId = c.var.currentUser?.id;
-    const body = await c.req.json().catch(() => null);
-    if (!body || typeof body !== 'object') {
+    let body: unknown;
+    try { body = await z.unknown().parse(c.req.json()); } catch { body = null; }
+    if (!body || !z.record(z.unknown()).safeParse(body).success) {
       return c.json(fail('INVALID_REQUEST', 'Expected JSON body'), 400);
     }
 
@@ -132,7 +133,7 @@ export function createAuditRouter(reader: IAuditReader): Hono<AuditEnv> {
 // ─── Serialization helpers ───
 
 function parseLevel(raw: unknown): KernLevel | null {
-  if (typeof raw !== 'string') return null;
+  if (!z.string().safeParse(raw).success) return null;
   const map: Record<string, KernLevel> = {
     emerg: KernLevel.EMERG, alert: KernLevel.ALERT, crit: KernLevel.CRIT,
     err: KernLevel.ERR, warning: KernLevel.WARNING, notice: KernLevel.NOTICE,
@@ -142,7 +143,8 @@ function parseLevel(raw: unknown): KernLevel | null {
 }
 
 function parseRule(raw: Record<string, unknown>): PersistenceRule {
-  const rawFacility = typeof raw.facility === 'string' ? raw.facility : '*';
+  const rawFacility = z.string().safeParse(raw.facility).success ? raw.facility as string : '*';
+  void rawFacility;
   const sampleRate = z.number().optional().parse(raw.sampleRate);
   const ttlMs = z.number().optional().parse(raw.ttlMs);
   return {

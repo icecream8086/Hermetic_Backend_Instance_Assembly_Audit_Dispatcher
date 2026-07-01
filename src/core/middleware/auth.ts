@@ -106,7 +106,8 @@ export function authz(config: AuthzConfig): MiddlewareHandler<{ Variables: AppCo
     }
 
     // 3. Validate session
-    const sessionEntry = await store.get<{ userId: string; createdAt: number; expiresAt?: number }>(TOKEN_PREFIX + token).catch(() => null);
+    let sessionEntry: { value: { userId: string; createdAt: number; expiresAt?: number }; version: VersionId } | null;
+    try { sessionEntry = await store.get<{ userId: string; createdAt: number; expiresAt?: number }>(TOKEN_PREFIX + token); } catch { sessionEntry = null; }
     if (!sessionEntry) {
       secAudit('perm.unauthorized', KernLevel.WARNING, { reason: 'invalid_token' });
       return c.json({ success: false, data: null, error: { code: 'UNAUTHORIZED', message: 'Invalid or expired token' } }, 401);
@@ -119,7 +120,8 @@ export function authz(config: AuthzConfig): MiddlewareHandler<{ Variables: AppCo
 
     // 4. Get user
     const uid = sessionEntry.value.userId;
-    const userEntry = await store.get<any>(USER_PREFIX + uid).catch(() => null);
+    let userEntry: { value: any; version: VersionId } | null;
+    try { userEntry = await store.get<any>(USER_PREFIX + uid); } catch { userEntry = null; }
     if (!userEntry) {
       secAudit('perm.unauthorized', KernLevel.WARNING, { reason: 'user_not_found', userId: uid });
       return c.json({ success: false, data: null, error: { code: 'UNAUTHORIZED', message: 'User not found' } }, 401);

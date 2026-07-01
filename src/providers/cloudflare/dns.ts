@@ -95,10 +95,10 @@ export class CloudflareDnsProvider implements IDnsProvider {
 
 async function parseCfResponse(res: Response): Promise<CfApiResponse> {
   const text = await res.text();
-  try {
-    return parseJson(text) as CfApiResponse;
-  } catch {
-    return { success: false, errors: [{ code: res.status, message: text.slice(0, 200) }] };
+  try {    return parseJson(text) as CfApiResponse;
+  } catch (e) {
+    const cfError = { success: false, errors: [{ code: res.status, message: text.slice(0, 200) }] };
+    return cfError;
   }
 }
 

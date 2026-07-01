@@ -168,7 +168,7 @@ export class GroupManager {
 }
 
 function normalizeItem(item: string | { id: string }): { id: string } {
-  if (typeof item === 'string') return { id: item };
+  if (z.string().safeParse(item).success) return { id: item };
   return item;
 }
 

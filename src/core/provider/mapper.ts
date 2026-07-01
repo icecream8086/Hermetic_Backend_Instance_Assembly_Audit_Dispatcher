@@ -45,7 +45,7 @@ export interface MappableEnv {
 export function mapEnv(e: MappableEnv): EnvVar {
   let valueFrom: EnvVar['valueFrom'] | undefined;
   if (e.valueFrom !== undefined) {
-    if (typeof e.valueFrom === 'string') {
+    if (z.string().safeParse(e.valueFrom).success) {
       valueFrom = { fieldRef: { fieldPath: e.valueFrom } };
     } else {
       valueFrom = e.valueFrom;

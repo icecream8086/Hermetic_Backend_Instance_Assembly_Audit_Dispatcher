@@ -80,7 +80,9 @@ export class AtomicStoreDO implements DurableObject {
     // Lazy bootstrap alarm on first request
     if (!this.#alarmBootstrapped) {
       this.#alarmBootstrapped = true;
-      try { await this.ctx.storage.setAlarm(Date.now() + IDLE_ALARM_MS); } catch { /* alarm is best-effort */ }
+      try { await this.ctx.storage.setAlarm(Date.now() + IDLE_ALARM_MS); } catch {
+        console.debug("alarm is best-effort");
+      }
     }
 
     const req: DoRequest = doRequestSchema.parse(await request.json());
@@ -128,7 +130,9 @@ export class AtomicStoreDO implements DurableObject {
             await this.ctx.storage.put(mk, { expiresAt: newExpiresAt });
 
             let currentAlarm: number | null = null;
-            try { currentAlarm = await this.ctx.storage.getAlarm(); } catch { /* not available in all runtimes */ }
+            try { currentAlarm = await this.ctx.storage.getAlarm(); } catch {
+              console.debug("not available in all runtimes");
+            }
             if (currentAlarm === null || newExpiresAt < currentAlarm) {
               await this.ctx.storage.setAlarm(newExpiresAt);
             }
@@ -277,7 +281,9 @@ export class AtomicStoreDO implements DurableObject {
       await this.ctx.storage.setAlarm(Date.now() + delay);
     } catch (err) {
       console.error('AtomicStoreDO alarm error:', err);
-      try { await this.ctx.storage.setAlarm(Date.now() + IDLE_ALARM_MS); } catch { /* best-effort reschedule */ }
+      try { await this.ctx.storage.setAlarm(Date.now() + IDLE_ALARM_MS); } catch {
+        console.debug("best-effort reschedule");
+      }
     }
   }
 }

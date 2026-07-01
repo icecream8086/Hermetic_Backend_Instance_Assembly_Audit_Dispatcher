@@ -49,7 +49,7 @@ export function createSecurityGroupRouter(svc: ISecurityGroupService): OpenAPIHo
     }),
     async (c) => {
       requireRoot(c);
-      const body = await c.req.json<CreateSecurityGroupInput>();
+      const body = await z.unknown().parse(c.req.json());
       if (!body.name || !body.instanceId) throw new AppError(400, 'VALIDATION_ERROR', 'name and instanceId are required');
       const sg = await svc.create(body, actorFrom(c));
       return c.json(ok(sg), 201);
@@ -85,7 +85,7 @@ export function createSecurityGroupRouter(svc: ISecurityGroupService): OpenAPIHo
     async (c) => {
       requireRoot(c);
       const id = c.req.param('id') as any;
-      const body = await c.req.json<UpdateSecurityGroupInput>();
+      const body = await z.unknown().parse(c.req.json());
       const sg = await svc.update(id, body, actorFrom(c));
       return c.json(ok(sg));
     },

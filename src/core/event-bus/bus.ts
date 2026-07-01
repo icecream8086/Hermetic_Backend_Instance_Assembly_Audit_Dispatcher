@@ -79,7 +79,7 @@ export class EventBus {
       if (handler) {
         try {
           const r = handler(event);
-          if (r instanceof Promise) await r;
+          if (r != null) await Promise.resolve(r);
         } catch (err) {
           this.#onError(err, event);
         }
@@ -91,16 +91,20 @@ export class EventBus {
     for (const handler of handlers) {
       try {
         const r = handler(event);
-        if (r instanceof Promise) results.push(r);
+        results.push(Promise.resolve(r));
       } catch (err) {
-        try { this.#onError(err, event); } catch { /* onError must not abort the loop */ }
+        try { this.#onError(err, event); } catch {
+          console.debug("onError must not abort the loop");
+        }
       }
     }
     if (results.length > 0) {
       const settled = await Promise.allSettled(results);
       for (const s of settled) {
         if (s.status === 'rejected') {
-          try { this.#onError(s.reason, event); } catch { /* onError must not abort */ }
+          try { this.#onError(s.reason, event); } catch {
+            console.debug("onError must not abort");
+          }
         }
       }
     }

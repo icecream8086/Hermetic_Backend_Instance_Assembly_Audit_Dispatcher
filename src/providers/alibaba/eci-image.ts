@@ -78,7 +78,8 @@ export class AlibabaEciImageProvider implements IImageProvider {
         size: c.FlashSize ?? c.Size ?? undefined,
       }));
     } catch (_e) {
-      return [];
+      const empty: never[] = [];
+      return empty;
     }
   }
 
@@ -97,9 +98,7 @@ export class AlibabaEciImageProvider implements IImageProvider {
         created: c.CreationTime ? new Date(c.CreationTime).getTime() : undefined,
         size: c.FlashSize ?? c.Size ?? undefined,
       };
-    } catch {
-      return null;
-    }
+    } catch (e) { const _r = null; return _r; }
   }
 
   public async remove(id: string): Promise<void> {

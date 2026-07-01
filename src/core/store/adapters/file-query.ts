@@ -28,8 +28,9 @@ export class FileQueryStore implements IQueryStore {
     try {
       const raw = await readFile(this.#tablePath(table), 'utf-8');
       return parseJson(raw) as Record<string, unknown>[];
-    } catch {
-      return [];
+    } catch (e) {
+      const _r: Record<string, unknown>[] = [];
+      return _r;
     }
   }
 

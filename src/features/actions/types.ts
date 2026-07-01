@@ -12,9 +12,18 @@ export type WorkflowDefId = string & { readonly [WF_DEF_ID]: true };
 export type WorkflowRunId = string & { readonly [WF_RUN_ID]: true };
 export type JobRunId = string & { readonly [JOB_RUN_ID]: true };
 
-export function createWorkflowDefId(raw: string): WorkflowDefId { if (!raw) throw new TypeError('empty'); return raw as WorkflowDefId; }
-export function createWorkflowRunId(raw: string): WorkflowRunId { if (!raw) throw new TypeError('empty'); return raw as WorkflowRunId; }
-export function createJobRunId(raw: string): JobRunId { if (!raw) throw new TypeError('empty'); return raw as JobRunId; }
+export function createWorkflowDefId(raw: string): WorkflowDefId {
+  if (!raw) throw new TypeError('empty');
+  return raw as WorkflowDefId;
+}
+export function createWorkflowRunId(raw: string): WorkflowRunId {
+  if (!raw) throw new TypeError('empty');
+  return raw as WorkflowRunId;
+}
+export function createJobRunId(raw: string): JobRunId {
+  if (!raw) throw new TypeError('empty');
+  return raw as JobRunId;
+}
 
 // ─── Trigger configuration ───
 

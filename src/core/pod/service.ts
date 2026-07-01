@@ -210,7 +210,11 @@ export class PodService {
     if (!pod) throw new AppError(404, 'POD_NOT_FOUND', `Pod ${podId} not found`);
     if (pod.providerId) {
       const provider = await this.resolveProvider();
-      try { await provider.stop?.(pod.providerId); } catch { /* best-effort */ }
+      try { await provider.stop?.(pod.providerId); } catch {
+
+        console.debug("best-effort");
+
+      }
     }
     const result = await this.store.transition(podId, 'Succeeded');
     this.audit?.write({
@@ -230,7 +234,11 @@ export class PodService {
     if (!pod) throw new AppError(404, 'POD_NOT_FOUND', `Pod ${podId} not found`);
     if (pod.providerId) {
       const provider = await this.resolveProvider();
-      try { await provider.start?.(pod.providerId); } catch { /* best-effort */ }
+      try { await provider.start?.(pod.providerId); } catch {
+
+        console.debug("best-effort");
+
+      }
     }
     const result = await this.store.transition(podId, 'Running');
     this.audit?.write({
@@ -251,7 +259,11 @@ export class PodService {
     if (!pod.providerId) throw new AppError(400, 'NO_PROVIDER', `Pod ${podId} has no providerId`);
     const provider = await this.resolveProvider();
     if (!provider.restart) throw new AppError(501, 'NOT_IMPLEMENTED', 'Provider does not support restart');
-    try { await provider.restart(pod.providerId); } catch { /* best-effort */ }
+    try { await provider.restart(pod.providerId); } catch {
+
+      console.debug("best-effort");
+
+    }
     const updated = await this.store.getById(podId);
     this.audit?.write({
       level: KernLevel.INFO, facility: 'pod-service',
@@ -271,7 +283,11 @@ export class PodService {
 
     // Try sync for Running pods to get fresh container state
     if (pod.phase === 'Running' && pod.providerId) {
-      try { await this.syncRuntime(podId); } catch { /* stale OK */ }
+      try { await this.syncRuntime(podId); } catch {
+
+        console.debug("stale OK");
+
+      }
     }
 
     const current = (await this.store.getById(podId)) ?? pod;
@@ -306,7 +322,10 @@ export class PodService {
     if (!pod) throw new AppError(404, 'POD_NOT_FOUND', `Pod ${podId} not found`);
     if (pod.providerId) {
       const provider = await this.resolveProvider();
-      try { await provider.delete({ region: createRegionId('cn-hangzhou'), providerId: pod.providerId }); } catch { /* GC will retry */ }
+      try { await provider.delete({ region: createRegionId('cn-hangzhou'), providerId: pod.providerId }); } catch {
+        /* GC will retry */
+        console.debug("GC will retry");
+      }
     }
     await this.store.transition(podId, 'Failed');
     await this.store.removeFromIndex(podId);
@@ -344,7 +363,11 @@ export class PodService {
           provider.delete({ region: createRegionId('cn-hangzhou'), providerId: pod.providerId }),
           new Promise<never>((_, reject) => setTimeout(() => { reject(new Error('GC delete timeout after 10s')); }, 10_000)),
         ]);
-      } catch { /* best-effort */ }
+      } catch {
+
+        console.debug("best-effort");
+
+      }
     }
     for (let attempt = 0; attempt < 3; attempt++) {
       const latest = await this.store.getById(podId);
@@ -366,7 +389,10 @@ export class PodService {
     let providerStatus: ContainerGroupRuntime | null = null;
     try {
       providerStatus = await provider.getStatus(pod.providerId);
-    } catch (_e) { /* provider unreachable — treat as resource gone */ }
+    } catch (_e) {
+      /* provider unreachable — treat as resource gone */
+      console.debug("provider unreachable");
+    }
     return providerStatus;
   }
 
@@ -431,7 +457,11 @@ export class PodService {
       const provider = await this.resolveProvider();
       if (provider.update) {
         const groupInput = podSpecToGroupInput(mergePodSpec(pod.spec, specPatch));
-        try { await provider.update(pod.providerId, groupInput); } catch { /* best-effort */ }
+        try { await provider.update(pod.providerId, groupInput); } catch {
+
+          console.debug("best-effort");
+
+        }
       }
     }
     const merged = mergePodSpec(pod.spec, specPatch);

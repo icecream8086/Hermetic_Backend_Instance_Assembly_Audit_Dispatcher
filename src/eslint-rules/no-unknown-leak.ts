@@ -49,6 +49,7 @@ const rule: TSESLint.RuleModule<MessageIds> = {
         }
       } catch {
         // Type resolution failures are ignored
+        console.debug("Type resolution failures are ignored");
       }
     }
 

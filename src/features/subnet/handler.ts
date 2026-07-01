@@ -36,7 +36,7 @@ export function createSubnetRouter(svc: ISubnetService): OpenAPIHono<{ Variables
       responses: { 201: { description: 'Subnet', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } },
     }),
     async (c) => {
-      const body = await c.req.json<CreateSubnetInput>();
+      const body = await z.unknown().parse(c.req.json());
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- API boundary: runtime data may differ from types
       if (!body.name || !body.cidr || body.subnetPrefix === undefined || !body.instanceId) {
         throw new AppError(400, 'VALIDATION_ERROR', 'name, cidr, subnetPrefix, and instanceId are required');
@@ -75,7 +75,7 @@ export function createSubnetRouter(svc: ISubnetService): OpenAPIHono<{ Variables
     }),
     async (c) => {
       const id = c.req.param('id') as any;
-      const body = await c.req.json<UpdateSubnetInput>();
+      const body = await z.unknown().parse(c.req.json());
       const actorId = c.var.currentUser?.id;
       const subnet = await svc.update(id, body, actorId);
       return c.json(ok(subnet));

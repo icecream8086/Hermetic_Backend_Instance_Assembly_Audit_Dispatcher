@@ -65,11 +65,11 @@ export class JobOperator implements ITaskExecutor {
         });
 
         try {
-          if ('run' in step) {
+          if (step.run != null) {
             await this.executeRunStep(step, config.env, sandboxId);
-          } else if ('dns' in step) {
+          } else if (step.dns != null) {
             await executeDnsStep(step, this.deps.providers.dns, this.deps.audit);
-          } else if ('uses' in step) {
+          } else if (step.uses != null) {
             await this.executeUsesStep(step, config.env, sandboxId);
           }
           await appendStepLog(this.deps.stores.blob, ti.id, name, `Step completed: ${name}`);
@@ -83,7 +83,8 @@ export class JobOperator implements ITaskExecutor {
           });
 
           if (step.continueOnError) continue;
-          return { success: false, error: msg, exitCode: 1 };
+          const stepResult = { success: false, error: msg, exitCode: 1 };
+          return stepResult;
         }
       }
 
@@ -100,13 +101,14 @@ export class JobOperator implements ITaskExecutor {
       return { success: true };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      return { success: false, error: msg, exitCode: 1 };
+      const _r = { success: false, error: msg, exitCode: 1 };
+      return _r;
     }
   }
 
   private stepLabel(step: StepDef): string {
-    if ('run' in step) return step.run.slice(0, 60);
-    if ('dns' in step) return `dns:${step.dns.name}`;
+    if (step.run != null) return step.run.slice(0, 60);
+    if (step.dns != null) return `dns:${step.dns.name}`;
     return step.uses;
   }
 
@@ -184,7 +186,7 @@ export class JobOperator implements ITaskExecutor {
     sandboxId: string,
   ): Promise<void> {
     const provider = await this.deps.providers.resolveContainer(undefined) as any;
-    if (typeof provider?.exec !== 'function') return;
+    if (provider?.exec == null) return;
 
     const shell = step.shell ?? '/bin/sh';
     const mergedEnv = Object.entries({ ...env, ...step.env }).map(([k, v]) => `${k}=${v}`);
@@ -209,12 +211,12 @@ export class JobOperator implements ITaskExecutor {
     const registry = this.deps.actionRegistry;
     const provider = await this.deps.providers.resolveContainer(undefined) as any;
 
-    if (!registry && typeof provider?.exec !== 'function') {
+    if (!registry && provider?.exec == null) {
       throw new Error(`Cannot execute uses: step — no action registry or provider exec`);
     }
 
     const resolved = registry ? await registry.resolve(step.uses) : null;
-    if (resolved && typeof provider?.exec === 'function') {
+    if (resolved && provider?.exec != null) {
       const mergedEnv = { ...env, ...step.env, ...step.with };
       const envList = Object.entries(mergedEnv).map(([k, v]) => `${k}=${v}`);
       const cmd = resolved.entrypoint ?? ['/bin/sh', '-c', `echo 'Action: ${step.uses}'`];
@@ -227,7 +229,7 @@ export class JobOperator implements ITaskExecutor {
       if (result?.exitCode !== 0) {
         throw new Error(`Action ${String(step.uses)} failed with exit ${String(result?.exitCode)}`);
       }
-    } else if (typeof provider?.exec === 'function') {
+    } else if (provider?.exec != null) {
       const mergedEnv = { ...env, ...step.env, ...step.with };
       const envList = Object.entries(mergedEnv).map(([k, v]) => `${k}=${v}`);
       const result = await provider.exec({

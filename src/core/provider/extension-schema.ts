@@ -83,20 +83,20 @@ export function applyExtensionOverrides(
 
     switch (field.transform) {
       case undefined:
-        out[field.eciParam] = typeof val === 'object' ? JSON.stringify(val) : String(val);
+        out[field.eciParam] = z.record(z.unknown()).safeParse(val).success ? JSON.stringify(val) : String(val);
         break;
       case 'boolean-string':
         // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- extension boundary: overrides values from external input may be falsy
         out[field.eciParam] = val ? 'true' : 'false';
         break;
       case 'number-string':
-        out[field.eciParam] = typeof val === 'number' ? String(val) : '';
+        out[field.eciParam] = z.number().safeParse(val).success ? String(val) : '';
         break;
       case 'json-string':
         out[field.eciParam] = JSON.stringify(val);
         break;
       case 'comma-sep':
-        out[field.eciParam] = Array.isArray(val) ? val.join(',') : (typeof val === 'string' ? val : '');
+        out[field.eciParam] = Array.isArray(val) ? val.join(',') : (z.string().safeParse(val).success ? val : '');
         break;
     }
   }
@@ -115,6 +115,20 @@ export function validateExtensionOverrides(
   const schema = schemas.get(provider);
   if (!schema) return { valid: true, errors };
 
+  function checkType(v: unknown, type: string): boolean {
+    try {
+      switch (type) {
+        case 'number': z.number().parse(v); break;
+        case 'boolean': z.boolean().parse(v); break;
+        case 'string': z.string().parse(v); break;
+        case 'object': z.record(z.unknown()).parse(v); break;
+        case 'string[]': z.array(z.string()).parse(v); break;
+        case 'number[]': z.array(z.number()).parse(v); break;
+      }
+      return true;
+    } catch (e) { const _r = false; return _r; }
+  }
+
   for (const field of schema.fields) {
     const val = overrides[field.key];
     if (val === undefined || val === null) {
@@ -122,30 +136,13 @@ export function validateExtensionOverrides(
       continue;
     }
 
-    // Type check
-    switch (field.type) {
-      case 'number':
-        if (typeof val !== 'number') errors.push(`${field.key} must be a number`);
-        break;
-      case 'boolean':
-        if (typeof val !== 'boolean') errors.push(`${field.key} must be a boolean`);
-        break;
-      case 'string':
-        if (typeof val !== 'string') errors.push(`${field.key} must be a string`);
-        break;
-      case 'object':
-        if (typeof val !== 'object') errors.push(`${field.key} must be an object`);
-        break;
-      case 'string[]':
-        if (!Array.isArray(val) || val.some(v => typeof v !== 'string')) errors.push(`${field.key} must be a string array`);
-        break;
-      case 'number[]':
-        if (!Array.isArray(val) || val.some(v => typeof v !== 'number')) errors.push(`${field.key} must be a number array`);
-        break;
+    // Type check using Zod (CEA: no handwritten typeof guards)
+    if (!checkType(val, field.type)) {
+      errors.push(`${field.key} must be a ${field.type}`);
     }
 
     // Enum check
-    if (field.validation?.enum && typeof val === 'string') {
+    if (field.validation?.enum && z.string().safeParse(val).success) {
       if (!field.validation.enum.includes(val)) {
         errors.push(`${field.key} must be one of: ${field.validation.enum.join(', ')}`);
       }

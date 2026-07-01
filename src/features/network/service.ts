@@ -106,9 +106,11 @@ export class SecurityGroupService implements ISecurityGroupService {
     if (!newVersion) throw new AppError(409, 'CONFLICT', 'Concurrent modification detected');
 
     if (input.rules !== undefined && updated.providerNetworkId && this.networkPolicy?.applyRules) {
-      await this.networkPolicy.applyRules(updated.providerNetworkId, updated.rules ?? []).catch((e: unknown) => {
-        this.logger.write({ facility: FACILITY, level: KernLevel.WARNING, message: `Failed to apply rules: ${String(e.message)}`, actorId });
-      });
+      try {
+        await this.networkPolicy.applyRules(updated.providerNetworkId, updated.rules ?? []);
+      } catch (e: unknown) {
+        this.logger.write({ facility: FACILITY, level: KernLevel.WARNING, message: `Failed to apply rules: ${String((e as any).message)}`, actorId });
+      }
     }
     return updated;
   }
@@ -117,7 +119,11 @@ export class SecurityGroupService implements ISecurityGroupService {
     const entry = await this.atomic.get<SecurityGroup>(PREFIX + id);
     if (!entry) throw new AppError(404, 'SECGROUP_NOT_FOUND', 'Security group not found');
     if (entry.value.providerNetworkId && this.networkPolicy) {
-      try { await this.networkPolicy.removeNetwork(entry.value.providerNetworkId); } catch { /* best-effort — provider network may already be gone */ }
+      try { await this.networkPolicy.removeNetwork(entry.value.providerNetworkId); } catch {
+
+        console.debug("best-effort — provider network may already be gone");
+
+      }
     }
     await this.atomic.set(PREFIX + id, null, entry.version);
     await this.#removeFromIndex(id);

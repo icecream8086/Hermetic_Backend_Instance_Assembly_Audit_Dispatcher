@@ -10,7 +10,7 @@ export function createContainerSecretRouter(svc: IContainerSecretService): OpenA
   const app = new OpenAPIHono();
 
   app.openapi(createRoute({ method: 'post', path: '/', tags: ['container-secrets'], summary: '创建 ContainerSecret', request: { body: { content: { 'application/json': { schema: CreateContainerSecretSchema } } } }, responses: { 201: { description: 'ContainerSecret', content: { 'application/json': { schema: OkResponse(z.unknown()) } } }, 400: { description: 'Bad request', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
-    const secret = await svc.create(CreateContainerSecretSchema.parse(await c.req.json()));
+    const secret = await svc.create(await CreateContainerSecretSchema.parse(c.req.json()));
     return c.json(ok(redact(secret)), 201);
   });
 
@@ -27,7 +27,7 @@ export function createContainerSecretRouter(svc: IContainerSecretService): OpenA
   });
 
   app.openapi(createRoute({ method: 'put', path: '/{id}', tags: ['container-secrets'], summary: '更新 ContainerSecret', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'ContainerSecret', content: { 'application/json': { schema: OkResponse(z.unknown()) } } }, 404: { description: 'Not found', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
-    const body: unknown = await c.req.json();
+    const body = await z.unknown().parse(c.req.json());
     const secret = await svc.update(c.req.param('id'), UpdateContainerSecretSchema.parse(body));
     return c.json(ok(redact(secret)));
   });
@@ -63,7 +63,7 @@ export function createContainerSecretRouter(svc: IContainerSecretService): OpenA
   });
 
   app.openapi(createRoute({ method: 'put', path: '/{id}/scopes', tags: ['container-secrets'], summary: '设置 secret 的 selectedScopeIds', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'ContainerSecret', content: { 'application/json': { schema: OkResponse(z.unknown()) } } }, 404: { description: 'Not found', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
-    const body: unknown = await c.req.json();
+    const body = await z.unknown().parse(c.req.json());
     const parsed = z.array(z.string()).parse(body);
     const secret = await svc.update(c.req.param('id'), { selectedScopeIds: parsed });
     return c.json(ok(redact(secret)));

@@ -229,7 +229,6 @@ function triggerEquals(a: TransitionTrigger, b: TransitionTrigger): boolean {
   if (a.kind !== b.kind) return false;
   if (a.kind === 'System') return a.event === (b as typeof a).event;
   if (a.kind === 'Api') return a.operation === (b as typeof a).operation;
-  // RestartPolicy
   return a.exitCode === (b as typeof a).exitCode && a.policy === (b as typeof a).policy;
 }
 

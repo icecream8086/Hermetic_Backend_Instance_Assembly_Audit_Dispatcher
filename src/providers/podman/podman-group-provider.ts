@@ -229,7 +229,7 @@ export class PodmanContainerGroupProvider implements IContainerGroupProvider {
   ): Promise<ContainerGroupRuntime | null> {
     let detail: PodmanPodInspectResult;
     // PodmanPodInspectResult has 'State', PodmanPodListItem has 'Status' — discriminate by field
-    if ('State' in pod) {
+    if (pod.State != null) {
       detail = pod;
     } else {
       const resp = await fetch(`${this.#libpodApi}/pods/${encodeURIComponent(pod.Id)}/json`);

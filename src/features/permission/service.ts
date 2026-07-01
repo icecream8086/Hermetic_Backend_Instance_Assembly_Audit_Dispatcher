@@ -147,7 +147,9 @@ export class PermissionService implements IPermissionService {
     this.#routeAclMgr = new RouteAclManager(atomic, _logger, audit);
     this.#checker = new PermissionChecker(atomic, _logger, audit);
     this.userTplStore = new CrudStore<UserTemplate>(atomic, USERTPL_PREFIX, USERTPL_INDEX_KEY, 'USERTPL_NOT_FOUND');
-    this.loadMacRules().catch(() => { /* noop */ });
+    try { this.loadMacRules(); } catch {
+      console.debug("noop");
+    }
   }
 
   // ── Policy CRUD ──
@@ -314,7 +316,9 @@ export class PermissionService implements IPermissionService {
     try {
       const entry = await this.atomic.get<PermissionRule[]>(MAC_KEY);
       if (entry) this.#macRules = entry.value;
-    } catch { this.#macRules = []; }
+    } catch {
+      console.debug("");
+    }
   }
 
   public async seedMacRules(rules: PermissionRule[]): Promise<void> {

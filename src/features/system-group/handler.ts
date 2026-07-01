@@ -29,7 +29,7 @@ export function createSysGroupRouter(svc: ISysGroupService): OpenAPIHono<{ Varia
     }),
     async (c) => {
       requireRoot(c);
-      const body = CreateSysGroupSchema.parse(await c.req.json());
+      const body = await CreateSysGroupSchema.parse(c.req.json());
       const group = await svc.create(body, c.var.currentUser?.id);
       return c.json(ok(group), 201);
     },
@@ -84,7 +84,7 @@ export function createSysGroupRouter(svc: ISysGroupService): OpenAPIHono<{ Varia
     }),
     async (c) => {
       requireRoot(c);
-      const body = UpdateSysGroupSchema.parse(await c.req.json());
+      const body = await UpdateSysGroupSchema.parse(c.req.json());
       return c.json(ok(await svc.update(c.req.param('id'), body, c.var.currentUser?.id)));
     },
   );

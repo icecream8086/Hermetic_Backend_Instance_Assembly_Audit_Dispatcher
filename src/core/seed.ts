@@ -170,7 +170,7 @@ export async function seedPolicyLibrary(atomic: IAtomicStore): Promise<void> {
 async function seedDefaultInstance(atomic: IAtomicStore): Promise<string | undefined> {
   const KEY = '_init:default-instance';
   const entry = await atomic.get<any>(KEY);
-  if (entry !== null) return entry.value.instanceId as string;
+  if (entry !== null) return entry.value.instanceId;
 
   try {
     const { InstanceService } = await import('./region/instance.ts');
