@@ -58,8 +58,8 @@ export class Dag<TId, TNode> {
     if (!this.nodes.has(from)) throw new TypeError(`Dag.addEdge: source node "${String(from)}" does not exist`);
     if (!this.nodes.has(to)) throw new TypeError(`Dag.addEdge: target node "${String(to)}" does not exist`);
 
-    this.outgoing.get(from)!.add(to);
-    this.incoming.get(to)!.add(from);
+    this.outgoing.get(from)?.add(to);
+    this.incoming.get(to)?.add(from);
   }
 
   // ─── Queries ───
@@ -105,10 +105,10 @@ export class Dag<TId, TNode> {
   /** Nodes with in-degree 0 — no edges point TO them. */
   public sources(): readonly TNode[] {
     const result: TNode[] = [];
-    for (const [id] of this.nodes) {
+    for (const [id, node] of this.nodes) {
       const inc = this.incoming.get(id);
       if (!inc || inc.size === 0) {
-        result.push(this.nodes.get(id)!);
+        result.push(node);
       }
     }
     return result;
@@ -117,10 +117,10 @@ export class Dag<TId, TNode> {
   /** Nodes with out-degree 0 — no edges point FROM them. */
   public sinks(): readonly TNode[] {
     const result: TNode[] = [];
-    for (const [id] of this.nodes) {
+    for (const [id, node] of this.nodes) {
       const out = this.outgoing.get(id);
       if (!out || out.size === 0) {
-        result.push(this.nodes.get(id)!);
+        result.push(node);
       }
     }
     return result;
@@ -159,8 +159,11 @@ export class Dag<TId, TNode> {
 
     const sorted: TNode[] = [];
     while (queue.length > 0) {
-      const id = queue.shift()!;
-      sorted.push(this.nodes.get(id)!);
+      const id = queue.shift();
+      if (id === undefined) break;
+      const node = this.nodes.get(id);
+      if (!node) continue;
+      sorted.push(node);
 
       for (const to of this.outgoing.get(id) ?? []) {
         const newDegree = (inDegree.get(to) ?? 1) - 1;
@@ -203,7 +206,9 @@ export class Dag<TId, TNode> {
 
       path.add(id);
       visited.add(id);
-      subgraph.addNode(this.nodes.get(id)!);
+      const subNode = this.nodes.get(id);
+      if (!subNode) return `Node "${String(id)}" not found in node storage`;
+      subgraph.addNode(subNode);
 
       for (const to of this.outgoing.get(id) ?? []) {
         const err = visit(to);

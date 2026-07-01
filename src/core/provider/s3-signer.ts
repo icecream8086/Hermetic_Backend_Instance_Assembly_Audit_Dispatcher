@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 // ─── AWS SigV4 signing for S3-compatible APIs ───
 // Uses Web Crypto API — works in Cloudflare Workers, Node 18+, Deno, Bun.
 // Used by both AWS S3 and Cloudflare R2 providers.
@@ -118,8 +120,7 @@ export function emptyPayloadHash(): string {
 /** Compute the SHA-256 payload hash for a body. */
 export async function payloadHash(body: BufferSource | string): Promise<string> {
   let enc: BufferSource;
-  if (z.string().safeParse(body).success) enc = new TextEncoder().encode(body);
-  else enc = body;
+  try { enc = new TextEncoder().encode(z.string().parse(body)); } catch { enc = body; }
   const hash = await crypto.subtle.digest('SHA-256', enc);
   return bytesToHex(new Uint8Array(hash));
 }

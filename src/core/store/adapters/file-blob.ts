@@ -3,6 +3,7 @@ import { mkdir, stat, unlink } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { Readable } from 'node:stream';
 import type { IBlobStore, BlobMetadata } from '../interfaces.ts';
+import { z } from 'zod';
 
 /**
  * Local file-based blob store for Node.js development.
@@ -29,9 +30,10 @@ export class FileBlobStore implements IBlobStore {
     const fp = this.#filePath(key);
 
     // Handle ArrayBuffer, Buffer (Uint8Array), and other binary types
-    if (z.instanceof(ArrayBuffer).safeParse(body).success || ArrayBuffer.isView(body)) {
+    const isArrayBuffer = (() => { try { z.instanceof(ArrayBuffer).parse(body); return true; } catch { return false; } })();
+    if (isArrayBuffer || ArrayBuffer.isView(body)) {
       const { writeFile } = await import('node:fs/promises');
-      await writeFile(fp, z.instanceof(ArrayBuffer).safeParse(body).success ? Buffer.from(body as ArrayBuffer) : Buffer.from((body as Uint8Array).buffer, (body as Uint8Array).byteOffset, (body as Uint8Array).byteLength));
+      await writeFile(fp, isArrayBuffer ? Buffer.from(body as ArrayBuffer) : Buffer.from((body as Uint8Array).buffer, (body as Uint8Array).byteOffset, (body as Uint8Array).byteLength));
     } else {
       // ReadableStream → write to file
       const chunks: Uint8Array[] = [];

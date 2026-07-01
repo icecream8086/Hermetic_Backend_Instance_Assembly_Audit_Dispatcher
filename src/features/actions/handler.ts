@@ -114,10 +114,7 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
   // ── Workflow CRUD ──
 
   app.openapi(createRoute({ method: 'post', path: '/workflows', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => { await guard('create', 'action:workflow')(c);
-    const parsed = await CreateWorkflowSchema.parse(c.req.json());
-    if (!parsed.success) throw new AppError(400, 'INVALID_WORKFLOW', parsed.error.message);
-
-    const input = parsed.data;
+    const input = CreateWorkflowSchema.parse(await c.req.json());
     const id = createWorkflowDefId(`wf_${crypto.randomUUID()}`);
     const now = Date.now();
 
@@ -155,7 +152,11 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
     const entries = await Promise.all(
       pageIds.map(i => atomic.get<WorkflowDef>(PFX_WORKFLOW_DEF + i)),
     );
-    return c.json(ok({ items: entries.filter(e => e).map(e => e!.value), total, page, limit }));
+    const items: WorkflowDef[] = [];
+    for (const e of entries) {
+      if (e) items.push(e.value);
+    }
+    return c.json(ok({ items, total, page, limit }));
   });
 
   app.openapi(createRoute({ method: 'get', path: '/workflows/:id', tags: ['actions'], responses: { 200: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
@@ -325,7 +326,11 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
     const entries = await Promise.all(
       pageIds.map(i => atomic.get<WorkflowRun>(PFX_WORKFLOW_RUN + i)),
     );
-    return c.json(ok({ items: entries.filter(e => e).map(e => e!.value), total, page, limit }));
+    const items: WorkflowRun[] = [];
+    for (const e of entries) {
+      if (e) items.push(e.value);
+    }
+    return c.json(ok({ items, total, page, limit }));
   });
 
   app.openapi(createRoute({ method: 'get', path: '/runs/:id', tags: ['actions'], responses: { 200: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
@@ -341,7 +346,11 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
     const jobRuns = await Promise.all(
       wfEntry.value.jobRunRefs.map(ref => atomic.get<JobRun>(PFX_JOB_RUN + ref.jobRunId)),
     );
-    return c.json(ok(jobRuns.filter(j => j).map(j => j!.value)));
+    const jobItems: JobRun[] = [];
+    for (const j of jobRuns) {
+      if (j) jobItems.push(j.value);
+    }
+    return c.json(ok(jobItems));
   });
 
   /** DAG endpoint — returns nodes + edges with real-time status for dependency graph rendering. */
@@ -357,7 +366,10 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
     const jobRuns = await Promise.all(
       run.jobRunRefs.map(ref => atomic.get<JobRun>(PFX_JOB_RUN + ref.jobRunId)),
     );
-    const statusMap = new Map(jobRuns.filter(j => j).map(j => [j!.value.jobName, j!.value]));
+    const statusMap = new Map<string, JobRun>();
+    for (const j of jobRuns) {
+      if (j) statusMap.set(j.value.jobName, j.value);
+    }
 
     const nodes = run.jobRunRefs.map(ref => ({
       id: ref.jobName,
@@ -454,7 +466,7 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
   });
 
   app.openapi(createRoute({ method: 'post', path: '/orgs/:id/members', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
-    const {} = await z.unknown().parse(c.req.json());
+    const { userId } = z.object({ userId: z.string() }).parse(await c.req.json());
     await orgService.addMember(c.req.param('id'), userId);
     return c.json(ok({ ok: true }));
   });
@@ -478,15 +490,15 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
   const approvalService = new ApprovalService(atomic);
 
   app.openapi(createRoute({ method: 'post', path: '/runs/:id/approvals', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
-    const {} = await z.unknown().parse(c.req.json());
+    const { jobName, approvers } = z.object({ jobName: z.string(), approvers: z.array(z.string()) }).parse(await c.req.json());
     const node = await approvalService.request(c.req.param('id'), jobName, approvers);
     return c.json(ok(node), 201);
   });
 
   app.openapi(createRoute({ method: 'post', path: '/approvals/:id/decide', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
-    const {} = await z.unknown().parse(c.req.json());
-    const userId = c.var.currentUser?.id ?? 'anonymous';
-    const node = await approvalService.decide(c.req.param('id'), userId, approved, reason);
+    const { approved, reason } = z.object({ approved: z.boolean(), reason: z.string().optional() }).parse(await c.req.json());
+    const currentUserId = c.var.currentUser?.id ?? 'anonymous';
+    const node = await approvalService.decide(c.req.param('id'), currentUserId, approved, reason);
     return c.json(ok(node));
   });
 
@@ -504,7 +516,7 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
     const wfEntry = await atomic.get<WorkflowDef>(PFX_WORKFLOW_DEF + wid);
     if (!wfEntry) throw new AppError(404, 'WORKFLOW_NOT_FOUND', 'Workflow not found');
 
-    const {} = await z.unknown().parse(c.req.json());
+    const { key, value } = z.object({ key: z.string(), value: z.string() }).parse(await c.req.json());
     if (!key || value === undefined) throw new AppError(400, 'INVALID_SECRET', 'key and value required');
 
     const secret = await secretService.set(wid, key, value);
@@ -584,7 +596,8 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
   });
 
   app.openapi(createRoute({ method: 'get', path: '/runners', tags: ['actions'], responses: { 200: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
-    const labels = c.req.query('labels') ? parseJson(c.req.query('labels')!) : undefined;
+    const labelsParam = c.req.query('labels');
+    const labels = labelsParam ? parseJson(labelsParam) : undefined;
     const runners = await runnerRegistry.listOnline(labels);
     return c.json(ok(runners));
   });

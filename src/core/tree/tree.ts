@@ -78,10 +78,12 @@ export class Tree<T> {
     if (!this.root) return undefined;
     const stack: TreeNode<T>[] = [this.root];
     while (stack.length > 0) {
-      const node = stack.pop()!;
+      const node = stack.pop();
+      if (!node) continue;
       if (predicate(node.value)) return node;
       for (let i = node.children.length - 1; i >= 0; i--) {
-        stack.push(node.children[i]!);
+        const child = node.children[i];
+        if (child) stack.push(child);
       }
     }
   }
@@ -156,7 +158,8 @@ export class Tree<T> {
     if (!this.root) return;
     const queue: TreeNode<T>[] = [this.root];
     while (queue.length > 0) {
-      const node = queue.shift()!;
+      const node = queue.shift();
+      if (!node) continue;
       result.push(node.value);
       for (const child of node.children) {
         queue.push(child);
@@ -168,7 +171,8 @@ export class Tree<T> {
     if (!this.root || target === this.root) return undefined;
     const stack: TreeNode<T>[] = [this.root];
     while (stack.length > 0) {
-      const node = stack.pop()!;
+      const node = stack.pop();
+      if (!node) continue;
       for (const child of node.children) {
         if (child === target) return node;
         stack.push(child);
@@ -179,7 +183,8 @@ export class Tree<T> {
   #subtractSize(node: TreeNode<T>): void {
     const stack: TreeNode<T>[] = [node];
     while (stack.length > 0) {
-      const n = stack.pop()!;
+      const n = stack.pop();
+      if (!n) continue;
       this._size--;
       for (const child of n.children) {
         stack.push(child);

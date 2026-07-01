@@ -36,7 +36,7 @@ export class PodmanImageProvider implements IImageProvider {
       url = `${this.#apiBase}/images/create?fromImage=${encodeURIComponent(image)}`;
     } else {
       const [name, tag] = image.includes(':') ? image.split(':') : [image, 'latest'];
-      url = `${this.#apiBase}/images/create?fromImage=${encodeURIComponent(name!)}&tag=${encodeURIComponent(tag!)}`;
+      url = `${this.#apiBase}/images/create?fromImage=${encodeURIComponent(name ?? '')}&tag=${encodeURIComponent(tag ?? '')}`;
     }
     const resp = await this.#fetch(url, { method: 'POST' });
     if (!resp) throw new Error('Podman daemon unreachable');
@@ -49,7 +49,7 @@ export class PodmanImageProvider implements IImageProvider {
       }
       throw new Error(`Podman pull failed (${String(resp.status)}):${errBody}`);
     }
-    return this.inspect(image).then(r => r!);
+    return this.inspect(image).then(r => { if (!r) throw new Error('Podman inspect returned null after pull'); return r; });
   }
 
   public async list(options?: ListImagesOptions): Promise<readonly ImageInfo[]> {
@@ -104,7 +104,7 @@ export class PodmanImageProvider implements IImageProvider {
       }
       throw new Error(`Podman push failed (${String(resp.status)}):${errBody}`);
     }
-    return this.inspect(imageOrId).then(r => r!);
+    return this.inspect(imageOrId).then(r => { if (!r) throw new Error('Podman inspect returned null after push'); return r; });
   }
 
   public async search(term: string): Promise<readonly { name: string; description?: string | undefined; isOfficial?: boolean | undefined }[]> {
@@ -117,7 +117,7 @@ export class PodmanImageProvider implements IImageProvider {
 
   public async tag(id: string, tag: string): Promise<void> {
     const [repo, t] = tag.includes(':') ? tag.split(':') : [tag, 'latest'];
-    const resp = await this.#fetch(`${this.#apiBase}/images/${encodeURIComponent(id)}/tag?repo=${encodeURIComponent(repo!)}&tag=${encodeURIComponent(t!)}`, { method: 'POST' });
+    const resp = await this.#fetch(`${this.#apiBase}/images/${encodeURIComponent(id)}/tag?repo=${encodeURIComponent(repo ?? '')}&tag=${encodeURIComponent(t ?? '')}`, { method: 'POST' });
     if (!resp) throw new Error('Podman daemon unreachable');
     if (!resp.ok) throw new Error(`Podman tag failed (${String(resp.status)})`);
   }
@@ -156,7 +156,7 @@ export class PodmanImageProvider implements IImageProvider {
     }
     // build returns a stream — resolve the image from the tag
     if (options?.tag) {
-      return this.inspect(options.tag).then(r => r ?? this.inspect(options.tag!.split(':')[0]!).then(r2 => r2!));
+      return this.inspect(options.tag).then(r => r ?? this.inspect(options.tag.split(':')[0] ?? '').then(r2 => { if (!r2) throw new Error('Podman inspect returned null after build'); return r2; }));
     }
     // No tag provided, find the newest image
     const all = await this.list();

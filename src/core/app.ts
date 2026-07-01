@@ -15,7 +15,6 @@ import { register as registerScheduler, startAll, stopAll } from './scheduler/re
 import { EventBus } from './event-bus/bus.ts';
 import { EventLoop } from './event-bus/loop.ts';
 import { SecretEncryption } from './auth/secret-encryption.ts';
-import type { EventLoopConfig, TriggerEventInput } from './event-bus/types.ts';
 import type { IAuditWriter, IAuditReader } from './audit/types.ts';
 import type { Sandbox } from '../features/sandbox/types.ts';
 import { createSandboxId } from '../features/sandbox/types.ts';
@@ -40,6 +39,7 @@ import type { AppContext, FeatureDeps, AppInstance } from './deps.ts';
 import { registerHealthCheck } from './events/health-check.ts';
 import { registerImagePullHandler } from './events/image-pull.ts';
 import { registerLogFetchHandler } from './events/log-fetch.ts';
+import { z } from 'zod';
 // Re-export for external consumers (index.ts, dev.ts, feature handlers)
 export type { AppContext, FeatureDeps, AppInstance } from './deps.ts';
 
@@ -255,11 +255,12 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
   let permService: PermissionService | undefined;
   if (config.authz?.enabled !== false) {
     permService = new PermissionService(stores.atomic, new ConsoleLogger(), audit);
+    const ps = permService;
     app.use('/api/*', authz({
       store: 'auto',
       audit,
       checkRouteAccess: async (method, path, userId) => {
-        return permService!.checkRouteAccess(method, path, userId);
+        return ps.checkRouteAccess(method, path, userId);
       },
       publicPaths: [
         '/api/users/register',
@@ -322,7 +323,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
 
   // 10. Migration endpoint (local only) — rebuild sharded user index from existing user keys
   app.post('/__admin/migrate-user-index', async (c) => {
-    const { ids } = await z.unknown().parse(c.req.json());
+    const { ids } = z.object({ ids: z.array(z.string()) }).parse(await c.req.json());
     const atomic = stores.atomic;
     const SHARDS = 16;
     const shards = Array.from({ length: SHARDS }, (_, i) => ({ key: 'user:idx:' + String(i), ids: new Set<string>() }));
@@ -333,7 +334,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
         let hash = 5381;
         for (let i = 0; i < id.length; i++) { hash = ((hash << 5) + hash) + id.charCodeAt(i); hash |= 0; }
         const si = Math.abs(hash) % SHARDS;
-        shards[si]!.ids.add(id);
+        shards[si]?.ids.add(id);
         count++;
       }
     }
@@ -348,8 +349,8 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
   // 11. Event management API routes
   const events = new Hono<{ Variables: AppContext }>()
     .post('/', async (c) => {
-      const input = await z.unknown().parse(c.req.json());
-      const event = eventLoop.enqueueTrigger(input);
+      const parsed = z.object({ type: z.string(), payload: z.unknown().optional(), metadata: z.record(z.string(), z.unknown()).optional() }).parse(await c.req.json());
+      const event = eventLoop.enqueueTrigger({ type: parsed.type, ...(parsed.payload !== undefined ? { payload: parsed.payload } : {}), ...(parsed.metadata !== undefined ? { metadata: parsed.metadata } : {}) });
       return c.json({ id: event.id }, 202);
     })
     .get('/loop/status', (c) => c.json(eventLoop.status()))
@@ -359,9 +360,8 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
     .post('/loop/pause', (c) => { eventLoop.pause(); return c.json({ ok: true }); })
     .post('/loop/resume', (c) => { eventLoop.resume(); return c.json({ ok: true }); })
     .post('/loop/configure', async (c) => {
-      // eslint-disable-next-line @typescript-eslint/no-restricted-types -- config patches naturally allow any subset of fields
-      const body = await z.unknown().parse(c.req.json());
-      return c.json(eventLoop.configure(body));
+      const parsed = z.object({ intervalMs: z.number().optional(), autoStart: z.boolean().optional(), batchSize: z.number().optional(), maxQueueSize: z.number().optional() }).parse(await c.req.json());
+      return c.json(eventLoop.configure({ ...(parsed.intervalMs !== undefined ? { intervalMs: parsed.intervalMs } : {}), ...(parsed.autoStart !== undefined ? { autoStart: parsed.autoStart } : {}), ...(parsed.batchSize !== undefined ? { batchSize: parsed.batchSize } : {}), ...(parsed.maxQueueSize !== undefined ? { maxQueueSize: parsed.maxQueueSize } : {}) }));
     });
   app.route('/api/events', events);
 
@@ -421,9 +421,11 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
 
     const containers = sandbox.containers;
     if (containers.length === 0) return c.json(fail('NO_CONTAINER', 'No containers in sandbox'), 400);
-    const containerName = containers[0]!.name;
-    const tail = c.req.query('tail') ? parseInt(c.req.query('tail')!) : undefined;
-    const since = c.req.query('since') ? parseInt(c.req.query('since')!) : undefined;
+    const containerName = containers[0]?.name ?? '';
+    const tailParam = c.req.query('tail');
+    const tail = tailParam ? parseInt(tailParam) : undefined;
+    const sinceParam = c.req.query('since');
+    const since = sinceParam ? parseInt(sinceParam) : undefined;
 
     try {
       const logProvider = await providers.resolveContainer(sandbox.config.instanceId);
@@ -468,10 +470,12 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
       }
 
       const stub = logStreamNs.get(logStreamNs.idFromName('logstream:' + id));
+      const tailQ = c.req.query('tail');
+      const sinceQ = c.req.query('since');
       const qs = new URLSearchParams({ providerId: sandbox.providerId, provider: 'podman', endpoint,
         containerName: sandbox.containers[0]?.name ?? '',
-        ...(c.req.query('tail') ? { tail: c.req.query('tail')! } : {}),
-        ...(c.req.query('since') ? { since: c.req.query('since')! } : {}),
+        ...(tailQ ? { tail: tailQ } : {}),
+        ...(sinceQ ? { since: sinceQ } : {}),
       });
       return stub.fetch(new URL(`/logs?${qs.toString()}`, 'https://do/'), c.req.raw);
     });

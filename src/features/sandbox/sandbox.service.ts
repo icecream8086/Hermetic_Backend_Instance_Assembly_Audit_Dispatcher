@@ -37,6 +37,7 @@ import type { InstanceService } from '../../core/region/instance.ts';
 import type { IMessageQueue } from '../../queue/interfaces.ts';
 import { SandboxStore } from './sandbox-store.ts';
 import { runtimeToNetwork, runtimeToContainers, runtimeToEvents } from './runtime-mapper.ts';
+import { z } from 'zod';
 
 const FACILITY = createFacility('sandbox-service');
 const KEY_PREFIX = 'sandbox:';
@@ -623,10 +624,8 @@ export function podSpecToSandboxInput(spec: {
   const containers = names.map(name => {
     const svc = spec.services[name]!;
     let args: string[] | undefined;
-    if (z.string().safeParse(svc.command).success) {
-      args = [svc.command];
-    } else if (svc.command !== undefined) {
-      args = [...svc.command];
+    try { z.string().parse(svc.command); args = [svc.command]; } catch {
+      if (svc.command !== undefined) args = [...svc.command];
     }
     const env = svc.environment
       ? Object.entries(svc.environment).map(([k, v]) => ({ name: k, value: v }))

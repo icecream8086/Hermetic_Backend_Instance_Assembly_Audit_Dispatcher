@@ -5,6 +5,7 @@
 // Design: these accept plain-old-data input (not domain entity types) so they
 // can be reused across different source types without cross-feature imports.
 
+import { z } from 'zod';
 import type {
   ContainerPortConfig,
   EnvVar,
@@ -45,9 +46,10 @@ export interface MappableEnv {
 export function mapEnv(e: MappableEnv): EnvVar {
   let valueFrom: EnvVar['valueFrom'] | undefined;
   if (e.valueFrom !== undefined) {
-    if (z.string().safeParse(e.valueFrom).success) {
-      valueFrom = { fieldRef: { fieldPath: e.valueFrom } };
-    } else {
+    try {
+      const strVal = z.string().parse(e.valueFrom);
+      valueFrom = { fieldRef: { fieldPath: strVal } };
+    } catch {
       valueFrom = e.valueFrom;
     }
   }

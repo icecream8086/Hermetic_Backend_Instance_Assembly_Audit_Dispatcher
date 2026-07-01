@@ -4,6 +4,7 @@ import type { SecretEncryption } from '../../core/auth/secret-encryption.ts';
 import type { UserKeyring } from '../../core/auth/keyring.ts';
 import { SealedBox } from '../../core/auth/sealed-box.ts';
 import type { ContainerSecret, CreateContainerSecretInput, UpdateContainerSecretInput } from './types.ts';
+import { z } from 'zod';
 
 const PREFIX = 'ctsecret:';
 const INDEX_KEY = 'ctsecret:ids';
@@ -139,7 +140,8 @@ export class ContainerSecretService implements IContainerSecretService {
     const blobKey = `ctsecret:${id}:${filename}`;
     await this.blob.put(blobKey, body, { ...(mimeType ? { contentType: mimeType } : {}) });
 
-    const size = z.instanceof(ArrayBuffer).safeParse(body).success ? (body as ArrayBuffer).byteLength : undefined;
+    const isAb = (() => { try { z.instanceof(ArrayBuffer).parse(body); return true; } catch { return false; } })();
+    const size = isAb ? (body as ArrayBuffer).byteLength : undefined;
     const existing = normalizeSecret(entry.value);
     const updated: ContainerSecret = {
       ...existing,

@@ -88,10 +88,9 @@ function subCrud<T>(opts: SubCrudOpts<T>): CrudHandlerMap {
   return {
     create: (r) => r.post('/', async (c) => {
       { const rv = opts.guard(c); if (rv) return rv; }
-      const body = await z.unknown().parse(c.req.json());
-      const parsed = opts.createSchema.safeParse(body);
-      if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
-      const result = await opts.createFn(parsed.data, actorFrom(c));
+      const raw = await c.req.json();
+      const data = opts.createSchema.parse(raw);
+      const result = await opts.createFn(data, actorFrom(c));
       return c.json(ok(result), 201);
     }),
 
@@ -110,10 +109,9 @@ function subCrud<T>(opts: SubCrudOpts<T>): CrudHandlerMap {
 
     update: (r) => r.put('/:id', async (c) => {
       { const rv = opts.guard(c); if (rv) return rv; }
-      const body = await z.unknown().parse(c.req.json());
-      const parsed = opts.updateSchema.safeParse(body);
-      if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
-      return c.json(ok(await opts.updateFn(c.req.param('id'), parsed.data, actorFrom(c))));
+      const raw = await c.req.json();
+      const data = opts.updateSchema.parse(raw);
+      return c.json(ok(await opts.updateFn(c.req.param('id'), data, actorFrom(c))));
     }),
 
     delete: (r) => r.delete('/:id', async (c) => {
@@ -208,13 +206,12 @@ export function createPermissionRouter(svc: IPermissionService): OpenAPIHono<{ V
     permGroups.post('/from-template/:templateId', async (c) => {
       { const r = requireRoot(c); if (r) return r; }
       const body = await z.unknown().parse(c.req.json());
-      const parsed = CreatePermGroupSchema.partial().safeParse(body);
-      if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
+      const templateData = CreatePermGroupSchema.partial().parse(body);
       const group = await svc.createPermGroupFromTemplate(c.req.param('templateId'), {
-        name: parsed.data.name ?? c.req.param('templateId'),
-        description: parsed.data.description,
-        userGroupIds: parsed.data.userGroupIds,
-        userIds: parsed.data.userIds,
+        name: templateData.name ?? c.req.param('templateId'),
+        description: templateData.description,
+        userGroupIds: templateData.userGroupIds,
+        userIds: templateData.userIds,
       }, actorFrom(c));
       return c.json(ok(group), 201);
     });
@@ -279,11 +276,10 @@ export function createPermissionRouter(svc: IPermissionService): OpenAPIHono<{ V
   // ─── Invitations ───
   app.openapi(createRoute({ method: 'post', path: '/invite', tags: ['permission'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
     const body = await z.unknown().parse(c.req.json());
-    const parsed = CreateInviteSchema.safeParse(body);
-    if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
+    const inviteData = CreateInviteSchema.parse(body);
     const user = c.var.currentUser;
     if (!user) return c.json(fail('UNAUTHORIZED', 'Authentication required'), 401);
-    const invite = await svc.sendInvite(parsed.data, user.id);
+    const invite = await svc.sendInvite(inviteData, user.id);
     return c.json(ok(invite), 201);
   });
 
@@ -323,8 +319,8 @@ export function createPermissionRouter(svc: IPermissionService): OpenAPIHono<{ V
   // ─── Capability management ───
   app.openapi(createRoute({ method: 'put', path: '/caps/user/:userId', tags: ['permission'], responses: { 200: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
     { const r = requireRoot(c); if (r) return r; }
-    const { caps } = await z.unknown().parse(c.req.json());
-    if (!z.number().safeParse(caps).success) return c.json(fail('VALIDATION_ERROR', 'caps must be a number (bitmask)'), 400);
+    const raw = await c.req.json();
+    const caps = z.number().parse(z.object({ caps: z.unknown() }).parse(raw).caps);
     await svc.setUserCaps(c.req.param('userId'), caps, actorFrom(c));
     return c.json(ok({ userId: c.req.param('userId'), caps }));
   });
@@ -336,8 +332,8 @@ export function createPermissionRouter(svc: IPermissionService): OpenAPIHono<{ V
 
   app.openapi(createRoute({ method: 'put', path: '/caps/group/:groupId', tags: ['permission'], responses: { 200: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
     { const r = requireRoot(c); if (r) return r; }
-    const { caps } = await z.unknown().parse(c.req.json());
-    if (!z.number().safeParse(caps).success) return c.json(fail('VALIDATION_ERROR', 'caps must be a number (bitmask)'), 400);
+    const raw = await c.req.json();
+    const caps = z.number().parse(z.object({ caps: z.unknown() }).parse(raw).caps);
     await svc.setGroupCaps(c.req.param('groupId'), caps, actorFrom(c));
     return c.json(ok({ groupId: c.req.param('groupId'), caps }));
   });
@@ -388,9 +384,8 @@ export function createPermissionRouter(svc: IPermissionService): OpenAPIHono<{ V
   app.openapi(createRoute({ method: 'post', path: '/check', tags: ['permission'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
     { const r = requireRoot(c); if (r) return r; }
     const body = await z.unknown().parse(c.req.json());
-    const parsed = PermissionCheckSchema.safeParse(body);
-    if (!parsed.success) return c.json(fail('VALIDATION_ERROR', parsed.error.issues.map(i => i.message).join('; ')), 400);
-    return c.json(ok(await svc.check(parsed.data)));
+    const checkData = PermissionCheckSchema.parse(body);
+    return c.json(ok(await svc.check(checkData)));
   });
 
   return app;

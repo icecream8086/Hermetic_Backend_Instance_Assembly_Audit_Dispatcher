@@ -88,7 +88,11 @@ export function createAuditRouter(reader: IAuditReader): Hono<AuditEnv> {
     const userId = c.var.currentUser?.id;
     let body: unknown;
     try { body = await z.unknown().parse(c.req.json()); } catch { body = null; }
-    if (!body || !z.record(z.unknown()).safeParse(body).success) {
+    if (!body) {
+      return c.json(fail('INVALID_REQUEST', 'Expected JSON body'), 400);
+    }
+    let parsedBody: Record<string, unknown>;
+    try { parsedBody = z.record(z.string(), z.unknown()).parse(body); } catch {
       return c.json(fail('INVALID_REQUEST', 'Expected JSON body'), 400);
     }
 
@@ -96,10 +100,10 @@ export function createAuditRouter(reader: IAuditReader): Hono<AuditEnv> {
 
     // Merge partial updates
     const updated: PersistencePolicy = {
-      enabled: z.boolean().optional().parse(body.enabled) ?? current.enabled,
-      defaultMinLevel: parseLevel(body.defaultMinLevel) ?? current.defaultMinLevel,
-      rules: Array.isArray(body.rules)
-        ? body.rules.map((r: any, _i: number) => parseRule(r))
+      enabled: z.boolean().optional().parse(parsedBody.enabled) ?? current.enabled,
+      defaultMinLevel: parseLevel(parsedBody.defaultMinLevel) ?? current.defaultMinLevel,
+      rules: Array.isArray(parsedBody.rules)
+        ? parsedBody.rules.map((r: any, _i: number) => parseRule(r))
         : current.rules,
       updatedAt: Date.now(),
       updatedBy: userId ?? 'unknown',
@@ -133,18 +137,19 @@ export function createAuditRouter(reader: IAuditReader): Hono<AuditEnv> {
 // ─── Serialization helpers ───
 
 function parseLevel(raw: unknown): KernLevel | null {
-  if (!z.string().safeParse(raw).success) return null;
+  let str: string;
+  try { str = z.string().parse(raw); } catch { return null; }
   const map: Record<string, KernLevel> = {
     emerg: KernLevel.EMERG, alert: KernLevel.ALERT, crit: KernLevel.CRIT,
     err: KernLevel.ERR, warning: KernLevel.WARNING, notice: KernLevel.NOTICE,
     info: KernLevel.INFO, debug: KernLevel.DEBUG,
   };
-  return map[raw.toLowerCase()] ?? null;
+  return map[str.toLowerCase()] ?? null;
 }
 
 function parseRule(raw: Record<string, unknown>): PersistenceRule {
-  const rawFacility = z.string().safeParse(raw.facility).success ? raw.facility as string : '*';
-  void rawFacility;
+  let rawFacility: string;
+  try { rawFacility = z.string().parse(raw.facility); } catch { rawFacility = '*'; }
   const sampleRate = z.number().optional().parse(raw.sampleRate);
   const ttlMs = z.number().optional().parse(raw.ttlMs);
   return {

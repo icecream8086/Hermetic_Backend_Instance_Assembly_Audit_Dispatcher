@@ -99,7 +99,8 @@ export class BinaryTree<T> {
     if (!this.root) return undefined;
     const stack: BinaryTreeNode<T>[] = [this.root];
     while (stack.length > 0) {
-      const node = stack.pop()!;
+      const node = stack.pop();
+      if (!node) continue;
       if (predicate(node.value)) return node;
       if (node.right) stack.push(node.right);
       if (node.left) stack.push(node.left);
@@ -178,7 +179,8 @@ export class BinaryTree<T> {
     if (!this.root) return;
     const queue: BinaryTreeNode<T>[] = [this.root];
     while (queue.length > 0) {
-      const node = queue.shift()!;
+      const node = queue.shift();
+      if (!node) continue;
       result.push(node.value);
       if (node.left) queue.push(node.left);
       if (node.right) queue.push(node.right);
@@ -189,7 +191,8 @@ export class BinaryTree<T> {
     if (!this.root) return;
     const stack: BinaryTreeNode<T>[] = [this.root];
     while (stack.length > 0) {
-      const node = stack.pop()!;
+      const node = stack.pop();
+      if (!node) continue;
       result.push(node.value);
       if (node.right) stack.push(node.right);
       if (node.left) stack.push(node.left);
@@ -200,7 +203,8 @@ export class BinaryTree<T> {
     if (!this.root || target === this.root) return undefined;
     const stack: BinaryTreeNode<T>[] = [this.root];
     while (stack.length > 0) {
-      const node = stack.pop()!;
+      const node = stack.pop();
+      if (!node) continue;
       if (node.left === target || node.right === target) return node;
       if (node.right) stack.push(node.right);
       if (node.left) stack.push(node.left);
@@ -210,7 +214,8 @@ export class BinaryTree<T> {
   #subtractSize(node: BinaryTreeNode<T>): boolean {
     const stack: BinaryTreeNode<T>[] = [node];
     while (stack.length > 0) {
-      const n = stack.pop()!;
+      const n = stack.pop();
+      if (!n) continue;
       this._size--;
       if (n.right) stack.push(n.right);
       if (n.left) stack.push(n.left);

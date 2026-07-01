@@ -156,13 +156,16 @@ export class R2AuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
     if (this.#buffer.length === 0) return;
     const batch = this.#buffer.splice(0);
     const now = Date.now();
-    const key = `${this.#config.prefix}${String(now)}-${batch[0]!.id}.json`;
+    const first = batch[0];
+    if (!first) return;
+    const key = `${this.#config.prefix}${String(now)}-${first.id}.json`;
     await this.bucket.put(key, JSON.stringify(batch));
   }
 
   // ─── IAuditReader ───
 
   public async query(params?: LogQuery): Promise<{ entries: StoredAuditEntry[]; nextCursor?: string; total?: number }> {
+    const { startTs, endTs } = params ?? {};
     const limit = params?.limit ?? 100;
     const prefix = this.#config.prefix;
     const listResult = await this.bucket.list({
@@ -176,11 +179,12 @@ export class R2AuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
       const data = await this.bucket.get(obj.key);
       if (!data) continue;
       try {
-        const batch: StoredAuditEntry[] = z.unknown().parse(parseJson(new TextDecoder().decode(data.body)));
+        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- R2 storage boundary: deserialized JSON is guaranteed to match StoredAuditEntry shape
+        const batch = parseJson(new TextDecoder().decode(data.body)) as StoredAuditEntry[];
         let filtered = batch;
         if (params?.facility) filtered = filtered.filter(e => e.facility === params.facility);
-        if (params?.startTs !== undefined) filtered = filtered.filter(e => e.timestamp >= params.startTs!);
-        if (params?.endTs !== undefined) filtered = filtered.filter(e => e.timestamp <= params.endTs!);
+        if (startTs !== undefined) filtered = filtered.filter(e => e.timestamp >= startTs);
+        if (endTs !== undefined) filtered = filtered.filter(e => e.timestamp <= endTs);
         entries.push(...filtered);
       } catch {
         console.debug("");
@@ -192,8 +196,8 @@ export class R2AuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
     if (this.#buffer.length > 0) {
       let buf = [...this.#buffer];
       if (params?.facility) buf = buf.filter(e => e.facility === params.facility);
-      if (params?.startTs !== undefined) buf = buf.filter(e => e.timestamp >= params.startTs!);
-      if (params?.endTs !== undefined) buf = buf.filter(e => e.timestamp <= params.endTs!);
+      if (startTs !== undefined) buf = buf.filter(e => e.timestamp >= startTs);
+      if (endTs !== undefined) buf = buf.filter(e => e.timestamp <= endTs);
       entries.push(...buf);
     }
 
@@ -229,7 +233,8 @@ export class R2AuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
       const data = await this.bucket.get(obj.key);
       if (!data) continue;
       try {
-        const batch: StoredAuditEntry[] = z.unknown().parse(parseJson(new TextDecoder().decode(data.body)));
+        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- R2 storage boundary: deserialized JSON is guaranteed to match StoredAuditEntry shape
+        const batch = parseJson(new TextDecoder().decode(data.body)) as StoredAuditEntry[];
         const found = batch.find(e => e.id === id);
         if (found) return found;
       } catch {
@@ -247,9 +252,12 @@ export class R2AuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
     let removed = 0;
     for (const obj of result.objects) {
       const tsMatch = /(\d{13})-/.exec(obj.key);
-      if (tsMatch && parseInt(tsMatch[1]!) < beforeTs) {
-        await this.bucket.delete(obj.key);
-        removed++;
+      if (tsMatch) {
+        const ts = tsMatch[1];
+        if (ts && parseInt(ts) < beforeTs) {
+          await this.bucket.delete(obj.key);
+          removed++;
+        }
       }
     }
     return removed;

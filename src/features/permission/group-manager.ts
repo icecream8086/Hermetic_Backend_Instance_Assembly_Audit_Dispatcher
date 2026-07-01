@@ -16,6 +16,7 @@ import type {
   Template,
 } from './types.ts';
 import { generateUserGroupId, generatePermGroupId } from './types.ts';
+import { z } from 'zod';
 
 const FACILITY = createFacility('perm');
 
@@ -168,8 +169,7 @@ export class GroupManager {
 }
 
 function normalizeItem(item: string | { id: string }): { id: string } {
-  if (z.string().safeParse(item).success) return { id: item };
-  return item;
+  try { z.string().parse(item); return { id: item }; } catch { return item; }
 }
 
 function buildCompareResult(a: Record<string, unknown>, b: Record<string, unknown>): CompareResult {

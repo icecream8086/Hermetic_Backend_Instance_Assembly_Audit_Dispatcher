@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 /**
  * Provider extension field schema system.
  *
@@ -83,20 +85,39 @@ export function applyExtensionOverrides(
 
     switch (field.transform) {
       case undefined:
-        out[field.eciParam] = z.record(z.unknown()).safeParse(val).success ? JSON.stringify(val) : String(val);
+        try {
+          z.record(z.string(), z.unknown()).parse(val);
+          out[field.eciParam] = JSON.stringify(val);
+        } catch {
+          out[field.eciParam] = String(val);
+        }
         break;
       case 'boolean-string':
         // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- extension boundary: overrides values from external input may be falsy
         out[field.eciParam] = val ? 'true' : 'false';
         break;
       case 'number-string':
-        out[field.eciParam] = z.number().safeParse(val).success ? String(val) : '';
+        try {
+          z.number().parse(val);
+          out[field.eciParam] = String(val);
+        } catch {
+          out[field.eciParam] = '';
+        }
         break;
       case 'json-string':
         out[field.eciParam] = JSON.stringify(val);
         break;
       case 'comma-sep':
-        out[field.eciParam] = Array.isArray(val) ? val.join(',') : (z.string().safeParse(val).success ? val : '');
+        if (Array.isArray(val)) {
+          out[field.eciParam] = val.join(',');
+        } else {
+          try {
+            const sv = z.string().parse(val);
+            out[field.eciParam] = sv;
+          } catch {
+            out[field.eciParam] = '';
+          }
+        }
         break;
     }
   }
@@ -121,7 +142,7 @@ export function validateExtensionOverrides(
         case 'number': z.number().parse(v); break;
         case 'boolean': z.boolean().parse(v); break;
         case 'string': z.string().parse(v); break;
-        case 'object': z.record(z.unknown()).parse(v); break;
+        case 'object': z.record(z.string(), z.unknown()).parse(v); break;
         case 'string[]': z.array(z.string()).parse(v); break;
         case 'number[]': z.array(z.number()).parse(v); break;
       }
@@ -142,10 +163,13 @@ export function validateExtensionOverrides(
     }
 
     // Enum check
-    if (field.validation?.enum && z.string().safeParse(val).success) {
-      if (!field.validation.enum.includes(val)) {
-        errors.push(`${field.key} must be one of: ${field.validation.enum.join(', ')}`);
-      }
+    if (field.validation?.enum) {
+      try {
+        const strVal = z.string().parse(val);
+        if (!field.validation.enum.includes(strVal)) {
+          errors.push(`${field.key} must be one of: ${field.validation.enum.join(', ')}`);
+        }
+      } catch { /* val is not a string, skip enum check */ }
     }
 
     // Range check

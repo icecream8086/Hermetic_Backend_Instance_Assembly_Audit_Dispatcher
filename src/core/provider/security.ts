@@ -1,6 +1,7 @@
 import type { CreateContainerGroupInput, ContainerCreateConfig, ProbeSpec } from './types.ts';
 import type { IContainerProvider, IContainerGroupProvider } from './interfaces.ts';
 import type { PodSpec, ContainerSpec } from '../pod/types.ts';
+import { z } from 'zod';
 
 // ─── Probe sanitization ───
 
@@ -82,7 +83,7 @@ export function secureContainerProvider(inner: IContainerProvider): IContainerPr
         return (providerId: string, input: Partial<CreateContainerGroupInput>) =>          target.update!(providerId, sanitizeContainerInput(input as CreateContainerGroupInput));
       }
       const val = Reflect.get(target, prop, receiver);
-      if (z.function().safeParse(val).success) return val.bind(target);
+      try { return z.function().parse(val).bind(target); } catch { /* not a function — return raw value */ }
       return val;
     },
   });
@@ -119,7 +120,7 @@ export function secureContainerGroupProvider(inner: IContainerGroupProvider): IC
         return (input: PodSpec) => target.createPod(sanitizePodSpec(input));
       }
       const val = Reflect.get(target, prop, receiver);
-      if (z.function().safeParse(val).success) return val.bind(target);
+      try { return z.function().parse(val).bind(target); } catch { /* not a function — return raw value */ }
       return val;
     },
   });

@@ -75,9 +75,8 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
   app.openapi(createRoute({ method: 'get', path: '/login-info', tags: ['users'], summary: '查询邮箱的登录方式', responses: { 200: { description: 'LoginInfo', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
     const email = c.req.query('email');
     if (!email) throw new AppError(400, 'VALIDATION_ERROR', 'email query param required');
-    const parsed = z.email().safeParse(email);
-    if (!parsed.success) throw new AppError(400, 'VALIDATION_ERROR', 'Valid email required');
-    const info = await userService.getLoginInfo(parsed.data);
+    const parsedEmail = z.email().parse(email);
+    const info = await userService.getLoginInfo(parsedEmail);
     return c.json(ok(info));
   });
 

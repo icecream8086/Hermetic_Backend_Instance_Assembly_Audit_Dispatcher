@@ -131,9 +131,9 @@ export abstract class S3ClientBase implements IS3Provider {
     const xml = await res.text();
     const parts: { partNumber: number; size: number; etag: string }[] = [];
     for (const m of xml.matchAll(/<Part>(.*?)<\/Part>/gs)) {
-      const pn = parseInt((/<PartNumber>(.*?)<\/PartNumber>/.exec((m[1]!)))?.[1] ?? '0', 10);
-      const sz = parseInt((/<Size>(.*?)<\/Size>/.exec((m[1]!)))?.[1] ?? '0', 10);
-      const et = ((/<ETag>(.*?)<\/ETag>/.exec((m[1]!)))?.[1] ?? '').replace(/"/g, '');
+      const pn = parseInt((/<PartNumber>(.*?)<\/PartNumber>/.exec((m[1] ?? '')))?.[1] ?? '0', 10);
+      const sz = parseInt((/<Size>(.*?)<\/Size>/.exec((m[1] ?? '')))?.[1] ?? '0', 10);
+      const et = ((/<ETag>(.*?)<\/ETag>/.exec((m[1] ?? '')))?.[1] ?? '').replace(/"/g, '');
       parts.push({ partNumber: pn, size: sz, etag: et });
     }
     const truncated = xml.includes('<IsTruncated>true</IsTruncated>');
@@ -150,12 +150,18 @@ export abstract class S3ClientBase implements IS3Provider {
     const amzHeaders: Record<string, string> = { host: new URL(url).host };
     const res = await this.authFetch(url, method, path, '', amzHeaders, '');
     if (res.status === 404) return null;
+    const rb = res.body;
+    if (!rb) throw new Error('Empty response body');
+    const ct = res.headers.get('content-type');
+    const cl = res.headers.get('content-length');
+    const et = res.headers.get('etag');
+    const lm = res.headers.get('last-modified');
     return {
-      body: res.body!,
-      ...(res.headers.get('content-type') ? { contentType: res.headers.get('content-type')! } : {}),
-      ...(res.headers.get('content-length') ? { contentLength: Number(res.headers.get('content-length')) } : {}),
-      ...(res.headers.get('etag') ? { etag: (res.headers.get('etag') ?? '').replace(/"/g, '') } : {}),
-      ...(res.headers.get('last-modified') ? { lastModified: new Date(res.headers.get('last-modified')!) } : {}),
+      body: rb,
+      ...(ct ? { contentType: ct } : {}),
+      ...(cl ? { contentLength: Number(cl) } : {}),
+      ...(et ? { etag: et.replace(/"/g, '') } : {}),
+      ...(lm ? { lastModified: new Date(lm) } : {}),
     };
   }
 }
@@ -167,18 +173,20 @@ export function encodeKey(key: string): string {
 }
 
 export async function toArrayBuffer(body: ReadableStream | ArrayBuffer | Uint8Array): Promise<ArrayBuffer> {
-  if (z.instanceof(ReadableStream).safeParse(body).success) return new Response(body as ReadableStream).arrayBuffer();
-  if (z.instanceof(ArrayBuffer).safeParse(body).success) return body as ArrayBuffer;
-  return (body as Uint8Array).buffer.slice((body as Uint8Array).byteOffset, (body as Uint8Array).byteOffset + (body as Uint8Array).byteLength) as ArrayBuffer;
+  if (body instanceof ReadableStream) return new Response(body).arrayBuffer();
+  if (body instanceof ArrayBuffer) return body;
+  return body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength) as ArrayBuffer;
 }
 
 export function parseObjectInfo(key: string, res: Response): S3ObjectInfo {
+  const lm = res.headers.get('last-modified');
+  const ct = res.headers.get('content-type');
   return {
     key,
     size: Number(res.headers.get('content-length') ?? 0),
     etag: (res.headers.get('etag') ?? '').replace(/"/g, ''),
-    lastModified: res.headers.get('last-modified') ? new Date(res.headers.get('last-modified')!) : new Date(0),
-    ...(res.headers.get('content-type') ? { contentType: res.headers.get('content-type')! } : {}),
+    lastModified: lm ? new Date(lm) : new Date(0),
+    ...(ct ? { contentType: ct } : {}),
   };
 }
 
@@ -190,11 +198,11 @@ export function parseListResult(xml: string): S3ListObjectsResult {
 
   const contents = xml.matchAll(/<Contents>(.*?)<\/Contents>/gs);
   for (const match of contents) {
-    const key = (/<Key>(.*?)<\/Key>/.exec((match[1]!)))?.[1] ?? '';
-    const size = parseInt((/<Size>(.*?)<\/Size>/.exec((match[1]!)))?.[1] ?? '0', 10);
-    const etag = ((/<ETag>(.*?)<\/ETag>/.exec((match[1]!)))?.[1] ?? '').replace(/"/g, '');
-    const lastMod = (/<LastModified>(.*?)<\/LastModified>/.exec((match[1]!)))?.[1];
-    const ct = (/<ContentType>(.*?)<\/ContentType>/.exec((match[1]!)))?.[1];
+    const key = (/<Key>(.*?)<\/Key>/.exec((match[1] ?? '')))?.[1] ?? '';
+    const size = parseInt((/<Size>(.*?)<\/Size>/.exec((match[1] ?? '')))?.[1] ?? '0', 10);
+    const etag = ((/<ETag>(.*?)<\/ETag>/.exec((match[1] ?? '')))?.[1] ?? '').replace(/"/g, '');
+    const lastMod = (/<LastModified>(.*?)<\/LastModified>/.exec((match[1] ?? '')))?.[1];
+    const ct = (/<ContentType>(.*?)<\/ContentType>/.exec((match[1] ?? '')))?.[1];
     objects.push({
       key: decodeURIComponent(key), size, etag,
       lastModified: lastMod ? new Date(lastMod) : new Date(0),
@@ -204,7 +212,7 @@ export function parseListResult(xml: string): S3ListObjectsResult {
 
   const prefixes = xml.matchAll(/<CommonPrefixes>(.*?)<\/CommonPrefixes>/gs);
   for (const match of prefixes) {
-    const prefix = (/<Prefix>(.*?)<\/Prefix>/.exec((match[1]!)))?.[1] ?? '';
+    const prefix = (/<Prefix>(.*?)<\/Prefix>/.exec((match[1] ?? '')))?.[1] ?? '';
     commonPrefixes.push(prefix);
   }
 

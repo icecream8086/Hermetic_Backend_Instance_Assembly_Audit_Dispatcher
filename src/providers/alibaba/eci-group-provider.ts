@@ -12,6 +12,7 @@ import type { ContainerGroupRuntime } from '../../core/provider/types.ts';
 import type { PodSpec } from '../../core/pod/types.ts';
 import { AlibabaPodCodec } from './pod-codec.ts';
 import { rpcCall } from './eci-signer.ts';
+import { z } from 'zod';
 
 export class AlibabaEciContainerGroupProvider implements IContainerGroupProvider {
   private readonly accessKeyId: string;

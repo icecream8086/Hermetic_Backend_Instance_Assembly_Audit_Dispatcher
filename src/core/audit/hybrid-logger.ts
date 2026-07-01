@@ -127,10 +127,11 @@ export class HybridAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmi
   }
 
   #filterEntries(params?: LogQuery): StoredAuditEntry[] {
+    const { startTs, endTs } = params ?? {};
     let f = [...this.#memory];
     if (params?.facility) f = f.filter(e => e.facility === params.facility);
-    if (params?.startTs !== undefined) f = f.filter(e => e.timestamp >= params.startTs!);
-    if (params?.endTs !== undefined) f = f.filter(e => e.timestamp <= params.endTs!);
+    if (startTs !== undefined) f = f.filter(e => e.timestamp >= startTs);
+    if (endTs !== undefined) f = f.filter(e => e.timestamp <= endTs);
     return f;
   }
 
@@ -148,13 +149,24 @@ export class HybridAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmi
     if (!this.#atomic) return [];
     const idx = await this.#atomic.get<string[]>(IDX_AUDIT);
     if (!idx) return [];
-    const entries = (await Promise.all(
-      idx.value.map(id => this.#atomic!.get<StoredAuditEntry>(PFX_AUDIT + id)),
-    )).filter(e => e).map(e => e!.value);
+    const store = this.#atomic;
+    const raw = await Promise.all(
+      idx.value.map(id => store.get<StoredAuditEntry>(PFX_AUDIT + id)),
+    );
+    const entries: StoredAuditEntry[] = [];
+    for (const r of raw) {
+      if (r) entries.push(r.value);
+    }
     let f = entries;
     if (params.facility) f = f.filter(e => e.facility === params.facility);
-    if (params.startTs !== undefined) f = f.filter(e => e.timestamp >= params.startTs!);
-    if (params.endTs !== undefined) f = f.filter(e => e.timestamp <= params.endTs!);
+    if (params.startTs !== undefined) {
+      const startTs = params.startTs;
+      f = f.filter(e => e.timestamp >= startTs);
+    }
+    if (params.endTs !== undefined) {
+      const endTs = params.endTs;
+      f = f.filter(e => e.timestamp <= endTs);
+    }
     return f;
   }
 

@@ -122,7 +122,9 @@ export class PodmanContainerProvider implements IContainerProvider {
   // ─── IContainerProvider ───
 
   public async create(input: CreateContainerGroupInput): Promise<{ providerId: string }> {
-    const c = input.containers[0]!;
+    const first = input.containers[0];
+    if (!first) throw new Error('Podman create requires at least one container');
+    const c = first;
 
     // Env: flatten to KEY=VALUE strings
     const env: string[] = [];
@@ -280,10 +282,12 @@ export class PodmanContainerProvider implements IContainerProvider {
 
     let filtered = list;
     if (input.sandboxName) {
-      filtered = filtered.filter(c => c.Names?.some(n => n.includes(input.sandboxName!)));
+      const nameFilter = input.sandboxName;
+      filtered = filtered.filter(c => c.Names?.some(n => n.includes(nameFilter)));
     }
     if (input.sandboxId) {
-      filtered = filtered.filter(c => c.Id.startsWith(input.sandboxId!));
+      const idFilter = input.sandboxId;
+      filtered = filtered.filter(c => c.Id.startsWith(idFilter));
     }
     if (input.status) {
       // eslint-disable-next-line @typescript-eslint/no-unsafe-enum-comparison -- podmanStatus returns string, input.status is ContainerGroupState
@@ -469,11 +473,12 @@ export class PodmanContainerProvider implements IContainerProvider {
     if (!resp) throw new Error('Podman daemon unreachable');
     if (!resp.ok) throw new Error(`Podman stats failed (${String(resp.status)})`);
     const data: PodmanStatsResponse = await resp.json();
-    const netKeys = data.networks ? Object.keys(data.networks) : [];
+    const networks = data.networks;
+    const firstNetKey = networks ? Object.keys(networks)[0] : undefined;
     return {
       cpuUsage: data.cpu_stats?.cpu_usage?.total_usage ?? 0,
       memoryUsage: data.memory_stats?.usage ?? 0,
-      ...(netKeys.length > 0 ? { networkIO: { rx: data.networks![netKeys[0]!]?.rx_bytes ?? 0, tx: data.networks![netKeys[0]!]?.tx_bytes ?? 0 } } : {}),
+      ...(networks && firstNetKey ? { networkIO: { rx: networks[firstNetKey]?.rx_bytes ?? 0, tx: networks[firstNetKey]?.tx_bytes ?? 0 } } : {}),
     };
   }
 
