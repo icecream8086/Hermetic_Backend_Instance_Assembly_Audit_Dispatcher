@@ -6,6 +6,7 @@ import type {
 } from '../../core/provider/index.ts';
 import {
   SandboxStatus,
+  VolumeType,
   isValidTransition,
   createSandboxId,
 } from './types.ts';
@@ -26,7 +27,7 @@ import { createRegionId } from '../../core/region/types.ts';
 import { createInstanceId } from '../../core/region/instance.ts';
 import { ContainerGroupState, toSandboxStatus } from '../../core/provider/container-lifecycle.ts';
 import type { PodService } from '../../core/pod/service.ts';
-import { createPodId, type PodSpec } from '../../core/pod/types.ts';
+import { createPodId, type PodSpec, type VolumeSpec } from '../../core/pod/types.ts';
 import { AppError } from '../../core/types.ts';
 import { ProviderResolutionError, ProviderOperationError } from '../../core/provider/errors.ts';
 import type { EventBus } from '../../core/event-bus/bus.ts';
@@ -714,7 +715,28 @@ function toPodSpec(input: CreateSandboxInput): PodSpec {
         })),
       } : {}),
       restartPolicy: input.restartPolicy,
-      // volumes: mapped via providerOverrides for now (sandbox Volume entity ≠ PodSpec VolumeSpec)
+      volumes: input.volumes?.length ? input.volumes.map(v => ({
+        id: v.id,
+        type: (() => {
+          // CEA: 枚举映射保证 VolumeType 新增成员时编译报错
+          const MAP: Record<VolumeType, VolumeSpec['type']> = {
+            [VolumeType.NFS]: 'NFSVolume',
+            [VolumeType.EmptyDir]: 'EmptyDirVolume',
+            [VolumeType.Disk]: 'DiskVolume',
+            [VolumeType.Secret]: 'SecretVolume',
+            [VolumeType.ConfigMap]: 'ConfigMapVolume',
+            [VolumeType.OSS]: 'OSSVolume',
+          };
+          return MAP[v.type];
+        })(),
+        options: v.nfs ? { server: v.nfs.server, path: v.nfs.path, readOnly: v.nfs.readOnly }
+          : v.emptyDir ? { sizeLimit: v.emptyDir.sizeLimit, medium: v.emptyDir.medium ?? '' }
+          : v.disk ? { diskId: v.disk.diskId, fsType: v.disk.fsType, readOnly: v.disk.readOnly }
+          : v.secret ? { name: v.secret.name, items: v.secret.items }
+          : v.configMap ? { name: v.configMap.name, items: v.configMap.items }
+          : v.oss ? { bucket: v.oss.bucket, path: v.oss.path, readOnly: v.oss.readOnly, endpoint: v.oss.endpoint }
+          : undefined,
+      })) : undefined,
     },
     ...(input.providerOverrides ? { providerOverrides: input.providerOverrides } : {}),
   };

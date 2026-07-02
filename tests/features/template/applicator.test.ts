@@ -374,17 +374,17 @@ describe('mapStorage', async () => {
     expect(r.volumes).toHaveLength(0);
   });
 
-  it('maps hostPath storage', async () => {
-    const r = await mapStorage([{ name: 'local', type: 'hostPath', mountPath: '/cache' }]);
-    expect(r.volumes).toHaveLength(1);
-    expect(r.volumes[0]!.type).toBe('HostPathVolume');
-    expect(r.volumeMounts[0]!.mountPath).toBe('/cache');
-  });
-
   it('maps emptyDir storage', async () => {
-    const r = await mapStorage([{ name: 'tmp', type: 'emptyDir', mountPath: '/tmp' }]);
+    const r = await mapStorage([{ name: 'tmp', type: 'emptyDir', mountPath: '/tmp', emptyDir: { sizeLimit: '512Mi' } }]);
     expect(r.volumes).toHaveLength(1);
     expect(r.volumes[0]!.type).toBe('EmptyDirVolume');
+    expect(r.volumes[0]!.emptyDir!.sizeLimit).toBe('512Mi');
+    expect(r.volumeMounts[0]!.mountPath).toBe('/tmp');
+  });
+
+  it('skips emptyDir when sizeLimit is missing', async () => {
+    const r = await mapStorage([{ name: 'tmp', type: 'emptyDir', mountPath: '/tmp' }]);
+    expect(r.volumes).toHaveLength(0);
   });
 
   it('maps OSS storage', async () => {
@@ -406,7 +406,7 @@ describe('mapStorage', async () => {
   it('maps multiple storage entries', async () => {
     const r = await mapStorage([
       { name: 'nfs-vol', type: 'nfs', mountPath: '/nfs', nfs: { server: 's', path: '/p' } },
-      { name: 'tmp-vol', type: 'emptyDir', mountPath: '/tmp' },
+      { name: 'tmp-vol', type: 'emptyDir', mountPath: '/tmp', emptyDir: { sizeLimit: '256Mi' } },
     ]);
     expect(r.volumes).toHaveLength(2);
     expect(r.volumeMounts).toHaveLength(2);
@@ -419,7 +419,7 @@ describe('mapStorage', async () => {
         containers: [{ name: 'c1', image: 'i1' }, { name: 'c2', image: 'i2' }],
       },
       extensions: {
-        storage: [{ name: 'v', type: 'emptyDir', mountPath: '/d' }],
+        storage: [{ name: 'v', type: 'emptyDir', mountPath: '/d', emptyDir: { sizeLimit: '512Mi' } }],
       },
     }));
     expect(r.containers[0]!.volumeMounts).toHaveLength(1);

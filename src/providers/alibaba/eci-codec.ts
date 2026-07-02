@@ -157,6 +157,7 @@ interface EciVolumeItem {
   NFSVolume?: { Server?: string; Path?: string; ReadOnly?: boolean };
   OSSVolume?: { Bucket?: string; Path?: string; ReadOnly?: boolean; Endpoint?: string };
   DiskVolume?: { DiskId?: string; FsType?: string; DiskSize?: number; DiskCategory?: string; ReadOnly?: boolean; DeleteWithInstance?: boolean };
+  EmptyDirVolume?: { Medium?: string; SizeLimit?: string };
   ConfigMapVolume?: { Name?: string; Items?: { Key?: string; Path?: string; Mode?: number }[] };
   SecretVolume?: { SecretName?: string; Items?: { Key?: string; Path?: string; Mode?: number }[] };
 }
@@ -517,6 +518,22 @@ function buildVolumeCompound(v: VolumeConfigInput, pfx: string): Record<string, 
   const p: Record<string, string> = {};
   const opts = (v.options ?? {});
 
+  // ── EmptyDir Volume ──
+  // ECI API: Volume.N.Type = "EmptyDirVolume"
+  //          Volume.N.EmptyDirVolume.Medium = "" | "Memory" | "LocalRaid0"
+  //          Volume.N.EmptyDirVolume.SizeLimit = "512Mi"
+  if (v.type === 'EmptyDirVolume' || opts.sizeLimit !== undefined) {
+    p[`${pfx}.Type`] = 'EmptyDirVolume';
+    const medium = strVal(opts.medium ?? '');
+    if (medium) {
+      p[`${pfx}.EmptyDirVolume.Medium`] = medium;
+    }
+    if (opts.sizeLimit !== undefined) {
+      p[`${pfx}.EmptyDirVolume.SizeLimit`] = strVal(opts.sizeLimit);
+    }
+    return p;
+  }
+
   if (opts.server) {
     p[`${pfx}.NFSVolume.Server`] = strVal(opts.server);
     p[`${pfx}.NFSVolume.Path`] = strVal(opts.path ?? '');
@@ -569,6 +586,9 @@ function parseVolumes(vols: EciVolumeItem[] | undefined): VolumeRuntimeInfo[] {
     type: v.Type ?? '',
     ...(v.NFSVolume ? {
       nfs: { server: v.NFSVolume.Server ?? '', path: v.NFSVolume.Path ?? '', readOnly: v.NFSVolume.ReadOnly === true },
+    } : {}),
+    ...(v.EmptyDirVolume ? {
+      emptyDir: { sizeLimit: v.EmptyDirVolume.SizeLimit ?? '', medium: v.EmptyDirVolume.Medium },
     } : {}),
   }));
 }
@@ -641,6 +661,17 @@ export function buildCreateParams(
       p = { ...p, ...buildProbeParams(c.livenessProbe, cpfx, 'LivenessProbe') };
       p = { ...p, ...buildProbeParams(c.readinessProbe, cpfx, 'ReadinessProbe') };
       p = { ...p, ...buildProbeParams(c.startupProbe, cpfx, 'StartupProbe') };
+
+      // ── VolumeMounts ──
+      if (c.volumeMounts?.length) {
+        c.volumeMounts.forEach((vm, j) => {
+          const vmpfx = `${cpfx}.VolumeMount.${String(j + 1)}`;
+          p[`${vmpfx}.Name`] = vm.volumeId;
+          p[`${vmpfx}.MountPath`] = vm.mountPath;
+          if (vm.readOnly) p[`${vmpfx}.ReadOnly`] = 'true';
+          if (vm.mountPropagation) p[`${vmpfx}.MountPropagation`] = vm.mountPropagation;
+        });
+      }
     });
   }
 
@@ -760,6 +791,17 @@ export function buildPodCreateParams(spec: PodSpec, region: string): Record<stri
     p = { ...p, ...buildProbeParams(c.livenessProbe, cpfx, 'LivenessProbe') };
     p = { ...p, ...buildProbeParams(c.readinessProbe, cpfx, 'ReadinessProbe') };
     p = { ...p, ...buildProbeParams(c.startupProbe, cpfx, 'StartupProbe') };
+
+    // ── VolumeMounts ──
+    if (c.volumeMounts?.length) {
+      c.volumeMounts.forEach((vm, j) => {
+        const vmpfx = `${cpfx}.VolumeMount.${String(j + 1)}`;
+        p[`${vmpfx}.Name`] = vm.volumeId;
+        p[`${vmpfx}.MountPath`] = vm.mountPath;
+        if (vm.readOnly) p[`${vmpfx}.ReadOnly`] = 'true';
+        if (vm.mountPropagation) p[`${vmpfx}.MountPropagation`] = vm.mountPropagation;
+      });
+    }
   });
 
   // ── InitContainers ──

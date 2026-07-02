@@ -116,13 +116,29 @@ export enum VolumeStatus {
   Orphaned = 'Orphaned',
 }
 
+// ─── EmptyDir ───
+
+/** EmptyDir 存储介质类型。仅包含 K8s 标准值。平台特有值（如 ECI LocalRaid0）走 providerOverrides。 */
+export enum EmptyDirMedium {
+  /** 默认 — 使用实例的系统盘。 */
+  Default = '',
+  /** 内存盘 — tmpfs，高性能易失。 */
+  Memory = 'Memory',
+}
+
+export interface EmptyDirVolumeConfig {
+  /** 容量限制，必选。K8s 标准字段，支持 Ki/Mi/Gi 后缀。如 "512Mi"、"1Gi"。 */
+  readonly sizeLimit: string;
+  /** 存储介质类型。默认 Default（系统盘）。 */
+  readonly medium?: EmptyDirMedium | undefined;
+}
+
 // ─── Volume ───
 
 export enum VolumeType {
   NFS = 'NFSVolume',
-  HostPath = 'HostPathVolume',
   EmptyDir = 'EmptyDirVolume',
-  /** Cloud disk (阿里云 Disk / 云盘) — persistent block storage, single-instance attach. */
+  /** Cloud disk (阿里云 Disk / 云盘) — persistent block storage, single-instance attach. Independent from EmptyDir. */
   Disk = 'DiskVolume',
   /** Secret — inject sensitive data (e.g. passwords, tokens) as in-memory files via provider (podman secret / KMS). */
   Secret = 'SecretVolume',
@@ -187,6 +203,7 @@ export interface Volume extends BaseEntity<VolumeId, VolumeStatus> {
   readonly credentialRef?: string;
   readonly nfs?: NFSVolumeConfig;
   readonly disk?: DiskVolumeConfig;
+  readonly emptyDir?: EmptyDirVolumeConfig;
   readonly secret?: SecretVolumeConfig;
   readonly configMap?: ConfigMapVolumeConfig;
   readonly oss?: OSSVolumeConfig;

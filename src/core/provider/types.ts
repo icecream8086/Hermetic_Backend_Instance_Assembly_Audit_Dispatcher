@@ -106,6 +106,10 @@ export interface VolumeRuntimeInfo {
     readonly path: string;
     readonly readOnly: boolean;
   };
+  readonly emptyDir?: {
+    readonly sizeLimit: string;
+    readonly medium?: string | undefined;
+  };
 }
 
 export interface ContainerGroupRuntimeEvent {

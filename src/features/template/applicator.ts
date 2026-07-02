@@ -5,6 +5,7 @@ import { VolumeType, VolumeStatus, createVolumeId } from '../sandbox/types.ts';
 import { createRegionId } from '../../core/region/types.ts';
 import { z } from 'zod';
 
+import { EmptyDirMedium } from '../sandbox/types.ts';
 import type { NFSVolumeConfig, DiskVolumeConfig, SecretVolumeConfig } from '../sandbox/types.ts';
 
 const ValueFromSchema = z.custom<EnvVar['valueFrom']>(
@@ -191,6 +192,15 @@ function mapNetwork(network: NetworkSpec | undefined): SandboxNetworkConfig {
   };
 }
 
+// ─── EmptyDir mapping ───
+
+function mapEmptyDirMedium(raw: string): EmptyDirMedium {
+  switch (raw) {
+    case 'Memory': return EmptyDirMedium.Memory;
+    default: return EmptyDirMedium.Default;
+  }
+}
+
 // ─── Storage → Volume + VolumeMount ───
 
 export async function mapStorage(
@@ -266,20 +276,16 @@ export async function mapStorage(
         volumeMounts.push({ volumeId: vid, mountPath: s.mountPath, readOnly: s.nfs.readOnly ?? false });
         break;
       }
-      case 'hostPath': {
-        volumes.push({
-          id: vid, name: s.name, tags: [], createdAt: now, updatedAt: now,
-          status: VolumeStatus.Detached, type: VolumeType.HostPath,
-          instanceId: s.instanceId,
-        });
-        volumeMounts.push({ volumeId: vid, mountPath: s.mountPath, readOnly: false });
-        break;
-      }
       case 'emptyDir': {
+        if (!s.emptyDir?.sizeLimit) break; // sizeLimit 必选，无值则跳过
         volumes.push({
           id: vid, name: s.name, tags: [], createdAt: now, updatedAt: now,
           status: VolumeStatus.Detached, type: VolumeType.EmptyDir,
           instanceId: s.instanceId,
+          emptyDir: {
+            sizeLimit: s.emptyDir.sizeLimit,
+            ...(s.emptyDir.medium ? { medium: mapEmptyDirMedium(s.emptyDir.medium) } : {}),
+          },
         });
         volumeMounts.push({ volumeId: vid, mountPath: s.mountPath, readOnly: false });
         break;
@@ -321,6 +327,10 @@ export async function mapStorage(
         });
         volumeMounts.push({ volumeId: vid, mountPath: s.mountPath, readOnly: true });
         break;
+      }
+      default: {
+        void (s.type satisfies never);
+        throw new Error(`Unknown storage type: ${String(s.type)}`);
       }
     }
   }

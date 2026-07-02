@@ -22,7 +22,7 @@ import type { Hono } from 'hono';
 
 export interface RegisteredFeature {
   path: string;
-  mount: (deps: FeatureDeps) => Hono;
+  mount: (deps: FeatureDeps) => Hono<any, any, any>;
 }
 
 export function getFeatures(): RegisteredFeature[] {

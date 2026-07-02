@@ -142,12 +142,20 @@ describe('Provider mapper', () => {
     const result = mapVolumes([
       { id: 'v1', type: 'NFSVolume', nfs: { server: 'nfs://srv', path: '/data', readOnly: false } },
       { id: 'v2', type: 'DiskVolume', disk: { diskId: 'd-xxx', fsType: 'ext4', readOnly: true, deleteWithInstance: true } },
-      { id: 'v3', type: 'SecretVolume', secret: { name: 'db-pass' } },
+      { id: 'v3', type: 'EmptyDirVolume', emptyDir: { sizeLimit: '512Mi', medium: 'Memory' } },
+      { id: 'v4', type: 'SecretVolume', secret: { name: 'db-pass' } },
     ] as any);
-    expect(result).toHaveLength(3);
+    expect(result).toHaveLength(4);
     expect(result![0]!.type).toBe('NFSVolume');
+    // Disk 独立类型 — diskId / fsType / readOnly 直接透传
+    expect(result![1]!.type).toBe('DiskVolume');
     expect(result![1]!.options!.diskId).toBe('d-xxx');
-    expect(result![2]!.options!.name).toBe('db-pass');
+    expect(result![1]!.options!.fsType).toBe('ext4');
+    // EmptyDir 独立类型 — sizeLimit / medium 透传
+    expect(result![2]!.type).toBe('EmptyDirVolume');
+    expect(result![2]!.options!.sizeLimit).toBe('512Mi');
+    expect(result![2]!.options!.medium).toBe('Memory');
+    expect(result![3]!.options!.name).toBe('db-pass');
   });
 
   it('mapVolumes returns undefined for empty', () => {

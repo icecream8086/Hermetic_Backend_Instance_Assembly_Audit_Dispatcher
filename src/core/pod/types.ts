@@ -85,7 +85,7 @@ export interface ContainerSpec {
 
 export interface VolumeSpec {
   readonly id: string;
-  readonly type: 'NFSVolume' | 'HostPathVolume' | 'EmptyDirVolume' | 'DiskVolume' | 'SecretVolume' | 'ConfigMapVolume' | 'OSSVolume';
+  readonly type: 'NFSVolume' | 'EmptyDirVolume' | 'DiskVolume' | 'SecretVolume' | 'ConfigMapVolume' | 'OSSVolume';
   readonly options?: Record<string, unknown> | undefined;
 }
 
