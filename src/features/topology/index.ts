@@ -9,7 +9,7 @@ import { z } from 'zod';
 import type { S3ProviderType } from '../../core/provider/s3-types.ts';
 import type { S3Credentials } from '../../core/provider/s3-factory.ts';
 
-export function createRouter(deps: FeatureDeps): Hono<any> {
+export function createRouter(deps: FeatureDeps): Hono<{ Variables: AppContext }> {
   const buckets = new BucketService(deps.stores.atomic);
   const instances = new InstanceService(deps.stores.atomic);
   const images = new ImageRepositoryService(deps.stores.atomic);

@@ -17,10 +17,10 @@ import type { CrudAction } from './types.ts';
  * };
  * registerCrudRoutes(router, handlers);
  */
-export type CrudHandlerMap = Record<CrudAction, (router: Hono<any>) => void>;
+export type CrudHandlerMap = Record<CrudAction, (router: Hono) => void>;
 
 /** Register all CRUD routes from a handler map. Returns the router for chaining. */
-export function registerCrudRoutes(router: Hono<any>, handlers: CrudHandlerMap): Hono<any> {
+export function registerCrudRoutes(router: Hono, handlers: CrudHandlerMap): Hono {
   for (const register of Object.values(handlers)) {
     register(router);
   }

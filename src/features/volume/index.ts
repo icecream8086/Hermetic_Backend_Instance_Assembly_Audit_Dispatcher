@@ -11,7 +11,7 @@ export interface VolumeDeps {
   audit?: IAuditWriter;
 }
 
-export function createRouter(deps: VolumeDeps): Hono<any> {
+export function createRouter(deps: VolumeDeps): Hono<{ Variables: AppContext }> {
   const svc = new VolumeService(deps.stores.atomic, new ConsoleLogger(), deps.audit);
   return createVolumeRouter(svc);
 }

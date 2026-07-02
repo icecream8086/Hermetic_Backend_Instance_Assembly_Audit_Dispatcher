@@ -89,7 +89,7 @@ export function createPlatformsRouter(
       }
 
       let resolvedPlatform = platform ?? '';
-      let regions: readonly any[] | undefined;
+      let regions: readonly Record<string, unknown>[] | undefined;
 
       if (instanceId) {
         if (!atomicStore) throw new AppError(503, 'SERVICE_UNAVAILABLE', 'Atomic store not available');

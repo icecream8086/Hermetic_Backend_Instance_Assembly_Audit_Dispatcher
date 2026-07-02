@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { StoredAuditEntry } from './types.ts';
 import type { SerializedBody } from '../brand.ts';
 import { createSerializedBody } from '../brand.ts';

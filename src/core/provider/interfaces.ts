@@ -324,13 +324,13 @@ export interface IProviderRegistry {
   listS3Accounts(): string[];
 
   /** Get raw ECI OpenAPI client for the default Alibaba account. */
-  rawEciApi(): any;
+  rawEciApi(): unknown;
 
   /** Get CR (Container Registry) OpenAPI client. */
-  crApi(): any;
+  crApi(): unknown;
 
   /** Get OSS management-plane OpenAPI client (bucket CRUD, policy, etc.). */
-  ossOpenApi(): any;
+  ossOpenApi(): unknown;
 
   // ─── ComputeInstance-aware resolution ───
 
@@ -345,13 +345,13 @@ export interface IProviderRegistry {
   resolveGroup(instanceId?: InstanceId): Promise<IContainerGroupProvider | undefined>;
 
   /** Resolve a raw ECI API client for a specific instance. */
-  resolveRawEciApi(instanceId?: InstanceId): Promise<any>;
+  resolveRawEciApi(instanceId?: InstanceId): Promise<unknown>;
 
   /** Resolve a CR (Container Registry) API client for a specific instance. */
-  resolveCrApi(instanceId?: InstanceId): Promise<any>;
+  resolveCrApi(instanceId?: InstanceId): Promise<unknown>;
 
   /** Resolve an OSS management-plane API client for a specific instance. */
-  resolveOssOpenApi(instanceId?: InstanceId): Promise<any>;
+  resolveOssOpenApi(instanceId?: InstanceId): Promise<unknown>;
 }
 
 // ─── Container group / Pod operations ───

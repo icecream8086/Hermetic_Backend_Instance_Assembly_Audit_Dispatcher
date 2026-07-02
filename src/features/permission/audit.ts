@@ -43,12 +43,19 @@ export function permLog(
   level: KernLevel,
   message?: string,
 ): void {
-  const entry = permEvent(eventType, actor, fields, level, message);
+  const msg: string = message ?? `${eventType} by ${actor?.userId ?? 'unknown'}`;
   logger.write({
     facility: FACILITY,
     level,
-    message: entry.message,
-    metadata: entry.metadata,
+    message: msg,
+    actorId: actor?.userId,
+    metadata: {
+      eventType,
+      ...(actor?.userId ? { actorId: actor.userId } : {}),
+      ...(actor?.ip ? { actorIp: actor.ip } : {}),
+      timestamp: Date.now(),
+      ...fields,
+    },
   });
 }
 

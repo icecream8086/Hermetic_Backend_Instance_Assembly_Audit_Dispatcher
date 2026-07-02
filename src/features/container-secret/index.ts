@@ -11,7 +11,7 @@ export interface ContainerSecretDeps {
   secretEncryption?: SecretEncryption;
 }
 
-export function createRouter(deps: ContainerSecretDeps): Hono<any> {
+export function createRouter(deps: ContainerSecretDeps): Hono<{ Variables: AppContext }> {
   const keyring = new UserKeyring(deps.stores.atomic);
   const svc = new ContainerSecretService(
     deps.stores.atomic,

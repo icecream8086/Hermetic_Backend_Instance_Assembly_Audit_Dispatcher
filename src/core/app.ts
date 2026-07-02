@@ -107,7 +107,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
   // binding routes messages to the Cloudflare Queues service.
   // When unavailable, createMessageQueue() returns a NoopMessageQueue — callers fall back to inline.
   const queueProducer = createMessageQueue(
-    z.custom<Queue<any>>().optional().parse(platformBindings?.TASK_QUEUE),
+    z.custom<Queue>().optional().parse(platformBindings?.TASK_QUEUE),
   );
   if (queueProducer.available) {
     console.log(formatDmesgLine('[app] Queue producer enabled (TASK_QUEUE)'));
@@ -165,7 +165,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
 
   // 5c. Load log policy into runtime
   try {
-    const policyEntry = await stores.atomic.get<any>('_sys:log-policy');
+    const policyEntry = await stores.atomic.get<{ defaultLevel: string; auditLevel: string; facilities: { facility: string; level: string }[]; updatedAt: number }>('_sys:log-policy');
     if (policyEntry) setActivePolicy(policyEntry.value);
   } catch (err: unknown) { console.error('[init] Failed to load log policy:', err instanceof Error ? err.message : err); }
 
@@ -287,8 +287,8 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
     try {
       const expiry = await permService.grantTempElevation(user.id);
       return c.json(ok({ expiry, durationMs: 30 * 60 * 1000 }));
-    } catch (e: any) {
-      return c.json({ error: e.message }, 403);
+    } catch (e: unknown) {
+      return c.json({ error: e instanceof Error ? e.message : String(e) }, 403);
     }
   });
 
@@ -314,7 +314,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
   }
 
   // 11. Tick trigger — DO Alarm fires POST /__scheduled, dev tools fire POST /__tick
-  const tickHandler = async (c: any): Promise<Response> => {
+  const tickHandler = async (c: { json: (data: Record<string, unknown>, status?: number) => Response }): Promise<Response> => {
     await eventLoop.triggerTick();
     const st = eventLoop.status();
     return c.json({ ok: true, queueSize: st.queueSize, processedCount: st.processedCount, running: st.running });
@@ -444,12 +444,12 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
         }
       }
       return c.json(ok({ content: logResult.content || '', containerName, timestamp: logResult.timestamp }));
-    } catch (e: any) {
+    } catch (e: unknown) {
       // Try cached
       const cached = await stores.atomic.get<{ content: string; containerName: string; fetchedAt: number }>('log:' + id);
       if (cached) return c.json(ok({ content: cached.value.content, containerName: cached.value.containerName, cached: true }));
-      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- error.message can be empty string, || catches both undefined and ''
-      return c.json(fail('LOGS_UNAVAILABLE', e.message || 'Logs unavailable'), 502);
+      const errMsg = e instanceof Error ? e.message : String(e);
+      return c.json(fail('LOGS_UNAVAILABLE', errMsg || 'Logs unavailable'), 502);
     }
   });
 

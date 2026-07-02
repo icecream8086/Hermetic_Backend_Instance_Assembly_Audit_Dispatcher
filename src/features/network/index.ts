@@ -14,7 +14,7 @@ export interface NetworkDeps {
   providers: { networkPolicy?: INetworkPolicyProvider | undefined };
 }
 
-export function createRouter(deps: NetworkDeps): Hono<any> {
+export function createRouter(deps: NetworkDeps): Hono<{ Variables: AppContext }> {
   const instanceSvc = new InstanceService(deps.stores.atomic);
   const svc = new SecurityGroupService(deps.stores.atomic, new ConsoleLogger(), deps.audit, deps.providers.networkPolicy, instanceSvc);
   return createSecurityGroupRouter(svc);

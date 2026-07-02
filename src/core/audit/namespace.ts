@@ -14,6 +14,7 @@
 
 import { z } from 'zod';
 import type { IAuditReader, StoredAuditEntry, LogQuery } from './types.ts';
+import type { LogId } from '../brand.ts';
 
 // ─── Namespace config ───
 
@@ -67,7 +68,7 @@ export class NamespacedAuditReader implements IAuditReader {
     return { entries, ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}), total: entries.length };
   }
 
-  public async getById(id: any): Promise<StoredAuditEntry | null> {
+  public async getById(id: LogId): Promise<StoredAuditEntry | null> {
     return this.reader.getById(id);
   }
 }

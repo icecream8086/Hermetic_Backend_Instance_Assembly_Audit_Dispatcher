@@ -80,9 +80,8 @@ export function createContainerSecretRouter(svc: IContainerSecretService): OpenA
   return app;
 }
 
-function redact(s: any): any {
+function redact(s: Record<string, unknown>): Record<string, unknown> {
   if (!s) return s;
-  const r = { ...s };
-  if (r.value) r.value = '[REDACTED]';
-  return r;
+  if (!s.value) return { ...s };
+  return { ...s, value: '[REDACTED]' };
 }

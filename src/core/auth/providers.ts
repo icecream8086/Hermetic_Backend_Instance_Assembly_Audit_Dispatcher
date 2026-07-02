@@ -159,9 +159,28 @@ export class AkSkProvider implements IAuthProvider {
 
 // ─── Factory ───
 
-export function createAuthProvider(creds: any): IAuthProvider {
+export function createAuthProvider(creds: Record<string, unknown>): IAuthProvider {
   if (!creds || creds.type === 'none') return new NoAuthProvider();
-  if (creds.type === 'bearer') return new BearerTokenProvider(creds.token, creds);
-  if (creds.type === 'aksk') return new AkSkProvider(creds.accessKeyId, creds.accessKeySecret, creds.region, creds.endpoint);
+  const parsedCreds = z.object({
+    type: z.string(),
+    token: z.string().optional(),
+    tokenUrl: z.string().optional(),
+    clientId: z.string().optional(),
+    clientSecret: z.string().optional(),
+    accessKeyId: z.string().optional(),
+    accessKeySecret: z.string().optional(),
+    region: z.string().optional(),
+    endpoint: z.string().optional(),
+  }).passthrough().parse(creds);
+  if (parsedCreds.type === 'bearer') {
+    return new BearerTokenProvider(parsedCreds.token ?? '', {
+      tokenUrl: parsedCreds.tokenUrl,
+      clientId: parsedCreds.clientId,
+      clientSecret: parsedCreds.clientSecret,
+    });
+  }
+  if (parsedCreds.type === 'aksk') {
+    return new AkSkProvider(parsedCreds.accessKeyId ?? '', parsedCreds.accessKeySecret ?? '', parsedCreds.region, parsedCreds.endpoint);
+  }
   return new NoAuthProvider();
 }

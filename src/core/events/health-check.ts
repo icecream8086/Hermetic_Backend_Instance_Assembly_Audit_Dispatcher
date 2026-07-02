@@ -714,11 +714,14 @@ async function gcUpdateState(
   createdAt: number,
 ): Promise<void> {
   for (let attempt = 0; attempt < 3; attempt++) {
-    const latest = await atomic.get<any>('sandbox:' + sid);
-    if (!latest || latest.value.status === SandboxStatus.Deleted) break;
+    const entrySchema = z.object({ status: z.string(), version: z.string().optional() }).passthrough();
+    const latestRaw = await atomic.get<Record<string, unknown>>('sandbox:' + sid);
+    if (!latestRaw) break;
+    const latestTyped = entrySchema.parse(latestRaw.value);
+    if (latestTyped.status === SandboxStatus.Deleted) break;
     const ver = await atomic.set('sandbox:' + sid, {
-      ...latest.value, status: SandboxStatus.Deleted, updatedAt: Date.now(),
-    }, latest.version);
+      ...latestRaw.value, status: SandboxStatus.Deleted, updatedAt: Date.now(),
+    }, latestRaw.version);
     if (!ver) continue;
     const idxEntry = await atomic.get<string[]>('sandbox:ids');
     if (idxEntry) await atomic.set('sandbox:ids', idxEntry.value.filter((i: string) => i !== sid), idxEntry.version);

@@ -12,10 +12,11 @@
 import { z } from 'zod';
 import type { IAtomicStore } from './store/interfaces.ts';
 import { Cap, GROUP_CAP_KEY } from './permission/capability.ts';
+import type { PermissionRule } from '../features/permission/types.ts';
 
 export async function seedPolicyLibrary(atomic: IAtomicStore): Promise<void> {
   const KEY = '_init:policy-lib';
-  const entry = await atomic.get<any>(KEY);
+  const entry = await atomic.get<Record<string, unknown>>(KEY);
   if (entry !== null) return; // already seeded
 
   const now = Date.now();
@@ -79,7 +80,7 @@ export async function seedPolicyLibrary(atomic: IAtomicStore): Promise<void> {
     { userGroupName: 'daemon', sysGroupName: 'perm.operator' },
   ];
   for (const b of permGroupBindings) {
-    const sgEntry = await atomic.get<any>('sysgroup:' + String(sysGroupIds[b.sysGroupName]));
+    const sgEntry = await atomic.get<Record<string, unknown>>('sysgroup:' + String(sysGroupIds[b.sysGroupName]));
     if (!sgEntry) continue;
     const ugId = userGroupIds[b.userGroupName];
     if (!ugId) continue;
@@ -170,7 +171,7 @@ export async function seedPolicyLibrary(atomic: IAtomicStore): Promise<void> {
 
 async function seedDefaultInstance(atomic: IAtomicStore): Promise<string | undefined> {
   const KEY = '_init:default-instance';
-  const entry = await atomic.get<any>(KEY);
+  const entry = await atomic.get<{ instanceId: string }>(KEY);
   if (entry !== null) return entry.value.instanceId;
 
   try {
@@ -197,9 +198,9 @@ async function seedDefaultInstance(atomic: IAtomicStore): Promise<string | undef
 }
 
 /** Seed MAC rules if absent. Returns the rules array for in-memory loading. */
-export async function ensureMacRules(atomic: IAtomicStore): Promise<readonly any[]> {
+export async function ensureMacRules(atomic: IAtomicStore): Promise<readonly PermissionRule[]> {
   const KEY = '_init:mac-policy';
-  const entry = await atomic.get<any>(KEY);
+  const entry = await atomic.get<{ rules: PermissionRule[] }>(KEY);
   if (entry !== null) return entry.value.rules;
 
   const rules = [
@@ -228,7 +229,7 @@ export async function ensureMacRules(atomic: IAtomicStore): Promise<readonly any
  */
 async function seedLogPolicy(atomic: IAtomicStore): Promise<void> {
   const KEY = '_sys:log-policy';
-  const entry = await atomic.get<any>(KEY);
+  const entry = await atomic.get<Record<string, unknown>>(KEY);
   if (entry !== null) return;
 
   const policy = {
@@ -254,7 +255,7 @@ async function seedLogPolicy(atomic: IAtomicStore): Promise<void> {
 
 async function seedVolumes(atomic: IAtomicStore, defaultInstanceId: string): Promise<void> {
   const KEY = '_init:volumes';
-  const entry = await atomic.get<any>(KEY);
+  const entry = await atomic.get<Record<string, unknown>>(KEY);
   if (entry !== null) return;
 
   const now = Date.now();

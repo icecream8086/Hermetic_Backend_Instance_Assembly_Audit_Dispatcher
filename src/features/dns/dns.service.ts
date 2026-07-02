@@ -7,7 +7,7 @@ import type { IAuditWriter } from '../../core/audit/types.ts';
 import type { IDnsProvider } from '../../core/provider/interfaces.ts';
 import type { IDnsService } from './interfaces.ts';
 import type { DnsRecordId, DnsRecord, DnsSyncInput } from './types.ts';
-import { DnsRecordStatus } from './types.ts';
+import { DnsRecordStatus, DnsRecordType } from './types.ts';
 import { createFacility } from '../../core/brand.ts';
 import { AppError } from '../../core/types.ts';
 import { KernLevel } from '../../core/audit/kern-level.ts';

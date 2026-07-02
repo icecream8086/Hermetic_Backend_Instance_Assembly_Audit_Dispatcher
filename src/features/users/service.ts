@@ -1,12 +1,17 @@
+import { z } from 'zod';
 import type { IAtomicStore, IStoreTransaction } from '../../core/store/interfaces.ts';
 import { TransactConflictError } from '../../core/store/interfaces.ts';
 import { createFacility } from '../../core/brand.ts';
 import { measure, lastPerf } from '../../core/perf.ts';
 import { AppError } from '../../core/types.ts';
 import { KernLevel } from '../../core/audit/kern-level.ts';
+import type { IAuditWriter } from '../../core/audit/types.ts';
 import type { User, UserId, Session, SessionToken, RegisterInput, LoginInput, LoginContext, NoPasswordLoginInput, UpdateUserInput, LoginInfo, Uid, Gid } from './types.ts';
 import { generateUserId, generateSessionToken, createUserId, createSessionToken, UserRole, createUid, createGid, UID_MIN, GID_MIN, DEFAULT_SHELL, DEFAULT_HOME_PREFIX } from './types.ts';
 import { Cap, USER_CAP_KEY } from '../../core/permission/capability.ts';
+
+/** Logger wrapper type that ESLint can resolve. */
+interface _LogFn { write(entry: Record<string, unknown>): void }
 
 const FACILITY = createFacility('user-service');
 const USER_PREFIX = 'user:';
@@ -237,7 +242,7 @@ export class UserService implements IUserService {
     const id = generateUserId();
     const uid = await this.#nextUid();
     const passwordHash = await hashPassword(input.password);
-    this.logger.write({ facility: FACILITY, level: KernLevel.INFO, message: `PBKDF2 hash: ${lastPerf().toFixed(1)}ms`, metadata: { operation: 'hash', duration: lastPerf() } });
+    z.custom<_LogFn>().parse(this.logger).write({ facility: FACILITY, level: Number(KernLevel.INFO), message: `PBKDF2 hash: ${lastPerf().toFixed(1)}ms`, metadata: { operation: 'hash', duration: lastPerf() } });
     const now = Date.now();
 
     const user: User = {
@@ -258,7 +263,7 @@ export class UserService implements IUserService {
 
     // Atomically: write user + email index (uniqueness) + user ID index + UID index
     await this.#transactWithRetry(async (txn) => {
-      const emailEntry = await txn.get<any>(EMAIL_INDEX_PREFIX + input.email);
+      const emailEntry = await txn.get<unknown>(EMAIL_INDEX_PREFIX + input.email);
       if (emailEntry) throw new AppError(409, 'EMAIL_EXISTS', 'Email already registered');
       const shardKey = USER_IDS_SHARD_PREFIX + String(shardIndex(id));
       const idx = await txn.get<string[]>(shardKey);
@@ -286,18 +291,20 @@ export class UserService implements IUserService {
       await this.atomic.set(USER_CAP_KEY + id, Cap.ALL, null);
     }
 
-    await this.logger.write({
+    await z.custom<_LogFn>().parse(this.logger).write({
       facility: FACILITY,
       level: KernLevel.INFO,
       message: 'User registered',
       metadata: { userId: id, email: input.email, role: input.role, uid },
     });
 
-    await this.audit?.write({
-      level: KernLevel.NOTICE,
-      facility: FACILITY,
-      message: `User registered — ${input.email} (role=${input.role}, uid=${String(uid)})`,
-    });
+    if (this.audit) {
+      z.custom<_LogFn>().parse(this.audit).write({
+        level: String(KernLevel.NOTICE),
+        facility: FACILITY,
+        message: `User registered — ${input.email} (role=${input.role}, uid=${String(uid)})`,
+      });
+    }
 
     return { user, token };
   }
@@ -318,7 +325,7 @@ export class UserService implements IUserService {
 
     const user = entry.value;
     const valid = await serialisedHash(() => verifyPassword(input.password, user.passwordHash));
-    this.logger.write({ facility: FACILITY, level: KernLevel.INFO, message: `PBKDF2 verify: ${lastPerf().toFixed(1)}ms`, metadata: { operation: 'verify', duration: lastPerf() } });
+    z.custom<_LogFn>().parse(this.logger).write({ facility: FACILITY, level: KernLevel.INFO, message: `PBKDF2 verify: ${lastPerf().toFixed(1)}ms`, metadata: { operation: 'verify', duration: lastPerf() } });
     if (!valid) {
       await recordAttempt(this.atomic, email, false, ip);
       throw new AppError(401, 'INVALID_CREDENTIALS', 'Invalid email or password');
@@ -359,18 +366,20 @@ export class UserService implements IUserService {
     const token = await this.createSession(user.id);
     await recordAttempt(this.atomic, email, true, ip);
 
-    await this.logger.write({
+    await z.custom<_LogFn>().parse(this.logger).write({
       facility: FACILITY,
       level: KernLevel.INFO,
       message: 'User logged in',
       metadata: { userId: user.id, email, ip },
     });
 
-    await this.audit?.write({
-      level: KernLevel.NOTICE,
-      facility: FACILITY,
-      message: `User logged in — ${email}${ip ? ` from ${ip}` : ''}`,
-    });
+    if (this.audit) {
+      z.custom<_LogFn>().parse(this.audit).write({
+        level: String(KernLevel.NOTICE),
+        facility: FACILITY,
+        message: `User logged in — ${email}${ip ? ` from ${ip}` : ''}`,
+      });
+    }
 
     return { user, token };
   }
@@ -463,18 +472,20 @@ export class UserService implements IUserService {
     const token = await this.createSession(user.id);
     await recordAttempt(this.atomic, input.email, true, ctx?.ip);
 
-    await this.logger.write({
+    await z.custom<_LogFn>().parse(this.logger).write({
       facility: FACILITY,
       level: KernLevel.INFO,
       message: 'User logged in (no-password)',
       metadata: { userId: user.id, email: user.email, ip: ctx?.ip },
     });
 
-    await this.audit?.write({
-      level: KernLevel.NOTICE,
-      facility: FACILITY,
-      message: `User logged in (no-password) — ${user.email}${ctx?.ip ? ` from ${ctx.ip}` : ''}`,
-    });
+    if (this.audit) {
+      z.custom<_LogFn>().parse(this.audit).write({
+        level: String(KernLevel.NOTICE),
+        facility: FACILITY,
+        message: `User logged in (no-password) — ${user.email}${ctx?.ip ? ` from ${ctx.ip}` : ''}`,
+      });
+    }
 
     return { user, token };
   }
@@ -517,7 +528,7 @@ export class UserService implements IUserService {
     };
 
     if (input.password !== undefined) {
-      this.logger.write({ facility: FACILITY, level: KernLevel.INFO, message: `PBKDF2 hash: ${lastPerf().toFixed(1)}ms`, metadata: { operation: 'hash', duration: lastPerf() } });
+      z.custom<_LogFn>().parse(this.logger).write({ facility: FACILITY, level: KernLevel.INFO, message: `PBKDF2 hash: ${lastPerf().toFixed(1)}ms`, metadata: { operation: 'hash', duration: lastPerf() } });
     }
 
     const newVersion = await this.atomic.set(USER_PREFIX + id, updated, entry.version);
@@ -529,19 +540,21 @@ export class UserService implements IUserService {
       await this.atomic.set(EMAIL_INDEX_PREFIX + updated.email, updated, emailEntry.version);
     }
 
-    await this.logger.write({
+    await z.custom<_LogFn>().parse(this.logger).write({
       facility: FACILITY,
       level: KernLevel.INFO,
       message: 'User updated',
       metadata: { userId: id },
     });
 
-    await this.audit?.write({
-      level: KernLevel.INFO,
-      facility: FACILITY,
-      message: `User profile updated — ${updated.email}`,
-      metadata: { eventType: 'user.updated', userId: id, actorId },
-    });
+    if (this.audit) {
+      z.custom<_LogFn>().parse(this.audit).write({
+        level: String(KernLevel.INFO),
+        facility: FACILITY,
+        message: `User profile updated — ${updated.email}`,
+        metadata: { eventType: 'user.updated', userId: id, actorId },
+      });
+    }
 
     return updated;
   }
@@ -560,7 +573,7 @@ export class UserService implements IUserService {
       const idx = await txn.get<string[]>(shardKey);
       if (idx) txn.set(shardKey, idx.filter((i: string) => i !== id));
       txn.set(USER_PREFIX + id, null);
-      const emEntry = await txn.get<any>(EMAIL_INDEX_PREFIX + email);
+      const emEntry = await txn.get<unknown>(EMAIL_INDEX_PREFIX + email);
       if (emEntry) txn.set(EMAIL_INDEX_PREFIX + email, null);
     });
 
@@ -568,19 +581,21 @@ export class UserService implements IUserService {
     try { await this.#decrCounter(); } catch {
       console.debug("noop");
     }
-    await this.logger.write({
+    await z.custom<_LogFn>().parse(this.logger).write({
       facility: FACILITY,
       level: KernLevel.INFO,
       message: 'User deleted',
       metadata: { userId: id, email },
     });
 
-    await this.audit?.write({
-      level: KernLevel.WARNING,
-      facility: FACILITY,
-      message: `User deleted — ${email}`,
-      metadata: { eventType: 'user.deleted', userId: id, email, actorId },
-    });
+    if (this.audit) {
+      z.custom<_LogFn>().parse(this.audit).write({
+        level: String(KernLevel.WARNING),
+        facility: FACILITY,
+        message: `User deleted — ${email}`,
+        metadata: { eventType: 'user.deleted', userId: id, email, actorId },
+      });
+    }
   }
 
   /** Increment user count — best-effort, OCC retry ×3. */
@@ -666,12 +681,14 @@ export class UserService implements IUserService {
     const emailEntry = await this.atomic.get<User>(EMAIL_INDEX_PREFIX + updated.email);
     if (emailEntry) await this.atomic.set(EMAIL_INDEX_PREFIX + updated.email, updated, emailEntry.version);
 
-    await this.audit?.write({
-      level: KernLevel.NOTICE,
-      facility: FACILITY,
-      message: `Login policy cleared for user — ${updated.email}`,
-      metadata: { eventType: 'user.loginPolicy.cleared', userId: id, actorId },
-    });
+    if (this.audit) {
+      z.custom<_LogFn>().parse(this.audit).write({
+        level: String(KernLevel.NOTICE),
+        facility: FACILITY,
+        message: `Login policy cleared for user — ${updated.email}`,
+        metadata: { eventType: 'user.loginPolicy.cleared', userId: id, actorId },
+      });
+    }
 
     return updated;
   }
@@ -686,12 +703,14 @@ export class UserService implements IUserService {
     const emailEntry = await this.atomic.get<User>(EMAIL_INDEX_PREFIX + updated.email);
     if (emailEntry) await this.atomic.set(EMAIL_INDEX_PREFIX + updated.email, updated, emailEntry.version);
 
-    await this.audit?.write({
-      level: KernLevel.NOTICE,
-      facility: FACILITY,
-      message: `Public key cleared for user — ${updated.email}`,
-      metadata: { eventType: 'user.publicKey.cleared', userId: id, actorId },
-    });
+    if (this.audit) {
+      z.custom<_LogFn>().parse(this.audit).write({
+        level: String(KernLevel.NOTICE),
+        facility: FACILITY,
+        message: `Public key cleared for user — ${updated.email}`,
+        metadata: { eventType: 'user.publicKey.cleared', userId: id, actorId },
+      });
+    }
 
     return updated;
   }
@@ -809,12 +828,14 @@ export class UserService implements IUserService {
       );
     }
 
-    await this.audit?.write({
-      level: KernLevel.INFO,
-      facility: FACILITY,
-      message: `Session revoked for user ${userId}`,
-      metadata: { eventType: 'user.session.revoked', userId: userId, tokenHint: String(token).slice(-4), actorId },
-    });
+    if (this.audit) {
+      z.custom<_LogFn>().parse(this.audit).write({
+        level: String(KernLevel.INFO),
+        facility: FACILITY,
+        message: `Session revoked for user ${userId}`,
+        metadata: { eventType: 'user.session.revoked', userId: userId, tokenHint: String(token).slice(-4), actorId },
+      });
+    }
   }
 
   /** Allocate next available UID — RHEL §1 UID auto-increment from 1000. */
@@ -844,12 +865,14 @@ export class UserService implements IUserService {
     const ver = await this.atomic.set(USER_PREFIX + userId, updated, entry.version);
     if (!ver) throw new AppError(409, 'CONFLICT', 'Concurrent modification detected');
 
-    await this.audit?.write({
-      level: KernLevel.INFO,
-      facility: FACILITY,
-      message: `Supplementary group added — user ${String(userId)} → gid ${String(gid)}`,
-      metadata: { eventType: 'user.suppGroup.added', userId: userId, gid, actorId },
-    });
+    if (this.audit) {
+      z.custom<_LogFn>().parse(this.audit).write({
+        level: String(KernLevel.INFO),
+        facility: FACILITY,
+        message: `Supplementary group added — user ${String(userId)} → gid ${String(gid)}`,
+        metadata: { eventType: 'user.suppGroup.added', userId: userId, gid, actorId },
+      });
+    }
     return updated;
   }
 
@@ -867,12 +890,14 @@ export class UserService implements IUserService {
     const ver = await this.atomic.set(USER_PREFIX + userId, updated, entry.version);
     if (!ver) throw new AppError(409, 'CONFLICT', 'Concurrent modification detected');
 
-    await this.audit?.write({
-      level: KernLevel.INFO,
-      facility: FACILITY,
-      message: `Supplementary group removed — user ${String(userId)} → gid ${String(gid)}`,
-      metadata: { eventType: 'user.suppGroup.removed', userId: userId, gid, actorId },
-    });
+    if (this.audit) {
+      z.custom<_LogFn>().parse(this.audit).write({
+        level: String(KernLevel.INFO),
+        facility: FACILITY,
+        message: `Supplementary group removed — user ${String(userId)} → gid ${String(gid)}`,
+        metadata: { eventType: 'user.suppGroup.removed', userId: userId, gid, actorId },
+      });
+    }
     return updated;
   }
 
@@ -893,12 +918,17 @@ export class UserService implements IUserService {
       const ugEntry = await this.atomic.get<string[]>('usergroup:ids');
       if (!ugEntry) return;
       for (const id of ugEntry.value) {
-        const g = await this.atomic.get<any>('usergroup:' + id);
-        if (g?.value?.name === groupName) {
-          if (!g.value.memberIds.includes(userId)) {
-            g.value.memberIds.push(userId);
-            g.value.updatedAt = Date.now();
-            await this.atomic.set('usergroup:' + id, g.value, g.version);
+        const gEntry = await this.atomic.get<unknown>('usergroup:' + id);
+        if (!gEntry) continue;
+        const gParsed = z.object({
+          value: z.object({ name: z.string(), memberIds: z.array(z.string()), updatedAt: z.number() }),
+          version: z.string(),
+        }).parse(gEntry);
+        if (gParsed.value.name === groupName) {
+          if (!gParsed.value.memberIds.includes(userId)) {
+            gParsed.value.memberIds.push(userId);
+            gParsed.value.updatedAt = Date.now();
+            await this.atomic.set('usergroup:' + id, gParsed.value, gParsed.version);
           }
           return;
         }

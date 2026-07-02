@@ -65,8 +65,11 @@ export class DashboardService {
     const runnerIdx = await this.atomic.get<string[]>('action-runner:ids');
     let runnersOnline = 0;
     if (runnerIdx) {
-      const rs = (await Promise.all(runnerIdx.value.map(i => this.atomic.get<any>('action-runner:' + i))))
-        .filter(e => e?.value.status === 'online');
+      const rs = (await Promise.all(runnerIdx.value.map(i => this.atomic.get('action-runner:' + i))))
+        .filter(e => {
+          const v = z.object({ status: z.string() }).passthrough().parse(e?.value);
+          return v.status === 'online';
+        });
       runnersOnline = rs.length;
     }
 

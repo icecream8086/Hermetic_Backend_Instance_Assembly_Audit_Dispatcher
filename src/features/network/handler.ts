@@ -17,7 +17,7 @@ function requireRoot<E extends { Variables: { currentUser?: { role?: string } } 
   }
 }
 
-function actorFrom(c: any): string | undefined {
+function actorFrom<E extends { Variables: { currentUser?: { id?: string } } }>(c: Context<E>): string | undefined {
   return c.var?.currentUser?.id;
 }
 

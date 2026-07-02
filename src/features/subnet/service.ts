@@ -7,6 +7,7 @@ import type { InstanceService } from '../../core/region/instance.ts';
 import type { Subnet, SubnetId, CreateSubnetInput, UpdateSubnetInput } from './types.ts';
 import { generateSubnetId } from './types.ts';
 import type { ICrudService, PaginatedResult } from '../../core/crud/index.ts';
+import type { IAuditWriter } from '../../core/audit/types.ts';
 
 const FACILITY = createFacility('subnet');
 const PREFIX = 'subnet:';

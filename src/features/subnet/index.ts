@@ -12,7 +12,7 @@ export interface SubnetDeps {
   audit?: IAuditWriter;
 }
 
-export function createRouter(deps: SubnetDeps): Hono<any> {
+export function createRouter(deps: SubnetDeps): Hono<{ Variables: AppContext }> {
   const instanceSvc = new InstanceService(deps.stores.atomic);
   const svc = new SubnetService(deps.stores.atomic, new ConsoleLogger(), deps.audit, instanceSvc);
   return createSubnetRouter(svc);

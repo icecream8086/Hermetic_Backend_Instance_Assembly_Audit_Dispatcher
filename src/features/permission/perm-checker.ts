@@ -11,6 +11,8 @@
  */
 
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
+import type { IAuditWriter } from '../../core/audit/types.ts';
+import { z } from 'zod';
 import { PermissionDag } from '../../core/permission/permission-dag.ts';
 import { PermissionEffect } from '../../core/permission/types.ts';
 import type { PolicyNode, PermissionCheck } from '../../core/permission/types.ts';
@@ -101,18 +103,19 @@ export class PermissionChecker {
     context?: Record<string, unknown>,
   ): void {
     if (!this.audit) return;
+    const auditResult = z.object({ auditType: z.string().optional(), reason: z.string() }).passthrough().parse(result);
     this.audit.write({
       level: 4, // WARNING
       facility: 'perm',
-      message: `${String(result.auditType)}: ${result.reason}`,
+      message: `${auditResult.auditType ?? 'unknown'}: ${auditResult.reason}`,
       actorId: userId,
       metadata: {
         userId,
         action,
         resource,
         layer: result.layer,
-        auditType: result.auditType,
-        reason: result.reason,
+        auditType: auditResult.auditType,
+        reason: auditResult.reason,
         ...context,
       },
     });
@@ -121,7 +124,7 @@ export class PermissionChecker {
   // ─── Layer 1: DAC ───
 
   async #checkDac(userId: string, _resource: string, resourceOwnerId?: string): Promise<PolicyMatchResult> {
-    const userEntry = await this.atomic.get<any>('user:' + userId);
+    const userEntry = await this.atomic.get<Record<string, unknown>>('user:' + userId);
     if (!userEntry) {
       return {
         allowed: false, reason: 'User not found',
@@ -130,7 +133,8 @@ export class PermissionChecker {
     }
     // Resource ownership check: if resourceOwnerId is set, the acting user
     // must be the owner OR have admin capability (checked in layer 2).
-    if (resourceOwnerId && userEntry.value?.id !== resourceOwnerId) {
+    const userValue = z.object({ id: z.string() }).passthrough().parse(userEntry.value);
+    if (resourceOwnerId && userValue.id !== resourceOwnerId) {
       // Not the owner — defer to capability + MAC layers
       // (CAP_DAC_OVERRIDE would handle this)
     }
@@ -167,9 +171,10 @@ export class PermissionChecker {
     const groupIds = new Set(resolveDagGroupIds(allGroups, userId));
 
     // Also resolve via supplementary GIDs (RHEL §1 supp_groups)
-    const userEntry = await this.atomic.get<any>('user:' + userId);
-    if (userEntry?.value?.supplementaryGids) {
-      for (const gid of userEntry.value.supplementaryGids) {
+    const userEntry2 = await this.atomic.get<Record<string, unknown>>('user:' + userId);
+    const suppGids = userEntry2 ? z.object({ supplementaryGids: z.array(z.number()).optional() }).passthrough().parse(userEntry2.value).supplementaryGids : undefined;
+    if (suppGids) {
+      for (const gid of suppGids) {
         const sgEntry = await this.atomic.get<string>('sysgroup:gid:' + String(gid));
         if (sgEntry?.value) groupIds.add(sgEntry.value);
       }

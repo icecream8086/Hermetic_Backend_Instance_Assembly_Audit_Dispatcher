@@ -4,6 +4,6 @@ import { createInfoHandler } from './info.handler.ts';
 
 export { ServerInfoSchema, type ServerInfo } from './info.schema.ts';
 
-export function createRouter(deps: FeatureDeps): Hono<any> {
+export function createRouter(deps: FeatureDeps): Hono<{ Variables: AppContext }> {
   return createInfoHandler(deps.stores);
 }

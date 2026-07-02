@@ -36,6 +36,7 @@ import type { InstanceService } from '../../core/region/instance.ts';
 import type { IMessageQueue } from '../../queue/interfaces.ts';
 import { SandboxStore } from './sandbox-store.ts';
 import { runtimeToNetwork, runtimeToContainers, runtimeToEvents } from './runtime-mapper.ts';
+import type { IAuditWriter } from '../../core/audit/types.ts';
 import { z } from 'zod';
 
 const FACILITY = createFacility('sandbox-service');
@@ -314,7 +315,7 @@ export class SandboxService implements ISandboxService {
     // Clean up auto-generated S3 bucket keys
     const BINDING_PREFIX = 'bucket-key:';
     const BINDING_INDEX_KEY = 'bucket-key:ids';
-    const bindingEntry = await this.atomic.get<any>(BINDING_PREFIX + id);
+    const bindingEntry = await this.atomic.get<{ value: Record<string, unknown> } | null>(BINDING_PREFIX + id);
     if (bindingEntry) {
       await this.atomic.set(BINDING_PREFIX + id, null, bindingEntry.version);
       const idx_ = await this.atomic.get<string[]>(BINDING_INDEX_KEY);

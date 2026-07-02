@@ -14,6 +14,7 @@
 
 import { z, ZodError, type ZodType } from 'zod';
 import type { IAtomicStore } from './interfaces.ts';
+import type { VersionId } from '../brand.ts';
 
 /**
  * Read and validate an entity from the atomic store.
@@ -48,8 +49,8 @@ export async function setValidated<T>(
   key: string,
   value: T,
   schema: ZodType<T>,
-  expectedVersion: any,
-): Promise<any> {
+  expectedVersion: VersionId | null,
+): Promise<VersionId | null> {
   try {
     const parsed = schema.parse(value);
     return atomic.set(key, parsed, expectedVersion);

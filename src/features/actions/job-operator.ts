@@ -118,12 +118,20 @@ export class JobOperator implements ITaskExecutor {
   }
 
   private stepLabel(step: StepDef): string {
-    if (step.run != null) return step.run.slice(0, 60);
-    if (step.dns != null) return `dns:${step.dns.name}`;
-    return step.uses;
+    if ('run' in step && step.run != null) return step.run.slice(0, 60);
+    if ('dns' in step && step.dns != null) return `dns:${step.dns.name}`;
+    if ('uses' in step) return step.uses;
+    return '';
   }
 
-  private async provisionSandbox(config: any): Promise<string> {
+  private async provisionSandbox(config: {
+    jobName: string;
+    env: Record<string, string>;
+    container?: ActionContainerConfig;
+    containers?: readonly (ActionContainerConfig & { name: string })[];
+    instanceId?: string;
+    region?: string;
+  }): Promise<string> {
     const mainContainer: ActionContainerConfig | undefined = config.containers?.[0] ?? config.container;
     if (!mainContainer) throw new Error('Job has no container defined');
 
@@ -165,7 +173,7 @@ export class JobOperator implements ITaskExecutor {
       throw new Error('Job requires an instanceId to resolve a container provider');
     }
 
-    const provider: any = await this.deps.providers.resolveContainer(instanceId);
+    const provider = await this.deps.providers.resolveContainer(instanceId);
     const region = config.region ?? 'local';
 
     const result = await provider.create({

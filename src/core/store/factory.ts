@@ -1,5 +1,6 @@
 /// <reference types="@cloudflare/workers-types" />
 
+import { z } from 'zod';
 import type { StorageConfig } from './config.ts';
 import type { IAtomicStore, IQueryStore, IBlobStore, Stores } from './interfaces.ts';
 

@@ -7,6 +7,7 @@ import { generateSysGroupId } from './types.ts';
 import { createGid, GID_MIN } from '../users/types.ts';
 import type { Gid } from '../users/types.ts';
 import type { ICrudService, PaginatedResult } from '../../core/crud/index.ts';
+import type { IAuditWriter } from '../../core/audit/types.ts';
 
 const FACILITY = createFacility('sysgrp');
 const PREFIX = 'sysgroup:';

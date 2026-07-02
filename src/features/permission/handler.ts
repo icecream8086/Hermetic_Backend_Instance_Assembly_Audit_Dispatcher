@@ -154,7 +154,7 @@ export function createPermissionRouter(svc: IPermissionService): OpenAPIHono<{ V
 
   // ─── Policies CRUD ───
   {
-    const policies = new OpenAPIHono<any>();
+    const policies = new OpenAPIHono();
     registerCrudRoutes(policies, subCrud({
       guard: requireRoot,
       createSchema: CreatePolicySchema,
@@ -174,7 +174,7 @@ export function createPermissionRouter(svc: IPermissionService): OpenAPIHono<{ V
 
   // ─── User groups CRUD ───
   {
-    const userGroups = new OpenAPIHono<any>();
+    const userGroups = new OpenAPIHono();
     registerCrudRoutes(userGroups, subCrud({
       guard: requireWheel,
       createSchema: CreateUserGroupSchema,
@@ -194,7 +194,7 @@ export function createPermissionRouter(svc: IPermissionService): OpenAPIHono<{ V
 
   // ─── Permission groups CRUD ───
   {
-    const permGroups = new OpenAPIHono<any>();
+    const permGroups = new OpenAPIHono();
 
     registerCrudRoutes(permGroups, subCrud({
       guard: requireRoot,
@@ -243,7 +243,7 @@ export function createPermissionRouter(svc: IPermissionService): OpenAPIHono<{ V
 
   // ─── UserTemplate CRUD ───
   {
-    const userTemplates = new OpenAPIHono<any>();
+    const userTemplates = new OpenAPIHono();
     registerCrudRoutes(userTemplates, subCrud({
       guard: requireRoot,
       createSchema: CreateUserTplSchema,
@@ -263,7 +263,7 @@ export function createPermissionRouter(svc: IPermissionService): OpenAPIHono<{ V
 
   // ─── Route ACL CRUD ───
   {
-    const routeAcls = new OpenAPIHono<any>();
+    const routeAcls = new OpenAPIHono();
     registerCrudRoutes(routeAcls, subCrud({
       guard: requireRoot,
       createSchema: CreateRouteAclSchema,

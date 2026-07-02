@@ -193,10 +193,20 @@ export class InstanceService {
     // Check for running sandboxes on this instance before allowing deletion
     const sandboxIdx = await this.atomic.get<string[]>('sandbox:ids');
     if (sandboxIdx) {
+      const sandboxEntrySchema = z.object({
+        config: z.object({
+          instanceId: z.string().optional(),
+        }).optional(),
+        status: z.string().optional(),
+      });
       const sandboxes = await Promise.all(
-        sandboxIdx.value.map(sid => this.atomic.get<any>('sandbox:' + sid))
+        sandboxIdx.value.map(sid => this.atomic.get('sandbox:' + sid))
       );
-      const running = sandboxes.filter(s => s && s.value?.config?.instanceId === id && s.value?.status !== 'Deleted');
+      const running = sandboxes.filter((s): boolean => {
+        if (!s) return false;
+        try { const parsed = sandboxEntrySchema.parse(s.value); return parsed.config?.instanceId === id && parsed.status !== 'Deleted'; }
+        catch (_e) { const _r = false; return _r; }
+      });
       if (running.length > 0) {
         throw new AppError(409, 'INSTANCE_HAS_SANDBOXES', `Instance ${id} has ${String(running.length)} running sandbox(es)`);
       }

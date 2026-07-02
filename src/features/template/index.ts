@@ -27,7 +27,7 @@ function createSandboxService(atomic: IAtomicStore, providers: IProviderRegistry
   return new SandboxService(atomic, new ConsoleLogger(), container, providers, undefined, audit, resolveNetwork, instanceService, undefined, podService);
 }
 
-export function createRouter(deps: TemplateDeps): Hono<any> {
+export function createRouter(deps: TemplateDeps): Hono<{ Variables: AppContext }> {
   const defaultSvc = createSandboxService(deps.stores.atomic, deps.providers, deps.audit);
   return createTemplateRouter(deps.stores.atomic, defaultSvc, deps.providers, deps.permissionChecker);
 }

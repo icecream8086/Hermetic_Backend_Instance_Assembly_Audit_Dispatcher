@@ -38,9 +38,10 @@ export function registerImagePullHandler(deps: ImagePullDeps): void {
     const { taskId, image, instanceId, clusterId, credentialRef, registryCredential } = fieldSchema.parse(payload);
     if (!taskId || !image) return;
 
-    const entry = await atomic.get<any>('pull-task:' + taskId);
+    const entry = await atomic.get<Record<string, unknown>>('pull-task:' + taskId);
     if (!entry) return;
-    const taskBase = { id: taskId, repositoryId: entry.value.repositoryId, image, createdAt: entry.value.createdAt };
+    const taskValue = z.object({ repositoryId: z.string(), createdAt: z.number() }).passthrough().parse(entry.value);
+    const taskBase = { id: taskId, repositoryId: taskValue.repositoryId, image, createdAt: taskValue.createdAt };
 
     // Try queue dispatch first
     const qSent = await queueProducer.sendImagePull({
@@ -74,10 +75,11 @@ export function registerImagePullHandler(deps: ImagePullDeps): void {
       await atomic.set('pull-task:' + taskId, {
         ...taskBase, status: 'completed', result: { id: info.id, tags: [...info.tags] }, completedAt: Date.now(),
       }, entry.version);
-    } catch (e: any) {
-      console.error(`[pull-task] ${taskId} failed:`, e.message);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error(`[pull-task] ${taskId} failed:`, msg);
       await atomic.set('pull-task:' + taskId, {
-        ...taskBase, status: 'failed', error: e.message, failedAt: Date.now(),
+        ...taskBase, status: 'failed', error: msg, failedAt: Date.now(),
       }, entry.version);
     }
   });

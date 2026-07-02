@@ -56,8 +56,8 @@ export function createSandboxRouter(
   app.openapi(createRoute({ method: 'post', path: '/pod', tags: ['sandboxes'], summary: '从 PodSpec 创建 Pod', responses: { 201: { description: 'Pod created', content: { 'application/json': { schema: OkResponse(PodCreateResponseSchema) } } } } }), async (c) => {
     await requirePerm(c, permissionChecker, 'create', 'pod');
     if (!podService) notConfigured();
-    const spec = await z.unknown().parse(c.req.json());
-    if (!spec.metadata.name || !spec.spec.containers.length) throw new AppError(400, 'VALIDATION_ERROR', 'PodSpec requires metadata.name and spec.containers');
+    const spec = z.custom<PodSpec>().parse(await c.req.json());
+    if (!spec.metadata.name || spec.spec.containers.length === 0) throw new AppError(400, 'VALIDATION_ERROR', 'PodSpec requires metadata.name and spec.containers');
     const pod = await podService.provision(spec, { creatorId: c.var.currentUser?.id });
     return c.json(ok({ podId: pod.podId, providerId: pod.providerId, phase: pod.phase, name: pod.name }), 201);
   });
@@ -157,8 +157,11 @@ export function createSandboxRouter(
     const podId = createPodId(c.req.param('id'));
     const pod = await podService.getById(podId);
     await requirePerm(c, permissionChecker, 'update', 'pod', pod.creatorId);
-    const body = await z.unknown().parse(c.req.json());
-    if (!body.cmd.length) throw new AppError(400, 'VALIDATION_ERROR', 'Body.cmd (string array) is required');
+    const body = z.object({
+      cmd: z.array(z.string()),
+      containerName: z.string().optional(),
+    }).parse(await c.req.json());
+    if (body.cmd.length === 0) throw new AppError(400, 'VALIDATION_ERROR', 'Body.cmd (string array) is required');
     const result = await podService.exec(podId, body.cmd, body.containerName);
     return c.json(ok(result));
   });

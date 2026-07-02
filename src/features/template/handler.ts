@@ -408,7 +408,23 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
   // POST / — 创建模板
   app.openapi(createRoute({ method: 'post', path: '/', tags: ['templates'], summary: '创建模板', responses: { 201: { description: 'SandboxTemplate', content: { 'application/json': { schema: OkResponse(SandboxTemplateSchema) } } } } }), async (c) => {
       await requirePerm(c, permissionChecker, 'create', 'template');
-      const body = await z.unknown().parse(c.req.json());
+      const bodySchema = z.object({
+        name: z.string().optional(),
+        healthChecks: z.array(z.object({ type: z.string() })).optional(),
+        singleton: z.boolean().optional(),
+        instanceLimit: z.unknown().optional(),
+        description: z.string().optional(),
+        apiVersion: z.string().optional(),
+        kind: z.string().optional(),
+        metadata: z.unknown().optional(),
+        dependsOn: z.array(z.string()).optional(),
+        resourceBinding: z.unknown().optional(),
+        container: z.unknown().optional(),
+        network: z.unknown().optional(),
+        extensions: z.unknown().optional(),
+        podSpec: z.unknown().optional(),
+      }).passthrough();
+      const body = bodySchema.parse(await c.req.json());
       if (!body.name) throw new AppError(400, 'VALIDATION_ERROR', 'name is required');
 
       const user = c.var.currentUser;

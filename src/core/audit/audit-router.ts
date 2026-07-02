@@ -103,7 +103,7 @@ export function createAuditRouter(reader: IAuditReader): Hono<AuditEnv> {
       enabled: z.boolean().optional().parse(parsedBody.enabled) ?? current.enabled,
       defaultMinLevel: parseLevel(parsedBody.defaultMinLevel) ?? current.defaultMinLevel,
       rules: Array.isArray(parsedBody.rules)
-        ? parsedBody.rules.map((r: any, _i: number) => parseRule(r))
+        ? parsedBody.rules.map((r: Record<string, unknown>, _i: number) => parseRule(r))
         : current.rules,
       updatedAt: Date.now(),
       updatedBy: userId ?? 'unknown',

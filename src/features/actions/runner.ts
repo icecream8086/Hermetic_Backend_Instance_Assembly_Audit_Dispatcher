@@ -50,6 +50,15 @@ interface ExecProvider {
 function runId(): WorkflowRunId { return createWorkflowRunId(`wfr_${crypto.randomUUID()}`); }
 function jId(): JobRunId { return createJobRunId(`jr_${crypto.randomUUID()}`); }
 
+/** Compute a human-readable step label from a StepDef. */
+function stepLabel(step: StepDef): string {
+  if (step.name) return step.name;
+  if ('run' in step && step.run != null) return step.run.slice(0, 60);
+  if ('dns' in step && step.dns != null) return `dns:${step.dns.name}`;
+  if ('uses' in step) return step.uses;
+  return '';
+}
+
 export interface WorkflowRunnerDeps {
   stores: { atomic: IAtomicStore; blob: IBlobStore };
   // eslint-disable-next-line @typescript-eslint/no-restricted-types -- slim dependency interface: only two methods needed from IProviderRegistry
@@ -309,7 +318,7 @@ export class WorkflowRunner {
   }
 
   /** Resolve ${{ matrix.KEY }} in container config fields. */
-  #resolveMatrixInContainer(container: any, vars: Record<string, string | number | boolean>): any {
+  #resolveMatrixInContainer(container: ActionContainerConfig, vars: Record<string, string | number | boolean>): ActionContainerConfig {
     const pattern = /\$\{\{\s*matrix\.(\w+)\s*\}\}/g;
     const resolve = (s: string): string => {
       let r = s;
@@ -497,7 +506,7 @@ export class WorkflowRunner {
     const provider = z.custom<ExecProvider>().parse(await this.deps.providers.resolveContainer(undefined));
 
     for (const step of steps) {
-      const name = step.name ?? (step.run != null ? step.run.slice(0, 60) : step.dns != null ? `dns:${step.dns.name}` : step.uses);
+      const name: string = stepLabel(step);
       const startedAt = Date.now();
 
       // Log step start
@@ -516,9 +525,10 @@ export class WorkflowRunner {
           stepRuns.push({ name, status: 'Success', startedAt, completedAt: Date.now(), exitCode: 0 });
 
         } else if (step.dns != null) {
+          const dnsInfo = z.object({ action: z.string(), name: z.string() }).parse(step.dns);
           await executeDnsStep(step, this.deps.providers.dns, this.deps.audit);
           await appendStepLog(this.deps.stores.blob, jobRunId, name,
-            `DNS ${step.dns.action} ${step.dns.name}`);
+            `DNS ${dnsInfo.action} ${dnsInfo.name}`);
           stepRuns.push({ name, status: 'Success', startedAt, completedAt: Date.now() });
 
         } else if (step.uses != null) {
@@ -555,7 +565,7 @@ export class WorkflowRunner {
     step: RunStepDef,
     env: Record<string, string>,
     sandboxId: string,
-    provider: any,
+    provider: ExecProvider,
   ): Promise<void> {
     const shell = step.shell ?? '/bin/sh';
     const script = step.run;
@@ -589,7 +599,7 @@ export class WorkflowRunner {
     step: UsesStepDef,
     env: Record<string, string>,
     sandboxId: string,
-    provider: any,
+    provider: ExecProvider,
   ): Promise<void> {
     const registry = this.deps.actionRegistry;
     if (!registry) {
@@ -634,7 +644,7 @@ export class WorkflowRunner {
   }
 
   #defToStepRun(step: StepDef): StepRun {
-    const name = step.name ?? (step.run != null ? step.run.slice(0, 60) : step.dns != null ? `dns:${step.dns.name}` : step.uses);
+    const name: string = stepLabel(step);
     return { name, status: 'Queued' };
   }
 

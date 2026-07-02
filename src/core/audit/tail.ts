@@ -9,7 +9,7 @@
  * This mirrors journald's `--after-cursor` + `--cursor-file` pattern (§5).
  */
 
-import type { IAuditReader, StoredAuditEntry } from './types.ts';
+import type { IAuditReader, StoredAuditEntry, LogQuery } from './types.ts';
 
 // ─── Tail session ───
 
@@ -49,7 +49,7 @@ export async function pollTail(
   session: TailSession,
   options: TailOptions = {},
 ): Promise<{ entries: readonly StoredAuditEntry[]; newCursor: string }> {
-  const params: any = {
+  const params: LogQuery = {
     limit: session.batchSize,
     ...(options.facility ? { facility: options.facility } : {}),
     ...(session.cursor ? { afterCursor: session.cursor } : {}),

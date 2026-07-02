@@ -11,7 +11,7 @@ export interface SysGroupDeps {
   audit?: IAuditWriter;
 }
 
-export function createRouter(deps: SysGroupDeps): Hono<any> {
+export function createRouter(deps: SysGroupDeps): Hono<{ Variables: AppContext }> {
   const service = new SysGroupService(deps.stores.atomic, new ConsoleLogger(), deps.audit);
   return createSysGroupRouter(service);
 }

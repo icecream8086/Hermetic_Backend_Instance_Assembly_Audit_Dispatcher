@@ -6,7 +6,7 @@ import type { AppContext } from '../../core/deps.ts';
 import type { IUserService } from './service.ts';
 import { RegisterUserSchema, LoginUserSchema, UpdateUserSchema, UserResponseSchema, LoginResponseSchema, LoginPolicySchema, NoPasswordLoginSchema, PublicKeySchema } from './schema.ts';
 import type { UserResponse } from './schema.ts';
-import { createUserId, createSessionToken, createGid, UserRole } from './types.ts';
+import { createUserId, createSessionToken, createGid, UserRole, type User } from './types.ts';
 import { ok } from '../../core/response.ts';
 import { OkResponse, PaginatedResponse } from '../../core/http-docs/response-schema.ts';
 
@@ -130,9 +130,9 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
     const q = c.req.query('q');
     if (!q) throw new AppError(400, 'VALIDATION_ERROR', 'query parameter q is required');
     const atomic = c.var.stores.atomic;
-    let user;
-    if (q.includes('@')) { const e = await atomic.get<any>('user:email:' + q); if (e) user = e.value; }
-    else { const e = await atomic.get<any>('user:' + q); if (e) user = e.value; }
+    let user: User | undefined;
+    if (q.includes('@')) { const e = await atomic.get<User>('user:email:' + q); if (e) user = e.value; }
+    else { const e = await atomic.get<User>('user:' + q); if (e) user = e.value; }
     if (!user) return c.json(ok(null));
     return c.json(ok(userToResponse(user)));
   });
@@ -231,7 +231,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
     const blobStore = c.var.stores.blob;
     const atomic = c.var.stores.atomic;
     await blobStore.delete(AVATAR_BLOB_PREFIX + targetId);
-    const metaEntry = await atomic.get<any>(AVATAR_META_PREFIX + targetId);
+    const metaEntry = await atomic.get<Record<string, unknown>>(AVATAR_META_PREFIX + targetId);
     if (metaEntry) await atomic.set(AVATAR_META_PREFIX + targetId, null, metaEntry.version);
     return c.json(ok(null));
   });

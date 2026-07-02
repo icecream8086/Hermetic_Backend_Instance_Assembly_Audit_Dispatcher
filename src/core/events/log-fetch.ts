@@ -84,7 +84,7 @@ export function registerLogFetchHandler(deps: LogFetchDeps): void {
       });
 
       // Cache the result with metadata
-      const existing = await atomic.get<any>(cacheKey(sandboxId, containerName));
+      const existing = await atomic.get<{ content: string; containerName?: string; timestamp?: string; fetchedAt: number }>(cacheKey(sandboxId, containerName));
       await atomic.set(cacheKey(sandboxId, containerName), {
         content: result.content,
         containerName: result.containerName,
@@ -97,8 +97,8 @@ export function registerLogFetchHandler(deps: LogFetchDeps): void {
       try { if (m2) await atomic.set<Record<string, unknown> | null>(markerKey, null, m2.version); } catch {
         console.debug("noop");
       }
-    } catch (e: any) {
-      console.error(`[log:fetch] ${sandboxId}/${containerName} failed:`, e.message);
+    } catch (e: unknown) {
+      console.error(`[log:fetch] ${sandboxId}/${containerName} failed:`, e instanceof Error ? e.message : String(e));
     }
   });
 }
@@ -108,6 +108,6 @@ export async function getCachedLogs(
   sandboxId: string,
   containerName: string,
 ): Promise<{ content: string; containerName?: string; timestamp?: string; fetchedAt?: number } | null> {
-  const entry = await atomic.get<any>(cacheKey(sandboxId, containerName));
+  const entry = await atomic.get<{ content: string; containerName?: string; timestamp?: string; fetchedAt?: number }>(cacheKey(sandboxId, containerName));
   return entry?.value ?? null;
 }

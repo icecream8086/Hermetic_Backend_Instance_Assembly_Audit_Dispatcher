@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { IAtomicStore, IStoreTransaction } from '../../core/store/interfaces.ts';
 import { TransactConflictError } from '../../core/store/interfaces.ts';
 
@@ -208,7 +209,7 @@ export class PermissionService implements IPermissionService {
     await this.#groupMgr.deletePermGroup(id, actor);
     this.#checker.invalidateCache();
   }
-  public createPermGroupFromTemplate(templateId: string, overrides: any, actor?: AuditActor): Promise<PermissionGroup> {
+  public createPermGroupFromTemplate(templateId: string, overrides: { name: string; description?: string | null | undefined; userGroupIds?: string[] | undefined; userIds?: string[] | undefined; }, actor?: AuditActor): Promise<PermissionGroup> {
     return this.#groupMgr.createFromTemplate(templateId, overrides, actor);
   }
 
@@ -225,10 +226,11 @@ export class PermissionService implements IPermissionService {
   public deleteRouteAcl(id: string, actor?: AuditActor): Promise<void> { return this.#routeAclMgr.delete(id, actor); }
 
   public async checkRouteAccess(method: string, path: string, userId: string): Promise<boolean> {
-    const userEntry = await this.atomic.get<any>('user:' + userId);
+    const userEntry = await this.atomic.get<Record<string, unknown>>('user:' + userId);
     if (!userEntry) return false;
     // Root role bypasses all route ACLs (capability model still applies at permission gate)
-    if (userEntry.value.role === 'root') return true;
+    const userValue = z.object({ role: z.string().optional() }).loose().parse(userEntry.value);
+    if (userValue.role === 'root') return true;
     const allGroups = await this.#groupMgr.listUserGroups();
     const groupIds = allGroups.filter(g => g.memberIds.includes(userId)).map(g => g.id);
     return this.#routeAclMgr.checkAccess(method, path, userId, groupIds);
@@ -483,9 +485,10 @@ export class PermissionService implements IPermissionService {
       if (inv?.status !== 'pending') throw new AppError(409, 'ALREADY_PROCESSED', 'Invitation already processed');
       txn.set(INVITE_PREFIX + inviteId, { ...inv, status: 'accepted' });
 
-      const grp = await txn.get<any>('usergroup:' + entry.value.groupId);
+      const grp = await txn.get<Record<string, unknown>>('usergroup:' + entry.value.groupId);
       if (grp) {
-        const members = grp.memberIds ?? [];
+        const groupValue = z.object({ memberIds: z.array(z.string()).optional() }).loose().parse(grp.value);
+        const members: string[] = groupValue.memberIds ?? [];
         if (!members.includes(userId)) {
           txn.set('usergroup:' + entry.value.groupId, { ...grp, memberIds: [...members, userId], updatedAt: Date.now() });
         }

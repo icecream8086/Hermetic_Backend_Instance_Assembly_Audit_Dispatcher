@@ -100,9 +100,9 @@ export async function evaluateProbe(
     ]);
     success = result.success;
     message = result.message ?? '';
-  } catch (e: any) {
+  } catch (e: unknown) {
     success = false;
-    message = e?.message ?? 'probe error';
+    message = e instanceof Error ? e.message : 'probe error';
   }
 
   // Update state

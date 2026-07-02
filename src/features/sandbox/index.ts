@@ -8,7 +8,7 @@ import { createAtomicNetworkResolver } from '../../core/network/resolver.ts';
 import { InstanceService } from '../../core/region/instance.ts';
 import { QuotaService } from '../../core/quota/service.ts';
 
-export function createRouter(deps: FeatureDeps): Hono<any> {
+export function createRouter(deps: FeatureDeps): Hono<{ Variables: AppContext }> {
   const resolveNetwork = createAtomicNetworkResolver(deps.stores.atomic);
   const instanceService = new InstanceService(deps.stores.atomic);
   const quotaService = new QuotaService(deps.stores.atomic, deps.audit);

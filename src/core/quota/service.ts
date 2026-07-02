@@ -1,6 +1,7 @@
 import type { IAtomicStore } from '../store/interfaces.ts';
 import type { IAuditWriter } from '../audit/types.ts';
 import { KernLevel } from '../audit/kern-level.ts';
+import { AppError } from '../types.ts';
 
 /** Quota key prefix per user. */
 const QUOTA_KEY = 'quota:user:';
@@ -44,7 +45,7 @@ export class QuotaService {
   }
 
   public async setQuota(userId: string, quota: UserQuota): Promise<void> {
-    const entry = await this.atomic.get<any>(QUOTA_KEY + userId);
+    const entry = await this.atomic.get<UserQuota>(QUOTA_KEY + userId);
     await this.atomic.set(QUOTA_KEY + userId, quota, entry?.version ?? null);
     this.audit?.write({
       level: KernLevel.NOTICE,
@@ -65,19 +66,13 @@ export class QuotaService {
     const usage = await this.getUsage(userId);
 
     if (quota.maxSandboxes && usage.sandboxes >= quota.maxSandboxes) {
-      const err: any = new Error(`Sandbox quota exceeded: ${String(usage.sandboxes)}/${String(quota.maxSandboxes)}`);
-      err.status = 429;
-      throw err;
+      throw new AppError(429, 'RATE_LIMITED', `Sandbox quota exceeded: ${String(usage.sandboxes)}/${String(quota.maxSandboxes)}`);
     }
     if (quota.maxCpu && (usage.cpu + cpu) > quota.maxCpu) {
-      const err: any = new Error(`CPU quota exceeded: ${String(usage.cpu + cpu)}/${String(quota.maxCpu)}`);
-      err.status = 429;
-      throw err;
+      throw new AppError(429, 'RATE_LIMITED', `CPU quota exceeded: ${String(usage.cpu + cpu)}/${String(quota.maxCpu)}`);
     }
     if (quota.maxMemory && (usage.memory + memory) > quota.maxMemory) {
-      const err: any = new Error(`Memory quota exceeded: ${String(usage.memory + memory)}/${String(quota.maxMemory)}`);
-      err.status = 429;
-      throw err;
+      throw new AppError(429, 'RATE_LIMITED', `Memory quota exceeded: ${String(usage.memory + memory)}/${String(quota.maxMemory)}`);
     }
   }
 

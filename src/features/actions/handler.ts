@@ -120,12 +120,12 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
   registerScheduler('dagScheduler', dagScheduler);
 
   const guard = (action: string, resource: string) =>
-    async (c: any) => {
+    async (c: { var: { currentUser?: { id?: string } }; req: { header(name: string): string | undefined } }) => {
       if (!deps.permissionChecker) return;
       const r = await deps.permissionChecker.check({
-        userId: c.var.currentUser?.id ?? c.get?.('userId') ?? 'anonymous',
+        userId: c.var.currentUser?.id ?? 'anonymous',
         action, resource,
-        ip: c.req.header?.('CF-Connecting-IP'),
+        ip: c.req.header('CF-Connecting-IP'),
       });
       if (!r.allowed) throw new AppError(403, 'FORBIDDEN', r.reason);
     };
@@ -235,9 +235,9 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
     if (!entry) throw new AppError(404, 'WORKFLOW_NOT_FOUND', 'Workflow not found');
 
     let body;
-    try { body = await z.unknown().parse(c.req.json()); } catch { body = {}; }
-    const parsed = TriggerWorkflowSchema.parse(body);
-    const inputs = parsed.success && parsed.data.inputs ? parsed.data.inputs : {};
+    try { body = await c.req.json(); } catch { body = {}; }
+    const parsed = TriggerWorkflowSchema.safeParse(body);
+    const inputs = parsed.success ? (parsed.data.inputs ?? {}) : {};
 
     const run = await runner.startRun(entry.value, 'manual', undefined, inputs,
       c.var.currentUser?.id ?? 'anonymous');
@@ -284,9 +284,9 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
     if (!entry) throw new AppError(404, 'WORKFLOW_NOT_FOUND', 'Workflow not found');
 
     let body;
-    try { body = await z.unknown().parse(c.req.json()); } catch { body = {}; }
-    const parsed = TriggerWorkflowSchema.parse(body);
-    const inputs = parsed.success && parsed.data.inputs ? parsed.data.inputs : {};
+    try { body = await c.req.json(); } catch { body = {}; }
+    const parsed = TriggerWorkflowSchema.safeParse(body);
+    const inputs = parsed.success ? (parsed.data.inputs ?? {}) : {};
 
     // Build DAG and persist
     const { dag } = buildDagFromWorkflow(entry.value);
@@ -297,7 +297,7 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
       dag.id, 'manual', undefined, inputs,
       c.var.currentUser?.id ?? 'anonymous',
     );
-    const run: any = { ...dagRun, version: generateVersionId() };
+    const run = { ...dagRun, version: generateVersionId() };
     await schedulerCtx.saveNewDagRun(run);
 
     deps.audit.write({
@@ -314,8 +314,9 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
    *  on.push configured.  Basic branch-name matching for now. */
   app.openapi(createRoute({ method: 'post', path: '/webhook', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(TriggeredWebhookResponseSchema) } } } } }), async (c) => {
     let payload;
-    try { payload = await z.unknown().parse(c.req.json()); } catch { payload = {}; }
-    const branch = (payload)?.ref?.replace('refs/heads/', '') ?? '';
+    try { payload = await c.req.json(); } catch { payload = {}; }
+    const payloadObj = z.object({ ref: z.string().optional() }).passthrough().parse(payload);
+    const branch = payloadObj.ref?.replace('refs/heads/', '') ?? '';
 
     const idx = await atomic.get<string[]>(IDX_WORKFLOW_IDS);
     if (!idx) return c.json(ok({ triggered: [], count: 0 }));
@@ -330,7 +331,7 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
         if (!branches.includes(branch) && !branches.includes('*')) continue;
       }
 
-      const run = await runner.startRun(entry.value, 'webhook', payload, undefined,
+      const run = await runner.startRun(entry.value, 'webhook', payloadObj, undefined,
         c.var.currentUser?.id ?? 'anonymous');
       triggered.push(run.id);
     }

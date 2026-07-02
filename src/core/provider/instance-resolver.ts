@@ -229,7 +229,7 @@ export class InstanceProviderResolver {
   }
 
   /** Resolve a raw ECI API client for a specific instance. */
-  public async resolveRawEciApi(instanceId: InstanceId): Promise<any> {
+  public async resolveRawEciApi(instanceId: InstanceId): Promise<AlibabaEciApiClient | undefined> {
     const inst = await this.instanceService.get(instanceId);
     if (inst?.platform !== 'alibaba') return undefined;
     const cred = await this.#resolveCredential(inst.credentialRef);
@@ -238,7 +238,7 @@ export class InstanceProviderResolver {
   }
 
   /** Resolve a CR (Container Registry) API client for a specific instance. */
-  public async resolveCrApi(instanceId: InstanceId): Promise<any> {
+  public async resolveCrApi(instanceId: InstanceId): Promise<AlibabaCrApiClient | undefined> {
     const inst = await this.instanceService.get(instanceId);
     if (inst?.platform !== 'alibaba') return undefined;
     const cred = await this.#resolveCredential(inst.credentialRef);
@@ -247,7 +247,7 @@ export class InstanceProviderResolver {
   }
 
   /** Resolve an OSS management-plane API client for a specific instance. */
-  public async resolveOssOpenApi(instanceId: InstanceId): Promise<any> {
+  public async resolveOssOpenApi(instanceId: InstanceId): Promise<AlibabaOssOpenApiClient | undefined> {
     const inst = await this.instanceService.get(instanceId);
     if (inst?.platform !== 'alibaba') return undefined;
     const cred = await this.#resolveCredential(inst.credentialRef);

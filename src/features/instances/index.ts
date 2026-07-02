@@ -11,7 +11,7 @@ export interface InstancesDeps {
   audit?: IAuditWriter;
 }
 
-export function createRouter(deps: InstancesDeps): Hono<any> {
+export function createRouter(deps: InstancesDeps): Hono<{ Variables: AppContext }> {
   const service = new RunnerService(deps.stores.atomic, new ConsoleLogger(), deps.audit);
   return createInstancesRouter(service);
 }

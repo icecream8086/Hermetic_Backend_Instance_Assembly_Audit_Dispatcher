@@ -37,7 +37,7 @@ function isRoot<E extends { Variables: { currentUser?: { role?: string } } }>(c:
 }
 
 /** Extract filter params from query string. */
-function extractFilter(c: any): Record<string, string | undefined> {
+function extractFilter(c: Context<{ Variables: AppContext }>): Record<string, string | undefined> {
   const out: Record<string, string | undefined> = {};
   for (const key of ['region', 'platform', 'status']) { const v = c.req.query(key); if (v) out[key] = v; }
   return out;
@@ -46,16 +46,16 @@ function extractFilter(c: any): Record<string, string | undefined> {
 /** Register CRUD routes on an OpenAPIHono sub-app. */
 function mkTopoCrud<T, TC = unknown, TU = unknown>(
   app: OpenAPIHono<{ Variables: AppContext }>,
-  svc: { create(input: TC): Promise<T>; get(id: any): Promise<T | null>; list(filter?: any): Promise<T[]>; update(id: any, input: TU): Promise<T>; delete(id: any): Promise<void> },
-  validateCreate: (body: any) => string | null,
+  svc: { create(input: TC): Promise<T>; get(id: string): Promise<T | null>; list(filter?: Record<string, string | undefined>): Promise<T[]>; update(id: string, input: TU): Promise<T>; delete(id: string): Promise<void> },
+  validateCreate: (body: TC) => string | null,
   notFoundMsg: string,
-  idTransform?: (raw: string) => any,
-  mapResult?: (item: T) => any,
-  guard?: (c: any) => void,
+  idTransform?: (raw: string) => string,
+  mapResult?: (item: T) => unknown,
+  guard?: (c: Context<{ Variables: AppContext }>) => void,
   itemSchema?: z.ZodType,
 ): void {
-  const idFn = (raw: string): any => idTransform ? idTransform(raw) : raw;
-  const map = (item: T): any => mapResult ? mapResult(item) : item;
+  const idFn = (raw: string): string => idTransform ? idTransform(raw) : raw;
+  const map = (item: T): unknown => mapResult ? mapResult(item) : item;
   const s = itemSchema ?? z.unknown();
   const listSchema = z.object({ items: z.array(s), total: z.number() });
 
@@ -67,7 +67,7 @@ function mkTopoCrud<T, TC = unknown, TU = unknown>(
 
   app.openapi(createRoute({ method: 'post', path: '/', tags: ['topology'], summary: 'Create', responses: { 201: { description: 'Created', content: { 'application/json': { schema: OkResponse(s) } } } } }), async (c) => {
     if (guard) guard(c);
-    const body = await z.unknown().parse(c.req.json());
+    const body = z.custom<TC>().parse(await c.req.json());
     const err = validateCreate(body);
     if (err) throw new AppError(400, 'VALIDATION_ERROR', err);
     const entity = await svc.create(body);
@@ -82,7 +82,7 @@ function mkTopoCrud<T, TC = unknown, TU = unknown>(
 
   app.openapi(createRoute({ method: 'put', path: '/{id}', tags: ['topology'], summary: 'Update', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Updated', content: { 'application/json': { schema: OkResponse(s) } } } } }), async (c) => {
     if (guard) guard(c);
-    const body = await z.unknown().parse(c.req.json());
+    const body = z.custom<TU>().parse(await c.req.json());
     const entity = await svc.update(idFn(c.req.param('id')), body);
     return c.json(ok(map(entity)));
   });
@@ -125,7 +125,7 @@ export function createTopologyRouter(
 
   // ─── Instance CRUD sub-app ───
   {
-    const sub = new OpenAPIHono<any>();
+    const sub = new OpenAPIHono<{ Variables: AppContext }>();
     mkTopoCrud(sub, instances, (body: CreateInstanceBody) => {
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- API boundary: body keys are runtime-optional
       if (!body.name || !body.platform || !body.region) return 'name, platform, and region are required';
@@ -145,7 +145,7 @@ export function createTopologyRouter(
 
   // ─── Credential CRUD ───
   if (credentials) {
-    const sub = new OpenAPIHono<any>();
+    const sub = new OpenAPIHono<{ Variables: AppContext }>();
     mkTopoCrud(sub, credentials, (body: CreateCredentialBody) => {
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- API boundary
       if (!body.name || !body.type || !body.platform) return 'name, type, and platform are required';
@@ -159,7 +159,7 @@ export function createTopologyRouter(
 
   // ─── Bucket CRUD ───
   {
-    const sub = new OpenAPIHono<any>();
+    const sub = new OpenAPIHono<{ Variables: AppContext }>();
     mkTopoCrud(sub, buckets, (body: CreateBucketBody) => {
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- API boundary
       if (!body.name || !body.bucketType || !body.instanceId) return 'name, bucketType, and instanceId are required';
@@ -222,7 +222,7 @@ export function createTopologyRouter(
 
   // ─── Image Repository CRUD ───
   {
-    const sub = new OpenAPIHono<any>();
+    const sub = new OpenAPIHono<{ Variables: AppContext }>();
     mkTopoCrud(sub, images, (body: CreateImageInput) => {
       if (!body.name || !body.instanceId || !body.image) return 'name, instanceId, and image are required';
       return null;
@@ -260,10 +260,10 @@ export function createTopologyRouter(
   });
 
   app.openapi(createRoute({ method: 'get', path: '/images/{id}/tasks', tags: ['topology'], summary: '列出仓库的历史拉取任务', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: '{ items: PullTask[] }', content: { 'application/json': { schema: OkResponse(z.object({ items: z.array(PullTaskSchema), total: z.number() })) } } } } }), async (c) => {
-    const idx: any = await c.var.stores.atomic.get('pull-task:repo:' + c.req.param('id'));
+    const idx = await c.var.stores.atomic.get<string[]>('pull-task:repo:' + c.req.param('id'));
     if (!idx) return c.json(ok({ items: [], total: 0 }));
     const entries = await Promise.all((idx.value ?? []).map((tid: string) => c.var.stores.atomic.get<Record<string, unknown>>('pull-task:' + tid)));
-    const tasks = entries.filter((e: any) => e).map((e: any) => e.value);
+    const tasks = entries.filter((e): e is NonNullable<typeof e> => e !== null).map(e => e.value);
     return c.json(ok({ items: tasks, total: tasks.length }));
   });
 

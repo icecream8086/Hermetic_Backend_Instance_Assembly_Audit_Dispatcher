@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { Dag } from './graph.ts';
 
 /** Minimum contract a task must satisfy to participate in DAG orchestration. */
@@ -105,7 +106,7 @@ export class DagOrchestrator<T extends OrchestratedTask> {
       for (const r of batchResults) {
         const result = r.status === 'fulfilled'
           ? r.value
-          : { id: '(unknown)', success: false, error: r.reason?.message ?? String(r.reason) };
+          : { id: '(unknown)', success: false, error: r.reason instanceof Error ? r.reason.message : String(r.reason) };
         results.push(result);
         if (result.success) {
           completed.add(result.id);
