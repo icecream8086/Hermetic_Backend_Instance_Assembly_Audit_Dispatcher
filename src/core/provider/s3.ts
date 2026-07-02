@@ -60,10 +60,10 @@ export interface IS3Provider {
   ): Promise<S3ListObjectsResult>;
 
   /** Generate a presigned GET URL. */
-  getPresignedUrl?(bucket: string, key: string, expiresInSeconds?: number): Promise<string>;
+  getPresignedUrl(bucket: string, key: string, expiresInSeconds?: number): Promise<string>;
 
   /** Generate a presigned PUT URL. */
-  putPresignedUrl?(bucket: string, key: string, expiresInSeconds?: number): Promise<string>;
+  putPresignedUrl(bucket: string, key: string, expiresInSeconds?: number): Promise<string>;
 
   // ─── Multi-part upload (optional — providers signal support by implementing) ───
 

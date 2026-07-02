@@ -27,10 +27,6 @@ describe('QueueProducer (white-box)', () => {
       expect(await p.sendImagePull({ taskId: 't1', image: 'nginx' })).toBe(false);
     });
 
-    it('sendBucketKeyRotate returns false', async () => {
-      expect(await p.sendBucketKeyRotate({ bindingId: 'bk1' })).toBe(false);
-    });
-
     it('sendSandboxProvision returns false', async () => {
       expect(await p.sendSandboxProvision({ sandboxId: 'sb1', providerId: 'p1' })).toBe(false);
     });
@@ -52,14 +48,6 @@ describe('QueueProducer (white-box)', () => {
       const result = await p.sendImagePull({ taskId: 't1', image: 'alpine' });
       expect(result).toBe(true);
       expect(sent!.type).toBe('image:pull');
-    });
-
-    it('sendBucketKeyRotate sends message to queue', async () => {
-      let sent: TaskMessage | null = null;
-      const p = new QueueProducer({ send: async (m: TaskMessage) => { sent = m; } } as any);
-      const result = await p.sendBucketKeyRotate({ bindingId: 'bk_1' });
-      expect(result).toBe(true);
-      expect(sent!.type).toBe('bucket-key:rotate');
     });
 
     it('send returns false when queue.send throws', async () => {

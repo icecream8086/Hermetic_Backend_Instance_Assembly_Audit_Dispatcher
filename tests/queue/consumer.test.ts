@@ -190,31 +190,6 @@ describe('processTaskBatch (white-box)', () => {
     });
   });
 
-  describe('bucket-key:rotate', () => {
-    it('rotates an expired bucket key with new secret', async () => {
-      const now = Date.now();
-      await app.stores.atomic.set('bucket-key:bk_r', { accessKeyId: 'ak1', secretValue: 'ak1:old', version: 1, rotationIntervalMs: 86400000, expiresAt: now - 1 }, null);
-
-      let acked = false;
-      const msg = makeMsg('bucket-key:rotate', { bindingId: 'bk_r' });
-      const batchMsg = { body: msg, id: msg.id, timestamp: new Date(), ack: () => { acked = true; }, retry: () => {} };
-      await processTaskBatch({ messages: [batchMsg as any], queue: 't', ackAll: () => {}, retryAll: () => {} } as any, async () => app);
-
-      expect(acked).toBe(true);
-      const entry = await app.stores.atomic.get<any>('bucket-key:bk_r');
-      expect(entry!.value.expiresAt).toBeGreaterThan(now);
-      expect(entry!.value.secretValue).not.toBe('ak1:old');
-    });
-
-    it('skips rotation when binding already cleaned up', async () => {
-      let acked = false;
-      const msg = makeMsg('bucket-key:rotate', { bindingId: 'bk_missing' });
-      const batchMsg = { body: msg, id: msg.id, timestamp: new Date(), ack: () => { acked = true; }, retry: () => {} };
-      await processTaskBatch({ messages: [batchMsg as any], queue: 't', ackAll: () => {}, retryAll: () => {} } as any, async () => app);
-      expect(acked).toBe(true);
-    });
-  });
-
   describe('unknown task type', () => {
     it('retries with error for unknown type', async () => {
       let retried = false;

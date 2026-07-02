@@ -22,6 +22,10 @@ export abstract class S3ClientBase implements IS3Provider {
   /** Subclass implements its own auth scheme (SigV4, OSS HMAC, etc.) */
   protected abstract authFetch(url: string, method: string, path: string, queryString: string, headers: Record<string, string>, bodyHash: string, body?: BodyInit): Promise<Response>;
 
+  abstract getPresignedUrl(bucket: string, key: string, expiresInSeconds?: number): Promise<string>;
+
+  abstract putPresignedUrl(bucket: string, key: string, expiresInSeconds?: number): Promise<string>;
+
   /** Bucket name mapping override */
   protected bucketMapping(bucket: string): string {
     return this.config.bucketNameMapping?.[bucket] ?? bucket;

@@ -1,5 +1,5 @@
 import type { SandboxTemplate, ContainerSpec, ContainerDef, HealthCheckDef, TemplateStorage, NetworkSpec } from './types.ts';
-import type { CreateSandboxInput, Volume, VolumeMount, SandboxNetworkConfig } from '../sandbox/types.ts';
+import type { CreateSandboxInput, Volume, VolumeMount, SandboxNetworkConfig, SecurityResourceRef } from '../sandbox/types.ts';
 import type { EnvVar, ProbeSpec } from '../../core/provider/types.ts';
 import { VolumeType, VolumeStatus, createVolumeId } from '../sandbox/types.ts';
 import { createRegionId } from '../../core/region/types.ts';
@@ -7,6 +7,7 @@ import { z } from 'zod';
 
 import { EmptyDirMedium } from '../sandbox/types.ts';
 import type { NFSVolumeConfig, DiskVolumeConfig, SecretVolumeConfig } from '../sandbox/types.ts';
+import type { SecurityResourceService } from '../../core/security/service.ts';
 
 const ValueFromSchema = z.custom<EnvVar['valueFrom']>(
   (v): v is EnvVar['valueFrom'] => v === undefined || (v !== null && typeof v === 'object'),
@@ -30,16 +31,16 @@ const StrSchema = z.string();
  * @param resolveVolume Optional callback to resolve a Volume entity by ID.
  *   When a TemplateStorage has `volumeId`, this callback fetches the Volume
  *   and merges its nfs/disk/configMap/secret config into the storage entry.
- * @param resolveBucket Optional callback to resolve a RegionBucket by ID.
- *   When a TemplateStorage has `bucketId`, this callback fetches the bucket
- *   and populates bucketMounts for autoGenerateKeys processing.
+ * @param securityStore Optional SecurityResourceService for resolving securityRef.
+ *   When a TemplateStorage has `securityRef`, this service fetches the
+ *   SecurityResource and validates its presigned URL validity.
  */
 export async function applyTemplate(
   tpl: SandboxTemplate,
   name?: string,
   region?: string,
   resolveVolume?: (id: string) => Promise<Record<string, unknown> | null>,
-  resolveBucket?: (id: string) => Promise<Record<string, unknown> | null>,
+  securityStore?: SecurityResourceService,
 ): Promise<CreateSandboxInput> {
   const container: ContainerSpec = tpl.container ?? { region: createRegionId('local'), containers: [] };
   const containers = container.containers;
@@ -49,7 +50,7 @@ export async function applyTemplate(
   const gpuType = containers.find(c => (c.resources?.limits?.gpu ?? 0) > 0)?.resources?.limits?.gpuType;
 
   const ext = tpl.extensions;
-  const { volumes, volumeMounts, configMapEnv, bucketMounts } = await mapStorage(ext?.storage, resolveVolume, resolveBucket);
+  const { volumes, volumeMounts, configMapEnv, securityRefs } = await mapStorage(ext?.storage, resolveVolume, securityStore);
 
   // Assign volume mounts to first container only (backward compat)
   const mainVolMounts = volumeMounts.length > 0 ? volumeMounts : undefined;
@@ -133,7 +134,7 @@ export async function applyTemplate(
       })),
     } : {}),
     ...(volumes.length > 0 ? { volumes } : {}),
-    ...(bucketMounts.length > 0 ? { bucketMounts } : {}),
+    ...(securityRefs.length > 0 ? { securityResources: securityRefs } : {}),
     ...(container.account ? { account: container.account } : {}),
     ...(container.instanceId ? { instanceId: container.instanceId } : {}),
     ...(ext?.healthMaxRetries !== undefined ? { healthMaxRetries: ext.healthMaxRetries } : {}),
@@ -206,23 +207,41 @@ function mapEmptyDirMedium(raw: string): EmptyDirMedium {
 export async function mapStorage(
   storage: readonly TemplateStorage[] | undefined,
   resolveVolume?: (id: string) => Promise<Record<string, unknown> | null>,
-  resolveBucket?: (id: string) => Promise<Record<string, unknown> | null>,
+  securityStore?: SecurityResourceService,
 ): Promise<{
   volumes: Volume[];
   volumeMounts: VolumeMount[];
   configMapEnv: { name: string; value: string }[];
-  bucketMounts: { bucketId: string; bucket: string; endpoint: string; region: string; autoGenerateKeys?: boolean; mountPath: string }[];
+  securityRefs: SecurityResourceRef[];
 }> {
-  if (!storage || storage.length === 0) return { volumes: [], volumeMounts: [], configMapEnv: [], bucketMounts: [] };
+  if (!storage || storage.length === 0) return { volumes: [], volumeMounts: [], configMapEnv: [], securityRefs: [] };
 
   const now = Date.now();
   const volumes: Volume[] = [];
   const volumeMounts: VolumeMount[] = [];
-  const bucketMounts: { bucketId: string; bucket: string; endpoint: string; region: string; autoGenerateKeys?: boolean; mountPath: string }[] = [];
+  const securityRefs: SecurityResourceRef[] = [];
   const configMapEnv: { name: string; value: string }[] = [];
 
   for (const s of storage) {
     const vid = createVolumeId(s.name);
+
+    // If securityRef is set, resolve SecurityResource (mutually exclusive with other storage types)
+    if (s.securityRef && securityStore) {
+      const sec = await securityStore.getByName(s.securityRef);
+      if (!sec) {
+        throw new Error(`SecurityResource "${s.securityRef}" not found`);
+      }
+      const check = securityStore.checkValidity(sec);
+      if (!check.valid) {
+        throw new Error(check.reason!);
+      }
+      securityRefs.push({
+        resourceId: sec.id,
+        resourceName: sec.name,
+        value: sec.value,
+      });
+      continue;
+    }
 
     // If volumeId is set, resolve from store and merge config
     if (s.volumeId && resolveVolume) {
@@ -237,22 +256,6 @@ export async function mapStorage(
           ...(vol.secret !== undefined && vol.secret !== null ? { secret: SecretConfigSchema.parse(vol.secret) } : {}),
         });
         volumeMounts.push({ volumeId: vid, mountPath: s.mountPath, readOnly: false, ...(vol.credentialRef !== undefined ? { credentialRef: StrSchema.parse(vol.credentialRef) } : {}) });
-        continue;
-      }
-    }
-
-    // If bucketId is set, resolve from store → populate bucketMounts for S3 key generation
-    if (s.bucketId && resolveBucket) {
-      const bkt = await resolveBucket(s.bucketId);
-      if (bkt) {
-        bucketMounts.push({
-          bucketId: s.bucketId,
-          bucket: (s.oss?.bucket) ?? StrSchema.parse(bkt.name ?? ''),
-          endpoint: StrSchema.parse(bkt.endpoint ?? ''),
-          region: StrSchema.parse(bkt.region ?? 'auto'),
-          autoGenerateKeys: bkt.autoGenerateKeys === true,
-          mountPath: s.mountPath,
-        });
         continue;
       }
     }
@@ -291,13 +294,8 @@ export async function mapStorage(
         break;
       }
       case 'oss': {
-        if (!s.oss) break;
-        volumes.push({
-          id: vid, name: s.name, tags: [], createdAt: now, updatedAt: now,
-          status: VolumeStatus.Detached, type: VolumeType.NFS,
-          instanceId: s.instanceId,
-        });
-        volumeMounts.push({ volumeId: vid, mountPath: s.mountPath, readOnly: s.oss.readOnly ?? false });
+        // @deprecated — OSS type is superseded by SecurityResource/securityRef.
+        // Skip silently for backward compatibility with old templates.
         break;
       }
       case 'disk': {
@@ -335,5 +333,5 @@ export async function mapStorage(
     }
   }
 
-  return { volumes, volumeMounts, configMapEnv, bucketMounts };
+  return { volumes, volumeMounts, configMapEnv, securityRefs };
 }

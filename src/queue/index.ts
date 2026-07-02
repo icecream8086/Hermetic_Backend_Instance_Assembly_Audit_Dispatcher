@@ -6,7 +6,6 @@ export type {
   ImagePullPayload,
   SandboxGcPayload,
   SandboxProvisionPayload,
-  BucketKeyRotatePayload,
 } from './types.ts';
 
 // ─── Abstraction ───

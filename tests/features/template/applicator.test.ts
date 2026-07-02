@@ -387,15 +387,13 @@ describe('mapStorage', async () => {
     expect(r.volumes).toHaveLength(0);
   });
 
-  it('maps OSS storage', async () => {
+  it('skips OSS storage (deprecated — superseded by SecurityResource/securityRef)', async () => {
     const r = await mapStorage([{
       name: 'oss-data', type: 'oss', mountPath: '/oss',
       oss: { bucket: 'my-bucket', path: '/data' },
     }]);
-    expect(r.volumes).toHaveLength(1);
-    expect(r.volumes[0]!.type).toBe('NFSVolume');
-    expect(r.volumeMounts).toHaveLength(1);
-    expect(r.volumeMounts[0]!.mountPath).toBe('/oss');
+    expect(r.volumes).toHaveLength(0);
+    expect(r.volumeMounts).toHaveLength(0);
   });
 
   it('skips OSS when oss config is missing', async () => {

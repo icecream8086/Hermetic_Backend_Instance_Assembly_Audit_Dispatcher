@@ -60,6 +60,7 @@ function podSpecToGroupInput(spec: PodSpec): CreateContainerGroupInput {
     restartPolicy: spec.spec.restartPolicy,
     containers,
     volumes: spec.spec.volumes?.map(v => ({ id: v.id, type: v.type, options: v.options })),
+    secretMounts: spec.spec.secretMounts,
     tags: spec.metadata.labels ? Object.entries(spec.metadata.labels).map(([k, v]) => ({ key: k, value: v })) : undefined,
     network: { allocatePublicIp: false },
     providerOverrides: spec.providerOverrides,

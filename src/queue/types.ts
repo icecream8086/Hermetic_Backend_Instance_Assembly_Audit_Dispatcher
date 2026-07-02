@@ -11,7 +11,6 @@ export type TaskType =
   | 'image:pull'
   | 'sandbox:gc'
   | 'sandbox:provision'
-  | 'bucket-key:rotate'
   | 'workflow:job:run';
 
 /** Container image pull — async heavyweight operation. */
@@ -49,11 +48,6 @@ export interface SandboxProvisionPayload {
   instanceId?: string | undefined;
 }
 
-/** Bucket key rotation — generate new SK, update binding via OCC. */
-export interface BucketKeyRotatePayload {
-  bindingId: string;
-}
-
 /** Workflow job execution — dispatched by WorkflowRunner to the Queue consumer. */
 export interface WorkflowJobRunPayload {
   jobRunId: string;
@@ -63,7 +57,7 @@ export interface WorkflowJobRunPayload {
 /** Discriminated union of all task message types. */
 export interface TaskMessage {
   type: TaskType;
-  payload: ImagePullPayload | SandboxGcPayload | SandboxProvisionPayload | BucketKeyRotatePayload | WorkflowJobRunPayload;
+  payload: ImagePullPayload | SandboxGcPayload | SandboxProvisionPayload | WorkflowJobRunPayload;
   /** Unix ms — set by producer. */
   timestamp: number;
   /** Unique idempotency key — producer generates this. */

@@ -3,7 +3,6 @@ import type {
   ImagePullPayload,
   SandboxGcPayload,
   SandboxProvisionPayload,
-  BucketKeyRotatePayload,
 } from './types.ts';
 
 /**
@@ -26,9 +25,6 @@ export interface IMessageQueue {
 
   /** Enqueue a typed sandbox:provision task. */
   sendSandboxProvision(payload: SandboxProvisionPayload): Promise<boolean>;
-
-  /** Enqueue a typed bucket-key:rotate task. */
-  sendBucketKeyRotate(payload: BucketKeyRotatePayload): Promise<boolean>;
 
   /** Enqueue an arbitrary message. Used by generic dispatch paths. */
   send(message: TaskMessage): Promise<boolean>;

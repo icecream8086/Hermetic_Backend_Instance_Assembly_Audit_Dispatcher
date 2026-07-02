@@ -114,6 +114,9 @@ export interface PodSpec {
       readonly options?: readonly { readonly name: string; readonly value?: string | undefined }[] | undefined;
     } | undefined;
     readonly hostAliases?: readonly { readonly ip: string; readonly hostnames: readonly string[] }[] | undefined;
+    /** Secret mounts — inject data as in-memory files (e.g. S3 presigned URLs).
+     *  Provider-specific encoding (ECI ConfigFileVolume, Podman secrets). */
+    readonly secretMounts?: readonly import('../provider/types.ts').SecretMountConfig[] | undefined;
     /** Topology spread constraints for multi-zone / multi-host distribution.
      *  K8s-aligned: maxSkew, topologyKey, whenUnsatisfiable, labelSelector. */
     readonly topologySpreadConstraints?: readonly TopologySpreadConstraint[] | undefined;

@@ -1,5 +1,8 @@
 # S3 存储桶自动密钥对生成与管理
 
+> **⚠️ DEPRECATED** — 已被 `SPEC/security-resource-presigned-spec.md` 取代。
+> AK/SK 密钥对方案已废弃，改为预签名 URL 方案。
+
 ## 需求
 
 Bucket 实体增加一个开关。打开后，只要有沙箱引用该存储桶，系统就：

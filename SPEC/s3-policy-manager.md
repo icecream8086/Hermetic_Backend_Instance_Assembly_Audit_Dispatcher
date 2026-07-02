@@ -1,5 +1,8 @@
 # S3 策略管理器设计
 
+> **⚠️ DEPRECATED** — 已被 `SPEC/security-resource-presigned-spec.md` 取代。
+> MinIO IAM 策略方案已废弃，改为预签名 URL 方案。
+
 ## 目标
 
 - 一套低耦合策略管理器，绑定到具体 S3 实例/存储桶

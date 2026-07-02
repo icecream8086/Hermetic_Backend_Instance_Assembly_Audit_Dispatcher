@@ -28,6 +28,7 @@ import { createInstanceId } from '../../core/region/instance.ts';
 import { ContainerGroupState, toSandboxStatus } from '../../core/provider/container-lifecycle.ts';
 import type { PodService } from '../../core/pod/service.ts';
 import { createPodId, type PodSpec, type VolumeSpec } from '../../core/pod/types.ts';
+import type { SecretMountConfig } from '../../core/provider/types.ts';
 import { AppError } from '../../core/types.ts';
 import { ProviderResolutionError, ProviderOperationError } from '../../core/provider/errors.ts';
 import type { EventBus } from '../../core/event-bus/bus.ts';
@@ -162,33 +163,6 @@ export class SandboxService implements ISandboxService {
     // Add to sandbox ID index
     await this.store.addToIndex(id);
 
-    // 2. Auto-generate S3 access keys for buckets with autoGenerateKeys (binding persistence)
-    const BINDING_PREFIX = 'bucket-key:';
-    const BINDING_INDEX_KEY = 'bucket-key:ids';
-    if (input.bucketMounts?.length) {
-      for (const bm of input.bucketMounts) {
-        if (!bm.autoGenerateKeys) continue;
-        const ak = `auto_${crypto.randomUUID().slice(0, 12)}`;
-        const sk = Array.from(crypto.getRandomValues(new Uint8Array(32)))
-          .map(b => b.toString(16).padStart(2, '0'))
-          .join('');
-        const secretValue = `${ak}:${sk}`;
-        const binding = {
-          sandboxId: id,
-          bucketId: bm.bucketId,
-          secretValue,
-          accessKeyId: ak,
-          version: 1,
-          expiresAt: Date.now() + 24 * 60 * 60 * 1000,
-          rotationIntervalMs: 24 * 60 * 60 * 1000,
-          createdAt: Date.now(),
-        };
-        await this.atomic.set(BINDING_PREFIX + id, binding, null);
-        const idx_ = await this.atomic.get<string[]>(BINDING_INDEX_KEY);
-        await this.atomic.set(BINDING_INDEX_KEY, [...(idx_?.value ?? []), id], idx_?.version ?? null);
-      }
-    }
-
     // ── Delegate to PodService (v3 unified lifecycle) ──
     let providerId: string;
     let podId: string | undefined;
@@ -311,18 +285,6 @@ export class SandboxService implements ISandboxService {
         }
       }
       return;
-    }
-
-    // Clean up auto-generated S3 bucket keys
-    const BINDING_PREFIX = 'bucket-key:';
-    const BINDING_INDEX_KEY = 'bucket-key:ids';
-    const bindingEntry = await this.atomic.get<{ value: Record<string, unknown> } | null>(BINDING_PREFIX + id);
-    if (bindingEntry) {
-      await this.atomic.set(BINDING_PREFIX + id, null, bindingEntry.version);
-      const idx_ = await this.atomic.get<string[]>(BINDING_INDEX_KEY);
-      if (idx_) {
-        await this.atomic.set(BINDING_INDEX_KEY, idx_.value.filter((i: string) => i !== id), idx_.version);
-      }
     }
 
     // Hard terminals with no cloud resource — delete directly
@@ -681,12 +643,19 @@ function parseMemoryString(s: string): number {
 
 
 function toPodSpec(input: CreateSandboxInput): PodSpec {
+  const securityMounts: SecretMountConfig[] = input.securityResources?.map(sr => ({
+    mountPath: `/run/secrets/s3/${sr.resourceName}.json`,
+    data: JSON.stringify(sr.value),
+    mode: 0o600,
+  })) ?? [];
+
   return {
     metadata: {
       name: input.name,
       ...(input.tags?.length ? { labels: Object.fromEntries(input.tags.map(t => [t.key, t.value])) } : {}),
     },
     spec: {
+      secretMounts: securityMounts.length > 0 ? securityMounts : undefined,
       containers: input.containers.map(c => ({
         name: c.name,
         image: c.image,

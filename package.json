@@ -49,7 +49,8 @@
       "container-secret": "/api/container-secrets",
       "images": "/api/images",
       "actions": "/api/actions",
-      "instances": "/api/instances"
+      "instances": "/api/instances",
+      "security": "/api/security"
     }
   },
   "dependencies": {

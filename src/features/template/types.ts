@@ -130,6 +130,8 @@ export interface TemplateStorage {
   readonly configMap?: { name: string; env: readonly { key: string; value: string }[] } | undefined;
   readonly secret?: { name: string; items?: readonly { key: string; path: string; mode?: number }[] } | undefined;
   readonly size?: number | undefined;
+  /** 引用 SecurityResource 的名称。设置后容器内 /run/secrets/s3/{name}.json 出现此资源。 */
+  readonly securityRef?: string | undefined;
   readonly providerOverrides?: Record<string, unknown> | undefined;
 }
 

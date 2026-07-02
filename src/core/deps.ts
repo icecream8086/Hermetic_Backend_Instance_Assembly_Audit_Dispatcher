@@ -42,6 +42,8 @@ export interface FeatureDeps {
   permissionChecker?: { check(params: { userId: string; action: string; resource: string; ip?: string; resourceOwnerId?: string }): Promise<{ allowed: boolean; reason: string }> };
   /** AES-256-GCM envelope encryption for credential secrets at rest. */
   secretEncryption?: SecretEncryption;
+  /** Resolve an S3 provider for a bucket ID. Used by the security feature for presigned URL signing. */
+  s3ProviderResolver?: (bucketId: string) => Promise<{ provider: import('./provider/s3.ts').IS3Provider; bucket: { name: string; endpoint: string; region: string } }>;
 }
 
 /** Assembled application instance returned by createApp(). */

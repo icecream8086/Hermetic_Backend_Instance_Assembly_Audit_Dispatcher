@@ -16,6 +16,7 @@ import { createRouter as container_secretRouter } from './container-secret/index
 import { createRouter as imagesRouter } from './images/index.ts';
 import { createRouter as actionsRouter } from './actions/index.ts';
 import { createRouter as instancesRouter } from './instances/index.ts';
+import { createRouter as securityRouter } from './security/index.ts';
 
 import type { FeatureDeps } from '../core/deps.ts';
 import type { Hono } from 'hono';
@@ -41,5 +42,6 @@ export function getFeatures(): RegisteredFeature[] {
   { path: '/api/container-secrets', mount: (deps) => container_secretRouter(deps) },
   { path: '/api/images', mount: (deps) => imagesRouter(deps) },
   { path: '/api/actions', mount: (deps) => actionsRouter(deps) },
-  { path: '/api/instances', mount: (deps) => instancesRouter(deps) },  ];
+  { path: '/api/instances', mount: (deps) => instancesRouter(deps) },
+  { path: '/api/security', mount: (deps) => securityRouter(deps) },  ];
 }

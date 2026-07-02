@@ -228,7 +228,7 @@ const stubActionDeps2: any = {
   audit: { write: async () => {} },
   eventBus: { on: () => {}, dispatch: async () => {} } as any,
   eventLoop: { enqueuePriority: () => {} } as any,
-  queueProducer: { send: async () => false, sendSandboxGc: async () => false, sendImagePull: async () => false, sendSandboxProvision: async () => false, sendBucketKeyRotate: async () => false, sendBatch: async () => 0 } as any,
+  queueProducer: { send: async () => false, sendSandboxGc: async () => false, sendImagePull: async () => false, sendSandboxProvision: async () => false, sendBatch: async () => 0 } as any,
   secretEncryption: undefined,
 };
 collect('Actions', '/api/actions', createActionsRouter(stubActionDeps2));

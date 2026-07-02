@@ -1,7 +1,7 @@
 /// <reference types="@cloudflare/workers-types" />
 
 import type { IMessageQueue } from './interfaces.ts';
-import type { TaskMessage, TaskType, ImagePullPayload, SandboxGcPayload, SandboxProvisionPayload, BucketKeyRotatePayload } from './types.ts';
+import type { TaskMessage, TaskType, ImagePullPayload, SandboxGcPayload, SandboxProvisionPayload } from './types.ts';
 
 /**
  * Cloudflare Queues producer — wraps the platform Queue binding.
@@ -31,10 +31,6 @@ export class CfQueueProducer implements IMessageQueue {
 
   public async sendSandboxProvision(payload: SandboxProvisionPayload): Promise<boolean> {
     return this.#send(this.#message('sandbox:provision', payload));
-  }
-
-  public async sendBucketKeyRotate(payload: BucketKeyRotatePayload): Promise<boolean> {
-    return this.#send(this.#message('bucket-key:rotate', payload));
   }
 
   public async send(message: TaskMessage): Promise<boolean> {

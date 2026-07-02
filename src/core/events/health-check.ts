@@ -285,36 +285,6 @@ export function registerHealthCheck(deps: HealthCheckDeps): void {
         }
       }
 
-      // Bucket key rotation — scan + enqueue (heavy work runs in Queue consumer)
-      const BINDING_INDEX_KEY = 'bucket-key:ids';
-      const BINDING_PREFIX = 'bucket-key:';
-      const bIdx = await stores.atomic.get<string[]>(BINDING_INDEX_KEY);
-      if (bIdx) {
-        for (const sid of bIdx.value) {
-          try {
-            const entry = await stores.atomic.get<Record<string, unknown>>(BINDING_PREFIX + sid);
-            if (!entry?.value) continue;
-            const bindingSchema = z.object({ expiresAt: z.number(), accessKeyId: z.string(), version: z.number(), rotationIntervalMs: z.number().optional() }).passthrough() /* TODO: Zod v4 z.looseObject() */;
-            const parsed = bindingSchema.parse(entry.value);
-            if (parsed.expiresAt > Date.now()) continue;
-            const qSent = await queueProducer.sendBucketKeyRotate({ bindingId: sid });
-            if (qSent) continue;
-            const sk = Array.from(crypto.getRandomValues(new Uint8Array(32)))
-              .map((b: number) => b.toString(16).padStart(2, '0')).join('');
-            const updated = {
-              ...parsed,
-              secretValue: `${parsed.accessKeyId}:${sk}`,
-              version: parsed.version + 1,
-              expiresAt: Date.now() + (parsed.rotationIntervalMs ?? 24 * 60 * 60 * 1000),
-            };
-            await stores.atomic.set(BINDING_PREFIX + sid, updated, entry.version);
-          } catch {
-
-            console.debug("skip");
-
-          }
-        }
-      }
     } finally {
       eventLoop.enqueuePriority({ type: 'health:check', payload: {} });
     }

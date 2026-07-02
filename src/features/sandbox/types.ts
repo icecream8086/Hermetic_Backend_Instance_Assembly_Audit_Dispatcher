@@ -391,15 +391,8 @@ export interface CreateSandboxInput {
   readonly initContainers?: readonly InitContainerConfig[];
   readonly containers: readonly ContainerConfig[];
   readonly volumes?: readonly Volume[];
-  /** S3 存储桶挂载引用。由 template applicator 填充，用于自动生成访问密钥等。 */
-  readonly bucketMounts?: readonly {
-    readonly bucketId: string;
-    readonly bucket: string;
-    readonly endpoint: string;
-    readonly region: string;
-    readonly autoGenerateKeys?: boolean | undefined;
-    readonly mountPath: string;
-  }[];
+  /** 引用的 SecurityResource 列表。applicator 解析后填充，注入容器时使用。 */
+  readonly securityResources?: readonly SecurityResourceRef[] | undefined;
   readonly network: SandboxNetworkConfig;
   readonly tags?: readonly Tag[];
   readonly account?: string | undefined;
@@ -436,6 +429,22 @@ export interface PodMapping {
   readonly providerId?: string;
   readonly createdAt: number;
   readonly updatedAt: number;
+}
+
+export interface SecurityResourceRef {
+  /** SecurityResource.id。 */
+  readonly resourceId: string;
+  /** SecurityResource.name，用作挂载文件名。 */
+  readonly resourceName: string;
+  /** 当前有效的 PresignedUrlSet（sandbox 创建时的快照）。 */
+  readonly value: {
+    readonly putUrl: string;
+    readonly listUrl: string;
+    readonly endpoint: string;
+    readonly bucket: string;
+    readonly region: string;
+    readonly expiresAt: string;
+  };
 }
 
 

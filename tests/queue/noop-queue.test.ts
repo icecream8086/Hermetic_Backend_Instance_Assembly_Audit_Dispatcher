@@ -30,10 +30,6 @@ describe('NoopMessageQueue', () => {
     })).toBe(false);
   });
 
-  it('sendBucketKeyRotate returns false', async () => {
-    expect(await q.sendBucketKeyRotate({ bindingId: 'b1' })).toBe(false);
-  });
-
   it('all send methods return false consistently', () => {
     // Noop queue always indicates "not available"
     expect(q.available).toBe(false);

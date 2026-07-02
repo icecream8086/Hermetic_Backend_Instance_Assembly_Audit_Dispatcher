@@ -685,6 +685,16 @@ export function buildCreateParams(
     });
   }
 
+  // ── Secret Mounts ──
+  if (input.secretMounts?.length) {
+    input.secretMounts.forEach((sm, i) => {
+      const spfx = `ConfigFileVolume.${String(i + 1)}`;
+      p[`${spfx}.MountPath`] = sm.mountPath;
+      p[`${spfx}.Payload`] = sm.data;
+      p[`${spfx}.FilePermission`] = String(sm.mode ?? 0o600);
+    });
+  }
+
   // ── Network ──
   if (!partial) {
     p.SecurityGroupId = input.network.securityGroupId ?? '';
@@ -824,6 +834,16 @@ export function buildPodCreateParams(spec: PodSpec, region: string): Record<stri
       p[`${vpfx}.Name`] = v.id;
       p[`${vpfx}.Type`] = v.type;
       p = { ...p, ...buildVolumeCompound(toVolumeConfigInput(v), vpfx) };
+    });
+  }
+
+  // ── Secret Mounts ──
+  if (spec.spec.secretMounts?.length) {
+    spec.spec.secretMounts.forEach((sm, i) => {
+      const spfx = `ConfigFileVolume.${String(i + 1)}`;
+      p[`${spfx}.MountPath`] = sm.mountPath;
+      p[`${spfx}.Payload`] = sm.data;
+      p[`${spfx}.FilePermission`] = String(sm.mode ?? 0o600);
     });
   }
 

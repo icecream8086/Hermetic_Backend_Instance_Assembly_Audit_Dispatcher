@@ -1,7 +1,7 @@
 /// <reference types="@cloudflare/workers-types" />
 
 import { z } from 'zod';
-import type { TaskMessage, TaskResult, SandboxGcPayload, ImagePullPayload, SandboxProvisionPayload, BucketKeyRotatePayload, WorkflowJobRunPayload } from './types.ts';
+import type { TaskMessage, TaskResult, SandboxGcPayload, ImagePullPayload, SandboxProvisionPayload, WorkflowJobRunPayload } from './types.ts';
 import type { AppInstance } from '../core/deps.ts';
 import { SandboxStatus } from '../features/sandbox/types.ts';
 import { CredentialService } from '../core/auth/credential.ts';
@@ -87,7 +87,6 @@ export async function handleTask(
     case 'image:pull':         return handleImagePull(validateImagePullPayload(msg.payload), instance);
     case 'sandbox:gc':         return handleSandboxGc(validateSandboxGcPayload(msg.payload), instance);
     case 'sandbox:provision':  return handleSandboxProvision(validateSandboxProvisionPayload(msg.payload), instance);
-    case 'bucket-key:rotate':  return handleBucketKeyRotate(validateBucketKeyRotatePayload(msg.payload), instance);
     case 'workflow:job:run':   return handleWorkflowJobRun(validateWorkflowJobRunPayload(msg.payload), instance);
     default: {
       const _exhaustive: never = msg.type;
@@ -129,10 +128,6 @@ const sandboxProvisionPayloadSchema = z.object({
   instanceId: z.string().optional(),
 });
 
-const bucketKeyRotatePayloadSchema = z.object({
-  bindingId: z.string(),
-});
-
 const workflowJobRunPayloadSchema = z.object({
   jobRunId: z.string(),
   workflowRunId: z.string(),
@@ -141,7 +136,6 @@ const workflowJobRunPayloadSchema = z.object({
 function validateImagePullPayload(p: unknown): ImagePullPayload { return imagePullPayloadSchema.parse(p); }
 function validateSandboxGcPayload(p: unknown): SandboxGcPayload { return sandboxGcPayloadSchema.parse(p); }
 function validateSandboxProvisionPayload(p: unknown): SandboxProvisionPayload { return sandboxProvisionPayloadSchema.parse(p); }
-function validateBucketKeyRotatePayload(p: unknown): BucketKeyRotatePayload { return bucketKeyRotatePayloadSchema.parse(p); }
 function validateWorkflowJobRunPayload(p: unknown): WorkflowJobRunPayload { return workflowJobRunPayloadSchema.parse(p); }
 
 // ─── Task handlers ───
@@ -301,38 +295,6 @@ async function handleSandboxProvision(
     // Currently these are done synchronously in sandbox.service.ts provision().
     // This handler exists as a migration target — once provision is refactored
     // to push async steps here, the sync path can shed latency.
-
-    return { success: true };
-  } catch (err) {
-    const errResult = { success: false, error: err instanceof Error ? err.message : String(err) };
-    return errResult;
-  }
-}
-
-async function handleBucketKeyRotate(
-  payload: BucketKeyRotatePayload,
-  { stores }: AppInstance,
-): Promise<TaskResult> {
-  const BINDING_PREFIX = 'bucket-key:';
-  const { bindingId } = payload;
-
-  try {
-    // Re-read binding in case it was rotated between enqueue and consume
-    const entry = await stores.atomic.get<any>(BINDING_PREFIX + bindingId);
-    if (!entry?.value) return { success: true }; // already cleaned up
-    if (entry.value.expiresAt > Date.now()) return { success: true }; // not yet expired
-
-    const binding = entry.value;
-    const ak = binding.accessKeyId;
-    const sk = Array.from(crypto.getRandomValues(new Uint8Array(32)))
-      .map((b: number) => b.toString(16).padStart(2, '0'))
-      .join('');
-    binding.secretValue = `${String(ak)}:${sk}`;
-    binding.version++;
-    binding.expiresAt = Date.now() + Number(binding.rotationIntervalMs ?? 24 * 60 * 60 * 1000);
-
-    const ver = await stores.atomic.set(BINDING_PREFIX + bindingId, binding, entry.version);
-    if (!ver) return { success: false, error: 'OCC conflict on key rotation' };
 
     return { success: true };
   } catch (err) {
