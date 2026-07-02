@@ -12,6 +12,7 @@
  *   _boot_id       → per-session isolation
  */
 
+import { z } from 'zod';
 import type { IAuditReader, StoredAuditEntry, LogQuery } from './types.ts';
 
 // ─── Namespace config ───
@@ -48,13 +49,13 @@ export class NamespacedAuditReader implements IAuditReader {
     let entries = result.entries;
     if (this.ns.sandboxId) {
       entries = entries.filter(e =>
-        (e as any)._sandbox_id === this.ns.sandboxId ||
+        z.custom<Record<string, unknown>>().parse(e)['_sandbox_id'] === this.ns.sandboxId ||
         e.metadata?.sandboxId === this.ns.sandboxId,
       );
     }
     if (this.ns.bootId) {
       entries = entries.filter(e =>
-        (e as any)._boot_id === this.ns.bootId ||
+        z.custom<Record<string, unknown>>().parse(e)['_boot_id'] === this.ns.bootId ||
         e.metadata?.bootId === this.ns.bootId,
       );
     }

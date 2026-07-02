@@ -127,5 +127,5 @@ export function getEndpointFor(region: RegionId, provider: string, service: stri
     return process.env.PODMAN_ENDPOINT ?? 'http://127.0.0.1:8080';
   }
   const registry = getDefaultRegistry();
-  return registry.getEndpoint(provider as any, region, service);
+  return registry.getEndpoint(provider, region, service);
 }

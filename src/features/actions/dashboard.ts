@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
 import type { WorkflowRun, JobRun } from './types.ts';
 import { IDX_WORKFLOW_RUN_IDS, PFX_WORKFLOW_RUN } from './types.ts';
@@ -98,11 +99,12 @@ export class DashboardService {
     const cost = cpuSec * CPU_COST_PER_SEC + memSec * MEM_COST_PER_MB_SEC;
 
     const entry = await this.atomic.get<WorkflowRun>(PFX_WORKFLOW_RUN + jobRun.workflowRunId);
+    const workflowRunValue = entry?.value ? z.custom<{ projectId?: string; orgId?: string }>().parse(entry.value) : undefined;
     const billing: BillingEntry = {
       runId: jobRun.workflowRunId,
       jobRunId: jobRun.id,
-      projectId: (entry?.value as any)?.projectId,
-      orgId: (entry?.value as any)?.orgId,
+      ...(workflowRunValue?.projectId != null ? { projectId: workflowRunValue.projectId } : {}),
+      ...(workflowRunValue?.orgId != null ? { orgId: workflowRunValue.orgId } : {}),
       cpuSeconds: cpuSec,
       memoryMbSeconds: memSec,
       durationMs,

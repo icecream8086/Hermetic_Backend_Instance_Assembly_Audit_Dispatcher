@@ -50,19 +50,19 @@ function fromGeneratedTemplate(def: InstanceTemplateDef, defaultInstanceId?: str
   const cid = defaultInstanceId;
 
   // Extract typed spec fields (Record<string, unknown> → domain types)
-  const apiVersion = s.apiVersion as string | undefined;
-  const kind = s.kind as SandboxTemplate['kind'] | undefined;
-  const dependsOn = s.dependsOn as string[] | undefined;
-  const region = s.region as RegionId | undefined;
-  const restartPolicy = s.restartPolicy as ContainerSpec['restartPolicy'] | undefined;
-  const containers = s.containers as ContainerDef[] | undefined;
-  const initContainers = s.initContainers as ContainerDef[] | undefined;
-  const singleton = s.singleton as boolean | undefined;
-  const healthChecks = s.healthChecks as HealthCheckDef[] | undefined;
-  const network = s.network as Record<string, unknown> | undefined;
-  const extensions = s.extensions as Record<string, unknown> | undefined;
-  const podSpec = s.podSpec as PodSpec | undefined;
-  const instanceLimit = s.instanceLimit as TemplateInstanceLimit | undefined;
+  const apiVersion = z.string().optional().parse(s.apiVersion);
+  const kind = z.custom<SandboxTemplate['kind']>().optional().parse(s.kind);
+  const dependsOn = z.array(z.string()).optional().parse(s.dependsOn);
+  const region = z.custom<RegionId>().optional().parse(s.region);
+  const restartPolicy = z.string().optional().parse(s.restartPolicy);
+  const containers = z.custom<ContainerDef[]>().optional().parse(s.containers);
+  const initContainers = z.custom<ContainerDef[]>().optional().parse(s.initContainers);
+  const singleton = z.boolean().optional().parse(s.singleton);
+  const healthChecks = z.custom<HealthCheckDef[]>().optional().parse(s.healthChecks);
+  const network = z.custom<Record<string, unknown>>().optional().parse(s.network);
+  const extensions = z.custom<Record<string, unknown>>().optional().parse(s.extensions);
+  const podSpec = z.custom<PodSpec>().optional().parse(s.podSpec);
+  const instanceLimit = z.custom<TemplateInstanceLimit>().optional().parse(s.instanceLimit);
 
   // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- boolean OR chain for feature detection, not default values
   const hasContainer = containers || initContainers || region !== undefined
@@ -116,7 +116,7 @@ async function resolveTemplateSource(atomic: IAtomicStore, id: string): Promise<
   const storeEntry = await atomic.get<Record<string, unknown>>(PREFIX + id);
   if (storeEntry) {
     if (storeEntry.value.__deleted === true) return null;
-    const template = storeEntry.value as SandboxTemplate;
+    const template = z.custom<SandboxTemplate>().parse(storeEntry.value);
     return { source: 'store', template };
   }
   const gen = INSTANCE_TEMPLATES.find(d => d.id === id);
@@ -152,7 +152,8 @@ function resolveDag(tpls: SandboxTemplate[], seedIds: string[]): SandboxTemplate
   const visited = new Set<string>();
   const inStack = new Set<string>();
   const result: SandboxTemplate[] = [];
-  const stack: { id: string; phase: 'enter' | 'exit' }[] = seedIds.map(id => ({ id, phase: 'enter' as const }));
+  const enterPhase: 'enter' = 'enter';
+  const stack: { id: string; phase: 'enter' | 'exit' }[] = seedIds.map(id => ({ id, phase: enterPhase }));
 
   while (stack.length) {
     const frame = stack.pop()!;
@@ -627,15 +628,15 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
         const baseInput = podSpecToSandboxInput(resolved.podSpec);
         const input = { ...baseInput, apiVersion: 'hbi-aad/v2', templateRef: resolved.id, ...(user?.id ? { creatorId: user.id } : {}) };
 
-        const explicitInstanceId = body.instanceId ?? (resolved.podSpec as any).instanceId as (string | undefined);
-        const targetRegion = (body.region ?? (resolved.podSpec as any).region ?? baseInput.region) as (string | undefined);
+        const explicitInstanceId: string | undefined = body.instanceId ?? resolved.podSpec.instanceId;
+        const targetRegion: string | undefined = body.region ?? resolved.podSpec.region ?? baseInput.region;
         let svc = sandboxService;
         let resolvedInstanceId: string | undefined;
 
         if (explicitInstanceId && providers?.resolveContainer) {
           const instProvider = await providers.resolveContainer(explicitInstanceId);
           svc = new SandboxService(atomic, new ConsoleLogger(), instProvider, providers, undefined, undefined, createAtomicNetworkResolver(atomic), new InstanceService(atomic));
-          resolvedInstanceId = explicitInstanceId as string;
+          resolvedInstanceId = explicitInstanceId;
         } else if (providers && targetRegion) {
           const instSvc = new InstanceService(atomic);
           const allInst = await instSvc.resolveByCapability('container');
@@ -648,7 +649,7 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
         }
 
         const finalInput = resolvedInstanceId
-          ? { ...input, instanceId: resolvedInstanceId as any }
+          ? { ...input, instanceId: z.custom<InstanceId>().parse(resolvedInstanceId) }
           : input;
 
         if (!svc) throw new AppError(503, 'SERVICE_UNAVAILABLE', 'Sandbox service not available');
@@ -663,15 +664,15 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
       }
 
       const providerName = body.provider;
-      const explicitInstanceId = body.instanceId ?? resolved.container?.instanceId as (string | undefined);
-      const targetRegion = (body.region ?? resolved.container?.region) as (string | undefined);
+      const explicitInstanceId: string | undefined = body.instanceId ?? resolved.container?.instanceId;
+      const targetRegion: string | undefined = body.region ?? resolved.container?.region;
       let svc = sandboxService;
       let resolvedInstanceId: string | undefined;
 
       if (explicitInstanceId && providers?.resolveContainer) {
         const instProvider = await providers.resolveContainer(explicitInstanceId);
         svc = new SandboxService(atomic, new ConsoleLogger(), instProvider, providers, undefined, undefined, createAtomicNetworkResolver(atomic), new InstanceService(atomic));
-        resolvedInstanceId = explicitInstanceId as string;
+        resolvedInstanceId = explicitInstanceId;
       } else if (providers && targetRegion) {
         const instSvc = new InstanceService(atomic);
         const allInst = await instSvc.resolveByCapability('container');
@@ -693,7 +694,7 @@ export function createTemplateRouter(atomic: IAtomicStore, sandboxService?: ISan
         return volEntry?.value ?? null;
       });
       const input = resolvedInstanceId
-        ? { ...baseInput, instanceId: resolvedInstanceId as any }
+        ? { ...baseInput, instanceId: z.custom<InstanceId>().parse(resolvedInstanceId) }
         : baseInput;
 
       const sandbox = await svc.provision(

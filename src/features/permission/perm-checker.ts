@@ -269,9 +269,9 @@ export class PermissionChecker {
 function resolveDagGroupIds(groups: UserGroup[], userId: string): string[] {
   const result = new Set<string>();
   const visited = new Set<string>();
-  const byId = new Map<string, UserGroup>(groups.map(g => [g.id as string, g]));
+  const byId = new Map<string, UserGroup>(groups.map(g => [String(g.id), g]));
 
-  const directIds = groups.filter(g => g.memberIds.includes(userId)).map(g => g.id as string);
+  const directIds = groups.filter(g => g.memberIds.includes(userId)).map(g => String(g.id));
   const queue = [...directIds];
   while (queue.length > 0) {
     const gid = queue.shift()!;

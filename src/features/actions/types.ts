@@ -1,29 +1,18 @@
-// ─── Action system types ───
-// Workflow/Job/Step definitions and run-time entities.
-// All persisted via IAtomicStore with manual indexes (no D1).
-
+import { z } from 'zod';
 import type { VersionId } from '../../core/brand.ts';
 
-declare const WF_DEF_ID: unique symbol;
-declare const WF_RUN_ID: unique symbol;
-declare const JOB_RUN_ID: unique symbol;
+const workflowDefIdSchema = z.string().min(1).brand('WorkflowDefId');
+const workflowRunIdSchema = z.string().min(1).brand('WorkflowRunId');
+const jobRunIdSchema = z.string().min(1).brand('JobRunId');
 
-export type WorkflowDefId = string & { readonly [WF_DEF_ID]: true };
-export type WorkflowRunId = string & { readonly [WF_RUN_ID]: true };
-export type JobRunId = string & { readonly [JOB_RUN_ID]: true };
+export type WorkflowDefId = z.infer<typeof workflowDefIdSchema>;
+export type WorkflowRunId = z.infer<typeof workflowRunIdSchema>;
+export type JobRunId = z.infer<typeof jobRunIdSchema>;
 
-export function createWorkflowDefId(raw: string): WorkflowDefId {
-  if (!raw) throw new TypeError('empty');
-  return raw as WorkflowDefId;
-}
-export function createWorkflowRunId(raw: string): WorkflowRunId {
-  if (!raw) throw new TypeError('empty');
-  return raw as WorkflowRunId;
-}
-export function createJobRunId(raw: string): JobRunId {
-  if (!raw) throw new TypeError('empty');
-  return raw as JobRunId;
-}
+export function createWorkflowDefId(raw: string): WorkflowDefId { return workflowDefIdSchema.parse(raw); }
+export function createWorkflowRunId(raw: string): WorkflowRunId { return workflowRunIdSchema.parse(raw); }
+export function createJobRunId(raw: string): JobRunId { return jobRunIdSchema.parse(raw); }
+
 
 // ─── Trigger configuration ───
 

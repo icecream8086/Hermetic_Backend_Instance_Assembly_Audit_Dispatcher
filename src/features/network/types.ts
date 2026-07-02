@@ -1,12 +1,14 @@
+import { z } from 'zod';
 import type { InstanceId } from '../../core/region/instance.ts';
 import type { NetworkRule } from '../../core/provider/interfaces.ts';
 
-declare const SG_ID_BRAND: unique symbol;
-export type SecurityGroupId = string & { readonly [SG_ID_BRAND]: true };
+const securityGroupIdSchema = z.string().min(1).brand('SecurityGroupId');
+export type SecurityGroupId = z.infer<typeof securityGroupIdSchema>;
 
-export function generateSecurityGroupId(): SecurityGroupId {
-  return `sg_${crypto.randomUUID()}` as SecurityGroupId;
-}
+export function generateSecurityGroupId(): SecurityGroupId { return securityGroupIdSchema.parse(`sg_${crypto.randomUUID()}`); }
+
+/** Parse a raw string into a SecurityGroupId (validates non-empty). */
+export function createSecurityGroupId(raw: string): SecurityGroupId { return securityGroupIdSchema.parse(raw); }
 
 /** 安全组状态 */
 export type SecurityGroupStatus = 'Active' | 'Inactive' | 'Error';

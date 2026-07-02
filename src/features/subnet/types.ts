@@ -1,10 +1,11 @@
+import { z } from 'zod';
 import type { InstanceId } from '../../core/region/instance.ts';
 
 declare const SUBNET_ID_BRAND: unique symbol;
 export type SubnetId = string & { readonly [SUBNET_ID_BRAND]: true };
 
 export function generateSubnetId(): SubnetId {
-  return `sub_${crypto.randomUUID()}` as SubnetId;
+  return z.custom<SubnetId>().parse(`sub_${crypto.randomUUID()}`);
 }
 
 export type SubnetStatus = 'Active' | 'Inactive' | 'Full' | 'Error';

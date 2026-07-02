@@ -3,7 +3,7 @@ import type { LogId } from '../brand.ts';
 import { generateLogId } from '../brand.ts';
 import { KernLevel, kernLevelName, resolveFacility, encodePriority } from './kern-level.ts';
 import { shouldLogAudit } from './log-policy.ts';
-import { encodeCursor, decodeCursor, cursorFromEntry, xorHash } from './types.ts';
+import { encodeCursor, decodeCursor, xorHash } from './types.ts';
 import { getBootId } from './context.ts';
 
 const MAX_IN_MEMORY = 500;
@@ -68,12 +68,12 @@ export class WorkersAuditLogger implements IAuditWriter, IAuditReader, IAuditAdm
     const seq = ++this.#seq;
     const id = generateLogId();
     const now = Date.now();
-    const cursor = encodeCursor(cursorFromEntry(
-      { id, timestamp: now } as unknown as StoredAuditEntry,
-      this.#bootId,
-      seq,
-      this.#machineHash,
-    ));
+    const monoNow = Math.round(performance.now());
+    const cursor = encodeCursor({
+      s: this.#machineHash, i: seq, b: this.#bootId,
+      m: monoNow, t: now,
+      x: xorHash({ s: this.#machineHash, i: seq, b: this.#bootId, m: monoNow, t: now }),
+    });
     const stored: StoredAuditEntry = {
       id,
       timestamp: now,

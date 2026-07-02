@@ -1,9 +1,10 @@
 import type { ITimerBackend, SchedulerStatus } from './interfaces.ts';
-import type {
-  DagRun,
-  TaskInstanceState,
-  SchedulerContext,
-  ITaskExecutor,
+import {
+  createTaskInstanceId,
+  type DagRun,
+  type TaskInstanceState,
+  type SchedulerContext,
+  type ITaskExecutor,
 } from '../dag/types.ts';
 import { isTaskTerminal, DEFAULT_TRIGGER_RULE } from '../dag/types.ts';
 import { evaluateTriggerRule } from '../dag/trigger-rule.ts';
@@ -158,7 +159,7 @@ export class DagScheduler {
         if (!ti) {
           // First encounter — create TaskInstance
           ti = createTaskInstance({
-            id: `ti_${crypto.randomUUID()}` as any,
+            id: createTaskInstanceId(`ti_${crypto.randomUUID()}`),
             taskId: task.id,
             dagRunId: currentRun.id,
           });

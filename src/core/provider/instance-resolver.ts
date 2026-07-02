@@ -17,6 +17,10 @@ import type { InstanceService, InstanceId } from '../region/instance.ts';
 import type { CredentialService, RegistryCredential } from '../auth/credential.ts';
 import { AppError } from '../types.ts';
 import { CredentialResolutionError } from './errors.ts';
+import type { CredentialId } from '../auth/credential.ts';
+import { z } from 'zod';
+
+const CredentialIdSchema = z.custom<CredentialId>(v => typeof v === 'string' && v.length > 0);
 import { secureContainerProvider, secureContainerGroupProvider } from './security.ts';
 import { PodmanContainerProvider } from '../../providers/podman/podman-provider.ts';
 import { PodmanImageProvider } from '../../providers/podman/podman-image.ts';
@@ -110,7 +114,7 @@ export class InstanceProviderResolver {
     // 1. Try credential manager (preferred — per-instance, encrypted)
     if (credentialRef) {
       // credentialRef may be a credential ID (cred_xxx) or a name (eci_profile@...)
-      const cred = await this.credentialService.get(credentialRef as any)
+      const cred = await this.credentialService.get(CredentialIdSchema.parse(credentialRef))
         ?? await this.credentialService.findByName(credentialRef, instanceId);
       if (cred?.accessKeyId && cred.accessKeySecret) {
         return {
@@ -163,7 +167,11 @@ export class InstanceProviderResolver {
         const cred = await this.#resolveCredential(instance.credentialRef, instance.id);
         return new AlibabaEciImageProvider(
           cred.accessKeyId ?? '', cred.accessKeySecret ?? '', instance.endpoint,
-          instance.region,          cred.registryCredentials as { server: string; userName: string; password: string }[] | undefined,
+          instance.region,          cred.registryCredentials?.map(c => ({
+          server: c.server,
+          userName: c.userName,
+          password: c.password,
+        })),
         );
       }
       case 'aws':

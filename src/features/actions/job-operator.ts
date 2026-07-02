@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { ITaskExecutor, Task, TaskInstance, TaskExecutionResult } from '../../core/dag/types.ts';
 import type { IBlobStore } from '../../core/store/interfaces.ts';
 import type { IProviderRegistry } from '../../core/provider/interfaces.ts';
@@ -10,6 +11,16 @@ import type { ActionRegistry } from './registry.ts';
 import { createEvent } from '../../core/event-bus/types.ts';
 import type { PodService } from '../../core/pod/service.ts';
 import type { PodSpec } from '../../core/pod/types.ts';
+
+/** Provider with exec support for step-level container execution. */
+interface ExecProvider {
+  exec?(opts: {
+    providerId: string;
+    command: readonly string[];
+    env: readonly string[];
+    timeout: number | undefined;
+  }): Promise<{ exitCode: number }>;
+}
 
 /**
  * JobOperator — executes a GitHub Actions–style Job as a single Task.
@@ -34,7 +45,7 @@ export class JobOperator implements ITaskExecutor {
   ) {}
 
   public async execute(_task: Task, ti: TaskInstance): Promise<TaskExecutionResult> {
-    const config = _task.config as {
+    const config = z.custom<{
       jobName: string;
       needs: string[];
       steps: StepDef[];
@@ -45,7 +56,7 @@ export class JobOperator implements ITaskExecutor {
       instanceId?: string;
       region?: string;
       approval?: { approvers: readonly string[]; message?: string };
-    };
+    }>().parse(_task.config);
 
     const jobName = config.jobName;
     const steps = config.steps;
@@ -185,7 +196,7 @@ export class JobOperator implements ITaskExecutor {
     env: Record<string, string>,
     sandboxId: string,
   ): Promise<void> {
-    const provider = await this.deps.providers.resolveContainer(undefined) as any;
+    const provider = z.custom<ExecProvider>().parse(await this.deps.providers.resolveContainer(undefined));
     if (provider?.exec == null) return;
 
     const shell = step.shell ?? '/bin/sh';
@@ -209,7 +220,7 @@ export class JobOperator implements ITaskExecutor {
     sandboxId: string,
   ): Promise<void> {
     const registry = this.deps.actionRegistry;
-    const provider = await this.deps.providers.resolveContainer(undefined) as any;
+    const provider = z.custom<ExecProvider>().parse(await this.deps.providers.resolveContainer(undefined));
 
     if (!registry && provider?.exec == null) {
       throw new Error(`Cannot execute uses: step — no action registry or provider exec`);

@@ -1,13 +1,9 @@
-// ─── DNS domain types ───
-// Independent from sandbox — no sandbox types imported here.
+import { z } from 'zod';
 
-declare const DNS_RECORD_ID_BRAND: unique symbol;
-export type DnsRecordId = string & { readonly [DNS_RECORD_ID_BRAND]: true };
+const dnsRecordIdSchema = z.string().min(1).brand('DnsRecordId');
+export type DnsRecordId = z.infer<typeof dnsRecordIdSchema>;
 
-export function createDnsRecordId(raw: string): DnsRecordId {
-  if (!raw) throw new TypeError('DnsRecordId must not be empty');
-  return raw as DnsRecordId;
-}
+export function createDnsRecordId(raw: string): DnsRecordId { return dnsRecordIdSchema.parse(raw); }
 
 export enum DnsRecordStatus {
   Active = 'Active',
@@ -34,7 +30,6 @@ export interface DnsRecord {
   readonly tags: readonly { key: string; value: string }[];
   readonly createdAt: number;
   readonly updatedAt: number;
-  /** Opaque reference to the resource this DNS points to (e.g. sandbox ID, load balancer ID). */
   readonly refId?: string;
   readonly description?: string;
 }

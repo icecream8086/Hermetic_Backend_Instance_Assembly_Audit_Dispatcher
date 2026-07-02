@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { IDnsProvider } from '../../core/provider/interfaces.ts';
 import type { IAuditWriter } from '../../core/audit/types.ts';
 import type { DnsStepDef } from './types.ts';
@@ -26,7 +27,7 @@ export async function executeDnsStep(
     const recordId = `${dns.type}:${dns.name}:${dns.zoneId}`;
     await provider.updateRecord({
       domain: dns.name,
-      type: dns.type as 'A' | 'CNAME',
+      type: z.enum(['A', 'CNAME']).parse(dns.type),
       value: dns.value,
       ttl,
       proxied,

@@ -23,7 +23,6 @@ import type {
 import { KernLevel } from '../../core/audit/kern-level.ts';
 import { createFacility, generateVersionId } from '../../core/brand.ts';
 import { createRegionId } from '../../core/region/types.ts';
-import type { InstanceId } from '../../core/region/instance.ts';
 import { createInstanceId } from '../../core/region/instance.ts';
 import { ContainerGroupState, toSandboxStatus } from '../../core/provider/container-lifecycle.ts';
 import type { PodService } from '../../core/pod/service.ts';
@@ -133,7 +132,7 @@ export class SandboxService implements ISandboxService {
       platform: resolvedInst.platform,
       instanceId: resolvedInst.id,
       region: resolvedInst.region,
-      zoneId: resolvedInst.zone as string | undefined,
+      zoneId: resolvedInst.zone,
       credentialRef: resolvedInst.credentialRef,
     } : undefined;
 
@@ -151,8 +150,8 @@ export class SandboxService implements ISandboxService {
       config: { ...input, ...(resolvedInst ? { instanceId: resolvedInst.id } : {}), network: mergedNetwork, ...(providerIdentity ? { providerIdentity } : {}) },
       ...(input.creatorId ? { creatorId: input.creatorId } : {}),
       network: {},
-      containers: [] as ContainerRuntime[],
-      events: [] as ContainerEvent[],
+      containers: new Array<ContainerRuntime>(),
+      events: new Array<ContainerEvent>(),
     };
 
     const created = await this.atomic.set<Sandbox>(`${KEY_PREFIX}${id}`, initial, null);
@@ -173,7 +172,7 @@ export class SandboxService implements ISandboxService {
           .join('');
         const secretValue = `${ak}:${sk}`;
         const binding = {
-          sandboxId: id as string,
+          sandboxId: id,
           bucketId: bm.bucketId,
           secretValue,
           accessKeyId: ak,
@@ -184,7 +183,7 @@ export class SandboxService implements ISandboxService {
         };
         await this.atomic.set(BINDING_PREFIX + id, binding, null);
         const idx_ = await this.atomic.get<string[]>(BINDING_INDEX_KEY);
-        await this.atomic.set(BINDING_INDEX_KEY, [...(idx_?.value ?? []), id as string], idx_?.version ?? null);
+        await this.atomic.set(BINDING_INDEX_KEY, [...(idx_?.value ?? []), id], idx_?.version ?? null);
       }
     }
 
@@ -560,7 +559,7 @@ export class SandboxService implements ISandboxService {
     const sandbox = (await this.store.getById(id)) ?? updated;
     const meta = {
       eventType: 'sandbox.transition' as const,
-      sandboxId: id as string,
+      sandboxId: id,
       name: sandbox.name,
       from: fromStatus,
       to,
@@ -648,7 +647,7 @@ export function podSpecToSandboxInput(spec: {
   return {
     name: spec.name,
     region: createRegionId(spec.region ?? 'local'),
-    ...(spec.instanceId ? { instanceId: spec.instanceId as InstanceId } : {}),
+    ...(spec.instanceId ? { instanceId: createInstanceId(spec.instanceId) } : {}),
     resourceSpec: { cpu: totalCpu, memory: totalMem },
     restartPolicy: 'Never',
     containers: containers,

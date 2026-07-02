@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { createApp, type AppInstance } from './core/app.ts';
 import { loadConfig } from './config/env.ts';
 import type { TaskMessage } from './queue/types.ts';
@@ -17,7 +18,8 @@ function getApp(platformBindings: Record<string, unknown>): Promise<AppInstance>
     // process.env — so we copy them over before loadConfig() reads them.
     for (const key of Object.keys(platformBindings)) {
       if (typeof platformBindings[key] === 'string' && !(key in process.env)) {
-        (process.env as any)[key] = platformBindings[key];
+        const val = z.string().parse(platformBindings[key]);
+        Object.assign(process.env, { [key]: val });
       }
     }
     const config = loadConfig();

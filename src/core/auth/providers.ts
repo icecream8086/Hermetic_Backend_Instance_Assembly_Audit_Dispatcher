@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { IAuthProvider, AuthRequest, SignResult } from './interfaces.ts';
 
 // ─── No-auth (local Podman, stub) ───
@@ -54,9 +55,9 @@ export class BearerTokenProvider implements IAuthProvider {
       }),
     });
     if (!resp.ok) throw new Error(`Token refresh failed: ${String(resp.status)}`);
-    const data = await resp.json() as any;
-    this.token = data.access_token ?? data.token ?? data.accessToken ?? '';
-    this.expiresAt = data.expires_in ? Date.now() + data.expires_in * 1000 : 0;
+    const data: Record<string, unknown> = await resp.json();
+    this.token = z.string().parse(data.access_token ?? data.token ?? data.accessToken ?? '');
+    this.expiresAt = data.expires_in ? Date.now() + Number(data.expires_in) * 1000 : 0;
   }
 }
 

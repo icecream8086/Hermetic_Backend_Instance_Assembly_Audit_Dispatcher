@@ -1,175 +1,42 @@
-// ─── Brand types ───
+import { z } from "zod";
 
-declare const USER_ID_BRAND: unique symbol;
-declare const SESSION_TOKEN_BRAND: unique symbol;
-declare const UID_BRAND: unique symbol;
-declare const GID_BRAND: unique symbol;
+const userIdSchema = z.string().regex(/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i).brand('UserId');
+const sessionTokenSchema = z.string().min(1).brand('SessionToken');
+const uidSchema = z.number().int().nonnegative().brand('Uid');
+const gidSchema = z.number().int().nonnegative().brand('Gid');
 
-export type UserId = string & { readonly [USER_ID_BRAND]: true };
-export type SessionToken = string & { readonly [SESSION_TOKEN_BRAND]: true };
-/** Numeric user ID — RHEL §1 UID, allocated from 1000+. */
-export type Uid = number & { readonly [UID_BRAND]: true };
-/** Numeric group ID — RHEL §1 GID, allocated from 1000+. */
-export type Gid = number & { readonly [GID_BRAND]: true };
+export type UserId = z.infer<typeof userIdSchema>;
+export type SessionToken = z.infer<typeof sessionTokenSchema>;
+export type Uid = z.infer<typeof uidSchema>;
+export type Gid = z.infer<typeof gidSchema>;
 
-const UUID_V4_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
+export function createUserId(raw: string): UserId { return userIdSchema.parse(raw); }
+export function createSessionToken(raw: string): SessionToken { return sessionTokenSchema.parse(raw); }
+export function generateUserId(): UserId { return userIdSchema.parse(crypto.randomUUID()); }
+export function generateSessionToken(): SessionToken { return sessionTokenSchema.parse(`sess_${crypto.randomUUID()}`); }
+export function createUid(n: number): Uid { return uidSchema.parse(n); }
+export function createGid(n: number): Gid { return gidSchema.parse(n); }
 
-export function createUserId(raw: string): UserId {
-  if (!UUID_V4_PATTERN.test(raw)) throw new TypeError(`Invalid UserId format, expected UUID v4: ${raw}`);
-  return raw as UserId;
-}
-
-export function createSessionToken(raw: string): SessionToken {
-  if (!raw) throw new TypeError('SessionToken must not be empty');
-  return raw as SessionToken;
-}
-
-export function generateUserId(): UserId {
-  return crypto.randomUUID() as UserId;
-}
-
-export function generateSessionToken(): SessionToken {
-  return `sess_${crypto.randomUUID()}` as SessionToken;
-}
-
-export function createUid(n: number): Uid {
-  if (!Number.isSafeInteger(n) || n < 0) throw new TypeError(`Invalid UID: ${String(n)}`);
-  return n as Uid;
-}
-
-export function createGid(n: number): Gid {
-  if (!Number.isSafeInteger(n) || n < 0) throw new TypeError(`Invalid GID: ${String(n)}`);
-  return n as Gid;
-}
-
-/** First allocatable UID — RHEL convention: <1000 reserved for system. */
 export const UID_MIN = 1000;
-/** First allocatable GID. */
 export const GID_MIN = 1000;
-
-/** Default /etc/passwd values. */
 export const DEFAULT_SHELL = '/bin/bash';
 export const DEFAULT_HOME_PREFIX = '/home/';
 
-// ─── Enums ───
+export enum UserRole { Root = 'root', Operator = 'Operator', Viewer = 'Viewer', Wheel = 'wheel' }
 
-export enum UserRole {
-  Root = 'root',
-  Operator = 'Operator',
-  Viewer = 'Viewer',
-  Wheel = 'wheel',
-}
-
-// ─── Entity ───
+export interface LoginTimeRange { start: string; end: string; }
+export interface LoginPolicy { enabled: boolean; timeRanges: LoginTimeRange[]; allowedCIDRs: string[]; passwordLoginDisabled?: boolean | undefined; }
+export interface LoginContext { ip: string | undefined; siteContext: string | undefined; }
+export interface LoginInfo { exists: boolean; methods: ('password' | 'no-password')[]; policy?: { enabled: boolean; disabled: boolean; timeRestricted: boolean; timeRanges: LoginTimeRange[]; }; }
 
 export interface User {
-  id: UserId;
-  email: string;
-  passwordHash: string;
-  /** Display name — RHEL /etc/passwd GECOS field. */
-  name: string;
-  role: UserRole;
-  loginPolicy?: LoginPolicy;
-  /** Ed25519 public key for key-based (no-password) login.
-   *  The private key is NEVER stored server-side — it is generated on the
-   *  client and only returned once in the registration response. */
-  publicKeyEd25519?: string;
-  // ── RHEL /etc/passwd 7-field model ──
-  /** Numeric user ID — RHEL §1 passwd UID. */
-  uid: Uid;
-  /** Primary group ID — RHEL §1 passwd GID. */
-  gid: Gid;
-  /** GECOS comment field (full name / notes). */
-  gecos: string;
-  /** Home directory. */
-  directory: string;
-  /** Login shell. */
-  shell: string;
-  /** Supplementary group IDs — RHEL §1 supp_groups. */
-  supplementaryGids: Gid[];
-  createdAt: number;
-  updatedAt: number;
+  id: UserId; email: string; passwordHash: string; name: string; role: UserRole;
+  loginPolicy?: LoginPolicy; publicKeyEd25519?: string;
+  uid: Uid; gid: Gid; gecos: string; directory: string; shell: string;
+  supplementaryGids: Gid[]; createdAt: number; updatedAt: number;
 }
-
-// ─── Session entity ───
-
-export interface Session {
-  token: SessionToken;
-  userId: UserId;
-  createdAt: number;
-  /** Absolute expiry timestamp. Checked against Date.now() at validation time
-   *  instead of computing TTL from createdAt, so clock drift between the
-   *  creating and validating isolate cancels out to first order. */
-  expiresAt: number;
-}
-
-// ─── Login policy ───
-
-export interface LoginTimeRange {
-  /** Start time in "HH:mm" UTC */
-  start: string;
-  /** End time in "HH:mm" UTC */
-  end: string;
-}
-
-export interface LoginPolicy {
-  /** false = completely block login for this account */
-  enabled: boolean;
-  /** Time windows when login is allowed (UTC), empty = no restriction */
-  timeRanges: LoginTimeRange[];
-  /** CIDR whitelist, empty = no restriction */
-  allowedCIDRs: string[];
-  /** true = disable password login, require key-based (no-password) auth */
-  passwordLoginDisabled?: boolean | undefined;
-}
-
-/** Runtime context passed into login() for policy evaluation. */
-export interface LoginContext {
-  /** Client IP address from X-Forwarded-For or cf-connecting-ip */
-  ip: string | undefined;
-  /** Site context string for no-password login signature binding */
-  siteContext: string | undefined;
-}
-
-export interface LoginInfo {
-  exists: boolean;
-  methods: ('password' | 'no-password')[];
-  policy?: {
-    enabled: boolean;
-    disabled: boolean;
-    timeRestricted: boolean;
-    timeRanges: LoginTimeRange[];
-  };
-}
-
-// ─── DTOs (domain-facing, after validation + binding) ───
-
-export interface RegisterInput {
-  email: string;
-  password: string;   // raw password, hashed before storage
-  name: string;
-  role: UserRole;
-}
-
-export interface LoginInput {
-  email: string;
-  password: string;
-}
-
-export interface UpdateUserInput {
-  name: string | undefined;
-  password: string | undefined;
-  role: UserRole | undefined;
-  loginPolicy: LoginPolicy | undefined;
-  publicKeyEd25519: string | undefined;
-  gecos: string | undefined;
-  directory: string | undefined;
-  shell: string | undefined;
-  /** Replace supplementary groups entirely (not merge). */
-  supplementaryGids: number[] | undefined;
-}
-
-export interface NoPasswordLoginInput {
-  email: string;
-  oneTimeKey: string;
-}
+export interface Session { token: SessionToken; userId: UserId; createdAt: number; expiresAt: number; }
+export interface RegisterInput { email: string; password: string; name: string; role: UserRole; }
+export interface LoginInput { email: string; password: string; }
+export interface UpdateUserInput { name: string | undefined; password: string | undefined; role: UserRole | undefined; loginPolicy: LoginPolicy | undefined; publicKeyEd25519: string | undefined; gecos: string | undefined; directory: string | undefined; shell: string | undefined; supplementaryGids: number[] | undefined; }
+export interface NoPasswordLoginInput { email: string; oneTimeKey: string; }

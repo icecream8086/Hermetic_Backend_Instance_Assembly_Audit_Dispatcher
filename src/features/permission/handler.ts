@@ -26,6 +26,7 @@ import {
   PolicyMatchResultSchema,
 } from './response-schema.ts';
 import type { ErrorCode } from '../../core/error-codes.ts';
+import type { LogPolicy } from './types.ts';
 import { AppError } from '../../core/types.ts';
 import type { AuditActor } from './audit.ts';
 import type { CrudHandlerMap } from '../../core/crud/router.ts';
@@ -319,7 +320,7 @@ export function createPermissionRouter(svc: IPermissionService): OpenAPIHono<{ V
   app.openapi(createRoute({ method: 'put', path: '/log-policy', tags: ['permission'], responses: { 200: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
     requireRoot(c);
     const body = await UpdateLogPolicySchema.parse(c.req.json());
-    const policy = await svc.updateLogPolicy(body as Record<string, unknown>, actorFrom(c));
+    const policy = await svc.updateLogPolicy(z.custom<Partial<LogPolicy>>().parse(body), actorFrom(c));
     return c.json(ok(policy));
   });
 

@@ -109,7 +109,7 @@ export class InstanceService {
       id,
       name: input.name,
       platform: input.platform,
-      region: input.region as RegionId,
+      region: z.custom<RegionId>().parse(input.region),
       zone,
       endpoint: input.endpoint ?? defaultEndpoint(input.platform, input.region),
       ...(input.credentialRef ? { credentialRef: input.credentialRef } : {}),

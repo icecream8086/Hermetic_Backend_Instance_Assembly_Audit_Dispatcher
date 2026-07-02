@@ -4,6 +4,8 @@ import type { IProviderRegistry } from '../provider/interfaces.ts';
 import type { IMessageQueue } from '../../queue/interfaces.ts';
 import type { SecretEncryption } from '../auth/secret-encryption.ts';
 import { CredentialService } from '../auth/credential.ts';
+import { createInstanceId } from '../region/instance.ts';
+import { z } from 'zod';
 
 export interface ImagePullDeps {
   atomic: IAtomicStore;
@@ -23,12 +25,17 @@ export function registerImagePullHandler(deps: ImagePullDeps): void {
   const { atomic, providers, eventBus, queueProducer, secretEncryption } = deps;
 
   eventBus.on('image.pull', async (event: { type: string; payload?: unknown }) => {
-    const payload = event.payload as Record<string, unknown> | undefined;
+    const payload = z.record(z.string(), z.unknown()).nullable().optional().parse(event.payload);
     if (!payload) return;
-    const { taskId, image, instanceId, clusterId, credentialRef, registryCredential } = payload as {
-      taskId?: string; image?: string; instanceId?: string; clusterId?: string;
-      credentialRef?: string; registryCredential?: { server: string; userName: string; password: string };
-    };
+    const fieldSchema = z.object({
+      taskId: z.string().optional(),
+      image: z.string().optional(),
+      instanceId: z.string().optional(),
+      clusterId: z.string().optional(),
+      credentialRef: z.string().optional(),
+      registryCredential: z.object({ server: z.string(), userName: z.string(), password: z.string() }).optional(),
+    }).passthrough();
+    const { taskId, image, instanceId, clusterId, credentialRef, registryCredential } = fieldSchema.parse(payload);
     if (!taskId || !image) return;
 
     const entry = await atomic.get<any>('pull-task:' + taskId);
@@ -52,7 +59,7 @@ export function registerImagePullHandler(deps: ImagePullDeps): void {
 
     // Queue unavailable — inline pull
     try {
-      const imgProvider = instanceId ? await providers.resolveImage(instanceId as any) : providers.image;
+      const imgProvider = instanceId ? await providers.resolveImage(createInstanceId(instanceId)) : providers.image;
       let credArg: string | { server: string; userName: string; password: string } | undefined = clusterId;
       if (credentialRef) {
         const credSvc = new CredentialService(atomic, secretEncryption);
@@ -63,7 +70,7 @@ export function registerImagePullHandler(deps: ImagePullDeps): void {
       } else if (registryCredential) {
         credArg = registryCredential;
       }
-      const info = await imgProvider.pull(image, credArg as any);
+      const info = await imgProvider.pull(image, z.custom<string | undefined>().optional().parse(credArg));
       await atomic.set('pull-task:' + taskId, {
         ...taskBase, status: 'completed', result: { id: info.id, tags: [...info.tags] }, completedAt: Date.now(),
       }, entry.version);

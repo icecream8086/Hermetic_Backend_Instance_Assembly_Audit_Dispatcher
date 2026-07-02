@@ -153,7 +153,7 @@ function parseRule(raw: Record<string, unknown>): PersistenceRule {
   const sampleRate = z.number().optional().parse(raw.sampleRate);
   const ttlMs = z.number().optional().parse(raw.ttlMs);
   return {
-    facility: (rawFacility === '*' ? '*' : rawFacility) as PersistenceRule['facility'],
+    facility: z.literal('*').or(z.string()).parse(rawFacility === '*' ? '*' : rawFacility),
     minLevel: parseLevel(raw.minLevel) ?? KernLevel.ERR,
     ...(sampleRate !== undefined && sampleRate > 0 ? { sampleRate } : {}),
     ...(ttlMs !== undefined && ttlMs >= 0 ? { ttlMs } : {}),

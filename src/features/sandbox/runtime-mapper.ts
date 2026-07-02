@@ -71,7 +71,7 @@ export function runtimeToContainers(r: ContainerGroupRuntime): ContainerRuntime[
 
 export function runtimeToEvents(r: ContainerGroupRuntime): ContainerEvent[] {
   return r.events.map(e => ({
-    _brand: 'ValueObject' as const,
+    _brand: 'ValueObject',
     reason: e.reason,
     type: e.type,
     message: e.message,

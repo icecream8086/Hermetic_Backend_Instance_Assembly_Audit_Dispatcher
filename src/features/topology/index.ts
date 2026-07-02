@@ -5,6 +5,8 @@ import { CredentialService } from '../../core/auth/credential.ts';
 import { S3PolicyManager } from '../../core/s3-policy/manager.ts';
 import { createTopologyRouter } from './handler.ts';
 import { createS3Provider } from '../../core/provider/s3-factory.ts';
+import { z } from 'zod';
+import type { S3ProviderType } from '../../core/provider/s3-types.ts';
 import type { S3Credentials } from '../../core/provider/s3-factory.ts';
 
 export function createRouter(deps: FeatureDeps): Hono<any> {
@@ -18,7 +20,7 @@ export function createRouter(deps: FeatureDeps): Hono<any> {
   let s3Provider: ReturnType<typeof createS3Provider> | undefined;
   const s3Backend = process.env.S3_BACKEND;
   if (s3Backend && s3Backend !== 'none') {
-    const type = s3Backend as any;
+    const type = z.custom<S3ProviderType>().parse(s3Backend);
     const region = process.env.S3_REGION ?? 'auto';
     const ak = process.env.S3_ACCESS_KEY_ID ?? process.env.MINIO_ACCESS_KEY ?? process.env.MINIO_ROOT_USER ?? '';
     const sk = process.env.S3_SECRET_ACCESS_KEY ?? process.env.MINIO_SECRET_KEY ?? process.env.MINIO_ROOT_PASSWORD ?? '';

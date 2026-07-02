@@ -140,8 +140,8 @@ export class ContainerSecretService implements IContainerSecretService {
     const blobKey = `ctsecret:${id}:${filename}`;
     await this.blob.put(blobKey, body, { ...(mimeType ? { contentType: mimeType } : {}) });
 
-    const isAb = (() => { try { z.instanceof(ArrayBuffer).parse(body); return true; } catch { return false; } })();
-    const size = isAb ? (body as ArrayBuffer).byteLength : undefined;
+    let size: number | undefined;
+    try { size = z.instanceof(ArrayBuffer).parse(body).byteLength; } catch { size = undefined; }
     const existing = normalizeSecret(entry.value);
     const updated: ContainerSecret = {
       ...existing,
@@ -244,6 +244,8 @@ function visibleTo(s: ContainerSecret, scopeId: string): boolean {
 
 /** Normalize old stored secrets missing fields added in Phase 5.2. */
 function normalizeSecret(s: ContainerSecret): ContainerSecret {
-  if (!s.version) (s as any).version = 1;
+  if (!s.version) {
+    z.custom<Record<string, unknown>>().parse(s).version = 1;
+  }
   return s;
 }

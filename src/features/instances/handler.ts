@@ -4,6 +4,7 @@ import type { Context } from 'hono';
 import type { IRunnerService } from './service.ts';
 import type { AppContext } from '../../core/deps.ts';
 import { CreateRunnerSchema, UpdateRunnerSchema, CreateRunnerGroupSchema, ValidateTokenSchema } from './schema.ts';
+import type { RunnerId, RunnerGroupId } from './types.ts';
 import { ok } from '../../core/response.ts';
 import { OkResponse } from '../../core/http-docs/response-schema.ts';
 import {
@@ -36,7 +37,7 @@ export function createInstancesRouter(svc: IRunnerService): OpenAPIHono<{ Variab
   });
 
   app.openapi(createRoute({ method: 'get', path: '/{id}', tags: ['instances'], summary: '获取 Runner 详情', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'RunnerInstance', content: { 'application/json': { schema: OkResponse(RunnerInstanceSchema) } } }, 404: { description: 'Not found' } } }), async (c) => {
-    const runner = await svc.get(c.req.param('id') as any);
+    const runner = await svc.get(z.custom<RunnerId>().parse(c.req.param('id')));
     if (!runner) throw new AppError(404, 'RUNNER_NOT_FOUND', 'Runner not found');
     return c.json(ok(runner));
   });
@@ -44,18 +45,18 @@ export function createInstancesRouter(svc: IRunnerService): OpenAPIHono<{ Variab
   app.openapi(createRoute({ method: 'put', path: '/{id}', tags: ['instances'], summary: '更新 Runner', request: { params: z.object({ id: z.string() }), body: { content: { 'application/json': { schema: UpdateRunnerSchema } } } }, responses: { 200: { description: 'RunnerInstance', content: { 'application/json': { schema: OkResponse(RunnerInstanceSchema) } } } } }), async (c) => {
     isRoot(c);
     const body = await UpdateRunnerSchema.parse(c.req.json());
-    const updated = await svc.update(c.req.param('id') as any, body, c.var.currentUser?.id);
+    const updated = await svc.update(z.custom<RunnerId>().parse(c.req.param('id')), body, c.var.currentUser?.id);
     return c.json(ok(updated));
   });
 
   app.openapi(createRoute({ method: 'delete', path: '/{id}', tags: ['instances'], summary: '删除 Runner', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: OkResponse(z.null()) } } } } }), async (c) => {
     isRoot(c);
-    await svc.delete(c.req.param('id') as any, c.var.currentUser?.id);
+    await svc.delete(z.custom<RunnerId>().parse(c.req.param('id')), c.var.currentUser?.id);
     return c.json(ok(null));
   });
 
   app.openapi(createRoute({ method: 'post', path: '/{id}/heartbeat', tags: ['instances'], summary: 'Runner 心跳上报', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'RunnerInstance', content: { 'application/json': { schema: OkResponse(RunnerInstanceSchema) } } } } }), async (c) => {
-    const runner = await svc.heartbeat(c.req.param('id') as any);
+    const runner = await svc.heartbeat(z.custom<RunnerId>().parse(c.req.param('id')));
     return c.json(ok(runner));
   });
 
@@ -90,14 +91,14 @@ export function createInstancesRouter(svc: IRunnerService): OpenAPIHono<{ Variab
   });
 
   app.openapi(createRoute({ method: 'get', path: '/groups/{id}', tags: ['instances'], summary: '获取 Runner 组详情', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'RunnerGroup', content: { 'application/json': { schema: OkResponse(RunnerGroupSchema) } } }, 404: { description: 'Not found' } } }), async (c) => {
-    const group = await svc.getGroup(c.req.param('id') as any);
+    const group = await svc.getGroup(z.custom<RunnerGroupId>().parse(c.req.param('id')));
     if (!group) throw new AppError(404, 'RUNNER_GROUP_NOT_FOUND', 'Runner group not found');
     return c.json(ok(group));
   });
 
   app.openapi(createRoute({ method: 'delete', path: '/groups/{id}', tags: ['instances'], summary: '删除 Runner 组', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: OkResponse(z.null()) } } } } }), async (c) => {
     isRoot(c);
-    await svc.deleteGroup(c.req.param('id') as any, c.var.currentUser?.id);
+    await svc.deleteGroup(z.custom<RunnerGroupId>().parse(c.req.param('id')), c.var.currentUser?.id);
     return c.json(ok(null));
   });
 

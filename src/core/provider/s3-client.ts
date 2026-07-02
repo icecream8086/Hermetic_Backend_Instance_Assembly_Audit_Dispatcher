@@ -99,7 +99,8 @@ export abstract class S3ClientBase implements IS3Provider {
     const path = `/${this.bucketMapping(input.bucket)}/${encodeKey(input.key)}?partNumber=${String(input.partNumber)}&uploadId=${encodeURIComponent(input.uploadId)}`;
     const url = `${this.endpointFor(input.bucket)}${path}`;
     const amzHeaders: Record<string, string> = { host: new URL(url).host };
-    const bodyBuf = body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength) as ArrayBuffer;
+    const bodyBuf = new ArrayBuffer(body.byteLength);
+    new Uint8Array(bodyBuf).set(body);
     const bodyHash = await payloadHash(bodyBuf);
     const res = await this.authFetch(url, 'PUT', `/${this.bucketMapping(input.bucket)}/${encodeKey(input.key)}`, `partNumber=${String(input.partNumber)}&uploadId=${encodeURIComponent(input.uploadId)}`, amzHeaders, bodyHash, bodyBuf);
     return { etag: (res.headers.get('etag') ?? '').replace(/"/g, ''), partNumber: input.partNumber };
@@ -175,7 +176,9 @@ export function encodeKey(key: string): string {
 export async function toArrayBuffer(body: ReadableStream | ArrayBuffer | Uint8Array): Promise<ArrayBuffer> {
   if (body instanceof ReadableStream) return new Response(body).arrayBuffer();
   if (body instanceof ArrayBuffer) return body;
-  return body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength) as ArrayBuffer;
+  const buf = new ArrayBuffer(body.length);
+  new Uint8Array(buf).set(body);
+  return buf;
 }
 
 export function parseObjectInfo(key: string, res: Response): S3ObjectInfo {

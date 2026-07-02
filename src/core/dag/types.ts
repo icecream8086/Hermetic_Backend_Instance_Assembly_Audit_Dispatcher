@@ -1,42 +1,20 @@
-/**
- * Unified DAG scheduling domain types.
- *
- * Merges:
- *   - Airflow: TaskInstance 12-state, TriggerRule, Pool, DagRun
- *   - GitHub Actions: WorkflowDef → DagDefinition, JobDef → Task, JobRun → TaskInstance
- *
- * The existing `Dag<TId, TNode>` (graph.ts) provides Kahn topological sort.
- * This file defines the *domain* layer: what tasks are, how they run, and what
- * states they transition through.
- */
-
+import { z } from 'zod';
 import type { VersionId } from '../brand.ts';
 
-// ─── Brand types ───
+const dagIdSchema = z.string().min(1).brand('DagId');
+const dagRunIdSchema = z.string().min(1).brand('DagRunId');
+const taskIdSchema = z.string().min(1).brand('TaskId');
+const taskInstanceIdSchema = z.string().min(1).brand('TaskInstanceId');
 
-declare const DAG_ID_BRAND: unique symbol;
-declare const DAG_RUN_ID_BRAND: unique symbol;
-declare const TASK_ID_BRAND: unique symbol;
-declare const TASK_INSTANCE_ID_BRAND: unique symbol;
+export type DagId = z.infer<typeof dagIdSchema>;
+export type DagRunId = z.infer<typeof dagRunIdSchema>;
+export type TaskId = z.infer<typeof taskIdSchema>;
+export type TaskInstanceId = z.infer<typeof taskInstanceIdSchema>;
 
-export type DagId = string & { readonly [DAG_ID_BRAND]: true };
-export type DagRunId = string & { readonly [DAG_RUN_ID_BRAND]: true };
-export type TaskId = string & { readonly [TASK_ID_BRAND]: true };
-export type TaskInstanceId = string & { readonly [TASK_INSTANCE_ID_BRAND]: true };
-
-export function createDagId(raw: string): DagId {
-  return raw as DagId;
-}
-export function createDagRunId(raw: string): DagRunId {
-  return raw as DagRunId;
-}
-export function createTaskId(raw: string): TaskId {
-  return raw as TaskId;
-}
-export function createTaskInstanceId(raw: string): TaskInstanceId {
-  return raw as TaskInstanceId;
-}
-
+export function createDagId(raw: string): DagId { return dagIdSchema.parse(raw); }
+export function createDagRunId(raw: string): DagRunId { return dagRunIdSchema.parse(raw); }
+export function createTaskId(raw: string): TaskId { return taskIdSchema.parse(raw); }
+export function createTaskInstanceId(raw: string): TaskInstanceId { return taskInstanceIdSchema.parse(raw); }
 // ─── Trigger rule (Airflow 9) ───
 
 export type TriggerRule =

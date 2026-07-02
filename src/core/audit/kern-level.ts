@@ -100,7 +100,8 @@ export function decodePriority(priority: number): { facility: AuditFacility; lev
 
 /** Look up numeric facility from a string name. Unknown facilities → LOCAL0. */
 export function resolveFacility(name: string): AuditFacility {
-  return (NAME_TO_FACILITY as Record<string, AuditFacility | undefined>)[name.toLowerCase()] ?? AuditFacility.LOCAL0;
+  const lookup: Record<string, AuditFacility | undefined> = NAME_TO_FACILITY;
+  return lookup[name.toLowerCase()] ?? AuditFacility.LOCAL0;
 }
 
 /** Get the human-readable name of a numeric facility. */

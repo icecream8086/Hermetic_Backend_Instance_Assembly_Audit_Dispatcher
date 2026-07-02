@@ -8,6 +8,7 @@
  *    are instantiated lazily, reducing cold-start cost and memory in serverless.
  */
 
+import { z } from 'zod';
 import type { ProviderConfig, S3Config, Credential } from '../../config/types.ts';
 import type {
   IContainerProvider,
@@ -322,8 +323,12 @@ class LazyProviderRegistry implements IProviderRegistry {
         name: a.name,
         container: secureContainerProvider(new AlibabaEciContainerProvider(a.accessKeyId, a.accessKeySecret, a.endpoint)),
         image: new AlibabaEciImageProvider(a.accessKeyId, a.accessKeySecret, a.endpoint,
-          a.defaultRegion ?? this.config.region as string,
-          a.extra?.registryCredentials as { server: string; userName: string; password: string }[] | undefined),
+          a.defaultRegion ?? this.config.region,
+          z.array(z.object({
+            server: z.string(),
+            userName: z.string(),
+            password: z.string(),
+          })).optional().parse(a.extra?.registryCredentials)),
       }));
   }
 
@@ -334,7 +339,7 @@ class LazyProviderRegistry implements IProviderRegistry {
     const aliAccounts = this._buildAlibabaAccounts();
     if (aliAccounts.length > 0) {
       entries.set('alibaba', {
-        name: 'alibaba' as const,
+        name: 'alibaba',
         container: aliAccounts[0]!.container,
         image: aliAccounts[0]!.image,
       });

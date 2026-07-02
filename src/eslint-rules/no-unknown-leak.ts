@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { TSESLint, TSESTree } from '@typescript-eslint/utils';
 import type { Program, TypeChecker } from 'typescript';
 
@@ -25,7 +26,7 @@ const rule: TSESLint.RuleModule<MessageIds> = {
   },
   defaultOptions: [],
   create(context) {
-    const parserServices = (context as unknown as { services: { program: Program } | undefined }).services;
+    const parserServices = z.custom<{ services: { program: Program } | undefined }>().parse(context).services;
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- ESLint rule injection boundary: parserServices may not exist at runtime
     if (!parserServices?.program) return {};
     const checker: TypeChecker = parserServices.program.getTypeChecker();
@@ -38,9 +39,7 @@ const rule: TSESLint.RuleModule<MessageIds> = {
 
     function checkReturnType(node: TSESTree.Node) {
       try {
-        const tsNode = checker.getResolvedSignature(
-          (node as unknown as { tsNode: unknown }).tsNode as never,
-        );
+        const tsNode = z.custom<never>().parse(z.custom<{ tsNode: unknown }>().parse(node).tsNode);
         if (!tsNode) return;
         const returnType = checker.getReturnTypeOfSignature(tsNode);
         if (returnType.flags & (1 << 25)) {

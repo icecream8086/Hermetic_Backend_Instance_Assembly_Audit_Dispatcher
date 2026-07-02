@@ -93,7 +93,7 @@ export class RunnerService implements IRunnerService {
 
     await this.audit?.write({
       level: KernLevel.NOTICE, facility: FACILITY,
-      message: `Runner registered — ${input.name} (id=${id as string})`,
+      message: `Runner registered — ${input.name} (id=${String(id)})`,
       metadata: { eventType: 'runner.registered', runnerId: id },
     });
 
@@ -165,10 +165,10 @@ export class RunnerService implements IRunnerService {
     let count = 0;
     for (const r of runners) {
       if (r.lastHeartbeatAt < threshold) {
-        const entry = await this.atomic.get<RunnerInstance>(RUNNER_PREFIX + (r.id as string));
+        const entry = await this.atomic.get<RunnerInstance>(RUNNER_PREFIX + String(r.id));
         if (!entry) continue;
         const updated: RunnerInstance = { ...entry.value, status: 'offline' };
-        await this.atomic.set(RUNNER_PREFIX + (r.id as string), updated, entry.version);
+        await this.atomic.set(RUNNER_PREFIX + String(r.id), updated, entry.version);
         count++;
       }
     }

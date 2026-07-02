@@ -22,7 +22,7 @@ import type { ComputeInstance } from '../core/region/instance.ts';
 import { WorkersAuditLogger, KvAuditLogger, HybridAuditLogger, createAuditRouter, setBootId } from './audit/index.ts';
 import { LocalAuditLogger } from './audit/local-audit-logger.ts';
 import { NoopAuditLogger } from './audit/noop-audit-logger.ts';
-import { R2AuditLogger } from './audit/r2-logger.ts';
+import { R2AuditLogger, type R2Bucket } from './audit/r2-logger.ts';
 import { authz } from './middleware/auth.ts';
 import { jsonDepthLimit } from './middleware/security.ts';
 import { idempotency } from './middleware/idempotency.ts';
@@ -65,11 +65,12 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
       auditLogger = new WorkersAuditLogger();
       break;
     case 'r2': {
-      const r2Bucket = platformBindings?.BLOB_STORE as any;
-      if (!r2Bucket) {
+      const r2BucketRaw = platformBindings?.BLOB_STORE;
+      if (!r2BucketRaw) {
         console.warn('[audit] R2 backend requested but BLOB_STORE binding not available — falling back to hybrid');
         auditLogger = new HybridAuditLogger(stores.atomic);
       } else {
+        const r2Bucket = z.custom<R2Bucket>().parse(r2BucketRaw);
         const r2Logger = new R2AuditLogger(r2Bucket);
         r2Logger.startAutoFlush();
         auditLogger = r2Logger;
@@ -106,7 +107,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
   // binding routes messages to the Cloudflare Queues service.
   // When unavailable, createMessageQueue() returns a NoopMessageQueue — callers fall back to inline.
   const queueProducer = createMessageQueue(
-    platformBindings?.TASK_QUEUE as Queue<any> | undefined,
+    z.custom<Queue<any>>().optional().parse(platformBindings?.TASK_QUEUE),
   );
   if (queueProducer.available) {
     console.log(formatDmesgLine('[app] Queue producer enabled (TASK_QUEUE)'));
@@ -116,7 +117,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
 
   // 4. Create timer backend (driven by SCHEDULER_BACKEND env var)
   const schedulerBackend = createTimerBackend(config.scheduler.backend, {
-    doNamespace: platformBindings?.ALARM_TIMER_DO as DurableObjectNamespace | undefined,
+    doNamespace: z.custom<DurableObjectNamespace>().optional().parse(platformBindings?.ALARM_TIMER_DO),
     callbackUrl: config.scheduler.callbackUrl,
   });
 
@@ -169,7 +170,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
   } catch (err: unknown) { console.error('[init] Failed to load log policy:', err instanceof Error ? err.message : err); }
 
   // 5d. Bridge EventBus → WebSocket DOs for real-time notifications
-  const notifDONamespace = platformBindings?.NOTIFICATION_DO as DurableObjectNamespace | undefined;
+  const notifDONamespace = z.custom<DurableObjectNamespace>().optional().parse(platformBindings?.NOTIFICATION_DO);
   if (notifDONamespace) {
     new DoBridge(eventBus, notifDONamespace);
   }
@@ -281,7 +282,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
   // 10c. Sudo endpoint — temporary privilege elevation for wheel members
   app.post('/api/sudo', async (c) => {
     if (!permService) return c.json({ error: 'Permission service unavailable' }, 503);
-    const user = c.var.currentUser as { id: string } | undefined;
+    const user = z.custom<{ id: string }>().optional().parse(c.var.currentUser);
     if (!user) return c.json({ error: 'Authentication required' }, 401);
     try {
       const expiry = await permService.grantTempElevation(user.id);
@@ -372,7 +373,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
   app.get('/api/openapi.json', async (c) => {
     if (!openApiSpec) {
       try {
-        const mod = await import('../../openapi.json') as { default: Record<string, unknown> };
+        const mod = z.custom<{ default: Record<string, unknown> }>().parse(await import('../../openapi.json'));
         openApiSpec = mod.default;
       } catch (e) {
         return c.json({ error: 'OpenAPI spec not generated. Run: npm run docs:openapi' }, 503);
@@ -391,7 +392,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
   // 13. Auto-register features from generated registry
   // Mount at both /path and /path/ since Hono's route() doesn't normalize
   // trailing slashes — /api/users matches but /api/users/ does not.
-  const featureDeps: FeatureDeps = { stores, providers, eventBus, eventLoop, audit, queueProducer, permissionChecker: permService as any, ...(secretEncryption ? { secretEncryption } : {}) };
+  const featureDeps: FeatureDeps = { stores, providers, eventBus, eventLoop, audit, queueProducer, ...(permService ? { permissionChecker: z.custom<NonNullable<FeatureDeps['permissionChecker']>>().parse(permService) } : {}), ...(secretEncryption ? { secretEncryption } : {}) };
   // Mount each feature with and without trailing slash (Hono app.route() doesn't normalize)
   for (const feat of getFeatures()) {
     const router = feat.mount(featureDeps);
@@ -453,7 +454,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
   });
 
   // Optional: WebSocket streaming via DO for Podman live tail
-  const logStreamNs = platformBindings?.LOG_STREAM_DO as DurableObjectNamespace | undefined;
+  const logStreamNs = z.custom<DurableObjectNamespace>().optional().parse(platformBindings?.LOG_STREAM_DO);
   if (logStreamNs) {
     app.get('/api/sandboxes/:id/logs/stream', async (c) => {
       const id = createSandboxId(c.req.param('id'));

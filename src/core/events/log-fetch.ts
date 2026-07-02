@@ -17,6 +17,9 @@
 import type { EventBus } from '../event-bus/bus.ts';
 import type { IAtomicStore } from '../store/interfaces.ts';
 import type { IProviderRegistry } from '../provider/interfaces.ts';
+import { createRegionId } from '../region/types.ts';
+import { createInstanceId } from '../region/instance.ts';
+import { z } from 'zod';
 
 export interface LogFetchDeps {
   atomic: IAtomicStore;
@@ -44,8 +47,17 @@ export function registerLogFetchHandler(deps: LogFetchDeps): void {
   const { atomic, providers, eventBus } = deps;
 
   eventBus.on('log:fetch', async (event: { type: string; payload?: unknown }) => {
-    const payload = event.payload as LogFetchPayload | undefined;
-    if (!payload?.sandboxId || !payload.containerName) return;
+    const payloadSchema = z.object({
+      sandboxId: z.string(),
+      providerId: z.string(),
+      region: z.string(),
+      containerName: z.string(),
+      instanceId: z.string().optional(),
+      tail: z.number().optional(),
+      sinceSeconds: z.number().optional(),
+    }).passthrough().optional();
+    const payload = payloadSchema.parse(event.payload);
+    if (!payload || !payload.sandboxId || !payload.containerName) return;
     const { sandboxId, providerId, region, containerName, tail, sinceSeconds } = payload;
 
     try {
@@ -58,13 +70,13 @@ export function registerLogFetchHandler(deps: LogFetchDeps): void {
 
       // Fetch logs from provider — resolve per-instance for correct credential binding
       const resolved = payload.instanceId
-        ? await providers.resolveContainer(payload.instanceId as any)
+        ? await providers.resolveContainer(createInstanceId(payload.instanceId))
         : undefined;
       if (!resolved) return;
       const containerProvider = resolved;
 
       const result = await containerProvider.getLogs({
-        region: region as any,
+        region: createRegionId(region),
         providerId,
         containerName,
         ...(tail !== undefined ? { limitBytes: tail } : {}),
@@ -82,7 +94,7 @@ export function registerLogFetchHandler(deps: LogFetchDeps): void {
 
       // Clear marker
       const m2 = await atomic.get(markerKey);
-      try { if (m2) await atomic.set(markerKey, null as any, m2.version); } catch {
+      try { if (m2) await atomic.set<Record<string, unknown> | null>(markerKey, null, m2.version); } catch {
         console.debug("noop");
       }
     } catch (e: any) {

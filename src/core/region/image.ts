@@ -1,7 +1,7 @@
 import type { IAtomicStore } from '../store/interfaces.ts';
 import type { RegionId, Platform } from './types.ts';
 import type { InstanceId } from './instance.ts';
-import { InstanceService } from './instance.ts';
+import { InstanceService, createInstanceId } from './instance.ts';
 import { AppError } from '../types.ts';
 
 // ─── Entity ───
@@ -66,7 +66,8 @@ export class ImageRepositoryService {
 
   public async create(input: CreateImageInput): Promise<ImageRepository> {
     const instSvc = new InstanceService(this.atomic);
-    const inst = await instSvc.get(input.instanceId as InstanceId);
+    const instanceId = createInstanceId(input.instanceId);
+    const inst = await instSvc.get(instanceId);
     if (!inst) throw new AppError(400, 'INSTANCE_NOT_FOUND', `ComputeInstance ${input.instanceId} not found`);
 
     const id = generateImageId();
@@ -78,7 +79,7 @@ export class ImageRepositoryService {
       platform: inst.platform,
       region: inst.region,
       endpoint: inst.endpoint,
-      instanceId: input.instanceId as InstanceId,
+      instanceId,
       image: input.image,
       ...(input.registryCredential ? { registryCredential: input.registryCredential } : {}),
       ...(input.credentialRef ? { credentialRef: input.credentialRef } : {}),
@@ -119,7 +120,7 @@ export class ImageRepositoryService {
       ...(input.registryCredential !== undefined ? { registryCredential: input.registryCredential ?? undefined } : {}),
       ...(input.credentialRef !== undefined ? { credentialRef: input.credentialRef ?? undefined } : {}),
       ...(input.clusterId !== undefined ? { clusterId: input.clusterId ?? undefined } : {}),
-      ...(input.instanceId !== undefined ? { instanceId: input.instanceId as InstanceId } : {}),
+      ...(input.instanceId !== undefined ? { instanceId: createInstanceId(input.instanceId) } : {}),
       ...(input.status !== undefined ? { status: input.status } : {}),
       updatedAt: Date.now(),
     };

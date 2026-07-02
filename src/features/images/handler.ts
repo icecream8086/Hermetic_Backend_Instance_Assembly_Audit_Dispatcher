@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import type { Context } from 'hono';
 import type { IProviderRegistry } from '../../core/provider/interfaces.ts';
+import type { InstanceId } from '../../core/region/instance.ts';
 import { AppError } from '../../core/types.ts';
 import type { AppContext } from '../../core/deps.ts';
 import { ok } from '../../core/response.ts';
@@ -25,8 +26,8 @@ export function createImagesRouter(providers: IProviderRegistry): OpenAPIHono<{ 
       const limit = parseInt(c.req.query('limit') ?? '') || undefined;
       const offset = parseInt(c.req.query('offset') ?? '') || undefined;
       const instanceId = c.req.query('instanceId');
-      const provider = instanceId ? await providers.resolveImage(instanceId as any) : providers.image;
-      const images = await provider.list({ search, limit, offset } as any);
+      const provider = instanceId ? await providers.resolveImage(z.custom<InstanceId>().parse(instanceId)) : providers.image;
+      const images = await provider.list({ search, limit, offset });
       return c.json(ok(images));
     },
   );
@@ -48,7 +49,7 @@ export function createImagesRouter(providers: IProviderRegistry): OpenAPIHono<{ 
     async (c) => {
       const id = c.req.param('id');
       const instanceId = c.req.query('instanceId');
-      const provider = instanceId ? await providers.resolveImage(instanceId as any) : providers.image;
+      const provider = instanceId ? await providers.resolveImage(z.custom<InstanceId>().parse(instanceId)) : providers.image;
       const info = await provider.inspect(id);
       if (!info) throw new AppError(404, 'NOT_FOUND', 'Image not found');
       return c.json(ok(info));
@@ -61,7 +62,7 @@ export function createImagesRouter(providers: IProviderRegistry): OpenAPIHono<{ 
       requireRoot(c);
       const id = c.req.param('id');
       const instanceId = c.req.query('instanceId');
-      const provider = instanceId ? await providers.resolveImage(instanceId as any) : providers.image;
+      const provider = instanceId ? await providers.resolveImage(z.custom<InstanceId>().parse(instanceId)) : providers.image;
       await provider.remove(id);
       return c.json(ok(null));
     },
@@ -75,7 +76,7 @@ export function createImagesRouter(providers: IProviderRegistry): OpenAPIHono<{ 
       const instanceId = c.req.query('instanceId');
       const { tag } = await z.unknown().parse(c.req.json());
       if (!tag) throw new AppError(400, 'VALIDATION_ERROR', 'tag is required');
-      const provider = instanceId ? await providers.resolveImage(instanceId as any) : providers.image;
+      const provider = instanceId ? await providers.resolveImage(z.custom<InstanceId>().parse(instanceId)) : providers.image;
       if (!provider.tag) throw new AppError(501, 'NOT_IMPLEMENTED', 'tag is not supported by the current provider');
       await provider.tag(id, tag);
       return c.json(ok(null));
@@ -88,7 +89,7 @@ export function createImagesRouter(providers: IProviderRegistry): OpenAPIHono<{ 
       const term = c.req.query('term');
       if (!term) throw new AppError(400, 'VALIDATION_ERROR', 'term is required');
       const instanceId = c.req.query('instanceId');
-      const provider = instanceId ? await providers.resolveImage(instanceId as any) : providers.image;
+      const provider = instanceId ? await providers.resolveImage(z.custom<InstanceId>().parse(instanceId)) : providers.image;
       if (!provider.search) throw new AppError(501, 'NOT_IMPLEMENTED', 'search is not supported by the current provider');
       const results = await provider.search(term);
       return c.json(ok(results));
@@ -100,7 +101,7 @@ export function createImagesRouter(providers: IProviderRegistry): OpenAPIHono<{ 
     async (c) => {
       requireRoot(c);
       const instanceId = c.req.query('instanceId');
-      const provider = instanceId ? await providers.resolveImage(instanceId as any) : providers.image;
+      const provider = instanceId ? await providers.resolveImage(z.custom<InstanceId>().parse(instanceId)) : providers.image;
       if (!provider.prune) throw new AppError(501, 'NOT_IMPLEMENTED', 'prune is not supported by the current provider');
       const { dangling } = await z.unknown().parse(c.req.json());
       const result = await provider.prune({ dangling });
@@ -113,7 +114,7 @@ export function createImagesRouter(providers: IProviderRegistry): OpenAPIHono<{ 
     async (c) => {
       const id = c.req.param('id');
       const instanceId = c.req.query('instanceId');
-      const provider = instanceId ? await providers.resolveImage(instanceId as any) : providers.image;
+      const provider = instanceId ? await providers.resolveImage(z.custom<InstanceId>().parse(instanceId)) : providers.image;
       if (!provider.history) throw new AppError(501, 'NOT_IMPLEMENTED', 'history is not supported by the current provider');
       const history = await provider.history(id);
       return c.json(ok(history));
@@ -125,7 +126,7 @@ export function createImagesRouter(providers: IProviderRegistry): OpenAPIHono<{ 
     async (c) => {
       requireRoot(c);
       const instanceId = c.req.query('instanceId');
-      const provider = instanceId ? await providers.resolveImage(instanceId as any) : providers.image;
+      const provider = instanceId ? await providers.resolveImage(z.custom<InstanceId>().parse(instanceId)) : providers.image;
       if (!provider.build) throw new AppError(501, 'NOT_IMPLEMENTED', 'build is not supported by the current provider');
       const { context, dockerfile, tag } = await z.unknown().parse(c.req.json());
       const result = await provider.build(context, { dockerfile, tag });

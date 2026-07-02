@@ -6,6 +6,14 @@ import type {
 } from './types.ts';
 import { TemplateKind } from './types.ts';
 import type { CreateSandboxInput, ContainerConfig } from '../types.ts';
+import { z } from 'zod';
+
+const ProviderOverrideValueSchema = z.record(z.string(), z.unknown());
+
+/** Validation boundary: merge pipeline produces a well-shaped object. */
+const CreateSandboxInputSchema = z.custom<CreateSandboxInput>(
+  (v): v is CreateSandboxInput => v !== null && typeof v === 'object',
+);
 
 /** Mutable builder used internally during merge. Frozen to CreateSandboxInput on completion. */
 interface MutableSandboxInput {
@@ -79,7 +87,7 @@ export function resolveAssembly(
   }
 
   // Merge produces raw strings; RegionId is a zero-cost brand — the caller
-  // (sandbox service) receives the struct and writes it to the store as-is.  return { success: true, config: merged as unknown as CreateSandboxInput };
+  // (sandbox service) receives the struct and writes it to the store as-is.  return { success: true, config: CreateSandboxInputSchema.parse(merged) };
 }
 
 // ─── Merge engine ───
@@ -121,7 +129,7 @@ function mergeTemplates(sorted: Template[]): MutableSandboxInput | null {
       case TemplateKind.Resource: {
         const rt = template;
         config.providerOverrides ??= {};
-        const prev = (config.providerOverrides[rt.resourceType] ?? {}) as Record<string, unknown>;
+        const prev = ProviderOverrideValueSchema.parse(config.providerOverrides[rt.resourceType] ?? {});
         config.providerOverrides[rt.resourceType] = { ...prev, ...rt.spec };
         break;
       }

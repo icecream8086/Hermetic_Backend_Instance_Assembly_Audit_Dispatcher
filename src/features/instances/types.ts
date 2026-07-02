@@ -5,18 +5,20 @@
  *   busy flag independent: busy=true ⇒ status=online
  */
 
-declare const RUNNER_ID_BRAND: unique symbol;
-declare const RUNNER_GROUP_ID_BRAND: unique symbol;
+import { z } from 'zod';
 
-export type RunnerId = string & { readonly [RUNNER_ID_BRAND]: true };
-export type RunnerGroupId = string & { readonly [RUNNER_GROUP_ID_BRAND]: true };
+const runnerIdSchema = z.string().brand('RunnerId');
+const runnerGroupIdSchema = z.string().brand('RunnerGroupId');
+
+export type RunnerId = z.infer<typeof runnerIdSchema>;
+export type RunnerGroupId = z.infer<typeof runnerGroupIdSchema>;
 
 export function generateRunnerId(): RunnerId {
-  return `runner_${crypto.randomUUID()}` as RunnerId;
+  return runnerIdSchema.parse(`runner_${crypto.randomUUID()}`);
 }
 
 export function generateRunnerGroupId(): RunnerGroupId {
-  return `rgrp_${crypto.randomUUID()}` as RunnerGroupId;
+  return runnerGroupIdSchema.parse(`rgrp_${crypto.randomUUID()}`);
 }
 
 // ─── Runner status (GitHub Actions model) ───

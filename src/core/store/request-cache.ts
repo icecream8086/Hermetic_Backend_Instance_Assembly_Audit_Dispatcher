@@ -25,7 +25,7 @@ export class RequestCachedAtomicStore implements IAtomicStore {
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- interface contract requires generics
   public async get<T>(key: string): Promise<{ value: T; version: VersionId } | null> {
     const cached = this.#cache.get(key);
-    if (cached !== undefined) return cached as { value: T; version: VersionId } | null;
+    if (cached !== undefined) { const entry: { value: T; version: VersionId } | null = cached; return entry; }
 
     const result = await this.#inner.get<T>(key);
     this.#cache.set(key, result);

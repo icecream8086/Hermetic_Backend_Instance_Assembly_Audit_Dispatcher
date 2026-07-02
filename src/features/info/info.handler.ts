@@ -37,7 +37,7 @@ export function createInfoHandler(stores: Stores): OpenAPIHono {
       version: '4.0.0',
       platform: 'cloudflare-workers',
       region: process.env.CF_REGION ?? 'auto',
-      features: { sandbox: true, assembly: true, audit: true } as Record<string, boolean>,
+      features: { sandbox: true, assembly: true, audit: true } satisfies Record<string, boolean>,
       uptime: Date.now() - START_TIME,
       storeMetrics: stats,
     };

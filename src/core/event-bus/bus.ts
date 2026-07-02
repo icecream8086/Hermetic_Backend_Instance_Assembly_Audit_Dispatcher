@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { Event, EventHandler, EventBusConfig } from './types.ts';
 
 /**
@@ -38,7 +39,7 @@ export class EventBus {
       set = new Set();
       this.#handlers.set(type, set);
     }
-    set.add(handler as EventHandler);
+    set.add(z.custom<EventHandler>().parse(handler));
   }
 
   /**
@@ -46,7 +47,8 @@ export class EventBus {
    * @returns `true` if the handler was found and removed.
    */
   public off<T>(type: string, handler: EventHandler<T>): boolean {
-    return this.#handlers.get(type)?.delete(handler as EventHandler) ?? false;
+    const h = z.custom<EventHandler>().parse(handler);
+    return this.#handlers.get(type)?.delete(h) ?? false;
   }
 
   /**

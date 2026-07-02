@@ -6,7 +6,7 @@ import type { AppContext } from '../../core/deps.ts';
 import { ok } from '../../core/response.ts';
 import { OkResponse, PaginatedResponse } from '../../core/http-docs/response-schema.ts';
 import { SubnetSchema } from './response-schema.ts';
-import type { CreateSubnetInput, UpdateSubnetInput } from './types.ts';
+import type { SubnetId, CreateSubnetInput, UpdateSubnetInput } from './types.ts';
 
 export function createSubnetRouter(svc: ISubnetService): OpenAPIHono<{ Variables: AppContext }> {
   const app = new OpenAPIHono<{ Variables: AppContext }>();
@@ -58,7 +58,7 @@ export function createSubnetRouter(svc: ISubnetService): OpenAPIHono<{ Variables
       responses: { 200: { description: 'Subnet', content: { 'application/json': { schema: OkResponse(SubnetSchema) } } } },
     }),
     async (c) => {
-      const id = c.req.param('id') as any;
+      const id = z.custom<SubnetId>().parse(c.req.param('id'));
       const subnet = await svc.get(id);
       if (!subnet) throw new AppError(404, 'NOT_FOUND', 'Subnet not found');
       return c.json(ok(subnet));
@@ -75,7 +75,7 @@ export function createSubnetRouter(svc: ISubnetService): OpenAPIHono<{ Variables
       responses: { 200: { description: 'Subnet', content: { 'application/json': { schema: OkResponse(SubnetSchema) } } } },
     }),
     async (c) => {
-      const id = c.req.param('id') as any;
+      const id = z.custom<SubnetId>().parse(c.req.param('id'));
       const body = await z.unknown().parse(c.req.json());
       const actorId = c.var.currentUser?.id;
       const subnet = await svc.update(id, body, actorId);
@@ -93,7 +93,7 @@ export function createSubnetRouter(svc: ISubnetService): OpenAPIHono<{ Variables
       responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: OkResponse(z.null()) } } } },
     }),
     async (c) => {
-      const id = c.req.param('id') as any;
+      const id = z.custom<SubnetId>().parse(c.req.param('id'));
       const actorId = c.var.currentUser?.id;
       await svc.delete(id, actorId);
       return c.json(ok(null));

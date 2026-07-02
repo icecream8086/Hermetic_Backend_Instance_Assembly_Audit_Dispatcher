@@ -1,7 +1,7 @@
 import type { IAtomicStore } from '../store/interfaces.ts';
 import type { RegionId, Platform } from './types.ts';
 import type { InstanceId } from './instance.ts';
-import { InstanceService } from './instance.ts';
+import { InstanceService, createInstanceId } from './instance.ts';
 import { AppError } from '../types.ts';
 
 // ─── Entity ───
@@ -82,7 +82,8 @@ export class BucketService {
   public async create(input: CreateBucketInput): Promise<RegionBucket> {
     // Resolve platform/region/endpoint/credentialRef from bound ComputeInstance
     const instSvc = new InstanceService(this.atomic);
-    const inst = await instSvc.get(input.instanceId as InstanceId);
+    const instanceId = createInstanceId(input.instanceId);
+    const inst = await instSvc.get(instanceId);
     if (!inst) throw new AppError(400, 'INSTANCE_NOT_FOUND', `ComputeInstance ${input.instanceId} not found`);
 
     const id = generateBucketId();
@@ -96,7 +97,7 @@ export class BucketService {
       endpoint: inst.endpoint,
       bucketType: input.bucketType,
       credentialRef: input.credentialRef ?? inst.credentialRef ?? '',
-      instanceId: input.instanceId as InstanceId,
+      instanceId,
       status: 'Active',
       ...(input.autoGenerateKeys ? { autoGenerateKeys: true } : {}),
       createdAt: now,
@@ -132,7 +133,8 @@ export class BucketService {
     let inheritedFields: Partial<RegionBucket> = {};
     if (input.instanceId !== undefined) {
       const instSvc = new InstanceService(this.atomic);
-      const inst = await instSvc.get(input.instanceId as InstanceId);
+      const updateInstanceId = createInstanceId(input.instanceId);
+      const inst = await instSvc.get(updateInstanceId);
       if (inst) {
         inheritedFields = { platform: inst.platform, region: inst.region, endpoint: inst.endpoint };
       }
@@ -143,7 +145,7 @@ export class BucketService {
       ...inheritedFields,
       ...(input.name !== undefined ? { name: input.name } : {}),
       ...(input.bucketType !== undefined ? { bucketType: input.bucketType } : {}),
-      ...(input.instanceId !== undefined ? { instanceId: input.instanceId as InstanceId } : {}),
+      ...(input.instanceId !== undefined ? { instanceId: createInstanceId(input.instanceId) } : {}),
       ...(input.credentialRef !== undefined ? { credentialRef: input.credentialRef ?? '' } : {}),
       ...(input.status !== undefined ? { status: input.status } : {}),
       ...(input.autoGenerateKeys !== undefined ? { autoGenerateKeys: input.autoGenerateKeys } : {}),

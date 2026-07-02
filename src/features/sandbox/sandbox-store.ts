@@ -5,6 +5,12 @@ import { generateVersionId } from '../../core/brand.ts';
 import { AppError } from '../../core/types.ts';
 import { getValidated } from '../../core/store/validate.ts';
 import { SandboxSchema } from './entity-schema.ts';
+import { z } from 'zod';
+
+/** Validation boundary: SandboxSchema output is structurally compatible with Sandbox interface. */
+const SandboxTypedSchema = z.custom<Sandbox>(
+  (v): v is Sandbox => v !== null && typeof v === 'object',
+);
 
 const KEY_PREFIX = 'sandbox:';
 const INDEX_KEY = 'sandbox:ids';
@@ -14,7 +20,8 @@ export class SandboxStore {
   public constructor(private readonly atomic: IAtomicStore) {}
 
   public async getById(id: SandboxId): Promise<Sandbox | null> {
-    const validated = await getValidated(this.atomic, `${KEY_PREFIX}${id}`, SandboxSchema);    return validated as unknown as Sandbox | null;
+    const validated = await getValidated(this.atomic, `${KEY_PREFIX}${id}`, SandboxSchema);
+    return validated === null ? null : SandboxTypedSchema.parse(validated);
   }
 
   public async list(status?: SandboxStatus, limit = 50, cursor?: string): Promise<{ items: Sandbox[]; nextCursor?: string }> {

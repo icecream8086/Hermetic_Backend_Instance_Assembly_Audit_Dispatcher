@@ -813,7 +813,7 @@ export class UserService implements IUserService {
       level: KernLevel.INFO,
       facility: FACILITY,
       message: `Session revoked for user ${userId}`,
-      metadata: { eventType: 'user.session.revoked', userId: userId, tokenHint: (token as string).slice(-4), actorId },
+      metadata: { eventType: 'user.session.revoked', userId: userId, tokenHint: String(token).slice(-4), actorId },
     });
   }
 

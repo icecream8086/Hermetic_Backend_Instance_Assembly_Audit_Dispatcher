@@ -80,7 +80,13 @@ export function secureContainerProvider(inner: IContainerProvider): IContainerPr
       }
       if (prop === 'update' && target.update) {
         // eslint-disable-next-line @typescript-eslint/no-restricted-types -- proxy delegates to target with same Partial signature
-        return (providerId: string, input: Partial<CreateContainerGroupInput>) =>          target.update!(providerId, sanitizeContainerInput(input as CreateContainerGroupInput));
+        return (providerId: string, input: Partial<CreateContainerGroupInput>) => {
+          const sanitizedContainers = input.containers?.map(sanitizeContainer);
+          return target.update!(providerId, {
+            ...input,
+            ...(sanitizedContainers ? { containers: sanitizedContainers } : {}),
+          });
+        };
       }
       const val = Reflect.get(target, prop, receiver);
       try { return z.function().parse(val).bind(target); } catch { /* not a function — return raw value */ }

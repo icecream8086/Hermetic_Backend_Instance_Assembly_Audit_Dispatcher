@@ -1,5 +1,7 @@
 /// <reference types="@cloudflare/workers-types" />
 
+import { z } from 'zod';
+
 /**
  * LogStreamDO — 容器日志 WebSocket 流。
  *
@@ -132,8 +134,10 @@ export class LogStreamDO implements DurableObject {
       this.#broadcast(JSON.stringify({ event: 'container_stopped' }));
       await this.#checkContainer(endpoint, containerId);
     } catch (e: unknown) {
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Runtime boundary: caught error type unknown
-      if ((e as Error)?.name === 'AbortError') return;
+      if (typeof e === 'object' && e !== null && 'name' in e) {
+        const errName = z.custom<{ name?: string }>().parse(e).name;
+        if (errName === 'AbortError') return;
+      }
       this.#broadcast(JSON.stringify({ event: 'error', message: String(e) }));
     }
   }

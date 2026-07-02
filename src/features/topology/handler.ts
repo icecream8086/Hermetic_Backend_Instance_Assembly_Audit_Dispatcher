@@ -178,7 +178,16 @@ export function createTopologyRouter(
     app.openapi(createRoute({ method: 'post', path: '/buckets/{id}/policies', tags: ['topology'], summary: '创建 S3 策略', request: { params: z.object({ id: z.string() }) }, responses: { 201: { description: 'S3Policy', content: { 'application/json': { schema: OkResponse(S3PolicySchema) } } } } }), async (c) => {
       isRoot(c);
       const body = await z.unknown().parse(c.req.json());
-      const policy = await policyManager.create(c.req.param('id'), body as CreateS3PolicyInput);
+      const createPolicySchema = z.object({
+        name: z.string(),
+        description: z.string().optional(),
+        effect: z.enum(['Allow', 'Deny']),
+        actions: z.array(z.string()),
+        pathPrefix: z.string().optional(),
+        applyToAutoKeys: z.boolean().optional(),
+        priority: z.number().optional(),
+      });
+      const policy = await policyManager.create(c.req.param('id'), createPolicySchema.parse(body));
       return c.json(ok(policy), 201);
     });
 
@@ -191,7 +200,16 @@ export function createTopologyRouter(
     app.openapi(createRoute({ method: 'put', path: '/policies/{id}', tags: ['topology'], summary: '更新 S3 策略', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'S3Policy', content: { 'application/json': { schema: OkResponse(S3PolicySchema) } } } } }), async (c) => {
       isRoot(c);
       const body = await z.unknown().parse(c.req.json());
-      const policy = await policyManager.update(c.req.param('id'), body as UpdateS3PolicyInput);
+      const updatePolicySchema = z.object({
+        name: z.string().optional(),
+        description: z.string().optional().nullable(),
+        effect: z.enum(['Allow', 'Deny']).optional(),
+        actions: z.array(z.string()).optional(),
+        pathPrefix: z.string().optional(),
+        applyToAutoKeys: z.boolean().optional(),
+        priority: z.number().optional(),
+      });
+      const policy = await policyManager.update(c.req.param('id'), updatePolicySchema.parse(body));
       return c.json(ok(policy));
     });
 
@@ -224,7 +242,7 @@ export function createTopologyRouter(
 
     await c.var.stores.atomic.set('pull-task:' + taskId, task, null);
     const idxKey = 'pull-task:repo:' + id;
-    const idxEntry = await c.var.stores.atomic.get(idxKey) as any;
+    const idxEntry = await c.var.stores.atomic.get<string[]>(idxKey);
     await c.var.stores.atomic.set(idxKey, [...(idxEntry?.value ?? []), taskId], idxEntry?.version ?? null);
     await c.var.eventLoop.enqueueTrigger({
       type: 'image.pull',
@@ -236,7 +254,7 @@ export function createTopologyRouter(
 
   app.openapi(createRoute({ method: 'get', path: '/pull-tasks/{taskId}', tags: ['topology'], summary: '查询拉取任务状态', request: { params: z.object({ taskId: z.string() }) }, responses: { 200: { description: 'PullTask', content: { 'application/json': { schema: OkResponse(PullTaskSchema) } } }, 404: { description: 'Not found' } } }), async (c) => {
     const taskId = c.req.param('taskId');
-    const entry = await c.var.stores.atomic.get('pull-task:' + taskId) as any;
+    const entry = await c.var.stores.atomic.get<Record<string, unknown>>('pull-task:' + taskId);
     if (!entry) throw new AppError(404, 'NOT_FOUND', 'Pull task not found');
     return c.json(ok(entry.value));
   });
@@ -244,7 +262,7 @@ export function createTopologyRouter(
   app.openapi(createRoute({ method: 'get', path: '/images/{id}/tasks', tags: ['topology'], summary: '列出仓库的历史拉取任务', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: '{ items: PullTask[] }', content: { 'application/json': { schema: OkResponse(z.object({ items: z.array(PullTaskSchema), total: z.number() })) } } } } }), async (c) => {
     const idx: any = await c.var.stores.atomic.get('pull-task:repo:' + c.req.param('id'));
     if (!idx) return c.json(ok({ items: [], total: 0 }));
-    const entries = await Promise.all((idx.value ?? []).map((tid: string) => c.var.stores.atomic.get('pull-task:' + tid))) as any;
+    const entries = await Promise.all((idx.value ?? []).map((tid: string) => c.var.stores.atomic.get<Record<string, unknown>>('pull-task:' + tid)));
     const tasks = entries.filter((e: any) => e).map((e: any) => e.value);
     return c.json(ok({ items: tasks, total: tasks.length }));
   });

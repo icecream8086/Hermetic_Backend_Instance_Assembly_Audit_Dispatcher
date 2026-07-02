@@ -4,7 +4,7 @@ import { AppError } from '../../core/types.ts';
 
 import type { IProviderRegistry } from '../../core/provider/interfaces.ts';
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
-import { InstanceService } from '../../core/region/instance.ts';
+import { InstanceService, createInstanceId } from '../../core/region/instance.ts';
 import { ALIBABA_REGIONS } from '../../core/region/types.ts';
 import { getExtensionSchema } from '../../core/provider/extension-schema.ts';
 import { ok } from '../../core/response.ts';
@@ -54,7 +54,7 @@ export function createPlatformsRouter(
       if (!atomicStore) throw new AppError(503, 'SERVICE_UNAVAILABLE', 'Atomic store not available');
 
       const instSvc = new InstanceService(atomicStore);
-      const inst = await instSvc.get(instanceId as any);
+      const inst = await instSvc.get(createInstanceId(instanceId));
       if (!inst) throw new AppError(404, 'NOT_FOUND', 'Compute instance not found');
 
       const schema = getExtensionSchema(inst.platform);
@@ -94,13 +94,14 @@ export function createPlatformsRouter(
       if (instanceId) {
         if (!atomicStore) throw new AppError(503, 'SERVICE_UNAVAILABLE', 'Atomic store not available');
         const instSvc = new InstanceService(atomicStore);
-        const inst = await instSvc.get(instanceId as any);
+        const instId = createInstanceId(instanceId);
+        const inst = await instSvc.get(instId);
         if (!inst) throw new AppError(404, 'NOT_FOUND', 'Compute instance not found');
         resolvedPlatform = inst.platform;
 
         switch (inst.platform) {
           case 'alibaba': {
-            const client = await registry.resolveRawEciApi(instanceId as any);
+            const client = await registry.resolveRawEciApi(instId);
             if (client) regions = await client.describeRegions();
             break;
           }

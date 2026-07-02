@@ -1,29 +1,17 @@
-declare const AUTHZ_ID_BRAND: unique symbol;
-declare const POLICY_ID_BRAND: unique symbol;
-declare const ROLE_ID_BRAND: unique symbol;
+import { z } from 'zod';
 
-export type AuthzId = string & { readonly [AUTHZ_ID_BRAND]: true };
-export type PolicyId = string & { readonly [POLICY_ID_BRAND]: true };
-export type RoleId = string & { readonly [ROLE_ID_BRAND]: true };
+const authzIdSchema = z.string().min(1).brand('AuthzId');
+const policyIdSchema = z.string().min(1).brand('PolicyId');
+const roleIdSchema = z.string().min(1).brand('RoleId');
 
-export function createAuthzId(raw: string): AuthzId {
-  if (!raw) throw new TypeError('AuthzId must not be empty');
-  return raw as AuthzId;
-}
+export type AuthzId = z.infer<typeof authzIdSchema>;
+export type PolicyId = z.infer<typeof policyIdSchema>;
+export type RoleId = z.infer<typeof roleIdSchema>;
 
-export function generateAuthzId(): AuthzId {
-  return `authz_${crypto.randomUUID()}` as AuthzId;
-}
-
-export function createPolicyId(raw: string): PolicyId {
-  if (!raw) throw new TypeError('PolicyId must not be empty');
-  return raw as PolicyId;
-}
-
-export function createRoleId(raw: string): RoleId {
-  if (!raw) throw new TypeError('RoleId must not be empty');
-  return raw as RoleId;
-}
+export function createAuthzId(raw: string): AuthzId { return authzIdSchema.parse(raw); }
+export function generateAuthzId(): AuthzId { return authzIdSchema.parse(`authz_${crypto.randomUUID()}`); }
+export function createPolicyId(raw: string): PolicyId { return policyIdSchema.parse(raw); }
+export function createRoleId(raw: string): RoleId { return roleIdSchema.parse(raw); }
 
 export enum PermissionEffect {
   ALLOW = 'allow',

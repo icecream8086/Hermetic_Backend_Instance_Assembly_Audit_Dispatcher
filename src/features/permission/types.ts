@@ -4,16 +4,17 @@ import { createPolicyId } from '../../core/permission/types.ts';
 export { createPolicyId };
 export type { PolicyId };
 
-declare const PERMISSION_ID_BRAND: unique symbol;
-export type PermissionId = string & { readonly [PERMISSION_ID_BRAND]: true };
+import { z } from 'zod';
+
+const permissionIdSchema = z.string().min(1).brand('PermissionId');
+export type PermissionId = z.infer<typeof permissionIdSchema>;
 
 export function createPermissionId(raw: string): PermissionId {
-  if (!raw) throw new TypeError('PermissionId must not be empty');
-  return raw as PermissionId;
+  return permissionIdSchema.parse(raw);
 }
 
 export function generatePermissionId(): PermissionId {
-  return `perm_${crypto.randomUUID()}` as PermissionId;
+  return permissionIdSchema.parse(`perm_${crypto.randomUUID()}`);
 }
 
 export type PolicyEffect = 'allow' | 'deny';
@@ -60,11 +61,11 @@ export interface UpdatePolicyInput {
 
 // ─── User group ───
 
-declare const USERGROUP_ID_BRAND: unique symbol;
-export type UserGroupId = string & { readonly [USERGROUP_ID_BRAND]: true };
+const userGroupIdSchema = z.string().min(1).brand('UserGroupId');
+export type UserGroupId = z.infer<typeof userGroupIdSchema>;
 
 export function generateUserGroupId(): UserGroupId {
-  return `usergrp_${crypto.randomUUID()}` as UserGroupId;
+  return userGroupIdSchema.parse(`usergrp_${crypto.randomUUID()}`);
 }
 
 export interface UserGroup {
@@ -107,11 +108,11 @@ export interface PermissionRule {
 
 // ─── Permission group ───
 
-declare const PERMGROUP_ID_BRAND: unique symbol;
-export type PermGroupId = string & { readonly [PERMGROUP_ID_BRAND]: true };
+const permGroupIdSchema = z.string().min(1).brand('PermGroupId');
+export type PermGroupId = z.infer<typeof permGroupIdSchema>;
 
 export function generatePermGroupId(): PermGroupId {
-  return `permgrp_${crypto.randomUUID()}` as PermGroupId;
+  return permGroupIdSchema.parse(`permgrp_${crypto.randomUUID()}`);
 }
 
 export interface PermissionGroup {
@@ -146,11 +147,11 @@ export interface UpdatePermGroupInput {
 
 // ─── User template ───
 
-declare const USERTPL_ID_BRAND: unique symbol;
-export type UserTplId = string & { readonly [USERTPL_ID_BRAND]: true };
+const userTplIdSchema = z.string().min(1).brand('UserTplId');
+export type UserTplId = z.infer<typeof userTplIdSchema>;
 
 export function generateUserTplId(): UserTplId {
-  return `usertpl_${crypto.randomUUID()}` as UserTplId;
+  return userTplIdSchema.parse(`usertpl_${crypto.randomUUID()}`);
 }
 
 export interface UserTemplate {
@@ -206,11 +207,11 @@ export interface Template {
 
 // ─── Route ACL ───
 
-declare const ROUTEACL_ID_BRAND: unique symbol;
-export type RouteAclId = string & { readonly [ROUTEACL_ID_BRAND]: true };
+const routeAclIdSchema = z.string().min(1).brand('RouteAclId');
+export type RouteAclId = z.infer<typeof routeAclIdSchema>;
 
 export function generateRouteAclId(): RouteAclId {
-  return `routeacl_${crypto.randomUUID()}` as RouteAclId;
+  return routeAclIdSchema.parse(`routeacl_${crypto.randomUUID()}`);
 }
 
 export interface RouteAcl {

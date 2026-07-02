@@ -30,6 +30,9 @@ const GC_MARKER_PREFIX = 'gc:queued:';
  *  the tick re-enqueues (self-healing).  Must be > 2× tick interval. */
 const GC_MARKER_TTL_MS = 120_000;
 
+/** GC reason enum — validated at dispatch so callers never bypass the type check. */
+const gcReasonSchema = z.enum(['stopped-gc', 'provider-gone', 'exited-gc', 'unhealthy-gc', 'manual', 'failed-gc', 'expired-gc', 'stuck-gc']);
+
 /**
  * Register the health:check handler on the event bus.
  *
@@ -127,8 +130,10 @@ export function registerHealthCheck(deps: HealthCheckDeps): void {
           ) {
             const TRANSIENT_TIMEOUT_MS = 10 * 60 * 1000; // 10 min — generous for ECI scheduling + image pull
             const duration = Date.now() - entry.value.updatedAt;
-            const providerIdentity = (entry.value.config as unknown as Record<string, unknown>).providerIdentity;
-            const resolvedInstanceId = instanceId ?? (providerIdentity as Record<string, unknown> | undefined)?.instanceId as string | undefined;
+            const configRecord = z.record(z.string(), z.unknown()).parse(entry.value.config);
+            const providerIdentity: unknown = configRecord.providerIdentity;
+            const providerIdObj = z.object({ instanceId: z.string().optional() }).optional();
+            const resolvedInstanceId = instanceId ?? providerIdObj.parse(providerIdentity)?.instanceId;
 
             // Try provider status check (only if we have instance routing info)
             if (resolvedInstanceId) {
@@ -358,7 +363,7 @@ async function dispatchGc(
 
   // 2. Try Queue dispatch
   const qSent = await queueProducer.sendSandboxGc({
-    sandboxId: params.sandboxId, reason: params.reason as 'stopped-gc' | 'provider-gone' | 'exited-gc' | 'unhealthy-gc' | 'manual' | 'failed-gc' | 'expired-gc' | 'stuck-gc',
+    sandboxId: params.sandboxId, reason: gcReasonSchema.parse(params.reason),
     providerId: params.providerId, region: params.region,
     ...(params.instanceId ? { instanceId: params.instanceId } : {}),
     containerCount: params.containerCount,
@@ -442,7 +447,7 @@ export function registerPodHealthCheck(deps: PodHealthCheckDeps): void {
 
           const phase = pod.phase;
           const providerId = pod.providerId;
-          const instanceId = (pod.spec.providerOverrides)?.instanceId as string | undefined;
+          const instanceId = z.string().optional().parse((pod.spec.providerOverrides)?.instanceId);
 
           // ── Succeeded > 60s → stopped-gc ──
           if (phase === 'Succeeded') {
@@ -635,7 +640,7 @@ async function dispatchPodGc(
 
   // Queue dispatch — reuses sandbox:gc queue but with pod-scoped markers
   const qSent = await queueProducer.sendSandboxGc({
-    sandboxId: params.podId, reason: params.reason as 'stopped-gc' | 'provider-gone' | 'exited-gc' | 'unhealthy-gc' | 'manual' | 'failed-gc' | 'expired-gc' | 'stuck-gc',
+    sandboxId: params.podId, reason: gcReasonSchema.parse(params.reason),
     providerId: params.providerId, region: 'cn-hangzhou',
     ...(params.instanceId ? { instanceId: params.instanceId } : {}),
     containerCount: 0,

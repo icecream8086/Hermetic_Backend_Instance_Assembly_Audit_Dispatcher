@@ -40,7 +40,7 @@ export function createContainerSecretRouter(svc: IContainerSecretService): OpenA
 
   app.openapi(createRoute({ method: 'post', path: '/{id}/upload', tags: ['container-secrets'], summary: '上传文件到 upload 类型 secret', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'ContainerSecret', content: { 'application/json': { schema: OkResponse(ContainerSecretResponseSchema) } } } } }), async (c) => {
     const body = await c.req.parseBody();
-    const file = body.file as File | undefined;
+    const file = z.custom<File>().optional().parse(body.file);
     if (!file) throw new AppError(400, 'VALIDATION_ERROR', 'file is required');
     const secret = await svc.uploadBlob(c.req.param('id'), file.name, await file.arrayBuffer(), file.type);
     return c.json(ok(redact(secret)));

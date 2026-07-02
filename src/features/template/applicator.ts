@@ -3,6 +3,19 @@ import type { CreateSandboxInput, Volume, VolumeMount, SandboxNetworkConfig } fr
 import type { EnvVar, ProbeSpec } from '../../core/provider/types.ts';
 import { VolumeType, VolumeStatus, createVolumeId } from '../sandbox/types.ts';
 import { createRegionId } from '../../core/region/types.ts';
+import { z } from 'zod';
+
+import type { NFSVolumeConfig, DiskVolumeConfig, SecretVolumeConfig } from '../sandbox/types.ts';
+
+const ValueFromSchema = z.custom<EnvVar['valueFrom']>(
+  (v): v is EnvVar['valueFrom'] => v === undefined || (v !== null && typeof v === 'object'),
+);
+
+const VolTypeSchema = z.nativeEnum(VolumeType);
+const NfsConfigSchema = z.custom<NFSVolumeConfig>(v => v !== null && typeof v === 'object' && !Array.isArray(v));
+const DiskConfigSchema = z.custom<DiskVolumeConfig>(v => v !== null && typeof v === 'object' && !Array.isArray(v));
+const SecretConfigSchema = z.custom<SecretVolumeConfig>(v => v !== null && typeof v === 'object' && !Array.isArray(v));
+const StrSchema = z.string();
 
 /**
  * Map a resolved template to CreateSandboxInput.
@@ -45,10 +58,26 @@ export async function applyTemplate(
 
   // Merge template-level env + configMap env for main containers
   function mergeEnv(existing: readonly { name: string; value?: string; valueFrom?: unknown }[] | undefined): EnvVar[] | undefined {
-    const merged: EnvVar[] = [
-      ...(existing?.map(e => ({ name: e.name, ...(e.value !== undefined ? { value: e.value } : {}), ...(e.valueFrom !== undefined ? { valueFrom: e.valueFrom as EnvVar['valueFrom'] } : {}) })) ?? []),
-      ...configMapEnv,
-    ];
+    const merged: EnvVar[] = [];
+    if (existing) {
+      for (const e of existing) {
+        if (e.valueFrom !== undefined) {
+          const parsedValueFrom = ValueFromSchema.parse(e.valueFrom);
+          merged.push({
+            name: e.name,
+            valueFrom: parsedValueFrom,
+          });
+        } else if (e.value !== undefined) {
+          merged.push({
+            name: e.name,
+            value: e.value,
+          });
+        } else {
+          merged.push({ name: e.name });
+        }
+      }
+    }
+    merged.push(...configMapEnv);
     return merged.length > 0 ? merged : undefined;
   }
 
@@ -91,7 +120,7 @@ export async function applyTemplate(
         ...((e => e ? { env: e.map(x => ({
           name: x.name,
           ...(x.value !== undefined ? { value: x.value } : {}),
-          ...(x.valueFrom !== undefined ? { valueFrom: x.valueFrom as EnvVar['valueFrom'] } : {}),
+          ...(x.valueFrom !== undefined ? { valueFrom: ValueFromSchema.parse(x.valueFrom) } : {}),
         })) } : {})(c.env)),
         ...(c.resources ? {
           resources: {
@@ -140,7 +169,7 @@ function buildProbeMap(healthChecks: readonly HealthCheckDef[] | undefined): Map
       ...(hc.successThreshold !== undefined ? { successThreshold: hc.successThreshold } : {}),
       ...(hc.failureThreshold !== undefined ? { failureThreshold: hc.failureThreshold } : {}),
     };
-    const probeKey = `${hc.type}Probe` as keyof ProbeBag;
+    const probeKey: keyof ProbeBag = `${hc.type}Probe`;
     entry[probeKey] = probe;
     map.set(hc.target, entry);
   }
@@ -191,13 +220,13 @@ export async function mapStorage(
       if (vol) {
         volumes.push({
           id: vid, name: s.name, tags: [], createdAt: now, updatedAt: now,
-          status: VolumeStatus.Detached, type: (vol as any).type ?? s.type,
+          status: VolumeStatus.Detached, type: VolTypeSchema.parse(vol.type ?? s.type),
           instanceId: s.instanceId,
-          ...((vol as any).nfs ? { nfs: (vol as any).nfs } : {}),
-          ...((vol as any).disk ? { disk: (vol as any).disk } : {}),
-          ...((vol as any).secret ? { secret: (vol as any).secret } : {}),
+          ...(vol.nfs !== undefined && vol.nfs !== null ? { nfs: NfsConfigSchema.parse(vol.nfs) } : {}),
+          ...(vol.disk !== undefined && vol.disk !== null ? { disk: DiskConfigSchema.parse(vol.disk) } : {}),
+          ...(vol.secret !== undefined && vol.secret !== null ? { secret: SecretConfigSchema.parse(vol.secret) } : {}),
         });
-        volumeMounts.push({ volumeId: vid, mountPath: s.mountPath, readOnly: false, ...((vol as any).credentialRef ? { credentialRef: (vol as any).credentialRef } : {}) });
+        volumeMounts.push({ volumeId: vid, mountPath: s.mountPath, readOnly: false, ...(vol.credentialRef !== undefined ? { credentialRef: StrSchema.parse(vol.credentialRef) } : {}) });
         continue;
       }
     }
@@ -208,10 +237,10 @@ export async function mapStorage(
       if (bkt) {
         bucketMounts.push({
           bucketId: s.bucketId,
-          bucket: (s.oss?.bucket) ?? (bkt as any).name ?? '',
-          endpoint: (bkt as any).endpoint ?? '',
-          region: (bkt as any).region ?? 'auto',
-          autoGenerateKeys: (bkt as any).autoGenerateKeys === true,
+          bucket: (s.oss?.bucket) ?? StrSchema.parse(bkt.name ?? ''),
+          endpoint: StrSchema.parse(bkt.endpoint ?? ''),
+          region: StrSchema.parse(bkt.region ?? 'auto'),
+          autoGenerateKeys: bkt.autoGenerateKeys === true,
           mountPath: s.mountPath,
         });
         continue;

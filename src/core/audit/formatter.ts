@@ -15,6 +15,6 @@ export class JsonLogFormatter implements ILogFormatter {
   }
 
   public deserialize(body: SerializedBody): StoredAuditEntry {
-    return parseJson(body) as StoredAuditEntry;
+    return z.custom<StoredAuditEntry>((v) => typeof v === 'object' && v !== null).parse(parseJson(body));
   }
 }

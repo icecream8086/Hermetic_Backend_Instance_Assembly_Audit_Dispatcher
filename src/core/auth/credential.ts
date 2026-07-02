@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { IAtomicStore } from '../store/interfaces.ts';
 import type { Platform } from '../region/types.ts';
 import { AppError } from '../types.ts';
@@ -13,7 +14,7 @@ declare const CREDENTIAL_ID_BRAND: unique symbol;
 export type CredentialId = string & { readonly [CREDENTIAL_ID_BRAND]: true };
 
 export function generateCredentialId(): CredentialId {
-  return `cred_${crypto.randomUUID()}` as CredentialId;
+  return z.custom<CredentialId>().parse(`cred_${crypto.randomUUID()}`);
 }
 
 // ─── Entity ───

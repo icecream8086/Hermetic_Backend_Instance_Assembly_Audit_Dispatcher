@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { RegionId, ZoneId, ClusterId } from './types.ts';
 import { ALIBABA_REGIONS } from './types.ts';
 
@@ -97,7 +98,7 @@ export class RegionRegistry {
 
     // Check region-level override first
     if (cfg.endpoints) {
-      const ep = cfg.endpoints[service as keyof RegionEndpoint];
+      const ep = cfg.endpoints[z.custom<keyof RegionEndpoint>().parse(service)];
       if (ep) return ep;
     }
 

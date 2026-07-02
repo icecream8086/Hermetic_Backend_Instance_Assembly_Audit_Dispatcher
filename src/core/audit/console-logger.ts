@@ -15,7 +15,7 @@ export function setPanicHandler(handler: ((msg: string) => void) | null): void {
 /** Minimal console logger for local development. */
 export class ConsoleLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
   public readonly auditTier = AuditTier.BEST_EFFORT;
-  #entries: AuditEntry[] = [];
+  #entries: StoredAuditEntry[] = [];
 
   public write(entry: AuditEntry): void {
     void this.log(entry);
@@ -44,7 +44,7 @@ export class ConsoleLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
 
   // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   public async query(params?: LogQuery): Promise<{ entries: StoredAuditEntry[]; nextCursor?: string; total?: number }> {
-    let result: StoredAuditEntry[] = this.#entries as StoredAuditEntry[];
+    let result = this.#entries;
     if (params?.facility) result = result.filter(e => e.facility === params.facility);
     if (params?.startTs !== undefined) result = result.filter(e => e.timestamp >= params.startTs!);
     if (params?.endTs !== undefined) result = result.filter(e => e.timestamp <= params.endTs!);
@@ -55,7 +55,8 @@ export class ConsoleLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
 
   // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   public async getById(id: LogId): Promise<StoredAuditEntry | null> {
-    return (this.#entries as StoredAuditEntry[]).find(e => e.id === id) ?? null;
+    const stored: StoredAuditEntry[] = this.#entries;
+    return stored.find(e => e.id === id) ?? null;
   }
 
   public async flush(): Promise<void> { /* noop */ }
@@ -68,7 +69,8 @@ export class ConsoleLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
   public async pruneByIds(_ids: readonly string[]): Promise<number> { return 0; }
 
   #print(entry: AuditEntry & { timestamp: number }): void {
-    const actorId = entry.actorId ?? (entry.metadata?.actorId as string | undefined);
+    const metaActorId: string | undefined = typeof entry.metadata?.actorId === 'string' ? entry.metadata.actorId : undefined;
+    const actorId = entry.actorId ?? metaActorId;
     console.log(formatDmesgLine(entry.message, actorId));
   }
 }

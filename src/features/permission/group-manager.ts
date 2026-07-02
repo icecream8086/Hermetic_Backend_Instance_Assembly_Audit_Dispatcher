@@ -176,7 +176,7 @@ function buildCompareResult(a: Record<string, unknown>, b: Record<string, unknow
   const common: Record<string, unknown>[] = [];
   const onlyA: Record<string, unknown>[] = [];
   const onlyB: Record<string, unknown>[] = [];
-  const depDiff = { onlyA: [] as string[], onlyB: [] as string[], common: [] as string[] };
+  const depDiff: { onlyA: string[]; onlyB: string[]; common: string[] } = { onlyA: [], onlyB: [], common: [] };
 
   const aItems = a.rules ?? a.memberIds ?? [];
   const bItems = b.rules ?? b.memberIds ?? [];

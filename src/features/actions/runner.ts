@@ -1,7 +1,9 @@
+import { z } from 'zod';
 import type { IAtomicStore, IBlobStore } from '../../core/store/interfaces.ts';
 import type { IProviderRegistry } from '../../core/provider/interfaces.ts';
 import type { IAuditWriter } from '../../core/audit/types.ts';
 import type { IMessageQueue } from '../../queue/interfaces.ts';
+import type { TaskMessage } from '../../queue/types.ts';
 import { createEvent } from '../../core/event-bus/types.ts';
 import type { EventBus } from '../../core/event-bus/bus.ts';
 import {
@@ -34,6 +36,16 @@ import type { PodService } from '../../core/pod/service.ts';
 import type { PodSpec } from '../../core/pod/types.ts';
 import { createRegionId } from '../../core/region/types.ts';
 import { createInstanceId } from '../../core/region/instance.ts';
+
+/** Provider with exec support for step-level container execution. */
+interface ExecProvider {
+  exec?(opts: {
+    providerId: string;
+    command: readonly string[];
+    env: readonly string[];
+    timeout: number | undefined;
+  }): Promise<{ exitCode: number }>;
+}
 
 function runId(): WorkflowRunId { return createWorkflowRunId(`wfr_${crypto.randomUUID()}`); }
 function jId(): JobRunId { return createJobRunId(`jr_${crypto.randomUUID()}`); }
@@ -238,7 +250,8 @@ export class WorkflowRunner {
     for (const [jobName, jobDef] of Object.entries(wf.jobs)) {
       // Expand matrix strategy → one JobRun per variant
       const variants = expander.expand(jobName, jobDef);
-      const failFast = (jobDef as any).strategy?.failFast === true;
+      const strategyRecord = z.object({ strategy: z.object({ failFast: z.boolean().optional() }).optional() }).parse(z.custom<Record<string, unknown>>().parse(jobDef));
+      const failFast = strategyRecord.strategy?.failFast === true;
 
       for (const variant of variants) {
         // Resolve ${{ matrix.xxx }} in env and container fields
@@ -247,12 +260,12 @@ export class WorkflowRunner {
           ? this.#resolveMatrixInContainer(variant.jobDef.container, variant.matrixVars)
           : undefined;
 
-        const resolvedJob: typeof jobDef = {
+        const resolvedJob: typeof jobDef & { failFast?: boolean } = {
           ...variant.jobDef,
           env: resolvedEnv,
           ...(resolvedContainer ? { container: resolvedContainer } : {}),
           // Inject failFast from matrix strategy
-          ...(failFast ? { failFast: true } as any : {}),
+          ...(failFast ? { failFast: true } : {}),
         };
 
         const id = jId();
@@ -326,7 +339,7 @@ export class WorkflowRunner {
       if (needs.length > 0) {
         const depStatuses = await Promise.all(
           needs.map(async (needName) => {
-            const depRef = run.jobRunRefs.find(r => r.jobName === needName);            if (!depRef) return { name: needName, status: 'Queued' as const };
+            const depRef = run.jobRunRefs.find(r => r.jobName === needName);            if (!depRef) { const r: { name: string; status: 'Queued' } = { name: needName, status: 'Queued' }; return r; }
             const depEntry = await atomic.get<JobRun>(PFX_JOB_RUN + depRef.jobRunId);
             return { name: needName, status: (depEntry?.value.status ?? 'Queued') };
           }),
@@ -352,8 +365,9 @@ export class WorkflowRunner {
 
       // Schedule via Queue, or inline fallback
       const qp = this.deps.queueProducer;
+      const qMsg: TaskMessage = { type: 'workflow:job:run', payload: { jobRunId: ref.jobRunId, workflowRunId: run.id }, timestamp: Date.now(), id: `wfj_${crypto.randomUUID()}` };
       const qSent = qp
-        ? await qp.send({ type: 'workflow:job:run', payload: { jobRunId: ref.jobRunId, workflowRunId: run.id }, timestamp: Date.now(), id: `wfj_${crypto.randomUUID()}` } as any)
+        ? await qp.send(qMsg)
         : false;
 
       if (!qSent) {
@@ -480,7 +494,7 @@ export class WorkflowRunner {
     jobRunId: string,
   ): Promise<StepRun[]> {
     const stepRuns: StepRun[] = [];
-    const provider = await this.deps.providers.resolveContainer(undefined) as any;
+    const provider = z.custom<ExecProvider>().parse(await this.deps.providers.resolveContainer(undefined));
 
     for (const step of steps) {
       const name = step.name ?? (step.run != null ? step.run.slice(0, 60) : step.dns != null ? `dns:${step.dns.name}` : step.uses);

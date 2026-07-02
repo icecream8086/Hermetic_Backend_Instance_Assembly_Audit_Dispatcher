@@ -6,7 +6,7 @@ import { shouldLogAudit } from './log-policy.ts';
 import { shouldPersist } from './persistence-policy.ts';
 import { resolveFacility, encodePriority } from './kern-level.ts';
 import { formatDmesgLine } from '../utils/dmesg.ts';
-import { encodeCursor, decodeCursor, cursorFromEntry, xorHash } from './types.ts';
+import { encodeCursor, decodeCursor, xorHash } from './types.ts';
 import { getBootId } from './context.ts';
 
 const PFX_AUDIT = 'audit:ring:';
@@ -53,12 +53,12 @@ export class HybridAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmi
     const safeMeta = sanitizeMetadata(entry.metadata);
     // Generate journald-style cursor with tamper-detection xor_hash.
     const seq = ++this.#seq;
-    const cursor = encodeCursor(cursorFromEntry(
-      { id, timestamp: now } as unknown as StoredAuditEntry,
-      this.#bootId,
-      seq,
-      this.#machineHash,
-    ));
+    const monoNow = Math.round(performance.now());
+    const cursor = encodeCursor({
+      s: this.#machineHash, i: seq, b: this.#bootId,
+      m: monoNow, t: now,
+      x: xorHash({ s: this.#machineHash, i: seq, b: this.#bootId, m: monoNow, t: now }),
+    });
     const stored: StoredAuditEntry = {
       id, timestamp: now, priority: encodePriority(facilityCode, entry.level),
       level: entry.level, facility: entry.facility,

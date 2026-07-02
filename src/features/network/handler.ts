@@ -8,6 +8,7 @@ import { ok } from '../../core/response.ts';
 import { OkResponse, PaginatedResponse } from '../../core/http-docs/response-schema.ts';
 import { SecurityGroupSchema } from './response-schema.ts';
 import type { CreateSecurityGroupInput, UpdateSecurityGroupInput } from './types.ts';
+import { createSecurityGroupId } from './types.ts';
 
 function requireRoot<E extends { Variables: { currentUser?: { role?: string } } }>(c: Context<E>): void {
   const user = c.var.currentUser;
@@ -67,7 +68,7 @@ export function createSecurityGroupRouter(svc: ISecurityGroupService): OpenAPIHo
       responses: { 200: { description: 'SecurityGroup', content: { 'application/json': { schema: OkResponse(SecurityGroupSchema) } } } },
     }),
     async (c) => {
-      const id = c.req.param('id') as any;
+      const id = createSecurityGroupId(c.req.param('id'));
       const sg = await svc.get(id);
       if (!sg) throw new AppError(404, 'NOT_FOUND', 'Security group not found');
       return c.json(ok(sg));
@@ -85,7 +86,7 @@ export function createSecurityGroupRouter(svc: ISecurityGroupService): OpenAPIHo
     }),
     async (c) => {
       requireRoot(c);
-      const id = c.req.param('id') as any;
+      const id = createSecurityGroupId(c.req.param('id'));
       const body = await z.unknown().parse(c.req.json());
       const sg = await svc.update(id, body, actorFrom(c));
       return c.json(ok(sg));
@@ -103,7 +104,7 @@ export function createSecurityGroupRouter(svc: ISecurityGroupService): OpenAPIHo
     }),
     async (c) => {
       requireRoot(c);
-      const id = c.req.param('id') as any;
+      const id = createSecurityGroupId(c.req.param('id'));
       await svc.delete(id, actorFrom(c));
       return c.json(ok(null));
     },

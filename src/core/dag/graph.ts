@@ -220,8 +220,12 @@ export class Dag<TId, TNode> {
     };
 
     const error = visit(root);
-    if (error) return { success: false as const, error };
-    return { success: true as const, dag: subgraph };
+    if (error) {
+      const failResult: { readonly success: false; readonly error: string } = { success: false, error };
+      return failResult;
+    }
+    const okResult: { readonly success: true; readonly dag: Dag<TId, TNode> } = { success: true, dag: subgraph };
+    return okResult;
   }
 }
 

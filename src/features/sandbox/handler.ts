@@ -65,7 +65,7 @@ export function createSandboxRouter(
   app.openapi(createRoute({ method: 'get', path: '/pod', tags: ['sandboxes'], summary: '列出所有 Pod', responses: { 200: { description: '{ items, nextCursor }', content: { 'application/json': { schema: OkResponse(PodListResponseSchema) } } } } }), async (c) => {
     await requirePerm(c, permissionChecker, 'read', 'pod');
     if (!podService) notConfigured();
-    const phase = (c.req.query('phase') || undefined) as PodPhase | undefined;
+    const phase = z.custom<PodPhase>().optional().parse(c.req.query('phase') || undefined);
     const limit = parseInt(c.req.query('limit') ?? '50');
     const cursor = c.req.query('cursor');
     const result = await podService.list(phase, limit, cursor);
@@ -177,7 +177,7 @@ export function createSandboxRouter(
 
   app.openapi(createRoute({ method: 'get', path: '/', tags: ['sandboxes'], summary: '列出所有沙箱', responses: { 200: { description: '{ items, nextCursor }', content: { 'application/json': { schema: OkResponse(SandboxListResponseSchema) } } } } }), async (c) => {
     await requirePerm(c, permissionChecker, 'read', 'sandbox');
-    const status = (c.req.query('status') || undefined) as SandboxStatus | undefined;
+    const status = z.custom<SandboxStatus>().optional().parse(c.req.query('status') || undefined);
     const apiVer = c.req.query('apiVersion');
     const podPhase = c.req.query('podPhase') || undefined;
     const limit = parseInt(c.req.query('limit') ?? '50');
@@ -187,12 +187,12 @@ export function createSandboxRouter(
     else result = { ...result, items: result.items.filter(s => s.config.apiVersion !== 'hbi-aad/v2') };
     if (podService && result.items.length > 0) {
       const enriched = await Promise.all(result.items.map(async s => {
-        const podUid = (s as unknown as Record<string, unknown>).podUid as string | undefined;
+        const podUid = s.podUid;
         if (!podUid) return { ...s, podPhase: null };
         try { const pod = await podService.getById(createPodId(podUid)); return { ...s, podPhase: pod?.phase ?? null }; }
         catch (e) { const fallback = { ...s, podPhase: null }; return fallback; }
       }));
-      if (podPhase) result = { ...result, items: enriched.filter(s => (s as Record<string, unknown>).podPhase === podPhase) };
+      if (podPhase) result = { ...result, items: enriched.filter(s => s.podPhase === podPhase) };
       else result = { ...result, items: enriched };
     }
     return c.json(ok(result));
@@ -205,7 +205,7 @@ export function createSandboxRouter(
     if (!sandbox) throw new AppError(404, 'SANDBOX_NOT_FOUND', 'Sandbox not found');
     let podPhase: string | null = null;
     if (podService) {
-      const podUid = (sandbox as unknown as Record<string, unknown>).podUid as string | undefined;
+      const podUid = sandbox.podUid;
       if (podUid) { try { const pod = await podService.getById(createPodId(podUid)); podPhase = pod?.phase ?? null; } catch (e) { podPhase = null; } }
     }
     return c.json(ok({ ...sandbox, podPhase }));

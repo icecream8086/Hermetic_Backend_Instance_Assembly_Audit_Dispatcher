@@ -97,7 +97,7 @@ export async function verifyHttpSignature(
     'raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['verify'],
   );
   const sigBytes = hexToBytes(signature);
-  return crypto.subtle.verify('HMAC', key, sigBytes.buffer as ArrayBuffer, encoder.encode(body));
+  return crypto.subtle.verify('HMAC', key, sigBytes, encoder.encode(body));
 }
 
 export async function signHttpPayload(secret: string, body: string): Promise<string> {
@@ -109,8 +109,9 @@ export async function signHttpPayload(secret: string, body: string): Promise<str
   return bytesToHex(new Uint8Array(sig));
 }
 
-function hexToBytes(hex: string): Uint8Array {
-  const bytes = new Uint8Array(hex.length / 2);
+function hexToBytes(hex: string): Uint8Array<ArrayBuffer> {
+  const buf = new ArrayBuffer(hex.length / 2);
+  const bytes = new Uint8Array(buf);
   for (let i = 0; i < hex.length; i += 2) {
     bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16);
   }

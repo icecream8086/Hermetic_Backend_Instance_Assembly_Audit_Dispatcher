@@ -1,6 +1,7 @@
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
 import { TransactConflictError } from '../../core/store/interfaces.ts';
 import type { IAuditWriter } from '../../core/audit/types.ts';
+import { KernLevel } from '../../core/audit/kern-level.ts';
 import type { Volume } from '../sandbox/types.ts';
 import { VolumeStatus, createVolumeId } from '../sandbox/types.ts';
 import type { CreateVolumeInput, UpdateVolumeInput } from './types.ts';
@@ -24,9 +25,9 @@ export class VolumeService implements IVolumeService {
 
   /** Validate that an instanceId refers to an existing ComputeInstance. */
   async #validateInstance(instanceId: string): Promise<void> {
-    const { InstanceService } = await import('../../core/region/instance.ts');
+    const { InstanceService, createInstanceId } = await import('../../core/region/instance.ts');
     const svc = new InstanceService(this.atomic);
-    const inst = await svc.get(instanceId as any);
+    const inst = await svc.get(createInstanceId(instanceId));
     if (!inst) throw new AppError(400, 'INSTANCE_NOT_FOUND', `ComputeInstance ${instanceId} not found`);
   }
 
@@ -67,7 +68,7 @@ export class VolumeService implements IVolumeService {
       }
     }
 
-    this.logger.write({ facility: 'app', level: 'INFO' as any, message: `[volume] Created ${input.type}: ${id} (${input.name})` });
+    this.logger.write({ facility: 'app', level: KernLevel.INFO, message: `[volume] Created ${input.type}: ${id} (${input.name})` });
     return volume;
   }
 
@@ -146,7 +147,7 @@ export class VolumeService implements IVolumeService {
           txn.set(PREFIX + id, merged);
           updated = merged;
         });
-        this.logger.write({ facility: 'app', level: 'INFO' as any, message: `[volume] Updated ${id}` });
+        this.logger.write({ facility: 'app', level: KernLevel.INFO, message: `[volume] Updated ${id}` });
         return updated!;
       } catch (err) {
         if (err instanceof TransactConflictError && attempt < 2) continue;
@@ -172,6 +173,6 @@ export class VolumeService implements IVolumeService {
         throw err;
       }
     }
-    this.logger.write({ facility: 'app', level: 'INFO' as any, message: `[volume] Deleted ${id}` });
+    this.logger.write({ facility: 'app', level: KernLevel.INFO, message: `[volume] Deleted ${id}` });
   }
 }

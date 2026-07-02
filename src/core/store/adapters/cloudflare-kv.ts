@@ -1,5 +1,6 @@
 /// <reference types="@cloudflare/workers-types" />
 
+import { z } from 'zod';
 import type { IAtomicStore, IStoreTransaction } from '../interfaces.ts';
 import { TransactConflictError } from '../interfaces.ts';
 import type { VersionId } from '../../brand.ts';
@@ -24,8 +25,7 @@ export class CloudflareKVAtomicStore implements IAtomicStore {
   public async get<T>(key: string): Promise<{ value: T; version: VersionId } | null> {
     const result = await this.kv.getWithMetadata<T>(key, 'json');
     if (result.value === null) return null;
-    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Cloudflare KV metadata is untyped, schema validation at call site
-    const version = (result.metadata as KvMetadata | null)?.v;
+    const version = z.custom<KvMetadata>().nullable().parse(result.metadata)?.v;
     if (!version) return null;
     return { value: result.value, version: createVersionId(version) };
   }
@@ -33,8 +33,7 @@ export class CloudflareKVAtomicStore implements IAtomicStore {
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- interface contract requires generics
   public async set<T>(key: string, value: T, expectedVersion: VersionId | null, ttlSeconds?: number): Promise<VersionId | null> {
     const existing = await this.kv.getWithMetadata(key, 'json');
-    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Cloudflare KV metadata is untyped
-    const currentVersion = (existing.metadata as KvMetadata | null)?.v;
+    const currentVersion = z.custom<KvMetadata>().nullable().parse(existing.metadata)?.v;
 
     if (expectedVersion === null && existing.value !== null) return null;
     if (expectedVersion !== null && currentVersion !== expectedVersion) return null;
@@ -54,8 +53,7 @@ export class CloudflareKVAtomicStore implements IAtomicStore {
     const txn: IStoreTransaction = {
       get: async <V>(key: string) => {
         const dw = deferredWrites.get(key);
-        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- transaction deferred write, type guaranteed by set()
-        if (dw !== undefined) return dw.value as V;
+        if (dw !== undefined) return z.custom<V>().parse(dw.value);
 
         const result = await this.kv.getWithMetadata<V>(key, 'json');
         const version = (result.metadata as KvMetadata | null)?.v ?? null;
@@ -67,13 +65,11 @@ export class CloudflareKVAtomicStore implements IAtomicStore {
         for (const key of keys) {
           const dw = deferredWrites.get(key);
           if (dw !== undefined) {
-            // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- transaction deferred write, type guaranteed by set()
-            results.push(dw.value as V);
+            results.push(z.custom<V>().parse(dw.value));
             continue;
           }
           const result = await this.kv.getWithMetadata<V>(key, 'json');
-          // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Cloudflare KV metadata is untyped
-          const version = (result.metadata as KvMetadata | null)?.v ?? null;
+          const version = z.custom<KvMetadata>().nullable().parse(result.metadata)?.v ?? null;
           readSet.set(key, version);
           results.push(result.value ?? null);
         }
@@ -91,8 +87,7 @@ export class CloudflareKVAtomicStore implements IAtomicStore {
     for (const [key, expectedVersion] of readSet) {
       if (deferredWrites.has(key)) continue;
       const current = await this.kv.getWithMetadata(key, 'json');
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Cloudflare KV metadata is untyped
-      const currentVersion = (current.metadata as KvMetadata | null)?.v;
+      const currentVersion = z.custom<KvMetadata>().nullable().parse(current.metadata)?.v;
       if (currentVersion !== expectedVersion) {
         throw new TransactConflictError(
           `Transaction conflict: key "${key}" was modified concurrently.`,

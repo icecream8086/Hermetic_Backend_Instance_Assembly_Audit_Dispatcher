@@ -227,9 +227,17 @@ export function evaluateRestartPolicy(
 
 function triggerEquals(a: TransitionTrigger, b: TransitionTrigger): boolean {
   if (a.kind !== b.kind) return false;
-  if (a.kind === 'System') return a.event === (b as typeof a).event;
-  if (a.kind === 'Api') return a.operation === (b as typeof a).operation;
-  return a.exitCode === (b as typeof a).exitCode && a.policy === (b as typeof a).policy;
+  // Both sides confirmed same kind. The switch narrows each variant
+  // so TypeScript can verify field access without type assertions.
+  switch (a.kind) {
+    case 'System': return b.kind === 'System' && a.event === b.event;
+    case 'Api': return b.kind === 'Api' && a.operation === b.operation;
+    case 'RestartPolicy': return b.kind === 'RestartPolicy' && a.exitCode === b.exitCode && a.policy === b.policy;
+    default: {
+      const _exhaustive: never = a;
+      throw new Error(`Unexpected trigger kind: ${String(_exhaustive)}`);
+    }
+  }
 }
 
 // ─── 6. Terminal states (§3.2) ───

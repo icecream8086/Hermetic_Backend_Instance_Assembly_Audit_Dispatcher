@@ -20,11 +20,14 @@ export type ContainerGroupStatus = ContainerGroupState;
 import type { RegionId, ZoneId } from '../region/types.ts';
 import type { InstanceId } from '../region/instance.ts';
 
-declare const CONTAINER_ID_BRAND: unique symbol;
-export type ContainerId = string & { readonly [CONTAINER_ID_BRAND]: true };
+import { z } from 'zod';
+
+const containerIdSchema = z.string().brand('ContainerId');
+export type ContainerId = z.infer<typeof containerIdSchema>;
 
 export function createContainerId(raw: string): ContainerId {
-  if (!raw) throw new TypeError('ContainerId must not be empty');  return raw as ContainerId;
+  if (!raw) throw new TypeError('ContainerId must not be empty');
+  return containerIdSchema.parse(raw);
 }
 
 /** Standard OCI container states — used by both cloud provider and OCI Runtime. */

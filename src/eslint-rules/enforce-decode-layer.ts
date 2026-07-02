@@ -3,6 +3,15 @@ import type { TSESLint, TSESTree } from '@typescript-eslint/utils';
 type MessageIds = 'bareJsonParse' | 'bareReqJson';
 
 /**
+ * The parser attaches `.parent` to every AST node at runtime, but the
+ * TSESTree type definitions do not include it.  This local interface lets
+ * us access it via structural typing without a type assertion.
+ */
+interface AstNode {
+  parent?: TSESTree.Node;
+}
+
+/**
  * Enforce that all `JSON.parse()` / `c.req.json()` calls go through
  * a Zod schema `.parse()`.
  *
@@ -26,21 +35,21 @@ const rule: TSESLint.RuleModule<MessageIds> = {
   },
   defaultOptions: [],
   create(context) {
-    // Skip provider files — they interface with external APIs
     if (context.filename.includes('/providers/')) return {};
 
     return {
       'CallExpression[callee.object.name="JSON"][callee.property.name="parse"]'(
         node: TSESTree.CallExpression,
       ) {
-        const parent = (node as TSESTree.Node & { parent?: TSESTree.Node }).parent;
+        const nodeParent: AstNode = node;
+        const parent = nodeParent.parent;
         if (
           parent?.type === 'CallExpression' &&
           parent.callee.type === 'MemberExpression' &&
           parent.callee.property.type === 'Identifier' &&
           parent.callee.property.name === 'parse'
         ) {
-          return; // wrapped in .parse()
+          return;
         }
         context.report({ node, messageId: 'bareJsonParse' });
       },
@@ -48,7 +57,6 @@ const rule: TSESLint.RuleModule<MessageIds> = {
       'CallExpression[callee.property.name="json"]'(
         node: TSESTree.CallExpression,
       ) {
-        // Only flag c.req.json() pattern
         if (
           node.callee.type !== 'MemberExpression' ||
           node.callee.object.type !== 'MemberExpression'
@@ -62,14 +70,15 @@ const rule: TSESLint.RuleModule<MessageIds> = {
           obj.property.type === 'Identifier' &&
           obj.property.name === 'req'
         ) {
-          const parent = (node as TSESTree.Node & { parent?: TSESTree.Node }).parent;
+          const nodeParent: AstNode = node;
+          const parent = nodeParent.parent;
           if (
             parent?.type === 'CallExpression' &&
             parent.callee.type === 'MemberExpression' &&
             parent.callee.property.type === 'Identifier' &&
             parent.callee.property.name === 'parse'
           ) {
-            return; // wrapped in .parse()
+            return;
           }
           context.report({ node, messageId: 'bareReqJson' });
         }

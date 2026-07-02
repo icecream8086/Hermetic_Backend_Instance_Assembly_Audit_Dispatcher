@@ -9,6 +9,7 @@
  * app assembly and only created if absent.
  */
 
+import { z } from 'zod';
 import type { IAtomicStore } from './store/interfaces.ts';
 import { Cap, GROUP_CAP_KEY } from './permission/capability.ts';
 
@@ -185,7 +186,7 @@ async function seedDefaultInstance(atomic: IAtomicStore): Promise<string | undef
       labels: { networkDomain: 'podman-default' },
       capabilities: { container: true, image: true, group: true, network: true, s3: true, metrics: false, dns: false },
     });
-    const instanceId = instance.id as string;
+    const instanceId = z.string().parse(instance.id);
     await atomic.set(KEY, { instanceId, seededAt: Date.now() }, null);
     console.log(`[${new Date().toISOString()}] INFO: [seed] Default instance seeded: ${instanceId}`);
     return instanceId;
@@ -273,7 +274,7 @@ async function seedVolumes(atomic: IAtomicStore, defaultInstanceId: string): Pro
 
   const ids: string[] = [];
   for (const v of volumes) {
-    ids.push(v.id as string);
+    ids.push(z.string().parse(v.id));
     await atomic.set('volume:' + String(v.id), v, null);
   }
   await atomic.set('volume:ids', ids, null);

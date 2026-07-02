@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { JobDef } from './types.ts';
 
 /**
@@ -53,12 +54,20 @@ export class MatrixExpander {
    * Returns an empty array if no matrix strategy is configured.
    */
   public expand(jobName: string, jobDef: JobDef): JobVariant[] {
-    const matrix = (jobDef as any).strategy?.matrix as MatrixConfig['matrix'] | undefined;
+    const jobDefRecord = z.custom<Record<string, unknown>>().parse(jobDef);
+    const strategy = z.object({
+      matrix: z.record(z.string(), z.array(z.union([z.string(), z.number(), z.boolean()]))).optional(),
+      exclude: z.array(z.record(z.string(), z.union([z.string(), z.number(), z.boolean()]))).optional(),
+      failFast: z.boolean().optional(),
+      maxParallel: z.number().optional(),
+    }).optional().parse(jobDefRecord.strategy);
+
+    const matrix = strategy?.matrix;
     if (!matrix) return [{ name: jobName, matrixVars: {}, jobDef }];
 
-    const exclude = (jobDef as any).strategy?.exclude as MatrixConfig['exclude'] | undefined;
-    const failFast = (jobDef as any).strategy?.failFast as boolean | undefined;
-    const maxParallel = (jobDef as any).strategy?.maxParallel as number | undefined;
+    const exclude = strategy?.exclude;
+    const failFast = strategy?.failFast;
+    const maxParallel = strategy?.maxParallel;
 
     const variables = Object.entries(matrix);
     if (variables.length === 0) return [{ name: jobName, matrixVars: {}, jobDef }];
@@ -81,7 +90,7 @@ export class MatrixExpander {
         jobDef: {
           ...jobDef,
           // Remove strategy from expanded job to prevent infinite recursion
-          strategy: undefined as any,
+          strategy: undefined,
           // Inject matrix variables into env
           env: {
             ...jobDef.env,

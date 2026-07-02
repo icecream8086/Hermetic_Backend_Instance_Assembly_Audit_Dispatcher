@@ -190,7 +190,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
     const metaEntry = await atomic.get<{ contentType: string }>(AVATAR_META_PREFIX + targetId);
     const stream = await blobStore.get(AVATAR_BLOB_PREFIX + targetId);
     if (!stream) throw new AppError(404, 'AVATAR_NOT_FOUND', 'No avatar');
-    return new Response(stream as any, { status: 200, headers: { 'Content-Type': metaEntry?.value.contentType ?? 'application/octet-stream', 'Cache-Control': 'public, max-age=86400' } });
+    return new Response(stream, { status: 200, headers: { 'Content-Type': metaEntry?.value.contentType ?? 'application/octet-stream', 'Cache-Control': 'public, max-age=86400' } });
   });
 
   app.openapi(createRoute({ method: 'put', path: '/{id}/avatar', tags: ['users'], summary: '上传用户头像', request: { params: z.object({ id: z.string() }) }, responses: { 201: { description: '{ size, contentType }', content: { 'application/json': { schema: OkResponse(z.object({ size: z.number(), contentType: z.string() })) } } } } }), async (c) => {
@@ -205,14 +205,15 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
     const blob = await c.req.blob();
     if (blob.size > AVATAR_MAX_SIZE) throw new AppError(413, 'AVATAR_TOO_LARGE', `Avatar must be under ${String(AVATAR_MAX_SIZE / 1024)} KB`);
     if (blob.size === 0) throw new AppError(400, 'AVATAR_EMPTY', 'Avatar cannot be empty');
-    const buf = new Uint8Array(await blob.arrayBuffer());
+    const arrayBuffer = await blob.arrayBuffer();
+    const buf = new Uint8Array(arrayBuffer);
     const detectedType = detectImageType(buf);
     if (!detectedType) throw new AppError(415, 'AVATAR_INVALID', 'File is not a valid image (JPEG/PNG/WebP/GIF)');
     const declaredType = blob.type;
     if (declaredType && !ALLOWED_MIME.has(declaredType)) throw new AppError(415, 'AVATAR_UNSUPPORTED_TYPE', `Unsupported image type: ${declaredType}`);
     const blobStore = c.var.stores.blob;
     const atomic = c.var.stores.atomic;
-    await blobStore.put(AVATAR_BLOB_PREFIX + targetId, buf as any, { contentType: detectedType, contentLength: buf.length });
+    await blobStore.put(AVATAR_BLOB_PREFIX + targetId, arrayBuffer, { contentType: detectedType, contentLength: buf.length });
     const metaEntry = await atomic.get<{ contentType: string; size: number; updatedAt: number }>(AVATAR_META_PREFIX + targetId);
     await atomic.set(AVATAR_META_PREFIX + targetId, { contentType: detectedType, size: buf.length, updatedAt: Date.now() }, metaEntry?.version ?? null);
     return c.json(ok({ size: buf.length, contentType: detectedType }), 201);

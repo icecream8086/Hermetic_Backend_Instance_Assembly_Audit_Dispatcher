@@ -17,7 +17,7 @@ import { generateLogId } from '../brand.ts';
 import { KernLevel, kernLevelName, resolveFacility, encodePriority } from './kern-level.ts';
 import { shouldLogAudit } from './log-policy.ts';
 import { shouldPersist } from './persistence-policy.ts';
-import { encodeCursor, decodeCursor, cursorFromEntry, xorHash } from './types.ts';
+import { encodeCursor, decodeCursor, xorHash } from './types.ts';
 import { getBootId } from './context.ts';
 
 // ─── R2 abstraction ───
@@ -100,10 +100,12 @@ export class R2AuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
 
     // Generate journald-style cursor with tamper-detection xor_hash.
     const seq = ++this.#seq;
-    const cursor = encodeCursor(cursorFromEntry(
-      { id, timestamp: now } as unknown as StoredAuditEntry,
-      this.#bootId, seq, this.#machineHash,
-    ));
+    const monoNow = Math.round(performance.now());
+    const cursor = encodeCursor({
+      s: this.#machineHash, i: seq, b: this.#bootId,
+      m: monoNow, t: now,
+      x: xorHash({ s: this.#machineHash, i: seq, b: this.#bootId, m: monoNow, t: now }),
+    });
 
     const stored: StoredAuditEntry = {
       id, timestamp: now,
@@ -179,8 +181,7 @@ export class R2AuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
       const data = await this.bucket.get(obj.key);
       if (!data) continue;
       try {
-        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- R2 storage boundary: deserialized JSON is guaranteed to match StoredAuditEntry shape
-        const batch = parseJson(new TextDecoder().decode(data.body)) as StoredAuditEntry[];
+        const batch: StoredAuditEntry[] = parseJson(new TextDecoder().decode(data.body));
         let filtered = batch;
         if (params?.facility) filtered = filtered.filter(e => e.facility === params.facility);
         if (startTs !== undefined) filtered = filtered.filter(e => e.timestamp >= startTs);
@@ -233,8 +234,7 @@ export class R2AuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
       const data = await this.bucket.get(obj.key);
       if (!data) continue;
       try {
-        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- R2 storage boundary: deserialized JSON is guaranteed to match StoredAuditEntry shape
-        const batch = parseJson(new TextDecoder().decode(data.body)) as StoredAuditEntry[];
+        const batch: StoredAuditEntry[] = parseJson(new TextDecoder().decode(data.body));
         const found = batch.find(e => e.id === id);
         if (found) return found;
       } catch {

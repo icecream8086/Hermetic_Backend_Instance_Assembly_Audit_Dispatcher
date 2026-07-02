@@ -151,9 +151,9 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
       id,
       name: input.name,
       ...(input.description ? { description: input.description } : {}),
-      on: input.on as TriggerConfig,
+      on: z.custom<TriggerConfig>().parse(input.on),
       ...(input.env ? { env: input.env } : {}),
-      jobs: input.jobs as Record<string, JobDef>,
+      jobs: z.custom<Record<string, JobDef>>().parse(input.jobs),
       ...(input.orgId ? { orgId: input.orgId } : {}),
       ...(input.projectId ? { projectId: input.projectId } : {}),
       ownerId: c.var.currentUser?.id ?? 'anonymous',
@@ -204,9 +204,9 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
       ...entry.value,
       ...(input.name !== undefined ? { name: input.name } : {}),
       ...(input.description != null ? { description: input.description } : {}),
-      ...(input.on !== undefined ? { on: input.on as TriggerConfig } : {}),
+      ...(input.on !== undefined ? { on: z.custom<TriggerConfig>().parse(input.on) } : {}),
       ...(input.env !== undefined ? { env: input.env } : {}),
-      ...(input.jobs !== undefined ? { jobs: input.jobs as Record<string, JobDef> } : {}),
+      ...(input.jobs !== undefined ? { jobs: z.custom<Record<string, JobDef>>().parse(input.jobs) } : {}),
       updatedAt: Date.now(),
       version: generateVersionId(),
     };
@@ -267,7 +267,7 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
       /* not JSON */
       console.debug("not JSON, using empty payload");
     }
-    const inputs = payload.inputs as Record<string, string> | undefined ?? {};
+    const inputs = z.record(z.string(), z.string()).optional().parse(payload.inputs) ?? {};
 
     const run = await runner.startRun(entry.value, 'http', payload, inputs,
       c.var.currentUser?.id ?? 'anonymous');
@@ -588,9 +588,8 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
 
   /** Guest access: validate and trigger. No auth required. */
   app.openapi(createRoute({ method: 'post', path: '/shared-links/:id/launch', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(LaunchResponseSchema) } } } } }), async (c) => {
-    let body;
-    try { body = await z.unknown().parse(c.req.json()); } catch { body = {}; }
-    const password = body.password as string | undefined;
+    const body = z.object({ password: z.string().optional() }).parse(await c.req.json());
+    const password = body.password;
 
     const link = await sharedLinkService.validate(c.req.param('id'), password);
 

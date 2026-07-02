@@ -48,8 +48,8 @@ export class SecurityGroupService implements ISecurityGroupService {
         if (input.rules?.length && this.networkPolicy.applyRules) {
           await this.networkPolicy.applyRules(providerNetworkId, input.rules);
         }
-      } catch (e: any) {
-        throw new AppError(502, 'PROVIDER_ERROR', `Failed to provision security group: ${String(e.message)}`);
+      } catch (e: unknown) {
+        throw new AppError(502, 'PROVIDER_ERROR', `Failed to provision security group: ${String(e instanceof Error ? e.message : e)}`);
       }
     }
 
@@ -109,7 +109,7 @@ export class SecurityGroupService implements ISecurityGroupService {
       try {
         await this.networkPolicy.applyRules(updated.providerNetworkId, updated.rules ?? []);
       } catch (e: unknown) {
-        this.logger.write({ facility: FACILITY, level: KernLevel.WARNING, message: `Failed to apply rules: ${String((e as any).message)}`, actorId });
+        this.logger.write({ facility: FACILITY, level: KernLevel.WARNING, message: `Failed to apply rules: ${String(e instanceof Error ? e.message : e)}`, actorId });
       }
     }
     return updated;

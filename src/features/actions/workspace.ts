@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { IBlobStore } from '../../core/store/interfaces.ts';
 
 const { parse: parseJson } = JSON;
@@ -19,6 +20,22 @@ export interface WorkspaceMeta {
   readonly fileCount: number;
   readonly createdAt: number;
 }
+
+/**
+ * Zod schema for the stored workspace envelope (JSON-serialised).
+ * Validates the full shape at decode time and eliminates type assertions.
+ */
+const workspaceEnvelopeSchema = z.object({
+  meta: z.object({
+    workflowRunId: z.string(),
+    jobName: z.string(),
+    format: z.enum(['tar', 'tar.gz', 'raw']),
+    sizeBytes: z.number(),
+    fileCount: z.number(),
+    createdAt: z.number(),
+  }),
+  data: z.array(z.number()),
+});
 
 /**
  * Workspace sharing service — transfers working directories between
@@ -89,10 +106,10 @@ export class BlobWorkspaceStore implements IWorkspaceStore {
     for (const c of chunks) { merged.set(c, offset); offset += c.byteLength; }
 
     const text = new TextDecoder().decode(merged);
-    const envelope = parseJson(text);
+    const envelope = workspaceEnvelopeSchema.parse(parseJson(text));
     return {
-      data: new Uint8Array(envelope.data as number[]),
-      meta: envelope.meta as WorkspaceMeta,
+      data: new Uint8Array(envelope.data),
+      meta: envelope.meta,
     };
   }
 
