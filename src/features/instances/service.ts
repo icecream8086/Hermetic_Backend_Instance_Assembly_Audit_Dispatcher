@@ -70,7 +70,7 @@ export class RunnerService implements IRunnerService {
     const runner: RunnerInstance = {
       id,
       name: input.name,
-      os: input.os ?? 'linux',
+      os: input.os || 'linux',
       status: 'online',
       busy: false,
       labels: input.labels ?? [],
@@ -188,7 +188,7 @@ export class RunnerService implements IRunnerService {
     const now = Date.now();
     const group: RunnerGroup = {
       id, name: input.name,
-      visibility: input.visibility ?? 'all',
+      visibility: input.visibility || 'all',
       selectedScopeIds: input.selectedScopeIds ?? [],
       dependsOn: input.dependsOn ?? [],
       createdAt: now, updatedAt: now,
@@ -246,24 +246,36 @@ export class RunnerService implements IRunnerService {
   // ─── Index helpers ───
 
   async #addRunnerToIndex(id: string): Promise<void> {
-    const idx = await this.atomic.get<string[]>(RUNNER_IDS_KEY);
-    await this.atomic.set(RUNNER_IDS_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const idx = await this.atomic.get<string[]>(RUNNER_IDS_KEY);
+      const ok = await this.atomic.set(RUNNER_IDS_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
+      if (ok) return;
+    }
   }
 
   async #removeRunnerFromIndex(id: string): Promise<void> {
-    const idx = await this.atomic.get<string[]>(RUNNER_IDS_KEY);
-    if (!idx) return;
-    await this.atomic.set(RUNNER_IDS_KEY, idx.value.filter(i => i !== id), idx.version);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const idx = await this.atomic.get<string[]>(RUNNER_IDS_KEY);
+      if (!idx) return;
+      const ok = await this.atomic.set(RUNNER_IDS_KEY, idx.value.filter(i => i !== id), idx.version);
+      if (ok) return;
+    }
   }
 
   async #addGroupToIndex(id: string): Promise<void> {
-    const idx = await this.atomic.get<string[]>(RUNNER_GROUP_IDS_KEY);
-    await this.atomic.set(RUNNER_GROUP_IDS_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const idx = await this.atomic.get<string[]>(RUNNER_GROUP_IDS_KEY);
+      const ok = await this.atomic.set(RUNNER_GROUP_IDS_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
+      if (ok) return;
+    }
   }
 
   async #removeGroupFromIndex(id: string): Promise<void> {
-    const idx = await this.atomic.get<string[]>(RUNNER_GROUP_IDS_KEY);
-    if (!idx) return;
-    await this.atomic.set(RUNNER_GROUP_IDS_KEY, idx.value.filter(i => i !== id), idx.version);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const idx = await this.atomic.get<string[]>(RUNNER_GROUP_IDS_KEY);
+      if (!idx) return;
+      const ok = await this.atomic.set(RUNNER_GROUP_IDS_KEY, idx.value.filter(i => i !== id), idx.version);
+      if (ok) return;
+    }
   }
 }

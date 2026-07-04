@@ -45,14 +45,19 @@ export class QuotaService {
   }
 
   public async setQuota(userId: string, quota: UserQuota): Promise<void> {
-    const entry = await this.atomic.get<UserQuota>(QUOTA_KEY + userId);
-    await this.atomic.set(QUOTA_KEY + userId, quota, entry?.version ?? null);
-    this.audit?.write({
-      level: KernLevel.NOTICE,
-      facility: 'quota',
-      message: `Quota set for user ${userId}`,
-      metadata: { eventType: 'quota.set', userId, quota },
-    });
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const entry = await this.atomic.get<UserQuota>(QUOTA_KEY + userId);
+      const ok = await this.atomic.set(QUOTA_KEY + userId, quota, entry?.version ?? null);
+      if (ok) {
+        this.audit?.write({
+          level: KernLevel.NOTICE,
+          facility: 'quota',
+          message: `Quota set for user ${userId}`,
+          metadata: { eventType: 'quota.set', userId, quota },
+        });
+        return;
+      }
+    }
   }
 
   /**
@@ -80,28 +85,34 @@ export class QuotaService {
    * Record a sandbox creation (increment counters).
    */
   public async recordCreate(userId: string, cpu: number, memory: number): Promise<void> {
-    const key = `${QUOTA_KEY}${userId}:usage`;
-    const entry = await this.atomic.get<QuotaUsage>(key);
-    const current = entry?.value ?? { sandboxes: 0, cpu: 0, memory: 0 };
-    await this.atomic.set(key, {
-      sandboxes: current.sandboxes + 1,
-      cpu: current.cpu + cpu,
-      memory: current.memory + memory,
-    }, entry?.version ?? null);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const key = `${QUOTA_KEY}${userId}:usage`;
+      const entry = await this.atomic.get<QuotaUsage>(key);
+      const current = entry?.value ?? { sandboxes: 0, cpu: 0, memory: 0 };
+      const ok = await this.atomic.set(key, {
+        sandboxes: current.sandboxes + 1,
+        cpu: current.cpu + cpu,
+        memory: current.memory + memory,
+      }, entry?.version ?? null);
+      if (ok) return;
+    }
   }
 
   /**
    * Record a sandbox deletion (decrement counters).
    */
   public async recordDelete(userId: string, cpu: number, memory: number): Promise<void> {
-    const key = `${QUOTA_KEY}${userId}:usage`;
-    const entry = await this.atomic.get<QuotaUsage>(key);
-    if (!entry) return;
-    const current = entry.value;
-    await this.atomic.set(key, {
-      sandboxes: Math.max(0, current.sandboxes - 1),
-      cpu: Math.max(0, current.cpu - cpu),
-      memory: Math.max(0, current.memory - memory),
-    }, entry.version);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const key = `${QUOTA_KEY}${userId}:usage`;
+      const entry = await this.atomic.get<QuotaUsage>(key);
+      if (!entry) return;
+      const current = entry.value;
+      const ok = await this.atomic.set(key, {
+        sandboxes: Math.max(0, current.sandboxes - 1),
+        cpu: Math.max(0, current.cpu - cpu),
+        memory: Math.max(0, current.memory - memory),
+      }, entry.version);
+      if (ok) return;
+    }
   }
 }

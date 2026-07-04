@@ -15,15 +15,12 @@ import type { InstanceId } from '../../core/region/instance.ts';
 
 const sandboxIdSchema = z.string().min(1).brand('SandboxId');
 const volumeIdSchema = z.string().min(1).brand('VolumeId');
-const metricSnapshotIdSchema = z.string().min(1).brand('MetricSnapshotId');
 
 export type SandboxId = z.infer<typeof sandboxIdSchema>;
 export type VolumeId = z.infer<typeof volumeIdSchema>;
-export type MetricSnapshotId = z.infer<typeof metricSnapshotIdSchema>;
 
 export function createSandboxId(raw: string): SandboxId { return sandboxIdSchema.parse(raw); }
 export function createVolumeId(raw: string): VolumeId { return volumeIdSchema.parse(raw); }
-export function createMetricSnapshotId(raw: string): MetricSnapshotId { return metricSnapshotIdSchema.parse(raw); }
 
 // ─── Sandbox state machine (ECI-aligned 11 states) ───
 
@@ -311,14 +308,6 @@ export interface ContainerEvent extends ValueObject {
   readonly lastTimestamp?: string;
 }
 
-// ─── Spot / preemptible ───
-
-export enum SpotStrategy {
-  None = 'None',
-  SpotAsPriceGo = 'SpotAsPriceGo',
-  SpotWithPriceLimit = 'SpotWithPriceLimit',
-}
-
 // ─── Resource spec ───
 
 export interface ResourceSpec {
@@ -425,22 +414,6 @@ export interface Sandbox extends PersistedEntity<SandboxId, SandboxStatus> {
   readonly ephemeralStorageGiB?: number | undefined;
 }
 
-// ─── Pod ↔ Sandbox ↔ Provider mapping ───
-
-export interface PodMapping {
-  readonly podUid: string;
-  readonly sandboxId: SandboxId;
-  readonly providerId?: string;
-  readonly createdAt: number;
-  readonly updatedAt: number;
-}
-
-export interface SandboxStorageAccess {
-  /** JWT token with S3 access grants. */
-  readonly token: string;
-  /** Expiration time (ISO 8601). */
-  readonly expiresAt: string;
-}
 
 
 

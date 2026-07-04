@@ -58,14 +58,15 @@ export class ImageCacheTracker {
     if (existing) {
       const entry = existing.value;
       const sizeDelta = sizeBytes - entry.sizeBytes;
-      const updated: ImageCacheEntry = {
-        ...entry,
-        tags: [...new Set([...entry.tags, ...tags])],
-        sizeBytes,
-        pullCount: entry.pullCount + 1,
-        lastAccessedAt: now,
-      };
-      await this.atomic.set(this.#key(imageId), updated, existing.version);
+      await this.atomic.transact(async (txn) => {
+        txn.set(this.#key(imageId), {
+          ...entry,
+          tags: [...new Set([...entry.tags, ...tags])],
+          sizeBytes,
+          pullCount: entry.pullCount + 1,
+          lastAccessedAt: now,
+        });
+      });
       if (sizeDelta !== 0) {
         await this.#addToTotalSize(sizeDelta);
       }
@@ -86,17 +87,20 @@ export class ImageCacheTracker {
   public async recordRemoval(imageId: string): Promise<void> {
     const existing = await this.atomic.get<ImageCacheEntry>(this.#key(imageId));
     if (!existing) return;
-    await this.#addToTotalSize(-existing.value.sizeBytes);
-    await this.atomic.set(this.#key(imageId), null, existing.version);
+    await this.atomic.transact(async (txn) => {
+      await this.#addToTotalSize(-existing.value.sizeBytes);
+      txn.set(this.#key(imageId), null);
+    });
     await this.#removeFromIndex(imageId);
   }
 
   /** Touch access time without changing other fields. */
   public async touch(imageId: string): Promise<void> {
-    const existing = await this.atomic.get<ImageCacheEntry>(this.#key(imageId));
-    if (!existing) return;
-    const updated = { ...existing.value, lastAccessedAt: Date.now() };
-    await this.atomic.set(this.#key(imageId), updated, existing.version);
+    await this.atomic.transact(async (txn) => {
+      const existing = await txn.get<ImageCacheEntry>(this.#key(imageId));
+      if (!existing) return;
+      txn.set(this.#key(imageId), { ...existing, lastAccessedAt: Date.now() });
+    });
   }
 
   /** Get the current total cached size in bytes. */
@@ -156,14 +160,20 @@ export class ImageCacheTracker {
   // ─── Index helpers ───
 
   async #addToIndex(id: string): Promise<void> {
-    const idx = await this.atomic.get<string[]>(CACHE_INDEX_KEY);
-    await this.atomic.set(CACHE_INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const idx = await this.atomic.get<string[]>(CACHE_INDEX_KEY);
+      const ok = await this.atomic.set(CACHE_INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
+      if (ok) return;
+    }
   }
 
   async #removeFromIndex(id: string): Promise<void> {
-    const idx = await this.atomic.get<string[]>(CACHE_INDEX_KEY);
-    if (!idx) return;
-    await this.atomic.set(CACHE_INDEX_KEY, idx.value.filter(i => i !== id), idx.version);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const idx = await this.atomic.get<string[]>(CACHE_INDEX_KEY);
+      if (!idx) return;
+      const ok = await this.atomic.set(CACHE_INDEX_KEY, idx.value.filter(i => i !== id), idx.version);
+      if (ok) return;
+    }
   }
 
   async #addToTotalSize(delta: number): Promise<void> {

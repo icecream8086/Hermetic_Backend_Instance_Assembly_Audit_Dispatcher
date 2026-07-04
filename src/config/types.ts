@@ -29,8 +29,6 @@ export interface Credential {
 }
 
 export interface ProviderConfig {
-  /** Container provider backend type. */
-  container: 'alibaba' | 'podman' | 'stub';
   /** Default region for container operations (fallback when account has none). */
   region: RegionId;
   /** Named credentials for multi-account support. */

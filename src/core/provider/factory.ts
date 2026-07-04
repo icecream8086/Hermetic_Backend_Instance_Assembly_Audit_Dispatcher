@@ -3,7 +3,7 @@
  *
  * Instead of creating singleton providers at startup, this factory:
  * 1. Returns a LazyProviderRegistry that instantiates providers on first access.
- * 2. Default provider (matching config.container) is eagerly resolved on first get.
+ * 2. Default provider is eagerly resolved on first get.
  * 3. All other providers (dns, metrics, networkPolicy, group, S3, instance resolver)
  *    are instantiated lazily, reducing cold-start cost and memory in serverless.
  */
@@ -34,7 +34,6 @@ import { StubMetricsProvider } from '../../providers/stub/metrics.ts';
 import { PodmanContainerProvider } from '../../providers/podman/podman-provider.ts';
 import { PodmanImageProvider } from '../../providers/podman/podman-image.ts';
 import { PodmanNetworkPolicyProvider } from '../../providers/podman/podman-network.ts';
-import { PodmanContainerGroupProvider } from '../../providers/podman/podman-group-provider.ts';
 import { AlibabaEciContainerProvider } from '../../providers/alibaba/eci-container.ts';
 import { AlibabaEciImageProvider } from '../../providers/alibaba/eci-image.ts';
 import { AlibabaEciMetricsProvider } from '../../providers/alibaba/eci-metrics.ts';
@@ -77,7 +76,7 @@ class LazyProviderRegistry implements IProviderRegistry {
   #warnDefault(): void {
     if (!this.#warnedDefault) {
       this.#warnedDefault = true;
-      console.warn(`[provider] Using global default container="${this.config.container}" as fallback. Per-instance resolution (resolveContainer) is preferred for production.`);
+      console.warn('[provider] Using global default provider as fallback. Per-instance resolution (resolveContainer) is preferred for production.');
     }
   }
 
@@ -105,7 +104,7 @@ class LazyProviderRegistry implements IProviderRegistry {
   public get networkPolicy(): INetworkPolicyProvider | undefined {
     if (this._networkPolicy === undefined) {
       const ep = process.env.PODMAN_ENDPOINT ?? 'http://127.0.0.1:8080';
-      this._networkPolicy = this._isAlibaba ? undefined : new PodmanNetworkPolicyProvider(ep);
+      this._networkPolicy = this._hasAlibabaAccounts ? undefined : new PodmanNetworkPolicyProvider(ep);
     }
     return this._networkPolicy;
   }
@@ -159,7 +158,7 @@ class LazyProviderRegistry implements IProviderRegistry {
   }
 
   public get capabilities(): ProviderCapabilities {
-    const isProd = this.config.container === 'alibaba' && this._hasAlibabaAccounts;
+    const isProd = this._hasAlibabaAccounts;
     return {
       spotInstances: isProd, nfsVolumes: true, publicIpAutoAssign: true,
       preemptible: isProd, maxRuntimeSeconds: isProd ? 86_400 * 7 : 0,
@@ -268,10 +267,6 @@ class LazyProviderRegistry implements IProviderRegistry {
 
   // ─── Internal helpers ───
 
-  private get _isAlibaba(): boolean {
-    return this.config.container === 'alibaba' && this._hasAlibabaAccounts;
-  }
-
   /** First valid Alibaba credential from config, or undefined if none configured. */
   private _firstAlibabaCred(): { accessKeyId: string; accessKeySecret: string } | undefined {
     const found = this.config.accounts.find(
@@ -281,12 +276,10 @@ class LazyProviderRegistry implements IProviderRegistry {
   }
 
   private _resolveDefaultEntry(): ProviderEntry {
-    if (this._isAlibaba) {
+    if (this._hasAlibabaAccounts) {
       return this._buildAlibabaDefaultEntry();
     }
-    if (this.config.container === 'podman') {
-      return this._buildPodmanEntry();
-    }
+    // Stub fallback for image/dns/metrics only; container getter throws
     return this._buildStubEntry();
   }
 
@@ -348,7 +341,7 @@ class LazyProviderRegistry implements IProviderRegistry {
   }
 
   private _createGroupProvider(): IContainerGroupProvider | undefined {
-    if (this._isAlibaba) {
+    if (this._hasAlibabaAccounts) {
       const defaultAccount = this.config.accounts.find(
         (a): a is Credential & { accessKeyId: string; accessKeySecret: string } => (a.accessKeyId != null && a.accessKeySecret != null),
       );
@@ -357,10 +350,6 @@ class LazyProviderRegistry implements IProviderRegistry {
           new AlibabaEciContainerGroupProvider(defaultAccount.accessKeyId, defaultAccount.accessKeySecret, defaultAccount.endpoint),
         );
       }
-    }
-    if (this.config.container === 'podman') {
-      const ep = process.env.PODMAN_ENDPOINT ?? 'http://127.0.0.1:8080';
-      return secureContainerGroupProvider(new PodmanContainerGroupProvider(ep));
     }
     return undefined;
   }

@@ -756,7 +756,7 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
     "tags": [],
     "spec": {
       "apiVersion": "hbi-aad/v1",
-      "kind": "ContainerGroup",
+      "kind": "Container",
       "dependsOn": [
         "web-service",
         "api-service",

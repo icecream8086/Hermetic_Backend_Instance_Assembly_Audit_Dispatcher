@@ -279,7 +279,7 @@ export function registerHealthCheck(deps: HealthCheckDeps): void {
             }
           } catch {
 
-            console.debug("skip");
+            console.log("skip");
 
           }
         }
@@ -353,7 +353,7 @@ async function dispatchGc(
       await resolved.delete({ region: createRegionId(params.region), providerId: params.providerId });
     } catch {
 
-      console.debug("best-effort");
+      console.log("best-effort");
 
     }
   }
@@ -463,14 +463,14 @@ export function registerPodHealthCheck(deps: PodHealthCheckDeps): void {
                 if (rt.status === ContainerGroupState.Running) {
                   try { await podService.syncRuntime(createPodId(pid)); } catch {
 
-                    console.debug("best-effort");
+                    console.log("best-effort");
 
                   }
                   continue;
                 }
               } catch {
 
-                console.debug("provider unreachable — fall through to timeout");
+                console.log("provider unreachable — fall through to timeout");
 
               }
             }
@@ -499,7 +499,7 @@ export function registerPodHealthCheck(deps: PodHealthCheckDeps): void {
               runtime = await podService.checkProviderStatus(createPodId(pid));
             } catch {
 
-              console.debug("");
+              console.log("");
 
             }
             if (!runtime) {
@@ -562,7 +562,7 @@ export function registerPodHealthCheck(deps: PodHealthCheckDeps): void {
           continue;
         } catch {
 
-          console.debug("skip individual pod errors");
+          console.log("skip individual pod errors");
 
         }
       }
@@ -590,7 +590,7 @@ function resolvePodGcInstanceId(raw: string | undefined): InstanceId | undefined
   if (!raw) return undefined;
   try { return createInstanceId(raw); } catch {
 
-    console.debug("");
+    console.log("");
 
   }
 }
@@ -629,7 +629,7 @@ async function dispatchPodGc(
       await resolved.delete({ region: createRegionId('cn-hangzhou'), providerId: params.providerId });
     } catch {
 
-      console.debug("best-effort");
+      console.log("best-effort");
 
     }
   }

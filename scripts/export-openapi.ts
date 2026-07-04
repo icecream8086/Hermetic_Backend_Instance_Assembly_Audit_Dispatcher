@@ -16,7 +16,7 @@ import { createUserRouter } from '../src/features/users/handler.ts';
 import { createPermissionRouter } from '../src/features/permission/handler.ts';
 import { createSysGroupRouter } from '../src/features/system-group/handler.ts';
 import { createTemplateRouter } from '../src/features/template/handler.ts';
-import { createSandboxRouter } from '../src/features/sandbox/handler.ts';
+import { createPodRouter } from '../src/features/pod/handler.ts';
 import { createPlatformsRouter } from '../src/features/platforms/handler.ts';
 import { createSecurityGroupRouter } from '../src/features/network/handler.ts';
 import { createTopologyRouter } from '../src/features/topology/handler.ts';
@@ -159,7 +159,7 @@ const stubPermService = {
 };
 const stubSysGroupService = { create: async () => ({ id: '', name: '', rules: [], priority: 0, createdAt: 0, updatedAt: 0 }), list: async () => [], get: async () => null, update: async () => { throw new Error('stub'); }, delete: async () => {} };
 const stubAtomic: any = { get: async () => null, set: async () => null };
-const stubSandboxSvc: any = { getById: async () => null, stop: async () => {}, terminate: async () => {}, syncRuntime: async () => {}, list: async () => ({ items: [] }) };
+const stubPodSvc: any = { getById: async () => null, provision: async () => ({}), stop: async () => ({}), terminate: async () => {}, syncRuntime: async () => ({}), start: async () => ({}), restart: async () => ({}), getHealth: async () => [], getLogs: async () => ({}), exec: async () => ({}), update: async () => ({}), list: async () => ({ items: [] }), getAllIds: async () => [] };
 const stubVolumeSvc: any = { create: async () => ({}), get: async () => null, listPaginated: async () => ({ items: [], total: 0, page: 1, limit: 50 }), update: async () => ({}), delete: async () => {} };
 const stubRegistry: any = { availableProviders: () => [{ name: 'stub' }, { name: 'podman' }] };
 
@@ -170,7 +170,7 @@ collect('Audit', '/api/audit', createAuditRouter(new WorkersAuditLogger()));
 collect('Permissions', '/api/permissions', createPermissionRouter(stubPermService as any));
 collect('System Groups', '/api/system-groups', createSysGroupRouter(stubSysGroupService as any));
 collect('Templates', '/api/templates', createTemplateRouter(stubAtomic as any));
-collect('Sandboxes', '/api/sandboxes', createSandboxRouter(stubSandboxSvc as any));
+collect('Pods', '/api/pods', createPodRouter(undefined, stubPodSvc as any));
 collect('Platforms', '/api/platforms', createPlatformsRouter(stubRegistry as any));
 collect('Volumes', '/api/volumes', createVolumeRouter(stubVolumeSvc as any));
 collect('Networks', '/api/networks', createSecurityGroupRouter({

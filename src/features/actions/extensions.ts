@@ -153,8 +153,11 @@ export class OrgService {
   }
 
   async #addToIdx(key: string, id: string): Promise<void> {
-    const idx = await this.atomic.get<string[]>(key);
-    await this.atomic.set(key, [...(idx?.value ?? []), id], idx?.version ?? null);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const idx = await this.atomic.get<string[]>(key);
+      const ok = await this.atomic.set(key, [...(idx?.value ?? []), id], idx?.version ?? null);
+      if (ok) return;
+    }
   }
 }
 
@@ -198,8 +201,11 @@ export class ProjectService {
   }
 
   async #addToIdx(key: string, id: string): Promise<void> {
-    const idx = await this.atomic.get<string[]>(key);
-    await this.atomic.set(key, [...(idx?.value ?? []), id], idx?.version ?? null);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const idx = await this.atomic.get<string[]>(key);
+      const ok = await this.atomic.set(key, [...(idx?.value ?? []), id], idx?.version ?? null);
+      if (ok) return;
+    }
   }
 }
 
@@ -247,7 +253,10 @@ export class ApprovalService {
   }
 
   async #addToIdx(key: string, id: string): Promise<void> {
-    const idx = await this.atomic.get<string[]>(key);
-    await this.atomic.set(key, [...(idx?.value ?? []), id], idx?.version ?? null);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const idx = await this.atomic.get<string[]>(key);
+      const ok = await this.atomic.set(key, [...(idx?.value ?? []), id], idx?.version ?? null);
+      if (ok) return;
+    }
   }
 }

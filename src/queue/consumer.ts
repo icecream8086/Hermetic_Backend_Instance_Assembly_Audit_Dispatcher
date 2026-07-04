@@ -218,7 +218,7 @@ async function handleSandboxGc(
         new Promise((_, reject) => setTimeout(() => { reject(new Error('GC delete timeout after 10s')); }, 10_000)),
       ]);
     } catch {
-      console.debug("best-effort — provider may be unreachable or the resource already gone");
+      console.log("best-effort — provider may be unreachable or the resource already gone");
     }
     // Update sandbox state to Deleted with OCC retry
     let deleted = false;
@@ -272,7 +272,7 @@ async function handleSandboxGc(
     const markerKey = 'gc:queued:' + sid;
     const marker = await stores.atomic.get<{ version: number }>(markerKey);
     try { if (marker) await stores.atomic.set(markerKey, null, marker.version); } catch {
-      console.debug("noop");
+      console.log("noop");
     }
     return { success: true };
   } catch (err) {

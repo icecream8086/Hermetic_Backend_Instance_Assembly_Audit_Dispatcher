@@ -6,7 +6,7 @@ import { createRouter as usersRouter } from './users/index.ts';
 import { createRouter as permissionRouter } from './permission/index.ts';
 import { createRouter as system_groupRouter } from './system-group/index.ts';
 import { createRouter as templateRouter } from './template/index.ts';
-import { createRouter as sandboxRouter } from './sandbox/index.ts';
+import { createRouter as podRouter } from './pod/index.ts';
 import { createRouter as platformsRouter } from './platforms/index.ts';
 import { createRouter as networkRouter } from './network/index.ts';
 import { createRouter as topologyRouter } from './topology/index.ts';
@@ -33,7 +33,7 @@ export function getFeatures(): RegisteredFeature[] {
   { path: '/api/permissions', mount: (deps) => permissionRouter(deps) },
   { path: '/api/system-groups', mount: (deps) => system_groupRouter(deps) },
   { path: '/api/templates', mount: (deps) => templateRouter(deps) },
-  { path: '/api/sandboxes', mount: (deps) => sandboxRouter(deps) },
+  { path: '/api/pods', mount: (deps) => podRouter(deps) },
   { path: '/api/platforms', mount: (deps) => platformsRouter(deps) },
   { path: '/api/networks', mount: (deps) => networkRouter(deps) },
   { path: '/api/topology', mount: (deps) => topologyRouter(deps) },

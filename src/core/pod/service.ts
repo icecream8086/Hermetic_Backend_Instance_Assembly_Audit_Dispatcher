@@ -9,65 +9,26 @@ import { ProviderResolutionError } from '../provider/errors.ts';
 import type { CreateContainerGroupInput, ContainerGroupRuntime } from '../provider/types.ts';
 import { ContainerGroupState } from '../provider/container-lifecycle.ts';
 import { createRegionId } from '../region/types.ts';
-import { generateVersionId } from '../brand.ts';
 import { AppError } from '../types.ts';
 import { PodStore } from './store.ts';
-import type { PodSpec, PodPhase, PodEntity, PodNetwork, PodId, ContainerState, PodHealth } from './types.ts';
-import { createPodId } from './types.ts';
+import type { PodSpec, PodPhase, PodEntity, PodId, ContainerState, PodHealth } from './types.ts';
 import type { IAuditWriter } from '../audit/types.ts';
 import { KernLevel } from '../audit/kern-level.ts';
 import type { EventBus } from '../event-bus/bus.ts';
 import { createEvent } from '../event-bus/types.ts';
 import type { QuotaService } from '../quota/service.ts';
+import { transitionPod, createPod } from './transitions.ts';
+import { buildPodCreateParams } from '../../providers/alibaba/eci-codec.ts';
 
 /** Context passed to PodService.provision() for sandbox-level concerns. */
 export interface ProvisionContext {
   readonly creatorId?: string | undefined;
+  readonly templateRef?: string | undefined;
 }
 
 // ═══════════════════════════════════════════════════════════════
-// v2 PodSpec → v1 Provider 协议翻译器。PodService 内部使用。
+// v2 Provider runtime → PodEntity helpers.
 // ═══════════════════════════════════════════════════════════════
-
-function podSpecToGroupInput(spec: PodSpec): CreateContainerGroupInput {
-  const containers = spec.spec.containers.map(c => {
-    const cpu = c.resources?.limits?.cpu ?? 0;
-    const mem = c.resources?.limits?.memory ?? 0;
-    return {
-      name: c.name,
-      image: c.image,
-      command: c.command,
-      args: c.args,
-      env: c.env,
-      ports: c.ports,
-      volumeMounts: c.volumeMounts,
-      livenessProbe: c.livenessProbe,
-      readinessProbe: c.readinessProbe,
-      startupProbe: c.startupProbe,
-      imagePullPolicy: c.imagePullPolicy ?? undefined,
-      tty: c.tty ?? undefined,
-      stdin: c.stdin ?? undefined,
-      networkMode: c.networkMode ?? undefined,
-      resources: (cpu > 0 || mem > 0) ? { limits: { cpu, memory: mem, ...(c.resources?.limits?.gpu !== undefined ? { gpu: c.resources.limits.gpu } : {}) } } : undefined,
-    };
-  });
-
-  return {
-    name: spec.metadata.name,
-    region: createRegionId('cn-hangzhou'),
-    cpu: containers.reduce((s, c) => s + (c.resources?.limits.cpu ?? 0), 0) || 1,
-    memory: containers.reduce((s, c) => s + (c.resources?.limits.memory ?? 0), 0) || 512,
-    restartPolicy: spec.spec.restartPolicy,
-    containers,
-    volumes: spec.spec.volumes?.map(v => ({ id: v.id, type: v.type, options: v.options })),
-    secretMounts: spec.spec.secretMounts,
-    secretRefs: spec.spec.secretRefs,
-    resolvedSecrets: spec.spec.resolvedSecrets,
-    tags: spec.metadata.labels ? Object.entries(spec.metadata.labels).map(([k, v]) => ({ key: k, value: v })) : undefined,
-    network: { allocatePublicIp: false },
-    providerOverrides: spec.providerOverrides,
-  };
-}
 
 function toPodPhase(cgStatus: ContainerGroupState): PodPhase {
   switch (cgStatus) {
@@ -142,62 +103,81 @@ export class PodService {
   }
 
   public async provision(spec: PodSpec, context?: ProvisionContext): Promise<PodEntity> {
-    const podId = createPodId(crypto.randomUUID());
     const cpu = spec.spec.containers.reduce((s, c) => s + (c.resources?.limits?.cpu ?? 0), 0) || 1;
     const memory = spec.spec.containers.reduce((s, c) => s + (c.resources?.limits?.memory ?? 0), 0) || 512;
 
-    // Check quota before provisioning
     if (context?.creatorId && this.quotaService) {
       await this.quotaService.checkQuota(context.creatorId, cpu, memory);
     }
 
     const provider = await this.resolveProvider();
-    const groupInput = podSpecToGroupInput(spec);
-    const { providerId } = await provider.create(groupInput);
-    const initialPhase: PodPhase = provider.lifecycle.asyncInit ? 'Pending' : 'Running';
-
-    const entity: PodEntity = {
-      podId,
+    const aliRegion = ((spec.providerOverrides?.alibaba as Record<string, unknown> | undefined)?.region as string | undefined) ?? 'cn-hangzhou';
+    const groupInput: CreateContainerGroupInput = {
       name: spec.metadata.name,
+      region: createRegionId(aliRegion),
+      cpu,
+      memory,
+      restartPolicy: spec.spec.restartPolicy,
+      containers: spec.spec.containers.map(c => {
+        const cc: import('../provider/types.ts').ContainerCreateConfig = {
+          name: c.name,
+          image: c.image,
+          ...(c.command !== undefined ? { command: c.command } : {}),
+          ...(c.args !== undefined ? { args: c.args } : {}),
+          ...(c.env !== undefined ? { env: c.env } : {}),
+          ...(c.ports !== undefined ? { ports: c.ports } : {}),
+          ...(c.volumeMounts !== undefined ? { volumeMounts: c.volumeMounts } : {}),
+          ...(c.livenessProbe !== undefined ? { livenessProbe: c.livenessProbe } : {}),
+          ...(c.readinessProbe !== undefined ? { readinessProbe: c.readinessProbe } : {}),
+          ...(c.startupProbe !== undefined ? { startupProbe: c.startupProbe } : {}),
+          ...(c.imagePullPolicy !== undefined ? { imagePullPolicy: c.imagePullPolicy } : {}),
+          ...(c.tty !== undefined ? { tty: c.tty } : {}),
+          ...(c.stdin !== undefined ? { stdin: c.stdin } : {}),
+          ...(c.networkMode !== undefined ? { networkMode: c.networkMode } : {}),
+          ...(c.providerOverrides !== undefined ? { providerOverrides: c.providerOverrides } : {}),
+          ...(c.resources !== undefined ? { resources: { limits: { cpu: c.resources.limits?.cpu ?? 0, memory: c.resources.limits?.memory ?? 0, ...(c.resources.limits?.gpu !== undefined ? { gpu: c.resources.limits.gpu } : {}) } } } : {}),
+        };
+        return cc;
+      }),
+      volumes: spec.spec.volumes?.map(v => ({ id: v.id, type: v.type, options: v.options })),
+      secretMounts: spec.spec.secretMounts,
+      secretRefs: spec.spec.secretRefs,
+      resolvedSecrets: spec.spec.resolvedSecrets,
+      network: { allocatePublicIp: false },
+      tags: spec.metadata.labels ? Object.entries(spec.metadata.labels).map(([k, v]) => ({ key: k, value: v })) : undefined,
+      providerOverrides: spec.providerOverrides,
+    };
+    const { providerId } = await provider.create(groupInput);
+
+    const pod = createPod({
+      type: 'Provision',
       spec,
-      phase: initialPhase,
       providerId,
       network: {},
-      containers: [],
-      conditions: [],
-      events: [],
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      version: generateVersionId(),
       creatorId: context?.creatorId,
-    };
+      templateRef: context?.templateRef,
+    });
 
-    const written = await this.store.insert(entity);
+    const written = await this.store.insert(pod);
     if (!written) throw new AppError(500, 'CREATE_FAILED', 'Failed to persist Pod');
-    await this.store.addToIndex(podId);
+    await this.store.addToIndex(pod.podId);
 
-    // Record quota usage
     if (context?.creatorId && this.quotaService) {
       void this.quotaService.recordCreate(context.creatorId, cpu, memory);
     }
 
-    // Audit + event
     this.audit?.write({
-      level: KernLevel.NOTICE,
-      facility: 'pod-service',
+      level: KernLevel.NOTICE, facility: 'pod-service',
       message: `Pod provisioned — ${spec.metadata.name}`,
       actorId: context?.creatorId,
-      metadata: { eventType: 'pod.provisioned', podId, providerId },
+      metadata: { eventType: 'pod.provisioned', podId: pod.podId, providerId },
     });
     void this.eventBus?.dispatch(createEvent('pod.provisioned', {
-      podId,
-      name: spec.metadata.name,
-      phase: initialPhase,
-      creatorId: context?.creatorId,
-      providerId,
+      podId: pod.podId, name: spec.metadata.name, phase: pod.phase,
+      creatorId: context?.creatorId, providerId,
     }));
 
-    return entity;
+    return pod;
   }
 
   public async getById(podId: PodId): Promise<PodEntity | null> {
@@ -213,13 +193,10 @@ export class PodService {
     if (!pod) throw new AppError(404, 'POD_NOT_FOUND', `Pod ${podId} not found`);
     if (pod.providerId) {
       const provider = await this.resolveProvider();
-      try { await provider.stop?.(pod.providerId); } catch {
-
-        console.debug("best-effort");
-
-      }
+      try { await provider.stop?.(pod.providerId); } catch { /* best-effort */ }
     }
-    const result = await this.store.transition(podId, 'Succeeded');
+    const updated = transitionPod(pod, { type: 'Stop' });
+    const result = await this.store.update(podId, updated, pod.version);
     this.audit?.write({
       level: KernLevel.INFO, facility: 'pod-service',
       message: `Pod stopped — ${pod.name}`,
@@ -235,15 +212,12 @@ export class PodService {
   public async start(podId: PodId): Promise<PodEntity> {
     const pod = await this.store.getById(podId);
     if (!pod) throw new AppError(404, 'POD_NOT_FOUND', `Pod ${podId} not found`);
+    const updated = transitionPod(pod, { type: 'Start' });
     if (pod.providerId) {
       const provider = await this.resolveProvider();
-      try { await provider.start?.(pod.providerId); } catch {
-
-        console.debug("best-effort");
-
-      }
+      try { await provider.start?.(pod.providerId); } catch { /* best-effort */ }
     }
-    const result = await this.store.transition(podId, 'Running');
+    const result = await this.store.update(podId, updated, pod.version);
     this.audit?.write({
       level: KernLevel.INFO, facility: 'pod-service',
       message: `Pod started — ${pod.name}`,
@@ -259,15 +233,12 @@ export class PodService {
   public async restart(podId: PodId): Promise<PodEntity> {
     const pod = await this.store.getById(podId);
     if (!pod) throw new AppError(404, 'POD_NOT_FOUND', `Pod ${podId} not found`);
-    if (!pod.providerId) throw new AppError(400, 'NO_PROVIDER', `Pod ${podId} has no providerId`);
-    const provider = await this.resolveProvider();
-    if (!provider.restart) throw new AppError(501, 'NOT_IMPLEMENTED', 'Provider does not support restart');
-    try { await provider.restart(pod.providerId); } catch {
-
-      console.debug("best-effort");
-
+    const updated = transitionPod(pod, { type: 'Restart' });
+    if (pod.providerId) {
+      const provider = await this.resolveProvider();
+      try { await provider.restart?.(pod.providerId); } catch { /* best-effort */ }
     }
-    const updated = await this.store.getById(podId);
+    const result = await this.store.update(podId, updated, pod.version);
     this.audit?.write({
       level: KernLevel.INFO, facility: 'pod-service',
       message: `Pod restarted — ${pod.name}`,
@@ -277,7 +248,7 @@ export class PodService {
     void this.eventBus?.dispatch(createEvent('pod.status', {
       podId, fromPhase: pod.phase, toPhase: pod.phase, reason: 'user requested restart',
     }));
-    return updated ?? pod;
+    return result;
   }
 
   public async getHealth(podId: PodId): Promise<readonly PodHealth[]> {
@@ -287,9 +258,7 @@ export class PodService {
     // Try sync for Running pods to get fresh container state
     if (pod.phase === 'Running' && pod.providerId) {
       try { await this.syncRuntime(podId); } catch {
-
-        console.debug("stale OK");
-
+        /* stale OK */
       }
     }
 
@@ -323,17 +292,25 @@ export class PodService {
   public async terminate(podId: PodId): Promise<void> {
     const pod = await this.store.getById(podId);
     if (!pod) throw new AppError(404, 'POD_NOT_FOUND', `Pod ${podId} not found`);
+
+    // Step 1: mark Terminate (set deletionTimestamp + DisruptionTarget)
+    const marked = transitionPod(pod, { type: 'Terminate' });
+    await this.store.update(podId, marked, pod.version);
+
+    // Step 2: delete provider resource (best-effort)
     if (pod.providerId) {
       const provider = await this.resolveProvider();
-      try { await provider.delete({ region: createRegionId('cn-hangzhou'), providerId: pod.providerId }); } catch {
-        /* GC will retry */
-        console.debug("GC will retry");
-      }
+      try {
+        await provider.delete({ region: createRegionId('cn-hangzhou'), providerId: pod.providerId });
+      } catch { /* GC will retry */ }
     }
-    await this.store.transition(podId, 'Failed');
+
+    // Step 3: mark final state
+    const terminated = transitionPod(marked, { type: 'MarkFailed', reason: 'user requested termination' });
+    await this.store.update(podId, terminated, marked.version);
     await this.store.removeFromIndex(podId);
 
-    // Record quota release
+    // quota release
     if (pod.creatorId && this.quotaService) {
       const cpu = pod.spec.spec.containers.reduce((s, c) => s + (c.resources?.limits?.cpu ?? 0), 0) || 1;
       const memory = pod.spec.spec.containers.reduce((s, c) => s + (c.resources?.limits?.memory ?? 0), 0) || 512;
@@ -359,28 +336,49 @@ export class PodService {
   public async gcCleanup(podId: PodId): Promise<void> {
     const pod = await this.store.getById(podId);
     if (!pod) return;
-    if (pod.providerId) {
-      const provider = await this.resolveProvider();
-      try {
-        await Promise.race([
-          provider.delete({ region: createRegionId('cn-hangzhou'), providerId: pod.providerId }),
-          new Promise<never>((_, reject) => setTimeout(() => { reject(new Error('GC delete timeout after 10s')); }, 10_000)),
-        ]);
-      } catch {
 
-        console.debug("best-effort");
+    const providerStatus = pod.providerId ? await this.checkProviderStatus(podId) : null;
 
+    if (providerStatus === null && pod.providerId) {
+      // Provider resource is gone — force delete
+      const updated = transitionPod(pod, { type: 'ForceDelete' });
+      await this.store.update(podId, updated, pod.version);
+      await this.store.removeFromIndex(podId);
+      return;
+    }
+
+    const duration = Date.now() - pod.createdAt;
+    if (pod.phase === 'Succeeded' || pod.phase === 'Failed') {
+      if (duration > 60_000) {
+        if (pod.phase === 'Succeeded') {
+          const updated = transitionPod(pod, { type: 'MarkSucceeded' });
+          if (pod.providerId) {
+            const provider = await this.resolveProvider();
+            try { await provider.delete({ region: createRegionId('cn-hangzhou'), providerId: pod.providerId }); } catch { }
+          }
+          await this.store.update(podId, updated, pod.version);
+        } else {
+          const updated = transitionPod(pod, { type: 'MarkFailed', reason: 'GC cleanup' });
+          if (pod.providerId) {
+            const provider = await this.resolveProvider();
+            try { await provider.delete({ region: createRegionId('cn-hangzhou'), providerId: pod.providerId }); } catch { }
+          }
+          await this.store.update(podId, updated, pod.version);
+        }
+        await this.store.removeFromIndex(podId);
       }
+      return;
     }
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const latest = await this.store.getById(podId);
-      if (!latest) break;
-      try {
-        await this.store.update(podId, { ...latest, phase: 'Failed', updatedAt: Date.now(), version: generateVersionId() }, latest.version);
-      } catch { continue; }
-      break;
+
+    if (pod.deletionTimestamp && duration > 60_000) {
+      if (pod.providerId) {
+        const provider = await this.resolveProvider();
+        try { await provider.delete({ region: createRegionId('cn-hangzhou'), providerId: pod.providerId }); } catch { return; }
+      }
+      const updated = transitionPod(pod, { type: 'ForceDelete' });
+      await this.store.update(podId, updated, pod.version);
+      await this.store.removeFromIndex(podId);
     }
-    await this.store.removeFromIndex(podId);
   }
 
   /** Lightweight provider status check — returns runtime or null if resource is gone. */
@@ -394,7 +392,6 @@ export class PodService {
       providerStatus = await provider.getStatus(pod.providerId);
     } catch (_e) {
       /* provider unreachable — treat as resource gone */
-      console.debug("provider unreachable");
     }
     return providerStatus;
   }
@@ -407,24 +404,17 @@ export class PodService {
     const runtime = describeResult.sandboxes[0];
     if (!runtime) throw new AppError(404, 'RUNTIME_NOT_FOUND', `No runtime found for pod ${podId}`);
 
-    const containers = toContainers(runtime);
-    const phase = toPodPhase(runtime.status);
-    const network: PodNetwork = {
-      privateIp: runtime.network.privateIp,
-      vpcId: runtime.network.vpcId,
-      subnetId: runtime.network.subnetId,
-      securityGroupId: runtime.network.securityGroupId,
+    const podRuntime: import('./types.ts').PodRuntime = {
+      podId, providerId: pod.providerId, name: pod.name,
+      phase: toPodPhase(runtime.status),
+      conditions: [],
+      containers: toContainers(runtime),
+      volumes: runtime.volumes?.map(v => ({ name: v.name ?? '', type: v.type ?? '' })) ?? [],
+      events: runtime.events?.map(e => ({ reason: e.reason, type: e.type, message: e.message, count: e.count })) ?? [],
+      network: { privateIp: runtime.network.privateIp, ...(runtime.network.vpcId ? { vpcId: runtime.network.vpcId } : {}), ...(runtime.network.subnetId ? { subnetId: runtime.network.subnetId } : {}), ...(runtime.network.securityGroupId ? { securityGroupId: runtime.network.securityGroupId } : {}) },
     };
 
-    const updated: PodEntity = {
-      ...pod,
-      phase,
-      containers,
-      network,
-      events: runtime.events.map(e => ({ reason: e.reason, type: e.type, message: e.message, count: e.count })),
-      updatedAt: Date.now(),
-      version: generateVersionId(),
-    };
+    const updated = transitionPod(pod, { type: 'UpdateFromProvider', status: podRuntime });
     const result = await this.store.update(podId, updated, pod.version);
 
     this.audit?.write({
@@ -432,7 +422,6 @@ export class PodService {
       message: `Pod runtime synced (${runtime.status})`,
       metadata: { eventType: 'pod.sync', podId, providerStatus: runtime.status, containers: runtime.containers.length },
     });
-
     return result;
   }
 
@@ -452,47 +441,29 @@ export class PodService {
     return { execId: result.execId, webSocketUri: result.webSocketUri ?? undefined };
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- PodSpec has many fields, Partial avoids maintaining a duplicate PatchSpec type
-  public async update(podId: PodId, specPatch: Partial<PodSpec>): Promise<PodEntity> {
+  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- PodSpec has many fields
+  public async update(podId: PodId, specPatch: Record<string, unknown>): Promise<PodEntity> {
     const pod = await this.store.getById(podId);
     if (!pod) throw new AppError(404, 'POD_NOT_FOUND', `Pod ${podId} not found`);
+
+    const mergedSpec: PodSpec = {
+      metadata: { ...pod.spec.metadata, ...((specPatch.metadata as Record<string, unknown>) ?? {}) },
+      spec: {
+        containers: ((specPatch.spec as Record<string, unknown>)?.containers as readonly import('./types.ts').ContainerSpec[]) ?? pod.spec.spec.containers,
+        restartPolicy: ((specPatch.spec as Record<string, unknown | undefined>)?.restartPolicy as 'Always' | 'OnFailure' | 'Never') ?? pod.spec.spec.restartPolicy,
+      },
+      providerOverrides: { ...pod.spec.providerOverrides, ...((specPatch.providerOverrides as Record<string, unknown>) ?? {}) },
+    } satisfies PodSpec;
+
+    const updated = transitionPod(pod, { type: 'Update', spec: mergedSpec });
+
     if (pod.providerId) {
       const provider = await this.resolveProvider();
       if (provider.update) {
-        const groupInput = podSpecToGroupInput(mergePodSpec(pod.spec, specPatch));
-        try { await provider.update(pod.providerId, groupInput); } catch {
-
-          console.debug("best-effort");
-
-        }
+        try { await provider.update(pod.providerId, buildPodCreateParams(mergedSpec, 'cn-hangzhou')); } catch { /* best-effort */ }
       }
     }
-    const merged = mergePodSpec(pod.spec, specPatch);
-    const updated: PodEntity = {
-      ...pod,
-      spec: merged,
-      updatedAt: Date.now(),
-      version: generateVersionId(),
-    };
+
     return this.store.update(podId, updated, pod.version);
   }
-}
-
-// eslint-disable-next-line @typescript-eslint/no-restricted-types -- merge helper: Partial allows sparse overrides over a large spec
-function mergePodSpec(base: PodSpec, patch: Partial<PodSpec>): PodSpec {
-  return {
-    metadata: { ...base.metadata, ...patch.metadata },
-    spec: {
-      containers: patch.spec?.containers ?? base.spec.containers,
-      restartPolicy: patch.spec?.restartPolicy ?? base.spec.restartPolicy,
-      ...(base.spec.initContainers || patch.spec?.initContainers ? { initContainers: patch.spec?.initContainers ?? base.spec.initContainers } : {}),
-      ...(base.spec.volumes || patch.spec?.volumes ? { volumes: patch.spec?.volumes ?? base.spec.volumes } : {}),
-      ...(base.spec.priority !== undefined || patch.spec?.priority !== undefined ? { priority: patch.spec?.priority ?? base.spec.priority } : {}),
-      ...(base.spec.nodeSelector || patch.spec?.nodeSelector ? { nodeSelector: patch.spec?.nodeSelector ?? base.spec.nodeSelector } : {}),
-      ...(base.spec.terminationGracePeriodSeconds !== undefined || patch.spec?.terminationGracePeriodSeconds !== undefined ? { terminationGracePeriodSeconds: patch.spec?.terminationGracePeriodSeconds ?? base.spec.terminationGracePeriodSeconds } : {}),
-      ...(base.spec.dnsConfig || patch.spec?.dnsConfig ? { dnsConfig: patch.spec?.dnsConfig ?? base.spec.dnsConfig } : {}),
-      ...(base.spec.hostAliases || patch.spec?.hostAliases ? { hostAliases: patch.spec?.hostAliases ?? base.spec.hostAliases } : {}),
-    },
-    ...(base.providerOverrides || patch.providerOverrides ? { providerOverrides: { ...base.providerOverrides, ...patch.providerOverrides } } : {}),
-  };
 }

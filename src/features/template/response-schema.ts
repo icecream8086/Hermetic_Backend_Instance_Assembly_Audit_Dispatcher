@@ -1,10 +1,10 @@
 import { z } from 'zod';
 
 /**
- * Minimal response schema for SandboxTemplate.
+ * Minimal response schema for Template.
  * Matches the domain interface shape for OpenAPI documentation.
  */
-export const SandboxTemplateSchema = z.object({
+export const TemplateSchema = z.object({
   id: z.string(),
   name: z.string(),
   description: z.string().optional(),
@@ -45,7 +45,7 @@ export const SandboxTemplateSchema = z.object({
 });
 
 /** Template with resolved DAG chain. */
-export const ResolvedTemplateSchema = SandboxTemplateSchema.extend({
+export const ResolvedTemplateSchema = TemplateSchema.extend({
   _chain: z.array(z.string()).readonly(),
 });
 

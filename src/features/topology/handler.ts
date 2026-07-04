@@ -139,7 +139,7 @@ export function createTopologyRouter(
   app.openapi(createRoute({ method: 'post', path: '/instances/{id}/heartbeat', tags: ['topology'], summary: '上报实例心跳', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'OK', content: { 'application/json': { schema: OkResponse(z.null()) } } } } }), async (c) => {
     const id = createInstanceId(c.req.param('id'));
     const body = await z.unknown().parse(c.req.json());
-    await instances.heartbeat(id, body.capacity, body.status ?? 'online');
+    await instances.heartbeat(id, body.capacity, String(body?.status ?? '') || 'online');
     return c.json(ok(null));
   });
 

@@ -72,9 +72,12 @@ export class StoreSchedulerContext implements SchedulerContext {
   public async saveNewDagRun(dagRun: DagRun): Promise<boolean> {
     const ok = await this.atomic.set(PFX_DAG_RUN + dagRun.id, dagRun, null);
     if (ok) {
-      const idx = await this.atomic.get<string[]>(PFX_DAG_RUN + 'idx');
-      const list = [...(idx?.value ?? []), dagRun.id];
-      await this.atomic.set(PFX_DAG_RUN + 'idx', list, idx?.version ?? null);
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const idx = await this.atomic.get<string[]>(PFX_DAG_RUN + 'idx');
+        const list = [...(idx?.value ?? []), dagRun.id];
+        const ok2 = await this.atomic.set(PFX_DAG_RUN + 'idx', list, idx?.version ?? null);
+        if (ok2) break;
+      }
     }
     return ok !== null;
   }
@@ -99,10 +102,12 @@ export class StoreSchedulerContext implements SchedulerContext {
 
     // Maintain per-dagRun index
     const idxKey = PFX_TASK_INST + ti.dagRunId;
-    const idx = await this.atomic.get<string[]>(idxKey);
-    const list = idx?.value ?? [];
-    if (!list.includes(ti.id)) {
-      await this.atomic.set(idxKey, [...list, ti.id], idx?.version ?? null);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const idx = await this.atomic.get<string[]>(idxKey);
+      const list = idx?.value ?? [];
+      if (list.includes(ti.id)) break;
+      const ok2 = await this.atomic.set(idxKey, [...list, ti.id], idx?.version ?? null);
+      if (ok2) break;
     }
     return ok !== null;
   }

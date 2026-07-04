@@ -3,7 +3,7 @@
 name: "prod-stack"
 description: "生产环境完整技术栈 — 合并 web + api + redis，带资源组保护和健康重试"
 apiVersion: "hbi-aad/v1"
-kind: "ContainerGroup"
+kind: "Container"
 dependsOn: ["web-service", "api-service", "redis-cache"]
 containers:
   - name: "nginx"

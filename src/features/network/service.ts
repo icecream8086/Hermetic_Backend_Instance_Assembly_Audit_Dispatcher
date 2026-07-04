@@ -60,7 +60,7 @@ export class SecurityGroupService implements ISecurityGroupService {
       ...(input.bandwidth ? { bandwidth: input.bandwidth } : {}),
       ...(providerNetworkId ? { providerNetworkId } : {}),
       instanceId: input.instanceId, provider: inst.platform, region: inst.region,
-      visibility: input.visibility ?? 'private', creatorId: actorId,
+      visibility: input.visibility || 'private', creatorId: actorId,
       userIds: input.userIds ?? [], userGroupIds: input.userGroupIds ?? [],
       status: 'Active', createdAt: now, updatedAt: now,
     };
@@ -121,7 +121,7 @@ export class SecurityGroupService implements ISecurityGroupService {
     if (entry.value.providerNetworkId && this.networkPolicy) {
       try { await this.networkPolicy.removeNetwork(entry.value.providerNetworkId); } catch {
 
-        console.debug("best-effort — provider network may already be gone");
+        console.log("best-effort — provider network may already be gone");
 
       }
     }
@@ -137,12 +137,18 @@ export class SecurityGroupService implements ISecurityGroupService {
     return entries.filter(e => e).map(e => e!.value);
   }
   async #addToIndex(id: SecurityGroupId): Promise<void> {
-    const idx = await this.atomic.get<string[]>(INDEX_KEY);
-    await this.atomic.set(INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const idx = await this.atomic.get<string[]>(INDEX_KEY);
+      const ok = await this.atomic.set(INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
+      if (ok) return;
+    }
   }
   async #removeFromIndex(id: SecurityGroupId): Promise<void> {
-    const idx = await this.atomic.get<string[]>(INDEX_KEY);
-    if (!idx) return;
-    await this.atomic.set(INDEX_KEY, idx.value.filter((i: string) => i !== id), idx.version);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const idx = await this.atomic.get<string[]>(INDEX_KEY);
+      if (!idx) return;
+      const ok = await this.atomic.set(INDEX_KEY, idx.value.filter((i: string) => i !== id), idx.version);
+      if (ok) return;
+    }
   }
 }

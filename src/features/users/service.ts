@@ -275,7 +275,7 @@ export class UserService implements IUserService {
 
     // Best-effort counter update (outside transaction to avoid cross-shard contention)
     try { await this.#incrCounter(); } catch {
-      console.debug("noop");
+      console.log("noop");
     }
     // Create session token (separate — 'session' prefix maps to different DO shard)
     const token = await this.createSession(id);
@@ -404,7 +404,7 @@ export class UserService implements IUserService {
     try {
       ts = parseInt(atob(tsB64.replace(/-/g, '+').replace(/_/g, '/')), 10);
     } catch {
-      console.debug("");
+      console.log("");
     }
     if (isNaN(ts)) { await recordAttempt(this.atomic, email, false, ip); throw new AppError(400, 'BAD_TIMESTAMP', 'Invalid timestamp'); }
     const skew = Date.now() - ts * 1000;
@@ -448,7 +448,7 @@ export class UserService implements IUserService {
       nonceBytes = base64UrlDecode(nonceB64);
       signature = base64UrlDecode(sigB64);
     } catch {
-      console.debug("");
+      console.log("");
     }
     const message = new Uint8Array(new TextEncoder().encode(`${String(ts)}${input.email}${ctx?.siteContext ?? ''}`));
     const pkRaw = atob(pubKeyB64);
@@ -579,7 +579,7 @@ export class UserService implements IUserService {
 
     // Best-effort counter update
     try { await this.#decrCounter(); } catch {
-      console.debug("noop");
+      console.log("noop");
     }
     await z.custom<_LogFn>().parse(this.logger).write({
       facility: FACILITY,
@@ -912,31 +912,29 @@ export class UserService implements IUserService {
     return this.#joinNamedGroup(userId, 'users');
   }
 
-  /** Add a user to a named user group by group name. */
+  /** Add a user to a named user group by group name. Uses transact for atomicity. */
   async #joinNamedGroup(userId: UserId, groupName: string): Promise<void> {
-    try {
-      const ugEntry = await this.atomic.get<string[]>('usergroup:ids');
-      if (!ugEntry) return;
-      for (const id of ugEntry.value) {
-        const gEntry = await this.atomic.get<unknown>('usergroup:' + id);
-        if (!gEntry) continue;
-        const gParsed = z.object({
-          value: z.object({ name: z.string(), memberIds: z.array(z.string()), updatedAt: z.number() }),
-          version: z.string(),
-        }).parse(gEntry);
-        if (gParsed.value.name === groupName) {
-          if (!gParsed.value.memberIds.includes(userId)) {
-            gParsed.value.memberIds.push(userId);
-            gParsed.value.updatedAt = Date.now();
-            await this.atomic.set('usergroup:' + id, gParsed.value, gParsed.version);
-          }
-          return;
-        }
+    await this.atomic.transact(async (txn) => {
+      const ugIdx = await txn.get<string[]>('usergroup:ids');
+      if (!ugIdx) return;
+      for (const id of ugIdx) {
+        const group = await txn.get<Record<string, unknown>>('usergroup:' + id);
+        if (!group) continue;
+        if (group.name !== groupName) continue;
+        const memberIds: string[] = Array.isArray(group.memberIds) ? [...group.memberIds] : [];
+        if (memberIds.includes(userId)) return;
+        memberIds.push(userId);
+        txn.set('usergroup:' + id, { ...group, memberIds, updatedAt: Date.now() });
+        return;
       }
-    } catch {
-      // Silently ignore — group may not exist yet
-      console.debug("Silently ignore — group may not exist yet");
-    }
+    }).catch((e: unknown) => {
+      this.logger.write({
+        facility: FACILITY,
+        level: KernLevel.ERR,
+        message: `Failed to add user ${userId} to group "${groupName}": ${e instanceof Error ? e.message : String(e)}`,
+        metadata: { userId, groupName, error: e instanceof Error ? e.message : String(e) },
+      });
+    });
   }
 
 }

@@ -95,7 +95,6 @@ export function loadConfig(overrides?: Record<string, unknown>): ReturnType<type
   }
 
   const providerConfig = {
-    container: process.env.PROVIDER_CONTAINER ?? 'stub',
     region: createRegionId(process.env.ALIBABA_REGION ?? 'cn-hangzhou'),
     accounts: loadAccounts(),
     defaultAccount: process.env.ALIBABA_DEFAULT_ACCOUNT ?? 'default',

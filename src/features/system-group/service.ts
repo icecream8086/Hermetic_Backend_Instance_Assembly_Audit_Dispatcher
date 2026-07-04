@@ -54,7 +54,7 @@ export class SysGroupService implements ISysGroupService {
     await this.atomic.set(GID_INDEX_PREFIX + gid, id, null);
     await this.#addToIndex(id);
     try { await this.#incrCounter(); } catch {
-      console.debug("noop");
+      console.log("noop");
     }
     await this.logger.write({ facility: FACILITY, level: KernLevel.INFO, message: `SysGroup created: ${input.name}`, metadata: { actorId: _actorId, groupId: id, gid, priority: group.priority } });
     this.audit?.write({
@@ -154,7 +154,7 @@ export class SysGroupService implements ISysGroupService {
     await this.atomic.set(PREFIX + id, null, entry.version);
     await this.#removeFromIndex(id);
     try { await this.#decrCounter(); } catch {
-      console.debug("noop");
+      console.log("noop");
     }
     await this.logger.write({ facility: FACILITY, level: KernLevel.WARNING, message: `SysGroup deleted: ${entry.value.name}`, metadata: { actorId: _actorId, groupId: id } });
     this.audit?.write({
@@ -176,18 +176,24 @@ export class SysGroupService implements ISysGroupService {
 
   async #addToIndex(id: string): Promise<void> {
     const shardKey = IDS_SHARD_PREFIX + String(sysgroupShard(id));
-    const entry = await this.atomic.get<string[]>(shardKey);
-    const ids = entry?.value ?? [];
-    ids.push(id);
-    await this.atomic.set(shardKey, ids, entry?.version ?? null);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const entry = await this.atomic.get<string[]>(shardKey);
+      const ids = entry?.value ?? [];
+      ids.push(id);
+      const ok = await this.atomic.set(shardKey, ids, entry?.version ?? null);
+      if (ok) return;
+    }
   }
 
   async #removeFromIndex(id: string): Promise<void> {
     const shardKey = IDS_SHARD_PREFIX + String(sysgroupShard(id));
-    const entry = await this.atomic.get<string[]>(shardKey);
-    if (!entry) return;
-    const ids = entry.value.filter((i: string) => i !== id);
-    await this.atomic.set(shardKey, ids, entry.version);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const entry = await this.atomic.get<string[]>(shardKey);
+      if (!entry) return;
+      const ids = entry.value.filter((i: string) => i !== id);
+      const ok = await this.atomic.set(shardKey, ids, entry.version);
+      if (ok) return;
+    }
   }
 
   /** Best-effort counter increment. */

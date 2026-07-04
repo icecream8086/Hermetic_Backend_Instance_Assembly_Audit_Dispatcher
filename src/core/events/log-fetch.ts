@@ -95,7 +95,7 @@ export function registerLogFetchHandler(deps: LogFetchDeps): void {
       // Clear marker
       const m2 = await atomic.get(markerKey);
       try { if (m2) await atomic.set<Record<string, unknown> | null>(markerKey, null, m2.version); } catch {
-        console.debug("noop");
+        console.log("noop");
       }
     } catch (e: unknown) {
       console.error(`[log:fetch] ${sandboxId}/${containerName} failed:`, e instanceof Error ? e.message : String(e));

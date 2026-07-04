@@ -1,5 +1,6 @@
-import type { SandboxTemplate, ContainerSpec, ContainerDef, HealthCheckDef, TemplateStorage, NetworkSpec } from './types.ts';
-import type { CreateSandboxInput, Volume, VolumeMount, SandboxNetworkConfig } from '../sandbox/types.ts';
+import type { Template, ContainerSpec, ContainerDef, HealthCheckDef, TemplateStorage } from './types.ts';
+import type { Volume, VolumeMount } from '../sandbox/types.ts';
+import type { PodSpec } from '../../core/pod/types.ts';
 import type { EnvVar, ProbeSpec } from '../../core/provider/types.ts';
 import { VolumeType, VolumeStatus, createVolumeId } from '../sandbox/types.ts';
 import { createRegionId } from '../../core/region/types.ts';
@@ -42,20 +43,29 @@ export interface ContainerSecretResolveResult {
   readonly platformRefs?: import('../container-secret/types.ts').PlatformSecretRefs | undefined;
 }
 
+interface AlibabaOverrides {
+  region: string;
+  instanceId?: string;
+  zoneId?: string;
+  account?: string;
+  healthMaxRetries?: number;
+  apiVersion?: string;
+  description?: string;
+  securityGroupId?: string;
+  subnetIds?: string[];
+  autoCreateEip?: boolean;
+}
+
 export async function applyTemplate(
-  tpl: SandboxTemplate,
+  tpl: Template,
   name?: string,
   region?: string,
   resolveVolume?: (id: string) => Promise<Record<string, unknown> | null>,
   securityStore?: SecurityResourceService,
   resolveContainerSecret?: (name: string) => Promise<ContainerSecretResolveResult | null>,
-): Promise<CreateSandboxInput> {
+): Promise<{ podSpec: PodSpec; securityRefNames: string[] }> {
   const container: ContainerSpec = tpl.container ?? { region: createRegionId('local'), containers: [] };
   const containers = container.containers;
-  const cpu = containers.reduce((s, c) => s + (c.resources?.limits?.cpu ?? c.resources?.requests?.cpu ?? 1), 0);
-  const memory = containers.reduce((s, c) => s + (c.resources?.limits?.memory ?? c.resources?.requests?.memory ?? 2048), 0);
-  const gpu = Math.max(...containers.map(c => c.resources?.limits?.gpu ?? 0));
-  const gpuType = containers.find(c => (c.resources?.limits?.gpu ?? 0) > 0)?.resources?.limits?.gpuType;
 
   const ext = tpl.extensions;
   const { volumes, volumeMounts, configMapEnv, securityRefNames, podSecretRefs, resolvedSecrets } = await mapStorage(ext?.storage, resolveVolume, securityStore, resolveContainerSecret);
@@ -93,65 +103,85 @@ export async function applyTemplate(
 
   // Validate restartPolicy at the boundary — narrows from string to literal union
   const rp = container.restartPolicy ?? 'Always';
-  const restartPolicy: CreateSandboxInput['restartPolicy'] =
+  const restartPolicy: 'Always' | 'OnFailure' | 'Never' =
     (rp === 'Always' || rp === 'OnFailure' || rp === 'Never') ? rp : 'Always';
 
-  return {
-    name: name ?? `${tpl.name}-${crypto.randomUUID().slice(0, 6)}`,
-    templateRef: tpl.id,
-    region: createRegionId(region ?? String(container.region)),
-    resourceSpec: { cpu, memory, ...(gpu > 0 ? { gpu, ...(gpuType ? { gpuType } : {}) } : {}) },
-    restartPolicy,
-    containers: containers.map((c: ContainerDef, i: number) => ({
-      name: c.name,
-      image: c.image,
-      ...(c.command ? { command: [...c.command] } : {}),
-      ...(c.args ? { args: [...c.args] } : {}),
-      ...((e => e ? { env: e } : {})(mergeEnv(c.env))),
-      ...(c.resources ? {
-        resources: {
-          ...(c.resources.requests ? { requests: { cpu: c.resources.requests.cpu ?? 0, memory: c.resources.requests.memory ?? 0 } } : {}),
-          ...(c.resources.limits ? { limits: { cpu: c.resources.limits.cpu ?? 0, memory: c.resources.limits.memory ?? 0, ...(c.resources.limits.gpu !== undefined ? { gpu: c.resources.limits.gpu } : {}), ...(c.resources.limits.gpuType !== undefined ? { gpuType: c.resources.limits.gpuType } : {}) } } : {}),
-        },
-      } : {}),
-      ...(c.ports ? { ports: c.ports.map(p => ({
-        containerPort: p.containerPort,
-        ...(p.protocol ? { protocol: p.protocol } : {}),
-      })) } : {}),
-      ...(i === 0 && mainVolMounts ? { volumeMounts: mainVolMounts } : {}),
-      ...(probeMap.get(`container:${c.name}`) ?? {}),
-    })),
-    ...(container.initContainers ? {
-      initContainers: container.initContainers.map((c: ContainerDef) => ({
+  const labels = tpl.metadata?.labels;
+  const net = tpl.network;
+  const tplOverrides: Record<string, unknown> = ext?.providerOverrides?.alibaba ?? {};
+
+  const alibabaOverrides: AlibabaOverrides = {
+    // ① 继承模板原有的 ECI 配置 (spotStrategy, instanceType, autoCreateEip...)
+    ...tplOverrides,
+    // ② 从模板 network 继承 VPC 网络配置
+    ...(net?.vpc?.securityGroupId ? { securityGroupId: net.vpc.securityGroupId } : {}),
+    ...(net?.vpc?.subnetIds?.length ? { subnetIds: [...net.vpc.subnetIds] } : {}),
+    // ③ 从模板顶层提取的核心字段 (覆盖同名配置)
+    region: region ?? String(container.region),
+    ...(container.instanceId ? { instanceId: container.instanceId } : {}),
+    ...(container.account ? { account: container.account } : {}),
+    ...(ext?.healthMaxRetries !== undefined ? { healthMaxRetries: ext.healthMaxRetries } : {}),
+  };
+
+  const podSpec: PodSpec = {
+    metadata: {
+      name: name ?? `${tpl.name}-${crypto.randomUUID().slice(0, 6)}`,
+      ...(labels && Object.keys(labels).length > 0 ? { labels } : {}),
+    },
+    spec: {
+      containers: containers.map((c: ContainerDef, i: number) => ({
         name: c.name,
         image: c.image,
         ...(c.command ? { command: [...c.command] } : {}),
         ...(c.args ? { args: [...c.args] } : {}),
-        ...((e => e ? { env: e.map(x => ({
-          name: x.name,
-          ...(x.value !== undefined ? { value: x.value } : {}),
-          ...(x.valueFrom !== undefined ? { valueFrom: ValueFromSchema.parse(x.valueFrom) } : {}),
-        })) } : {})(c.env)),
+        ...((e => e ? { env: e } : {})(mergeEnv(c.env))),
         ...(c.resources ? {
           resources: {
-            ...(c.resources.requests ? { requests: { cpu: c.resources.requests.cpu ?? 0, memory: c.resources.requests.memory ?? 0 } } : {}),
-            ...(c.resources.limits ? { limits: { cpu: c.resources.limits.cpu ?? 0, memory: c.resources.limits.memory ?? 0, ...(c.resources.limits.gpu !== undefined ? { gpu: c.resources.limits.gpu } : {}), ...(c.resources.limits.gpuType !== undefined ? { gpuType: c.resources.limits.gpuType } : {}) } } : {}),
+            limits: {
+              cpu: c.resources.limits?.cpu ?? 0,
+              memory: c.resources.limits?.memory ?? 0,
+              ...(c.resources.limits?.gpu !== undefined ? { gpu: c.resources.limits.gpu } : {}),
+              ...(c.resources.limits?.gpuType !== undefined ? { gpuType: c.resources.limits.gpuType } : {}),
+            },
           },
         } : {}),
-        ...(probeMap.get(`init:${c.name}`) ?? {}),
+        ...(c.ports ? { ports: c.ports.map(p => ({
+          containerPort: p.containerPort,
+          ...(p.protocol ? { protocol: p.protocol } : {}),
+        })) } : {}),
+        ...(i === 0 && mainVolMounts ? { volumeMounts: mainVolMounts } : {}),
+        ...(probeMap.get(`container:${c.name}`) ?? {}),
       })),
-    } : {}),
-    ...(volumes.length > 0 ? { volumes } : {}),
-    ...(securityRefNames.length > 0 ? { securityRefNames } : {}),
-    ...(podSecretRefs.length > 0 ? { podSecretRefs } : {}),
-    ...(Object.keys(resolvedSecrets).length > 0 ? { resolvedSecrets } : {}),
-    ...(container.account ? { account: container.account } : {}),
-    ...(container.instanceId ? { instanceId: container.instanceId } : {}),
-    ...(ext?.healthMaxRetries !== undefined ? { healthMaxRetries: ext.healthMaxRetries } : {}),
-    network: mapNetwork(tpl.network),
-    ...(tpl.description !== undefined ? { description: tpl.description } : {}),
-    ...(ext?.providerOverrides ? { providerOverrides: ext.providerOverrides } : {}),
+      restartPolicy,
+      ...(container.initContainers?.length ? {
+        initContainers: container.initContainers.map((c: ContainerDef) => ({
+          name: c.name,
+          image: c.image,
+          ...(c.command ? { command: [...c.command] } : {}),
+          ...(c.args ? { args: [...c.args] } : {}),
+          ...((e => e ? { env: e } : {})(mergeEnv(c.env))),
+          ...(c.resources ? {
+            resources: {
+              limits: {
+                cpu: c.resources.limits?.cpu ?? 0,
+                memory: c.resources.limits?.memory ?? 0,
+                ...(c.resources.limits?.gpu !== undefined ? { gpu: c.resources.limits.gpu } : {}),
+                ...(c.resources.limits?.gpuType !== undefined ? { gpuType: c.resources.limits.gpuType } : {}),
+              },
+            },
+          } : {}),
+          ...(probeMap.get(`init:${c.name}`) ?? {}),
+        })),
+      } : {}),
+      ...(volumes.length > 0 ? { volumes: volumes.map(v => ({ id: v.id, type: v.type, options: 'options' in v ? v.options as Record<string, unknown> : undefined })) } : {}),
+      ...(podSecretRefs.length > 0 ? { secretRefs: podSecretRefs, resolvedSecrets } : {}),
+    },
+    providerOverrides: {
+      alibaba: alibabaOverrides,
+    },
   };
+
+  return { podSpec, securityRefNames };
 }
 
 // ─── Health check → probe map ───
@@ -186,21 +216,6 @@ function buildProbeMap(healthChecks: readonly HealthCheckDef[] | undefined): Map
     map.set(hc.target, entry);
   }
   return map;
-}
-
-// ─── Network mapping ───
-
-function mapNetwork(network: NetworkSpec | undefined): SandboxNetworkConfig {
-  if (!network) return { allocatePublicIp: false };
-  // allocatePublicIp: NEVER from template network.publicIp — EIP costs money,
-  // must come through extensions.providerOverrides.alibaba.autoCreateEip.
-  // VPC fields (securityGroupId, subnetIds) are cloud-neutral and pass through.
-  return {
-    allocatePublicIp: false,
-    ...(network.ipAddress ? { ipAddress: network.ipAddress } : {}),
-    ...(network.vpc?.securityGroupId ? { securityGroupId: network.vpc.securityGroupId } : {}),
-    ...(network.vpc?.subnetIds ? { subnetIds: [...network.vpc.subnetIds] } : {}),
-  };
 }
 
 // ─── EmptyDir mapping ───

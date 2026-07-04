@@ -288,6 +288,7 @@ export interface PodEntity {
   readonly spec: PodSpec;
   readonly phase: PodPhase;
   readonly providerId?: string | undefined;
+  readonly deletionTimestamp?: string | undefined;  // ISO 8601, set on Terminate
   readonly network: PodNetwork;
   readonly containers: readonly ContainerRuntime[];
   readonly conditions: readonly PodCondition[];
@@ -323,6 +324,7 @@ export interface PodRuntime {
 /**
  * Project internal SandboxStatus (11) to K8s-standard PodPhase (5).
  * ECI is a refinement of K8s — each K8s phase decomposes into ECI sub-states.
+ * @deprecated Use transitionPod() with UpdateFromProvider instead — this is only for codec backward compat.
  */
 export function sandboxStatusToPodPhase(status: SandboxStatus): PodPhase | null {
   switch (status) {

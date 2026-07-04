@@ -69,8 +69,11 @@ export class SharedLinkService {
     };
 
     await this.atomic.set(PFX + id, link, null);
-    const idx = await this.atomic.get<string[]>(IDX);
-    await this.atomic.set(IDX, [...(idx?.value ?? []), id], idx?.version ?? null);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const idx = await this.atomic.get<string[]>(IDX);
+      const ok = await this.atomic.set(IDX, [...(idx?.value ?? []), id], idx?.version ?? null);
+      if (ok) break;
+    }
 
     this.audit.write({
       level: 5, facility: 'shared-link',

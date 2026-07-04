@@ -195,11 +195,18 @@ type TopScalarKey = Exclude<
   'region' | 'instanceId' | 'description'
 >;
 
+  /** Sanitize to ECI naming rules: 2-63 chars, lowercase letters/digits/hyphens. */
+function sanitizeContainerName(raw: string): string {
+  const cleaned = raw.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  if (cleaned.length < 2) return cleaned.padEnd(2, '0');
+  return cleaned.slice(0, 63);
+}
+
 const TOP_SCALARS = {
   name: {
     param: 'ContainerGroupName',
     responsePath: 'ContainerGroupName',
-    encode: v => v,
+    encode: (v: string) => sanitizeContainerName(v),
     decode: decStr,
   },
   zoneId: {
@@ -590,8 +597,6 @@ function parseVolumes(vols: EciVolumeItem[] | undefined): VolumeRuntimeInfo[] {
     ...(v.EmptyDirVolume ? {
       emptyDir: { sizeLimit: v.EmptyDirVolume.SizeLimit ?? '', medium: v.EmptyDirVolume.Medium },
     } : {}),
-    ...(v.SecretVolume ? { secretVolume: { secretName: v.SecretVolume.SecretName ?? '' } } : {}),
-    ...(v.ConfigMapVolume ? { configMapVolume: { name: v.ConfigMapVolume.Name ?? '' } } : {}),
   }));
 }
 
@@ -632,16 +637,18 @@ export function buildCreateParams(
   // ── Top-level scalars (explicit per-field — type-safe, no casts) ──
   p[TOP_SCALARS.name.param] = TOP_SCALARS.name.encode(input.name);
   if (input.zoneId !== undefined) p[TOP_SCALARS.zoneId.param] = TOP_SCALARS.zoneId.encode(input.zoneId);
-  p[TOP_SCALARS.cpu.param] = TOP_SCALARS.cpu.encode(input.cpu);
-  p[TOP_SCALARS.memory.param] = TOP_SCALARS.memory.encode(input.memory);
-  p[TOP_SCALARS.restartPolicy.param] = TOP_SCALARS.restartPolicy.encode(input.restartPolicy);
+  if (!partial) {
+    p[TOP_SCALARS.cpu.param] = TOP_SCALARS.cpu.encode(input.cpu);
+    p[TOP_SCALARS.memory.param] = TOP_SCALARS.memory.encode(input.memory);
+    p[TOP_SCALARS.restartPolicy.param] = TOP_SCALARS.restartPolicy.encode(input.restartPolicy);
+  }
 
   if (!partial || input.gpu !== undefined) {
     p = { ...p, ...buildGpuParam(input) };
   }
 
   // ── Containers ──
-  if (input.containers.length > 0) {
+  if (input.containers?.length) {
     input.containers.forEach((c, i) => {
       const cpfx = `Container.${String(i + 1)}`;
 
@@ -713,9 +720,13 @@ export function buildCreateParams(
 
   // ── Network ──
   if (!partial) {
-    p.SecurityGroupId = input.network.securityGroupId ?? '';
-    if (input.network.subnetIds?.length) {
-      p.VSwitchId = input.network.subnetIds.join(',');
+    const aliNet = (input.providerOverrides?.alibaba ?? {}) as Record<string, unknown>;
+    const sgId = input.network.securityGroupId ?? aliNet.securityGroupId as string | undefined;
+    p.SecurityGroupId = String(sgId ?? '');
+    const subnetIds = input.network.subnetIds ?? (Array.isArray(aliNet.subnetIds) ? aliNet.subnetIds : undefined) as string[] | undefined;
+    const vSwitchId = (aliNet.vSwitchId as string | undefined) ?? (subnetIds?.length ? subnetIds.join(',') : undefined);
+    if (vSwitchId) {
+      p.VSwitchId = vSwitchId;
       p.ScheduleStrategy = 'VSwitchRandom';
       delete p.ZoneId;
     }
@@ -778,7 +789,7 @@ function toVolumeConfigInput(v: { readonly id: string; readonly type: string; re
   return { id: v.id, type: v.type, options: v.options };
 }
 
-export interface SecretRefResolvedSecret {
+interface SecretRefResolvedSecret {
   readonly value?: string | undefined;
   readonly platformRefs?: import('../../features/container-secret/types.ts').PlatformSecretRefs | undefined;
 }
@@ -788,14 +799,8 @@ export interface SecretRefResolvedSecret {
  * Reference mode (SecretVolume) when platformRefs.eci exists.
  * Inline fallback: returns mounts for the caller to merge into secretMounts
  * (avoids ConfigFileVolume index collision with existing secretMounts).
- *
- * @param refs - PlatformSecretRef[] from PodSpec.spec.secretRefs
- * @param params - ECI API parameter map (mutated)
- * @param volumeBase - Starting index for Volume.N params (existing volume count)
- * @param secrets - Map<secretName, { value?: plaintext, platformRefs? }> — value MUST be decrypted
- * @returns Inline mounts to append to secretMounts (caller merges them)
  */
-export function encodeSecretRefs(
+function encodeSecretRefs(
   refs: readonly import('../../core/pod/types.ts').PlatformSecretRef[],
   params: Record<string, string>,
   volumeBase: number,
@@ -808,7 +813,7 @@ export function encodeSecretRefs(
     const platformName = cs?.platformRefs?.eci;
 
     if (platformName) {
-      // 引用模式 — ECI on ACK: SecretVolume
+      // Reference mode — ECI on ACK: SecretVolume
       const vi = volumeBase + i + 1;
       params[`Volume.${vi}.Name`] = `secret-${ref.secretName}`;
       params[`Volume.${vi}.Type`] = 'SecretVolume';
@@ -817,13 +822,12 @@ export function encodeSecretRefs(
         params[`Volume.${vi}.SecretVolume.Items.${j + 1}.Key`] = key;
         params[`Volume.${vi}.SecretVolume.Items.${j + 1}.Path`] = key;
       });
+    } else if (cs?.value !== undefined) {
+      // Inline fallback — embed plaintext value
+      inlineMounts.push({ mountPath: ref.mountPath, data: cs.value, mode: 0o600 });
     } else {
-      // 降级内联 — 返回 mount config，由调用方合并到 secretMounts
-      inlineMounts.push({
-        mountPath: ref.mountPath,
-        data: cs?.value ?? '',
-        mode: ref.mode ?? 0o400,
-      });
+      // No resolved secret for this ref — skip
+      console.debug(`[eci-codec] unresolved secret ref "${ref.secretName}" — skipping`);
     }
   });
 
@@ -836,7 +840,7 @@ export function buildPodCreateParams(spec: PodSpec, region: string): Record<stri
   p.RegionId = region;
 
   // ── Top-level fields ──
-  p.ContainerGroupName = spec.metadata.name;
+  p.ContainerGroupName = sanitizeContainerName(spec.metadata.name);
 
   const containers = spec.spec.containers.map(c => toContainerCreateConfig(c, spec.spec.priority));
   const totalCpu = containers.reduce((s, c) => s + (c.resources?.limits?.cpu ?? 0), 0) || 1;
@@ -971,6 +975,29 @@ export function buildPodCreateParams(spec: PodSpec, region: string): Record<stri
 
   // ── Network defaults ──
   p.AutoMatchImageCache = 'true';
+
+  // ── Provider override field mappings ──
+  const aliOverride = (spec.providerOverrides?.alibaba ?? {}) as Record<string, unknown>;
+
+  p.SecurityGroupId = String(aliOverride.securityGroupId ?? '');
+  if (aliOverride.vSwitchId) {
+    p.VSwitchId = String(aliOverride.vSwitchId);
+  }
+  if (Array.isArray(aliOverride.subnetIds) && aliOverride.subnetIds.length > 0) {
+    p.VSwitchId = (aliOverride.subnetIds as string[]).join(',');
+    p.ScheduleStrategy = 'VSwitchRandom';
+    delete p.ZoneId;
+  }
+  p.AutoCreateEip = String(aliOverride.autoCreateEip ?? false);
+
+  // Spot Strategy
+  if (aliOverride.spotStrategy) p.SpotStrategy = String(aliOverride.spotStrategy);
+  if (aliOverride.spotPriceLimit !== undefined) p.SpotPriceLimit = String(aliOverride.spotPriceLimit);
+
+  // Passthrough
+  if (aliOverride.ramRoleName) p.RamRoleName = String(aliOverride.ramRoleName);
+  if (aliOverride.resourceGroupId) p.ResourceGroupId = String(aliOverride.resourceGroupId);
+  if (aliOverride.activeDeadlineSeconds !== undefined) p.ActiveDeadlineSeconds = String(aliOverride.activeDeadlineSeconds);
 
   // ── Extension fields (providerOverrides) ──
   if (spec.providerOverrides) {

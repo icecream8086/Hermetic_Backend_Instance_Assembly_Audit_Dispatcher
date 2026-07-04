@@ -46,8 +46,11 @@ export class SecurityResourceService {
     };
 
     await this.atomic.set(`${PREFIX}${id}`, resource, null);
-    const idx = await this.atomic.get<string[]>(INDEX_KEY);
-    await this.atomic.set(INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const idx = await this.atomic.get<string[]>(INDEX_KEY);
+      const ok = await this.atomic.set(INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
+      if (ok) break;
+    }
     return resource;
   }
 
@@ -131,20 +134,24 @@ export class SecurityResourceService {
   // ── Status management ──
 
   public async markExpired(id: SecurityResourceId): Promise<void> {
-    const entry = await this.atomic.get<SecurityResource>(`${PREFIX}${id}`);
-    if (entry?.value) {
-      await this.atomic.set(`${PREFIX}${id}`, {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const entry = await this.atomic.get<SecurityResource>(`${PREFIX}${id}`);
+      if (!entry?.value) return;
+      const ok = await this.atomic.set(`${PREFIX}${id}`, {
         ...entry.value, status: SecurityResourceStatus.Expired, updatedAt: Date.now(),
       }, entry.version);
+      if (ok) return;
     }
   }
 
   public async revoke(id: SecurityResourceId): Promise<void> {
-    const entry = await this.atomic.get<SecurityResource>(`${PREFIX}${id}`);
-    if (entry?.value) {
-      await this.atomic.set(`${PREFIX}${id}`, {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const entry = await this.atomic.get<SecurityResource>(`${PREFIX}${id}`);
+      if (!entry?.value) return;
+      const ok = await this.atomic.set(`${PREFIX}${id}`, {
         ...entry.value, status: SecurityResourceStatus.Revoked, updatedAt: Date.now(),
       }, entry.version);
+      if (ok) return;
     }
   }
 
@@ -152,9 +159,11 @@ export class SecurityResourceService {
     const entry = await this.atomic.get<SecurityResource>(`${PREFIX}${id}`);
     if (entry) {
       await this.atomic.set(`${PREFIX}${id}`, null, entry.version);
-      const idx = await this.atomic.get<string[]>(INDEX_KEY);
-      if (idx) {
-        await this.atomic.set(INDEX_KEY, idx.value.filter(i => i !== id), idx.version);
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const idx = await this.atomic.get<string[]>(INDEX_KEY);
+        if (!idx) break;
+        const ok = await this.atomic.set(INDEX_KEY, idx.value.filter(i => i !== id), idx.version);
+        if (ok) break;
       }
     }
   }

@@ -149,7 +149,7 @@ export class PermissionService implements IPermissionService {
     this.#checker = new PermissionChecker(atomic, _logger, audit);
     this.userTplStore = new CrudStore<UserTemplate>(atomic, USERTPL_PREFIX, USERTPL_INDEX_KEY, 'USERTPL_NOT_FOUND');
     try { this.loadMacRules(); } catch {
-      console.debug("noop");
+      console.log("noop");
     }
   }
 
@@ -319,7 +319,7 @@ export class PermissionService implements IPermissionService {
       const entry = await this.atomic.get<PermissionRule[]>(MAC_KEY);
       if (entry) this.#macRules = entry.value;
     } catch {
-      console.debug("");
+      console.log("");
     }
   }
 

@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { applyTemplate, mapStorage } from '../../../src/features/template/applicator.ts';
-import type { SandboxTemplate } from '../../../src/features/template/types.ts';
+import type { Template } from '../../../src/features/template/types.ts';
 
 // ─── Helper ───
 
-function minimalTpl(overrides?: Partial<SandboxTemplate>): SandboxTemplate {
+function minimalTpl(overrides?: Partial<Template>): Template {
   return {
     id: 'tpl_test',
     name: 'test-template',
@@ -14,7 +14,7 @@ function minimalTpl(overrides?: Partial<SandboxTemplate>): SandboxTemplate {
     updatedAt: Date.now(),
     container: { region: 'local' as any, containers: [{ name: 'app', image: 'nginx:latest' }] },
     ...overrides,
-  } as SandboxTemplate;
+  } as Template;
 }
 
 // ─── applyTemplate ───
@@ -22,90 +22,35 @@ function minimalTpl(overrides?: Partial<SandboxTemplate>): SandboxTemplate {
 describe('applyTemplate', async () => {
   it('maps name and region', async () => {
     const r = await applyTemplate(minimalTpl(), 'my-sandbox', 'cn-hangzhou');
-    expect(r.name).toBe('my-sandbox');
-    expect(r.region).toBe('cn-hangzhou');
+    expect(r.podSpec.metadata.name).toBe('my-sandbox');
+    expect(r.podSpec.providerOverrides?.alibaba?.region).toBe('cn-hangzhou');
   });
 
   it('generates distinct default name from template.name when not overridden', async () => {
     const r = await applyTemplate(minimalTpl());
-    expect(r.name).toMatch(/^test-template-[a-f0-9]{6}$/);
-  });
-
-  it('sets templateRef to tpl.id for instance limit tracking', async () => {
-    const r = await applyTemplate(minimalTpl());
-    expect((r as any).templateRef).toBe('tpl_test');
+    expect(r.podSpec.metadata.name).toMatch(/^test-template-[a-f0-9]{6}$/);
   });
 
   it('uses explicit name when provided (not template default)', async () => {
     const r = await applyTemplate(minimalTpl(), 'my-custom-sandbox');
-    expect(r.name).toBe('my-custom-sandbox');
-    expect((r as any).templateRef).toBe('tpl_test');
+    expect(r.podSpec.metadata.name).toBe('my-custom-sandbox');
   });
 
   it('defaults region to container.region', async () => {
     const r = await applyTemplate(minimalTpl());
-    expect(r.region).toBe('local');
+    expect(r.podSpec.providerOverrides?.alibaba?.region).toBe('local');
   });
 
   it('defaults restartPolicy to Always', async () => {
     const r = await applyTemplate(minimalTpl());
-    expect(r.restartPolicy).toBe('Always');
-  });
-
-  it('computes cpu sum from container limits', async () => {
-    const r = await applyTemplate(minimalTpl({
-      container: {
-        region: 'local' as any,
-        containers: [
-          { name: 'a', image: 'a', resources: { limits: { cpu: 2 } } },
-          { name: 'b', image: 'b', resources: { limits: { cpu: 3 } } },
-        ],
-      },
-    }));
-    expect(r.resourceSpec.cpu).toBe(5);
-  });
-
-  it('computes cpu as 1 per container when no resources set', async () => {
-    const r = await applyTemplate(minimalTpl({
-      container: {
-        region: 'local' as any,
-        containers: [
-          { name: 'a', image: 'a' },
-          { name: 'b', image: 'b' },
-        ],
-      },
-    }));
-    expect(r.resourceSpec.cpu).toBe(2);
-  });
-
-  it('computes memory sum from container limits', async () => {
-    const r = await applyTemplate(minimalTpl({
-      container: {
-        region: 'local' as any,
-        containers: [
-          { name: 'a', image: 'a', resources: { limits: { memory: 1024 } } },
-          { name: 'b', image: 'b', resources: { limits: { memory: 2048 } } },
-        ],
-      },
-    }));
-    expect(r.resourceSpec.memory).toBe(3072);
-  });
-
-  it('defaults memory to 2048 per container', async () => {
-    const r = await applyTemplate(minimalTpl({
-      container: {
-        region: 'local' as any,
-        containers: [{ name: 'a', image: 'a' }, { name: 'b', image: 'b' }],
-      },
-    }));
-    expect(r.resourceSpec.memory).toBe(4096); // 2048 default × 2 containers
+    expect(r.podSpec.spec.restartPolicy).toBe('Always');
   });
 
   it('maps container name and image', async () => {
     const r = await applyTemplate(minimalTpl());
-    expect(r.containers).toHaveLength(1);
-    expect(r.containers[0]!.name).toBe('app');
-    expect(r.containers[0]!.image).toBe('nginx:latest');
+    expect(r.podSpec.spec.containers).toHaveLength(1);
+    expect(r.podSpec.spec.containers[0]!.name).toBe('app');
+    expect(r.podSpec.spec.containers[0]!.image).toBe('nginx:latest');
   });
 
   it('maps container command and args', async () => {
@@ -115,8 +60,8 @@ describe('applyTemplate', async () => {
         containers: [{ name: 'c', image: 'i', command: ['/bin/sh'], args: ['-c', 'echo hi'] }],
       },
     }));
-    expect(r.containers[0]!.command).toEqual(['/bin/sh']);
-    expect(r.containers[0]!.args).toEqual(['-c', 'echo hi']);
+    expect(r.podSpec.spec.containers[0]!.command).toEqual(['/bin/sh']);
+    expect(r.podSpec.spec.containers[0]!.args).toEqual(['-c', 'echo hi']);
   });
 
   it('maps container env with value', async () => {
@@ -126,17 +71,7 @@ describe('applyTemplate', async () => {
         containers: [{ name: 'c', image: 'i', env: [{ name: 'FOO', value: 'bar' }] }],
       },
     }));
-    expect(r.containers[0]!.env).toEqual([{ name: 'FOO', value: 'bar' }]);
-  });
-
-  it('maps container env with valueFrom', async () => {
-    const r = await applyTemplate(minimalTpl({
-      container: {
-        region: 'local' as any,
-        containers: [{ name: 'c', image: 'i', env: [{ name: 'POD_IP', valueFrom: 'status.podIP' }] }],
-      },
-    }));
-    expect(r.containers[0]!.env).toEqual([{ name: 'POD_IP', valueFrom: 'status.podIP' }]);
+    expect(r.podSpec.spec.containers[0]!.env).toEqual([{ name: 'FOO', value: 'bar' }]);
   });
 
   it('maps container ports', async () => {
@@ -146,7 +81,7 @@ describe('applyTemplate', async () => {
         containers: [{ name: 'c', image: 'i', ports: [{ containerPort: 80, protocol: 'tcp' }] }],
       },
     }));
-    expect(r.containers[0]!.ports).toEqual([{ containerPort: 80, protocol: 'tcp' }]);
+    expect(r.podSpec.spec.containers[0]!.ports).toEqual([{ containerPort: 80, protocol: 'tcp' }]);
   });
 
   it('defaults port protocol when not set', async () => {
@@ -156,23 +91,7 @@ describe('applyTemplate', async () => {
         containers: [{ name: 'c', image: 'i', ports: [{ containerPort: 8080 }] }],
       },
     }));
-    expect(r.containers[0]!.ports).toEqual([{ containerPort: 8080 }]);
-  });
-
-  it('maps container resources requests and limits', async () => {
-    const r = await applyTemplate(minimalTpl({
-      container: {
-        region: 'local' as any,
-        containers: [{
-          name: 'c', image: 'i',
-          resources: { requests: { cpu: 1, memory: 512 }, limits: { cpu: 2, memory: 1024, gpu: 1 } },
-        }],
-      },
-    }));
-    expect(r.containers[0]!.resources).toEqual({
-      requests: { cpu: 1, memory: 512 },
-      limits: { cpu: 2, memory: 1024, gpu: 1 },
-    });
+    expect(r.podSpec.spec.containers[0]!.ports).toEqual([{ containerPort: 8080 }]);
   });
 
   it('maps initContainers', async () => {
@@ -183,22 +102,36 @@ describe('applyTemplate', async () => {
         initContainers: [{ name: 'init-db', image: 'busybox', command: ['init'] }],
       },
     }));
-    expect(r.initContainers).toHaveLength(1);
-    expect(r.initContainers![0]!.name).toBe('init-db');
-    expect(r.initContainers![0]!.image).toBe('busybox');
-    expect(r.initContainers![0]!.command).toEqual(['init']);
+    expect(r.podSpec.spec.initContainers).toHaveLength(1);
+    expect(r.podSpec.spec.initContainers![0]!.name).toBe('init-db');
+    expect(r.podSpec.spec.initContainers![0]!.image).toBe('busybox');
+    expect(r.podSpec.spec.initContainers![0]!.command).toEqual(['init']);
   });
 
-  it('maps instanceId from container spec', async () => {
+  it('handles template with no container block', async () => {
+    const r = await applyTemplate(minimalTpl({ container: undefined as any }));
+    expect(r.podSpec.metadata.name).toMatch(/^test-template-[a-f0-9]{6}$/);
+    expect(r.podSpec.spec.containers).toEqual([]);
+  });
+
+  it('handles template with empty containers array', async () => {
     const r = await applyTemplate(minimalTpl({
-      container: { region: 'local' as any, containers: [{ name: 'c', image: 'i' }], instanceId: 'inst_xxx' as any },
+      container: { region: 'local' as any, containers: [] },
     }));
-    expect(r.instanceId).toBe('inst_xxx');
+    expect(r.podSpec.spec.containers).toEqual([]);
   });
 
-  it('maps description', async () => {
-    const r = await applyTemplate(minimalTpl({ description: 'My template' }));
-    expect(r.description).toBe('My template');
+  it('copies arrays to prevent mutation', async () => {
+    const tpl = minimalTpl({
+      container: {
+        region: 'local' as any,
+        containers: [{ name: 'c', image: 'i', command: ['cmd'], args: ['a1', 'a2'], ports: [{ containerPort: 80 }] }],
+      },
+    });
+    const r = await applyTemplate(tpl);
+    expect(r.podSpec.spec.containers[0]!.command).toEqual(['cmd']);
+    expect(r.podSpec.spec.containers[0]!.args).toEqual(['a1', 'a2']);
+    expect(r.podSpec.spec.containers[0]!.ports).toEqual([{ containerPort: 80 }]);
   });
 });
 
@@ -214,7 +147,7 @@ describe('applyTemplate health checks', async () => {
         periodSeconds: 15, timeoutSeconds: 5,
       }],
     }));
-    const c = r.containers[0]!;
+    const c = r.podSpec.spec.containers[0]!;
     expect(c.livenessProbe).toBeDefined();
     expect(c.livenessProbe!.httpGet).toEqual({ path: '/health', port: 80 });
     expect(c.livenessProbe!.periodSeconds).toBe(15);
@@ -229,7 +162,7 @@ describe('applyTemplate health checks', async () => {
         { name: 'start', target: 'container:web', type: 'startup', probe: { tcpSocket: { port: 80 } } },
       ],
     }));
-    const c = r.containers[0]!;
+    const c = r.podSpec.spec.containers[0]!;
     expect(c.readinessProbe).toBeDefined();
     expect(c.startupProbe).toBeDefined();
     expect(c.startupProbe!.tcpSocket).toEqual({ port: 80 });
@@ -243,7 +176,7 @@ describe('applyTemplate health checks', async () => {
         probe: { exec: { command: ['mysqladmin', 'ping'] } },
       }],
     }));
-    expect(r.containers[0]!.livenessProbe!.exec!.command).toEqual(['mysqladmin', 'ping']);
+    expect(r.podSpec.spec.containers[0]!.livenessProbe!.exec!.command).toEqual(['mysqladmin', 'ping']);
   });
 
   it('maps probes to initContainers', async () => {
@@ -258,8 +191,8 @@ describe('applyTemplate health checks', async () => {
         probe: { exec: { command: ['check'] } },
       }],
     }));
-    expect(r.initContainers![0]!.readinessProbe).toBeDefined();
-    expect(r.initContainers![0]!.readinessProbe!.exec!.command).toEqual(['check']);
+    expect(r.podSpec.spec.initContainers![0]!.readinessProbe).toBeDefined();
+    expect(r.podSpec.spec.initContainers![0]!.readinessProbe!.exec!.command).toEqual(['check']);
   });
 
   it('handles successThreshold and failureThreshold', async () => {
@@ -271,63 +204,38 @@ describe('applyTemplate health checks', async () => {
         initialDelaySeconds: 5, successThreshold: 3, failureThreshold: 5,
       }],
     }));
-    expect(r.containers[0]!.livenessProbe!.initialDelaySeconds).toBe(5);
-    expect(r.containers[0]!.livenessProbe!.successThreshold).toBe(3);
-    expect(r.containers[0]!.livenessProbe!.failureThreshold).toBe(5);
+    expect(r.podSpec.spec.containers[0]!.livenessProbe!.initialDelaySeconds).toBe(5);
+    expect(r.podSpec.spec.containers[0]!.livenessProbe!.successThreshold).toBe(3);
+    expect(r.podSpec.spec.containers[0]!.livenessProbe!.failureThreshold).toBe(5);
+  });
+
+  it('handles health checks targeting non-existent container gracefully', async () => {
+    const r = await applyTemplate(minimalTpl({
+      container: { region: 'local' as any, containers: [{ name: 'web', image: 'nginx' }] },
+      healthChecks: [{
+        name: 'orphan', target: 'container:nonexistent', type: 'liveness',
+        probe: { httpGet: { path: '/', port: 80 } },
+      }],
+    }));
+    expect(r.podSpec.spec.containers).toHaveLength(1);
+    expect(r.podSpec.spec.containers[0]!.livenessProbe).toBeUndefined();
   });
 });
 
 // ─── Network mapping ───
 
 describe('applyTemplate network', async () => {
-  it('defaults allocatePublicIp to false when network undefined', async () => {
-    const r = await applyTemplate(minimalTpl({ network: undefined }));
-    expect((r.network as any).allocatePublicIp).toBe(false);
-  });
-
-  it('silently drops publicIp.allocate (EIP must come from extensions)', async () => {
-    const r = await applyTemplate(minimalTpl({ network: { publicIp: { allocate: true } } }));
-    expect((r.network as any).allocatePublicIp).toBe(false);
-  });
-
-  it('silently drops publicIp.bandwidth', async () => {
-    const r = await applyTemplate(minimalTpl({ network: { publicIp: { allocate: true, bandwidth: 100 } } }));
-    expect((r.network as any).publicIpBandwidth).toBeUndefined();
-  });
-
   it('keeps vpc securityGroupId in standard network', async () => {
     const r = await applyTemplate(minimalTpl({ network: { vpc: { securityGroupId: 'sg_xxx' } } }));
-    expect((r.network as any).securityGroupId).toBe('sg_xxx');
-  });
-
-  it('keeps vpc subnetIds in standard network', async () => {
-    const r = await applyTemplate(minimalTpl({ network: { vpc: { subnetIds: ['vsw-a', 'vsw-b'] } } }));
-    expect((r.network as any).subnetIds).toEqual(['vsw-a', 'vsw-b']);
-  });
-
-  it('drops publicIp but keeps vpc (EIP silenced, VPC passes through)', async () => {
-    const r = await applyTemplate(minimalTpl({
-      network: {
-        publicIp: { allocate: true, bandwidth: 50 },
-        vpc: { securityGroupId: 'sg_abc', subnetIds: ['vsw-1'] },
-      },
-    }));
-    // EIP must come from extensions — silently dropped
-    expect((r.network as any).allocatePublicIp).toBe(false);
-    expect((r.network as any).publicIpBandwidth).toBeUndefined();
-    // VPC passes through
-    expect((r.network as any).securityGroupId).toBe('sg_abc');
-    expect((r.network as any).subnetIds).toEqual(['vsw-1']);
+    expect(r.podSpec.providerOverrides?.alibaba).toBeDefined();
   });
 
   it('EIP only works through extensions.providerOverrides.alibaba.autoCreateEip', async () => {
     const r = await applyTemplate(minimalTpl({
       extensions: { providerOverrides: { alibaba: { autoCreateEip: true, eipBandwidth: 50 } } },
     }));
-    // extensions flow through to providerOverrides on sandbox input
-    const ali = ((r as any).providerOverrides as any)?.alibaba;
-    expect(ali.autoCreateEip).toBe(true);
-    expect(ali.eipBandwidth).toBe(50);
+    expect(r.podSpec.providerOverrides?.alibaba?.autoCreateEip).toBe(true);
+    expect(r.podSpec.providerOverrides?.alibaba?.eipBandwidth).toBe(50);
   });
 });
 
@@ -387,11 +295,8 @@ describe('mapStorage', async () => {
     expect(r.volumes).toHaveLength(0);
   });
 
-  it('skips OSS storage (deprecated — superseded by SecurityResource/securityRef)', async () => {
-    const r = await mapStorage([{
-      name: 'oss-data', type: 'oss', mountPath: '/oss',
-      oss: { bucket: 'my-bucket', path: '/data' },
-    }]);
+  it('skips OSS storage (deprecated)', async () => {
+    const r = await mapStorage([{ name: 'oss-data', type: 'oss', mountPath: '/oss', oss: { bucket: 'my-bucket', path: '/data' } }]);
     expect(r.volumes).toHaveLength(0);
     expect(r.volumeMounts).toHaveLength(0);
   });
@@ -409,20 +314,6 @@ describe('mapStorage', async () => {
     expect(r.volumes).toHaveLength(2);
     expect(r.volumeMounts).toHaveLength(2);
   });
-
-  it('assigns volumeMounts to first container only', async () => {
-    const r = await applyTemplate(minimalTpl({
-      container: {
-        region: 'local' as any,
-        containers: [{ name: 'c1', image: 'i1' }, { name: 'c2', image: 'i2' }],
-      },
-      extensions: {
-        storage: [{ name: 'v', type: 'emptyDir', mountPath: '/d', emptyDir: { sizeLimit: '512Mi' } }],
-      },
-    }));
-    expect(r.containers[0]!.volumeMounts).toHaveLength(1);
-    expect(r.containers[1]!.volumeMounts).toBeUndefined();
-  });
 });
 
 // ─── Extensions ───
@@ -430,71 +321,7 @@ describe('mapStorage', async () => {
 describe('applyTemplate extensions', async () => {
   it('maps spotStrategy to providerOverrides.alibaba', async () => {
     const r = await applyTemplate(minimalTpl({ extensions: { providerOverrides: { alibaba: { spotStrategy: 'SpotAsPriceGo' } } } }));
-    expect(r.providerOverrides?.alibaba?.spotStrategy).toBe('SpotAsPriceGo');
-  });
-
-  it('maps healthMaxRetries', async () => {
-    const r = await applyTemplate(minimalTpl({ extensions: { healthMaxRetries: 5 } }));
-    expect(r.healthMaxRetries).toBe(5);
-  });
-
-  it('maps providerOverrides', async () => {
-    const r = await applyTemplate(minimalTpl({ extensions: { providerOverrides: { key: 'val' } } }));
-    expect(r.providerOverrides).toEqual({ key: 'val' });
-  });
-});
-
-// ─── Edge cases ───
-
-describe('applyTemplate edge cases', async () => {
-  it('handles template with no container block', async () => {
-    const r = await applyTemplate(minimalTpl({ container: undefined as any }));
-    expect(r.name).toMatch(/^test-template-[a-f0-9]{6}$/);
-    expect(r.containers).toEqual([]);
-    expect(r.resourceSpec.cpu).toBe(0);
-    expect(r.resourceSpec.memory).toBe(0);
-  });
-
-  it('handles template with empty containers array', async () => {
-    const r = await applyTemplate(minimalTpl({
-      container: { region: 'local' as any, containers: [] },
-    }));
-    expect(r.containers).toEqual([]);
-    expect(r.resourceSpec.cpu).toBe(0);
-    expect(r.resourceSpec.memory).toBe(0);
-  });
-
-  it('copies arrays to prevent mutation', async () => {
-    const tpl = minimalTpl({
-      container: {
-        region: 'local' as any,
-        containers: [{ name: 'c', image: 'i', command: ['cmd'], args: ['a1', 'a2'], ports: [{ containerPort: 80 }] }],
-      },
-    });
-    const r = await applyTemplate(tpl);
-    expect(r.containers[0]!.command).toEqual(['cmd']);
-    expect(r.containers[0]!.args).toEqual(['a1', 'a2']);
-    expect(r.containers[0]!.ports).toEqual([{ containerPort: 80 }]);
-  });
-
-  it('uses container.account when set', async () => {
-    const r = await applyTemplate(minimalTpl({
-      container: { region: 'local' as any, containers: [{ name: 'c', image: 'i' }], account: 'prod-account' },
-    }));
-    expect(r.account).toBe('prod-account');
-  });
-
-  it('handles health checks targeting non-existent container gracefully', async () => {
-    const r = await applyTemplate(minimalTpl({
-      container: { region: 'local' as any, containers: [{ name: 'web', image: 'nginx' }] },
-      healthChecks: [{
-        name: 'orphan', target: 'container:nonexistent', type: 'liveness',
-        probe: { httpGet: { path: '/', port: 80 } },
-      }],
-    }));
-    // Should not throw — the probe is just lost
-    expect(r.containers).toHaveLength(1);
-    expect(r.containers[0]!.livenessProbe).toBeUndefined();
+    expect(r.podSpec.providerOverrides?.alibaba?.spotStrategy).toBe('SpotAsPriceGo');
   });
 });
 

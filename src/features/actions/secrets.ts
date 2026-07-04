@@ -44,8 +44,11 @@ export class WorkflowSecretService {
     }
 
     await this.atomic.set(PFX + id, secret, null);
-    const idx = await this.atomic.get<string[]>(IDX);
-    await this.atomic.set(IDX, [...(idx?.value ?? []), id], idx?.version ?? null);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const idx = await this.atomic.get<string[]>(IDX);
+      const ok = await this.atomic.set(IDX, [...(idx?.value ?? []), id], idx?.version ?? null);
+      if (ok) break;
+    }
     return secret;
   }
 
@@ -72,8 +75,12 @@ export class WorkflowSecretService {
     const entry = await this.atomic.get<WorkflowSecret>(PFX + id);
     if (!entry) throw new AppError(404, 'SECRET_NOT_FOUND', 'Secret not found');
     await this.atomic.set(PFX + id, null, entry.version);
-    const idx = await this.atomic.get<string[]>(IDX);
-    if (idx) await this.atomic.set(IDX, idx.value.filter(i => i !== id), idx.version);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const idx = await this.atomic.get<string[]>(IDX);
+      if (!idx) return;
+      const ok = await this.atomic.set(IDX, idx.value.filter(i => i !== id), idx.version);
+      if (ok) return;
+    }
   }
 
   /**

@@ -6,7 +6,6 @@
 import type { IAtomicStore } from '../store/interfaces.ts';
 import type { PodId, PodEntity, PodPhase } from './types.ts';
 import type { VersionId } from '../brand.ts';
-import { generateVersionId } from '../brand.ts';
 import { AppError } from '../types.ts';
 const KEY_PREFIX = 'pod:';
 const INDEX_KEY = 'pod:ids';
@@ -45,13 +44,21 @@ export class PodStore {
   }
 
   public async addToIndex(id: string): Promise<void> {
-    const idx = await this.atomic.get<string[]>(INDEX_KEY);
-    await this.atomic.set(INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const idx = await this.atomic.get<string[]>(INDEX_KEY);
+      const ok = await this.atomic.set(INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
+      if (ok) return;
+    }
   }
 
   public async removeFromIndex(id: string): Promise<void> {
-    const idx = await this.atomic.get<string[]>(INDEX_KEY);
-    if (idx) await this.atomic.set(INDEX_KEY, idx.value.filter(i => i !== id), idx.version);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const idx = await this.atomic.get<string[]>(INDEX_KEY);
+      if (idx) {
+        const ok = await this.atomic.set(INDEX_KEY, idx.value.filter(i => i !== id), idx.version);
+        if (ok) return;
+      }
+    }
   }
 
   /** Insert a new pod entity (expects OCC version null — first write). */
@@ -65,20 +72,5 @@ export class PodStore {
     const newVersion = await this.atomic.set(`${KEY_PREFIX}${podId}`, next, expectedVersion);
     if (!newVersion) throw new AppError(409, 'CONFLICT', 'Concurrent modification detected');
     return next;
-  }
-
-  /** Perform an OCC-guarded phase transition. */
-  public async transition(podId: PodId, to: PodPhase): Promise<PodEntity> {
-    const entry = await this.atomic.get<PodEntity>(`${KEY_PREFIX}${podId}`);
-    if (!entry) throw new AppError(404, 'POD_NOT_FOUND', `Pod ${podId} not found`);
-
-    const updated: PodEntity = {
-      ...entry.value,
-      phase: to,
-      updatedAt: Date.now(),
-      version: generateVersionId(),
-    };
-
-    return this.update(podId, updated, entry.value.version);
   }
 }

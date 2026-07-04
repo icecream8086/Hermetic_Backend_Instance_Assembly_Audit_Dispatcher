@@ -263,13 +263,19 @@ export class CredentialService {
   }
 
   async #addToIndex(id: CredentialId): Promise<void> {
-    const idx = await this.atomic.get<string[]>(INDEX_KEY);
-    await this.atomic.set(INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const idx = await this.atomic.get<string[]>(INDEX_KEY);
+      const ok = await this.atomic.set(INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
+      if (ok) return;
+    }
   }
 
   async #removeFromIndex(id: CredentialId): Promise<void> {
-    const idx = await this.atomic.get<string[]>(INDEX_KEY);
-    if (!idx) return;
-    await this.atomic.set(INDEX_KEY, idx.value.filter((i: string) => i !== id), idx.version);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const idx = await this.atomic.get<string[]>(INDEX_KEY);
+      if (!idx) return;
+      const ok = await this.atomic.set(INDEX_KEY, idx.value.filter((i: string) => i !== id), idx.version);
+      if (ok) return;
+    }
   }
 }

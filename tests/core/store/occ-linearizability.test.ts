@@ -747,38 +747,28 @@ describe('OCC linearizability (formal)', () => {
             calls++;
             throw new TransactConflictError();
           },
-          { maxRetries: 2, baseDelayMs: 1 },
+          { maxRetries: 2, attemptTimeoutMs: 1000 },
         ),
       ).rejects.toThrow(TransactRetryExhausted);
       expect(calls).toBe(3); // 1 initial + 2 retries
     });
 
-    it('uses exponential backoff (increasing delays)', async () => {
-      const delays: number[] = [];
+    it('retries immediately (no sleep) on TransactConflictError', async () => {
+      const timestamps: number[] = [];
       await expect(
         withRetry(
           async () => {
-            delays.push(performance.now());
+            timestamps.push(performance.now());
             throw new TransactConflictError();
           },
-          { maxRetries: 3, baseDelayMs: 15 },
+          { maxRetries: 3, attemptTimeoutMs: 1000 },
         ),
       ).rejects.toThrow(TransactRetryExhausted);
 
-      // Check delays increase: delay[i+1] - delay[i] >= baseDelay * 2^i
-      // With baseDelay=15: ~15ms, ~30ms, ~60ms
-      expect(delays.length).toBe(4); // initial + 3 retries
-      const intervals = [
-        delays[1]! - delays[0]!,
-        delays[2]! - delays[1]!,
-        delays[3]! - delays[2]!,
-      ];
-      // Each interval should be at least 10ms (accounting for timing jitter)
-      for (let i = 0; i < intervals.length; i++) {
-        expect(intervals[i]).toBeGreaterThanOrEqual(8); // allow timing jitter
-      }
-      // The last interval should be the longest (rough check)
-      expect(intervals[2]!).toBeGreaterThanOrEqual(intervals[0]!);
+      expect(timestamps.length).toBe(4); // initial + 3 retries
+      // All retries should complete within 50ms total since there's no sleep
+      const totalTime = timestamps[3]! - timestamps[0]!;
+      expect(totalTime).toBeLessThan(50);
     });
   });
 

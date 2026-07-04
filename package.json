@@ -40,7 +40,7 @@
       "permission": "/api/permissions",
       "system-group": "/api/system-groups",
       "template": "/api/templates",
-      "sandbox": "/api/sandboxes",
+      "pod": "/api/pods",
       "platforms": "/api/platforms",
       "network": "/api/networks",
       "topology": "/api/topology",

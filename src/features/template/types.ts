@@ -1,7 +1,7 @@
 import type { RegionId, ZoneId } from '../../core/region/types.ts';
 import type { InstanceId } from '../../core/region/instance.ts';
 import type { ProbeSpec, OciImageRef } from '../../core/provider/types.ts';
-import type { PodSpec } from '../sandbox/assembly/types.ts';
+import type { PodSpec } from './assembly/types.ts';
 
 // ═══════════════════════════════════════════
 // 模板信息 — 模板自身的元数据
@@ -132,17 +132,11 @@ export interface TemplateStorage {
     readonly medium?: 'Default' | 'Memory' | undefined;
   } | undefined;
   readonly disk?: { diskId: string; fsType?: string; sizeGiB?: number; readOnly?: boolean; deleteWithInstance?: boolean } | undefined;
-  /** @deprecated 未使用，开发错误 */
-  readonly hostPath?: { path: string } | undefined;
   readonly configMap?: { name: string; env: readonly { key: string; value: string }[] } | undefined;
   readonly secret?: { name: string; items?: readonly { key: string; path: string; mode?: number }[] } | undefined;
   readonly size?: number | undefined;
-  /** @deprecated 使用 securityRefs 替代 */
-  readonly securityRef?: string | undefined;
   /** 引用 SecurityResource 的名称列表（S3 存储策略） */
   readonly securityRefs?: readonly string[] | undefined;
-  /** @deprecated 使用 containerSecretRefs 替代 */
-  readonly secretRef?: string | undefined;
   /** 引用 ContainerSecret 列表（平台密钥注入） */
   readonly containerSecretRefs?: readonly ContainerSecretBinding[] | undefined;
   readonly providerOverrides?: Record<string, unknown> | undefined;
@@ -168,7 +162,7 @@ export interface TemplateExtensions {
 // 完整模板定义
 // ═══════════════════════════════════════════
 
-export interface SandboxTemplate {
+export interface Template {
   readonly id: string;
   readonly name: string;
   readonly description?: string | undefined;

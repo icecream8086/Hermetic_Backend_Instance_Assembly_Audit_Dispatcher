@@ -137,12 +137,15 @@ export class HybridAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmi
 
   async #persistToStore(e: StoredAuditEntry): Promise<void> {
     if (!this.#atomic) return;
-    const idx = await this.#atomic.get<string[]>(IDX_AUDIT);
-    const ids = idx?.value ?? [];
-    ids.push(e.id);
-    if (ids.length > MAX_KV_BATCH) ids.shift();
     await this.#atomic.set(`${PFX_AUDIT}${e.id}`, e, null);
-    await this.#atomic.set(IDX_AUDIT, ids, idx?.version ?? null);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const idx = await this.#atomic.get<string[]>(IDX_AUDIT);
+      const ids = idx?.value ?? [];
+      ids.push(e.id);
+      if (ids.length > MAX_KV_BATCH) ids.shift();
+      const ok = await this.#atomic.set(IDX_AUDIT, ids, idx?.version ?? null);
+      if (ok) return;
+    }
   }
 
   async #queryFromStore(params: LogQuery): Promise<StoredAuditEntry[]> {
@@ -184,10 +187,14 @@ export class HybridAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmi
       if (idx) {
         let removed = 0;
         for (const id of idx.value) {
-          const entry = await this.#atomic.get<StoredAuditEntry>(PFX_AUDIT + id);
-          if (entry && entry.value.timestamp < beforeTs) {
-            await this.#atomic.set(PFX_AUDIT + id, null, entry.version);
-            removed++;
+          for (let attempt = 0; attempt < 3; attempt++) {
+            const entry = await this.#atomic.get<StoredAuditEntry>(PFX_AUDIT + id);
+            if (entry && entry.value.timestamp < beforeTs) {
+              const ok = await this.#atomic.set(PFX_AUDIT + id, null, entry.version);
+              if (ok) { removed++; break; }
+            } else {
+              break; // nothing to delete or already deleted
+            }
           }
         }
         return removed;

@@ -68,7 +68,7 @@ export class RunnerRegistry {
         labels: input.labels,
         capacity: input.capacity,
         status: 'online',
-        version: input.version ?? existing.version,
+        version: input.version || existing.version,
         lastHeartbeat: Date.now(),
         updatedAt: Date.now(),
         storeVersion: generateVersionId(),
@@ -87,15 +87,18 @@ export class RunnerRegistry {
       labels: input.labels,
       capacity: input.capacity,
       status: 'online',
-      version: input.version ?? '1.0.0',
+      version: input.version || '1.0.0',
       lastHeartbeat: now,
       createdAt: now, updatedAt: now,
       storeVersion: generateVersionId(),
     };
 
     await this.atomic.set(PFX + id, runner, null);
-    const idx = await this.atomic.get<string[]>(IDX);
-    await this.atomic.set(IDX, [...(idx?.value ?? []), id], idx?.version ?? null);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const idx = await this.atomic.get<string[]>(IDX);
+      const ok = await this.atomic.set(IDX, [...(idx?.value ?? []), id], idx?.version ?? null);
+      if (ok) break;
+    }
 
     this.audit.write({
       level: 5, facility: 'runner-registry',

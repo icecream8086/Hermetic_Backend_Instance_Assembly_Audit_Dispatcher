@@ -18,7 +18,9 @@ export interface IStoreTransaction {
 }
 
 /**
- * transact 重试包装器，指数退避。
+ * transact 重试包装器，Promise.race 超时。
+ * 每次重试立即发起（无 sleep），但用短超时兜底。
+ * 适用于 Worker 30s 请求限制。
  *
  * 用法:
  *   const result = await withRetry(() => atomic.transact(fn));
@@ -44,20 +46,25 @@ export class TransactConflictError extends Error {
 
 export async function withRetry<T>(
   fn: () => Promise<T>,
-  options?: { maxRetries?: number; baseDelayMs?: number },
+  options?: { maxRetries?: number; attemptTimeoutMs?: number },
 ): Promise<T> {
   const maxRetries = options?.maxRetries ?? 3;
-  const baseDelayMs = options?.baseDelayMs ?? 50;
+  const attemptTimeoutMs = options?.attemptTimeoutMs ?? 500;
   let lastError: unknown;
 
   for (let i = 0; i <= maxRetries; i++) {
     try {
-      return await fn();
+      return await Promise.race([
+        fn(),
+        new Promise<T>((_, reject) =>
+          setTimeout(() => reject(new TransactConflictError(`Attempt ${i + 1} timed out after ${attemptTimeoutMs}ms`)), attemptTimeoutMs),
+        ),
+      ]);
     } catch (e) {
       if (!(e instanceof TransactConflictError)) throw e;
       if (i === maxRetries) throw new TransactRetryExhausted(maxRetries + 1, e);
       lastError = e;
-      await new Promise(r => setTimeout(r, baseDelayMs * Math.pow(2, i)));
+      // No sleep between retries — in Worker context, retry immediately
     }
   }
 

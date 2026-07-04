@@ -101,7 +101,7 @@ export class InstanceService {
   public async create(input: CreateInstanceInput): Promise<ComputeInstance> {
     const id = generateInstanceId();
     // Default zone: Podman → "local", Alibaba → region+"-g" (ECI auto-schedules, suffix is metadata)
-    const zoneRaw = input.zone ?? (input.platform === 'podman' ? 'local' : (input.platform === 'alibaba' ? `${input.region}-g`.replace(/--/g, '-') : 'unknown'));
+    const zoneRaw = (input.zone && input.zone.trim()) || (input.platform === 'podman' ? 'local' : (input.platform === 'alibaba' ? `${input.region}-g`.replace(/--/g, '-') : 'unknown'));
     const zone = createZoneId(zoneRaw, input.platform);
     const now = Date.now();
 
@@ -111,11 +111,11 @@ export class InstanceService {
       platform: input.platform,
       region: z.custom<RegionId>().parse(input.region),
       zone,
-      endpoint: input.endpoint ?? defaultEndpoint(input.platform, input.region),
+      endpoint: (input.endpoint && input.endpoint.trim()) || defaultEndpoint(input.platform, input.region),
       ...(input.credentialRef ? { credentialRef: input.credentialRef } : {}),
       capabilities: input.capabilities ?? { container: true, image: true },
       ...(input.capacity ? { capacity: input.capacity } : {}),
-      status: 'online',
+      status: input.credentialRef ? 'online' : 'offline',
       ...(input.labels ? { labels: { ...input.labels } } : {}),
       createdAt: now,
       updatedAt: now,
@@ -157,10 +157,10 @@ export class InstanceService {
     const entry = await this.atomic.get<ComputeInstance>(PREFIX + id);
     if (!entry) throw new AppError(404, 'INSTANCE_NOT_FOUND', 'Compute instance not found');
 
-    const updated: ComputeInstance = {
+    const merged = {
       ...entry.value,
       ...(input.name !== undefined ? { name: input.name } : {}),
-      ...(input.endpoint !== undefined ? { endpoint: input.endpoint } : {}),
+      ...(input.endpoint !== undefined ? { endpoint: (input.endpoint && input.endpoint.trim()) || defaultEndpoint(entry.value.platform, String(entry.value.region)) } : {}),
       ...(input.credentialRef !== undefined ? { credentialRef: input.credentialRef ?? undefined } : {}),
       ...(input.capabilities ? { capabilities: { ...entry.value.capabilities, ...input.capabilities } } : {}),
       ...(input.capacity !== undefined ? { capacity: input.capacity ?? undefined } : {}),
@@ -168,6 +168,10 @@ export class InstanceService {
       ...(input.labels !== undefined ? { labels: input.labels ?? undefined } : {}),
       updatedAt: Date.now(),
     };
+    // Belt-and-suspenders: if endpoint is still empty after merge, fill default
+    const endpoint = (merged.endpoint && merged.endpoint.trim())
+      || defaultEndpoint(merged.platform, String(merged.region));
+    const updated: ComputeInstance = { ...merged, endpoint };
 
     const newVersion = await this.atomic.set(PREFIX + id, updated, entry.version);
     if (!newVersion) throw new AppError(409, 'CONFLICT', 'Concurrent modification detected');
@@ -176,14 +180,17 @@ export class InstanceService {
 
   /** Update instance capacity + status (heartbeat). Throws if instance not found. */
   public async heartbeat(id: InstanceId, capacity: InstanceCapacity, status: InstanceStatus = 'online'): Promise<void> {
-    const entry = await this.atomic.get<ComputeInstance>(PREFIX + id);
-    if (!entry) throw new AppError(404, 'INSTANCE_NOT_FOUND', `Instance ${id} not found`);
-    await this.atomic.set(PREFIX + id, {
-      ...entry.value,
-      capacity,
-      status,
-      updatedAt: Date.now(),
-    }, entry.version);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const entry = await this.atomic.get<ComputeInstance>(PREFIX + id);
+      if (!entry) throw new AppError(404, 'INSTANCE_NOT_FOUND', `Instance ${id} not found`);
+      const ok = await this.atomic.set(PREFIX + id, {
+        ...entry.value,
+        capacity,
+        status,
+        updatedAt: Date.now(),
+      }, entry.version);
+      if (ok) return;
+    }
   }
 
   public async delete(id: InstanceId): Promise<void> {
@@ -243,13 +250,19 @@ export class InstanceService {
   }
 
   async #addToIndex(id: InstanceId): Promise<void> {
-    const idx = await this.atomic.get<string[]>(INDEX_KEY);
-    await this.atomic.set(INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const idx = await this.atomic.get<string[]>(INDEX_KEY);
+      const ok = await this.atomic.set(INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
+      if (ok) return;
+    }
   }
 
   async #removeFromIndex(id: InstanceId): Promise<void> {
-    const idx = await this.atomic.get<string[]>(INDEX_KEY);
-    if (!idx) return;
-    await this.atomic.set(INDEX_KEY, idx.value.filter((i: string) => i !== id), idx.version);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const idx = await this.atomic.get<string[]>(INDEX_KEY);
+      if (!idx) return;
+      const ok = await this.atomic.set(INDEX_KEY, idx.value.filter((i: string) => i !== id), idx.version);
+      if (ok) return;
+    }
   }
 }

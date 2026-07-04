@@ -53,7 +53,10 @@ export class InstanceProviderResolver {
     }
     const all = await this.instanceService.resolveByCapability('container');
     if (all.length > 0) return this.#createContainerProvider(all[0]!);
-    return secureContainerProvider(new StubContainerProvider());
+    // ── 不再静默降级 ──
+    throw new AppError(503, 'NO_CONTAINER_INSTANCE',
+      'No online container-capable compute instance is registered. ' +
+      'Create one via POST /api/instances with platform="xxx" and capabilities=["container"].');
   }
 
   /** Resolve an image provider. */
@@ -167,7 +170,8 @@ export class InstanceProviderResolver {
         const cred = await this.#resolveCredential(instance.credentialRef, instance.id);
         return new AlibabaEciImageProvider(
           cred.accessKeyId ?? '', cred.accessKeySecret ?? '', instance.endpoint,
-          instance.region,          cred.registryCredentials?.map(c => ({
+          instance.region,
+          cred.registryCredentials?.map(c => ({
           server: c.server,
           userName: c.userName,
           password: c.password,

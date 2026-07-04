@@ -36,7 +36,6 @@ const LogConfigSchema = z.object({
 });
 
 const ProviderConfigSchema = z.object({
-  container: z.enum(['alibaba', 'podman', 'stub']).default('stub'),
   region: z.string().default('cn-hangzhou'),
   accounts: z.array(CredentialSchema).default([]),
   defaultAccount: z.string().default('default'),
@@ -71,7 +70,7 @@ const AuditConfigSchema = z.object({
 export const AppConfigSchema = z.object({
   storage: StorageConfigSchema.default({ stateBackend: 'file', queryBackend: 'none', blobBackend: 'none', connections: { filePath: '.data', kvNamespace: 'KV_STORE', doNamespace: 'ATOMIC_STORE_DO', d1Binding: 'QUERY_DB', r2Binding: 'BLOB_STORE' } }),
   log: LogConfigSchema.default({ auditTier: 'best-effort', defaultFacility: 'app', storage: { backend: 'filesystem' } }),
-  provider: ProviderConfigSchema.default({ container: 'stub', region: 'cn-hangzhou', accounts: [], defaultAccount: 'default', dns: 'cloudflare', metrics: 'alibaba' }),
+  provider: ProviderConfigSchema.default({ region: 'cn-hangzhou', accounts: [], defaultAccount: 'default', dns: 'cloudflare', metrics: 'alibaba' }),
   s3: S3ConfigSchema.default({ backend: 'none', region: 'auto', accounts: [], defaultAccount: 'default' }),
   scheduler: SchedulerAppConfigSchema.default({ backend: 'worker', intervalMs: 60_000, batchSize: 0 }),
   server: z.object({

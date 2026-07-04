@@ -42,7 +42,7 @@ export class SubnetService implements ISubnetService {
       id, name: input.name, description: input.description,
       cidr: input.cidr, subnetPrefix: input.subnetPrefix,
       instanceId: input.instanceId, provider: inst.platform, region: inst.region,
-      visibility: input.visibility ?? 'private', creatorId: actorId,
+      visibility: input.visibility || 'private', creatorId: actorId,
       userIds: input.userIds ?? [], userGroupIds: input.userGroupIds ?? [],
       status: 'Active', createdAt: now, updatedAt: now,
     };
@@ -106,12 +106,18 @@ export class SubnetService implements ISubnetService {
     return entries.filter(e => e).map(e => e!.value);
   }
   async #addToIndex(id: SubnetId): Promise<void> {
-    const idx = await this.atomic.get<string[]>(INDEX_KEY);
-    await this.atomic.set(INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const idx = await this.atomic.get<string[]>(INDEX_KEY);
+      const ok = await this.atomic.set(INDEX_KEY, [...(idx?.value ?? []), id], idx?.version ?? null);
+      if (ok) return;
+    }
   }
   async #removeFromIndex(id: SubnetId): Promise<void> {
-    const idx = await this.atomic.get<string[]>(INDEX_KEY);
-    if (!idx) return;
-    await this.atomic.set(INDEX_KEY, idx.value.filter((i: string) => i !== id), idx.version);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const idx = await this.atomic.get<string[]>(INDEX_KEY);
+      if (!idx) return;
+      const ok = await this.atomic.set(INDEX_KEY, idx.value.filter((i: string) => i !== id), idx.version);
+      if (ok) return;
+    }
   }
 }

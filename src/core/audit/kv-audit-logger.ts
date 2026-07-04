@@ -75,7 +75,14 @@ export class KvAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
         kept.push(id);
       }
     }
-    if (removed > 0) await this.atomic.set(AUDIT_PREFIX + 'ids', kept, idx.version);
+    if (removed > 0) {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const idx2 = await this.atomic.get<string[]>(AUDIT_PREFIX + 'ids');
+        if (!idx2) break;
+        const ok = await this.atomic.set(AUDIT_PREFIX + 'ids', kept, idx2.version);
+        if (ok) break;
+      }
+    }
     return removed;
   }
 
@@ -92,7 +99,12 @@ export class KvAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
       }
     }
     if (removed > 0) {
-      await this.atomic.set(AUDIT_PREFIX + 'ids', idx.value.filter(i => !idSet.has(i)), idx.version);
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const idx2 = await this.atomic.get<string[]>(AUDIT_PREFIX + 'ids');
+        if (!idx2) break;
+        const ok = await this.atomic.set(AUDIT_PREFIX + 'ids', idx2.value.filter(i => !idSet.has(i)), idx2.version);
+        if (ok) break;
+      }
     }
     return removed;
   }
