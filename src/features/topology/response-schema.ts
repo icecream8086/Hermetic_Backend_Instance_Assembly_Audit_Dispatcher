@@ -40,7 +40,6 @@ export const RegionBucketSchema = z.object({
   credentialRef: z.string(),
   instanceId: z.string(),
   status: z.enum(['Active', 'Inactive']),
-  autoGenerateKeys: z.boolean().optional(),
   createdAt: z.number(),
   updatedAt: z.number(),
 });

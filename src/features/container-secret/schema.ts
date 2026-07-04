@@ -3,13 +3,19 @@ import { z } from 'zod';
 export const CreateContainerSecretSchema = z.object({
   name: z.string().min(1, 'Name is required').max(200),
   description: z.string().max(500).optional(),
-  type: z.enum(['inline', 'upload']),
+  type: z.enum(['inline', 'upload', 'platformRef']),
   value: z.string().optional(),
   status: z.enum(['active', 'inactive']).optional(),
   visibility: z.enum(['all', 'private', 'selected']).optional().default('all'),
   selectedScopeIds: z.array(z.string()).optional().default([]),
   keyType: z.enum(['aes-gcm', 'sealed-box']).optional().default('aes-gcm'),
   sealForUserId: z.string().optional(),
+  platformRefs: z.object({
+    eci: z.string().optional(),
+    k8s: z.string().optional(),
+    podman: z.string().optional(),
+    aws: z.string().optional(),
+  }).optional(),
 }).refine(data => {
   if (data.type === 'inline' && !data.value) return false;
   return true;

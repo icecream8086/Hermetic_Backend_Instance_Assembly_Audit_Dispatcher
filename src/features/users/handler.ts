@@ -51,7 +51,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
   const app = new OpenAPIHono<{ Variables: AppContext }>();
 
   app.openapi(createRoute({ method: 'post', path: '/register', tags: ['users'], summary: '注册新用户', request: { body: { content: { 'application/json': { schema: RegisterUserSchema } } } }, responses: { 201: { description: 'LoginResponse', content: { 'application/json': { schema: OkResponse(LoginResponseSchema) } } } } }), async (c) => {
-    const body = await RegisterUserSchema.parse(c.req.json());
+    const body = RegisterUserSchema.parse(await c.req.json());
     const atomic = c.var.stores.atomic;
     const initKey = '_sys:initialized';
     const initEntry = await atomic.get<boolean>(initKey);
@@ -66,7 +66,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
   });
 
   app.openapi(createRoute({ method: 'post', path: '/login', tags: ['users'], summary: '用户登录', request: { body: { content: { 'application/json': { schema: LoginUserSchema } } } }, responses: { 200: { description: 'LoginResponse', content: { 'application/json': { schema: OkResponse(LoginResponseSchema) } } } } }), async (c) => {
-    const body = await LoginUserSchema.parse(c.req.json());
+    const body = LoginUserSchema.parse(await c.req.json());
     const loginIp = c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ?? c.req.header('cf-connecting-ip');
     const { user, token } = await userService.login({ email: body.email, password: body.password }, { ip: loginIp, siteContext: undefined });
     return c.json(ok(LoginResponseSchema.parse({ token, user: userToResponse(user) })));
@@ -89,7 +89,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
 
   app.openapi(createRoute({ method: 'put', path: '/{id}', tags: ['users'], summary: '更新用户', request: { params: z.object({ id: z.string() }), body: { content: { 'application/json': { schema: UpdateUserSchema } } } }, responses: { 200: { description: 'UserResponse', content: { 'application/json': { schema: OkResponse(UserResponseSchema) } } } } }), async (c) => {
     const id = createUserId(c.req.param('id'));
-    const body = await UpdateUserSchema.parse(c.req.json());
+    const body = UpdateUserSchema.parse(await c.req.json());
     await requirePerm(c, permissionChecker, 'update', 'user', id);
     const actorId = c.var.currentUser?.id;
     const user = await userService.update(id, {
@@ -147,7 +147,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
   app.openapi(createRoute({ method: 'put', path: '/{id}/login-policy', tags: ['users'], summary: '更新用户登录策略', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'LoginPolicy', content: { 'application/json': { schema: OkResponse(LoginPolicySchema.nullable()) } } } } }), async (c) => {
     const id = createUserId(c.req.param('id'));
     await requirePerm(c, permissionChecker, 'update', 'user', id);
-    const body = await LoginPolicySchema.parse(c.req.json());
+    const body = LoginPolicySchema.parse(await c.req.json());
     const user = await userService.update(id, { name: undefined, password: undefined, role: undefined, loginPolicy: body, publicKeyEd25519: undefined, gecos: undefined, directory: undefined, shell: undefined, supplementaryGids: undefined });
     return c.json(ok(user.loginPolicy ?? null));
   });
@@ -168,7 +168,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
 
   app.openapi(createRoute({ method: 'put', path: '/{id}/public-key', tags: ['users'], summary: '设置用户 Ed25519 公钥', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'string', content: { 'application/json': { schema: OkResponse(z.union([z.string(), z.null()])) } } } } }), async (c) => {
     const id = createUserId(c.req.param('id'));
-    const data = await z.object({ publicKey: PublicKeySchema }).parse(c.req.json());
+    const data = z.object({ publicKey: PublicKeySchema }).parse(await c.req.json());
     await requirePerm(c, permissionChecker, 'update', 'user', id);
     const user = await userService.update(id, { name: undefined, password: undefined, role: undefined, loginPolicy: undefined, publicKeyEd25519: data.publicKey, gecos: undefined, directory: undefined, shell: undefined, supplementaryGids: undefined });
     return c.json(ok(user.publicKeyEd25519 ?? null));
@@ -278,7 +278,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
   });
 
   app.openapi(createRoute({ method: 'post', path: '/no-password-login', tags: ['users'], summary: '无密码登录', request: { body: { content: { 'application/json': { schema: NoPasswordLoginSchema } } } }, responses: { 200: { description: 'LoginResponse', content: { 'application/json': { schema: OkResponse(LoginResponseSchema) } } } } }), async (c) => {
-    const data = await NoPasswordLoginSchema.parse(c.req.json());
+    const data = NoPasswordLoginSchema.parse(await c.req.json());
     const loginIp = c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ?? c.req.header('cf-connecting-ip');
     const siteContext = c.req.header('origin') ?? c.req.header('referer') ?? '';
     const { user, token } = await userService.loginNoPassword({ email: data.email, oneTimeKey: data.oneTimeKey }, { ip: loginIp, siteContext });

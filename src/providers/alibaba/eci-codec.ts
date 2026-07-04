@@ -695,6 +695,21 @@ export function buildCreateParams(
     });
   }
 
+  // ── Secret Refs (platform-native secret references) ──
+  if (input.secretRefs?.length) {
+    const secretVolBase = input.volumes?.length ?? 0;
+    // TODO: pass decrypted containerSecrets Map as 4th arg — requires plumbing decrypted
+    // values from applicator → sandbox.service → pod.service → codec
+    const inlineFromRefs = encodeSecretRefs(input.secretRefs, p, secretVolBase);
+    const existingMountCount = input.secretMounts?.length ?? 0;
+    inlineFromRefs.forEach((m, i) => {
+      const spfx = `ConfigFileVolume.${String(existingMountCount + i + 1)}`;
+      p[`${spfx}.MountPath`] = m.mountPath;
+      p[`${spfx}.Payload`] = m.data;
+      p[`${spfx}.FilePermission`] = String(m.mode ?? 0o600);
+    });
+  }
+
   // ── Network ──
   if (!partial) {
     p.SecurityGroupId = input.network.securityGroupId ?? '';
@@ -760,6 +775,58 @@ function toContainerCreateConfig(c: ContainerSpec, priority?: number): Container
 
 function toVolumeConfigInput(v: { readonly id: string; readonly type: string; readonly options?: Record<string, unknown> | undefined }): VolumeConfigInput {
   return { id: v.id, type: v.type, options: v.options };
+}
+
+export interface SecretRefResolvedSecret {
+  readonly value?: string | undefined;
+  readonly platformRefs?: import('../../features/container-secret/types.ts').PlatformSecretRefs | undefined;
+}
+
+/**
+ * Encode PlatformSecretRefs into ECI API parameters.
+ * Reference mode (SecretVolume) when platformRefs.eci exists.
+ * Inline fallback: returns mounts for the caller to merge into secretMounts
+ * (avoids ConfigFileVolume index collision with existing secretMounts).
+ *
+ * @param refs - PlatformSecretRef[] from PodSpec.spec.secretRefs
+ * @param params - ECI API parameter map (mutated)
+ * @param volumeBase - Starting index for Volume.N params (existing volume count)
+ * @param secrets - Map<secretName, { value?: plaintext, platformRefs? }> — value MUST be decrypted
+ * @returns Inline mounts to append to secretMounts (caller merges them)
+ */
+export function encodeSecretRefs(
+  refs: readonly import('../../core/pod/types.ts').PlatformSecretRef[],
+  params: Record<string, string>,
+  volumeBase: number,
+  secrets?: Map<string, SecretRefResolvedSecret>,
+): import('../../core/provider/types.ts').SecretMountConfig[] {
+  const inlineMounts: import('../../core/provider/types.ts').SecretMountConfig[] = [];
+
+  refs.forEach((ref, i) => {
+    const cs = secrets?.get(ref.secretName);
+    const platformName = cs?.platformRefs?.eci;
+
+    if (platformName) {
+      // 引用模式 — ECI on ACK: SecretVolume
+      const vi = volumeBase + i + 1;
+      params[`Volume.${vi}.Name`] = `secret-${ref.secretName}`;
+      params[`Volume.${vi}.Type`] = 'SecretVolume';
+      params[`Volume.${vi}.SecretVolume.SecretName`] = platformName;
+      (ref.keys ?? []).forEach((key, j) => {
+        params[`Volume.${vi}.SecretVolume.Items.${j + 1}.Key`] = key;
+        params[`Volume.${vi}.SecretVolume.Items.${j + 1}.Path`] = key;
+      });
+    } else {
+      // 降级内联 — 返回 mount config，由调用方合并到 secretMounts
+      inlineMounts.push({
+        mountPath: ref.mountPath,
+        data: cs?.value ?? '',
+        mode: ref.mode ?? 0o400,
+      });
+    }
+  });
+
+  return inlineMounts;
 }
 
 export function buildPodCreateParams(spec: PodSpec, region: string): Record<string, string> {
@@ -844,6 +911,21 @@ export function buildPodCreateParams(spec: PodSpec, region: string): Record<stri
       p[`${spfx}.MountPath`] = sm.mountPath;
       p[`${spfx}.Payload`] = sm.data;
       p[`${spfx}.FilePermission`] = String(sm.mode ?? 0o600);
+    });
+  }
+
+  // ── Secret Refs (platform-native secret references) ──
+  if (spec.spec.secretRefs?.length) {
+    const secretVolBase = spec.spec.volumes?.length ?? 0;
+    // TODO: pass decrypted containerSecrets Map as 4th arg (same as buildCreateParams)
+    const inlineFromRefs = encodeSecretRefs(spec.spec.secretRefs, p, secretVolBase);
+    // Write inline fallback mounts after existing secretMounts to avoid ConfigFileVolume index collision
+    const existingSecretMountCount = spec.spec.secretMounts?.length ?? 0;
+    inlineFromRefs.forEach((m, i) => {
+      const spfx = `ConfigFileVolume.${String(existingSecretMountCount + i + 1)}`;
+      p[`${spfx}.MountPath`] = m.mountPath;
+      p[`${spfx}.Payload`] = m.data;
+      p[`${spfx}.FilePermission`] = String(m.mode ?? 0o600);
     });
   }
 

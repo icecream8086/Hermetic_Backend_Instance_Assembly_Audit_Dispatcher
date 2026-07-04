@@ -391,8 +391,10 @@ export interface CreateSandboxInput {
   readonly initContainers?: readonly InitContainerConfig[];
   readonly containers: readonly ContainerConfig[];
   readonly volumes?: readonly Volume[];
-  /** 引用的 SecurityResource 列表。applicator 解析后填充，注入容器时使用。 */
-  readonly securityResources?: readonly SecurityResourceRef[] | undefined;
+  /** SecurityResource names to resolve for S3 access. The JWT token is issued at provision time. */
+  readonly securityRefNames?: readonly string[] | undefined;
+  /** Platform-native secret references (ContainerSecret platformRefs). Populated by applicator, encoded by codec. */
+  readonly podSecretRefs?: readonly import('../../core/pod/types.ts').PlatformSecretRef[] | undefined;
   readonly network: SandboxNetworkConfig;
   readonly tags?: readonly Tag[];
   readonly account?: string | undefined;
@@ -431,20 +433,12 @@ export interface PodMapping {
   readonly updatedAt: number;
 }
 
-export interface SecurityResourceRef {
-  /** SecurityResource.id。 */
-  readonly resourceId: string;
-  /** SecurityResource.name，用作挂载文件名。 */
-  readonly resourceName: string;
-  /** 当前有效的 PresignedUrlSet（sandbox 创建时的快照）。 */
-  readonly value: {
-    readonly putUrl: string;
-    readonly listUrl: string;
-    readonly endpoint: string;
-    readonly bucket: string;
-    readonly region: string;
-    readonly expiresAt: string;
-  };
+export interface SandboxStorageAccess {
+  /** JWT token with S3 access grants. */
+  readonly token: string;
+  /** Expiration time (ISO 8601). */
+  readonly expiresAt: string;
 }
+
 
 

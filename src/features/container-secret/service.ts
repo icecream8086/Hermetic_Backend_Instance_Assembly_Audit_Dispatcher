@@ -108,6 +108,7 @@ export class ContainerSecretService implements IContainerSecretService {
       ...(input.status !== undefined ? { status: input.status } : {}),
       ...(input.visibility !== undefined ? { visibility: input.visibility } : {}),
       ...(input.selectedScopeIds !== undefined ? { selectedScopeIds: input.selectedScopeIds ?? [] } : {}),
+      ...(input.platformRefs !== undefined ? { platformRefs: input.platformRefs } : {}),
       version: existing.version + 1,
       updatedAt: Date.now(),
     };

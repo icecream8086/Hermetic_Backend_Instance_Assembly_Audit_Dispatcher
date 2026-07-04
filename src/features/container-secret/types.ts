@@ -1,8 +1,20 @@
-export type ContainerSecretType = 'inline' | 'upload';
+export type ContainerSecretType = 'inline' | 'upload' | 'platformRef';
 /** Secret visibility scope — GitHub Secret model. */
 export type SecretVisibility = 'all' | 'private' | 'selected';
 /** Encryption key type used. */
 export type SecretKeyType = 'aes-gcm' | 'sealed-box';
+
+/** 当 type='platformRef' 时，各平台的原生 secret 名称映射。Provisioner 写入，Codec 只读。 */
+export interface PlatformSecretRefs {
+  /** ECI K8s Secret 名。ECI 独立用户始终 undefined（不支持引用）。 */
+  readonly eci?: string | undefined;
+  /** K8s Secret name。 */
+  readonly k8s?: string | undefined;
+  /** Podman secret name。 */
+  readonly podman?: string | undefined;
+  /** AWS Secrets Manager ARN。 */
+  readonly aws?: string | undefined;
+}
 
 export interface ContainerSecret {
   readonly id: string;
@@ -17,6 +29,8 @@ export interface ContainerSecret {
   readonly mimeType?: string | undefined;
   readonly size?: number | undefined;
   readonly status: 'active' | 'inactive';
+  /** 当 type='platformRef': 各平台的原生 secret 名称。Provisioner 写入，Codec 只读。 */
+  readonly platformRefs?: PlatformSecretRefs | undefined;
   // ── GitHub Secret model ──
   /** Visibility scope. */
   readonly visibility: SecretVisibility;
@@ -39,6 +53,7 @@ export interface CreateContainerSecretInput {
   /** Required for inline type. */
   readonly value?: string | undefined;
   readonly status?: 'active' | 'inactive' | undefined;
+  readonly platformRefs?: PlatformSecretRefs | undefined;
   readonly visibility?: SecretVisibility | undefined;
   readonly selectedScopeIds?: string[] | undefined;
   readonly keyType?: SecretKeyType | undefined;
@@ -53,4 +68,5 @@ export interface UpdateContainerSecretInput {
   readonly status?: 'active' | 'inactive' | undefined;
   readonly visibility?: SecretVisibility | undefined;
   readonly selectedScopeIds?: string[] | null | undefined;
+  readonly platformRefs?: PlatformSecretRefs | undefined;
 }

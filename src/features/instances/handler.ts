@@ -25,7 +25,7 @@ export function createInstancesRouter(svc: IRunnerService): OpenAPIHono<{ Variab
   const app = new OpenAPIHono<{ Variables: AppContext }>();
 
   app.openapi(createRoute({ method: 'post', path: '/', tags: ['instances'], summary: '注册新 Runner', request: { body: { content: { 'application/json': { schema: CreateRunnerSchema } } } }, responses: { 201: { description: '{ runner, token }', content: { 'application/json': { schema: OkResponse(RegisterResultSchema) } } } } }), async (c) => {
-    const body = await CreateRunnerSchema.parse(c.req.json());
+    const body = CreateRunnerSchema.parse(await c.req.json());
     const { runner, token } = await svc.register(body);
     return c.json(ok({ runner, token }), 201);
   });
@@ -44,7 +44,7 @@ export function createInstancesRouter(svc: IRunnerService): OpenAPIHono<{ Variab
 
   app.openapi(createRoute({ method: 'put', path: '/{id}', tags: ['instances'], summary: '更新 Runner', request: { params: z.object({ id: z.string() }), body: { content: { 'application/json': { schema: UpdateRunnerSchema } } } }, responses: { 200: { description: 'RunnerInstance', content: { 'application/json': { schema: OkResponse(RunnerInstanceSchema) } } } } }), async (c) => {
     isRoot(c);
-    const body = await UpdateRunnerSchema.parse(c.req.json());
+    const body = UpdateRunnerSchema.parse(await c.req.json());
     const updated = await svc.update(z.custom<RunnerId>().parse(c.req.param('id')), body, c.var.currentUser?.id);
     return c.json(ok(updated));
   });
@@ -73,14 +73,14 @@ export function createInstancesRouter(svc: IRunnerService): OpenAPIHono<{ Variab
   });
 
   app.openapi(createRoute({ method: 'post', path: '/validate-token', tags: ['instances'], summary: '验证并消费注册 token', request: { body: { content: { 'application/json': { schema: ValidateTokenSchema } } } }, responses: { 200: { description: '{ valid: boolean }', content: { 'application/json': { schema: OkResponse(ValidateTokenResultSchema) } } } } }), async (c) => {
-    const body = await ValidateTokenSchema.parse(c.req.json());
+    const body = ValidateTokenSchema.parse(await c.req.json());
     const valid = await svc.validateRegistrationToken(body.token);
     return c.json(ok({ valid }));
   });
 
   app.openapi(createRoute({ method: 'post', path: '/groups', tags: ['instances'], summary: '创建 Runner 组', request: { body: { content: { 'application/json': { schema: CreateRunnerGroupSchema } } } }, responses: { 201: { description: 'RunnerGroup', content: { 'application/json': { schema: OkResponse(RunnerGroupSchema) } } } } }), async (c) => {
     isRoot(c);
-    const body = await CreateRunnerGroupSchema.parse(c.req.json());
+    const body = CreateRunnerGroupSchema.parse(await c.req.json());
     const group = await svc.createGroup(body, c.var.currentUser?.id);
     return c.json(ok(group), 201);
   });

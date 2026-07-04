@@ -8,7 +8,7 @@ import { z } from 'zod';
 export const ContainerSecretResponseSchema = z.object({
   id: z.string(),
   name: z.string(),
-  type: z.enum(['inline', 'upload']),
+  type: z.enum(['inline', 'upload', 'platformRef']),
   description: z.string().optional(),
   value: z.literal('[REDACTED]').optional(),
   blobKey: z.string().optional(),
@@ -20,6 +20,12 @@ export const ContainerSecretResponseSchema = z.object({
   selectedScopeIds: z.array(z.string()).readonly(),
   keyType: z.enum(['aes-gcm', 'sealed-box']),
   sealedForUserId: z.string().optional(),
+  platformRefs: z.object({
+    eci: z.string().optional(),
+    k8s: z.string().optional(),
+    podman: z.string().optional(),
+    aws: z.string().optional(),
+  }).optional(),
   version: z.number(),
   createdAt: z.number(),
   updatedAt: z.number(),

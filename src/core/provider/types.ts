@@ -359,6 +359,7 @@ export interface CreateContainerGroupInput {
   readonly containers: readonly ContainerCreateConfig[];
   readonly volumes?: readonly VolumeConfigInput[] | undefined;
   readonly secretMounts?: readonly SecretMountConfig[] | undefined;
+  readonly secretRefs?: readonly import('../pod/types.ts').PlatformSecretRef[] | undefined;
   readonly network: ContainerGroupNetworkInput;
   readonly tags?: readonly { key: string; value: string }[] | undefined;
   readonly providerOverrides?: Record<string, unknown> | undefined;

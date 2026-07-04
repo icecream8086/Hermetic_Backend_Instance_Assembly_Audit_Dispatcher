@@ -39,3 +39,9 @@
 | | [Container Dep](container_dep_spec.txt) | Container dependency and limit system |
 | | [Network API](network/api.md) | Virtual network API |
 | | [ContainerGroup Preview](preview_container_gp_dep_spec.md) | Future ContainerGroup design |
+| **Security** | | |
+| | [S3 Presigned Control Plane](s3-presigned-control-plane.md) | Worker control-plane JWT + on-demand presigned URL (v3, current) |
+| | [Platform Secret Provisioner](platform-secret-provisioner.md) | Cross-platform native secret injection via ContainerSecret (v1) |
+| | [Security Resource Presigned](security-resource-presigned-spec.md) | v2 presigned URL injection (deprecated) |
+| | [S3 Auto Key Provision](s3-auto-key-provision.md) | v1 AK/SK key pair (deprecated) |
+| | [S3 Policy Manager](s3-policy-manager.md) | v1 MinIO IAM policy (deprecated) |

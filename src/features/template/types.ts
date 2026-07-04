@@ -109,6 +109,13 @@ export interface NetworkSpec {
 // 扩展功能 — 存储、调度、厂商参数、生命周期策略
 // ═══════════════════════════════════════════
 
+export interface ContainerSecretBinding {
+  /** ContainerSecret.name */
+  readonly name: string;
+  /** 要挂载的 key。空 = 全部。 */
+  readonly keys?: readonly string[] | undefined;
+}
+
 export interface TemplateStorage {
   readonly name: string;
   readonly type: 'oss' | 'nfs' | 'emptyDir' | 'disk' | 'configMap' | 'secret';
@@ -130,8 +137,14 @@ export interface TemplateStorage {
   readonly configMap?: { name: string; env: readonly { key: string; value: string }[] } | undefined;
   readonly secret?: { name: string; items?: readonly { key: string; path: string; mode?: number }[] } | undefined;
   readonly size?: number | undefined;
-  /** 引用 SecurityResource 的名称。设置后容器内 /run/secrets/s3/{name}.json 出现此资源。 */
+  /** @deprecated 使用 securityRefs 替代 */
   readonly securityRef?: string | undefined;
+  /** 引用 SecurityResource 的名称列表（S3 存储策略） */
+  readonly securityRefs?: readonly string[] | undefined;
+  /** @deprecated 使用 containerSecretRefs 替代 */
+  readonly secretRef?: string | undefined;
+  /** 引用 ContainerSecret 列表（平台密钥注入） */
+  readonly containerSecretRefs?: readonly ContainerSecretBinding[] | undefined;
   readonly providerOverrides?: Record<string, unknown> | undefined;
 }
 

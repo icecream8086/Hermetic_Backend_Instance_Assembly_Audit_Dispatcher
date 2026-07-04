@@ -14,10 +14,12 @@
 - [x] 镜像仓库凭证管理 — **复用 5.2 ContainerSecret**（visibility 作用域控制哪些 sandbox 可用哪个 registry 凭据）
 - [ ] 镜像加速 (nydus/dadi/p2p/imc) ⏳ — provider 层实现
 
-### 5.5 存储桶管理 ⏳
+### 5.5 存储桶管理 🔄
 
-- [ ] S3 auto-key-provision (已有 spec)
-- [ ] S3 policy manager (已有 spec)
+- [x] ~~S3 auto-key-provision~~ → 已废弃（SPEC/s3-auto-key-provision.md）
+- [x] ~~S3 policy manager~~ → 已废弃（SPEC/s3-policy-manager.md）
+- [x] V2 presigned URL 注入 → 已实现（SPEC/security-resource-presigned-spec.md），但存在 PUT payload 无效等缺陷
+- [ ] V3 S3 预签名控制面（SPEC/s3-presigned-control-plane.md）—— Worker JWT + 按需签名
 - [ ] 存储配额 + 用量统计
 - [ ] 数据卷扩容 (cloud_essd / cloud_ssd 性能等级)
 

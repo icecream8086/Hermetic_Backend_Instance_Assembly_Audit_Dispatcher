@@ -89,6 +89,18 @@ export interface VolumeSpec {
   readonly options?: Record<string, unknown> | undefined;
 }
 
+/** 引用平台原生 Secret/凭据存储中的密钥对象。 */
+export interface PlatformSecretRef {
+  /** ContainerSecret.name — 用于查找平台映射和策略。 */
+  readonly secretName: string;
+  /** 容器内挂载路径。 */
+  readonly mountPath: string;
+  /** 要挂载的 key 列表。空 = 全部 key。 */
+  readonly keys?: readonly string[] | undefined;
+  /** 文件权限 (POSIX mode)，默认 0o400。 */
+  readonly mode?: number | undefined;
+}
+
 export interface PodSpec {
   readonly metadata: {
     readonly name: string;
@@ -114,6 +126,10 @@ export interface PodSpec {
       readonly options?: readonly { readonly name: string; readonly value?: string | undefined }[] | undefined;
     } | undefined;
     readonly hostAliases?: readonly { readonly ip: string; readonly hostnames: readonly string[] }[] | undefined;
+    /** References to platform-native secrets (translated by Codec per platform).
+     *  Codec tries reference mode first, falls back to inline secretMounts if the
+     *  platform doesn't support native secret references. */
+    readonly secretRefs?: readonly PlatformSecretRef[] | undefined;
     /** Secret mounts — inject data as in-memory files (e.g. S3 presigned URLs).
      *  Provider-specific encoding (ECI ConfigFileVolume, Podman secrets). */
     readonly secretMounts?: readonly import('../provider/types.ts').SecretMountConfig[] | undefined;

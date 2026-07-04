@@ -1,8 +1,8 @@
 # S3 Security 资源 + 预签名 URL — 实现规范 v2
 
-> **Status**: Implemented (2026-07-03)
-> **日期**: 2026-07-03
-> **目标读者**: 维护者
+> **Status**: DEPRECATED — 已被 `SPEC/s3-presigned-control-plane.md` (v3) 取代
+> **日期**: 2026-07-03 (implemented), 2026-07-04 (deprecated)
+> **目标读者**: 维护者（仅作历史参考）
 
 ---
 

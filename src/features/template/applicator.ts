@@ -1,5 +1,5 @@
 import type { SandboxTemplate, ContainerSpec, ContainerDef, HealthCheckDef, TemplateStorage, NetworkSpec } from './types.ts';
-import type { CreateSandboxInput, Volume, VolumeMount, SandboxNetworkConfig, SecurityResourceRef } from '../sandbox/types.ts';
+import type { CreateSandboxInput, Volume, VolumeMount, SandboxNetworkConfig } from '../sandbox/types.ts';
 import type { EnvVar, ProbeSpec } from '../../core/provider/types.ts';
 import { VolumeType, VolumeStatus, createVolumeId } from '../sandbox/types.ts';
 import { createRegionId } from '../../core/region/types.ts';
@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { EmptyDirMedium } from '../sandbox/types.ts';
 import type { NFSVolumeConfig, DiskVolumeConfig, SecretVolumeConfig } from '../sandbox/types.ts';
 import type { SecurityResourceService } from '../../core/security/service.ts';
+import { SecurityResourceStatus } from '../../core/security/types.ts';
 
 const ValueFromSchema = z.custom<EnvVar['valueFrom']>(
   (v): v is EnvVar['valueFrom'] => v === undefined || (v !== null && typeof v === 'object'),
@@ -35,12 +36,19 @@ const StrSchema = z.string();
  *   When a TemplateStorage has `securityRef`, this service fetches the
  *   SecurityResource and validates its presigned URL validity.
  */
+/** Resolve a ContainerSecret by name. Returns { value, platformRefs } or null. */
+export interface ContainerSecretResolveResult {
+  readonly value?: string | undefined;
+  readonly platformRefs?: import('../container-secret/types.ts').PlatformSecretRefs | undefined;
+}
+
 export async function applyTemplate(
   tpl: SandboxTemplate,
   name?: string,
   region?: string,
   resolveVolume?: (id: string) => Promise<Record<string, unknown> | null>,
   securityStore?: SecurityResourceService,
+  resolveContainerSecret?: (name: string) => Promise<ContainerSecretResolveResult | null>,
 ): Promise<CreateSandboxInput> {
   const container: ContainerSpec = tpl.container ?? { region: createRegionId('local'), containers: [] };
   const containers = container.containers;
@@ -50,7 +58,7 @@ export async function applyTemplate(
   const gpuType = containers.find(c => (c.resources?.limits?.gpu ?? 0) > 0)?.resources?.limits?.gpuType;
 
   const ext = tpl.extensions;
-  const { volumes, volumeMounts, configMapEnv, securityRefs } = await mapStorage(ext?.storage, resolveVolume, securityStore);
+  const { volumes, volumeMounts, configMapEnv, securityRefNames, podSecretRefs } = await mapStorage(ext?.storage, resolveVolume, securityStore, resolveContainerSecret);
 
   // Assign volume mounts to first container only (backward compat)
   const mainVolMounts = volumeMounts.length > 0 ? volumeMounts : undefined;
@@ -134,7 +142,8 @@ export async function applyTemplate(
       })),
     } : {}),
     ...(volumes.length > 0 ? { volumes } : {}),
-    ...(securityRefs.length > 0 ? { securityResources: securityRefs } : {}),
+    ...(securityRefNames.length > 0 ? { securityRefNames } : {}),
+    ...(podSecretRefs.length > 0 ? { podSecretRefs } : {}),
     ...(container.account ? { account: container.account } : {}),
     ...(container.instanceId ? { instanceId: container.instanceId } : {}),
     ...(ext?.healthMaxRetries !== undefined ? { healthMaxRetries: ext.healthMaxRetries } : {}),
@@ -208,38 +217,57 @@ export async function mapStorage(
   storage: readonly TemplateStorage[] | undefined,
   resolveVolume?: (id: string) => Promise<Record<string, unknown> | null>,
   securityStore?: SecurityResourceService,
+  resolveContainerSecret?: (name: string) => Promise<ContainerSecretResolveResult | null>,
 ): Promise<{
   volumes: Volume[];
   volumeMounts: VolumeMount[];
   configMapEnv: { name: string; value: string }[];
-  securityRefs: SecurityResourceRef[];
+  securityRefNames: string[];
+  podSecretRefs: import('../../core/pod/types.ts').PlatformSecretRef[];
 }> {
-  if (!storage || storage.length === 0) return { volumes: [], volumeMounts: [], configMapEnv: [], securityRefs: [] };
+  if (!storage || storage.length === 0) return { volumes: [], volumeMounts: [], configMapEnv: [], securityRefNames: [], podSecretRefs: [] };
 
   const now = Date.now();
   const volumes: Volume[] = [];
   const volumeMounts: VolumeMount[] = [];
-  const securityRefs: SecurityResourceRef[] = [];
+  const securityRefNames: string[] = [];
   const configMapEnv: { name: string; value: string }[] = [];
+  const podSecretRefs: import('../../core/pod/types.ts').PlatformSecretRef[] = [];
 
   for (const s of storage) {
     const vid = createVolumeId(s.name);
 
-    // If securityRef is set, resolve SecurityResource (mutually exclusive with other storage types)
-    if (s.securityRef && securityStore) {
-      const sec = await securityStore.getByName(s.securityRef);
-      if (!sec) {
-        throw new Error(`SecurityResource "${s.securityRef}" not found`);
+    // If securityRefs is set, collect names (mutually exclusive with other storage types)
+    if ((s.securityRefs?.length || s.securityRef) && securityStore) {
+      const names = s.securityRefs ?? (s.securityRef ? [s.securityRef] : []);
+      for (const name of names) {
+        const sec = await securityStore.getByName(name);
+        if (!sec) {
+          throw new Error(`SecurityResource "${name}" not found`);
+        }
+        // V3: only verify policy exists and is Active — JWT issued later at sandbox provision
+        if (sec.status !== SecurityResourceStatus.Active) {
+          throw new Error(`SecurityResource "${name}" is ${sec.status}`);
+        }
+        securityRefNames.push(name);
       }
-      const check = securityStore.checkValidity(sec);
-      if (!check.valid) {
-        throw new Error(check.reason!);
+      continue;
+    }
+
+    // If containerSecretRefs is set, resolve ContainerSecrets for platform-native secret injection
+    if (s.containerSecretRefs?.length && resolveContainerSecret) {
+      for (const ref of s.containerSecretRefs) {
+        const cs = await resolveContainerSecret(ref.name);
+        if (!cs) {
+          throw new Error(`ContainerSecret "${ref.name}" not found`);
+        }
+        podSecretRefs.push({
+          secretName: ref.name,
+          mountPath: s.mountPath,
+          keys: ref.keys,
+          mode: 0o400,
+        });
       }
-      securityRefs.push({
-        resourceId: sec.id,
-        resourceName: sec.name,
-        value: sec.value,
-      });
       continue;
     }
 
@@ -333,5 +361,5 @@ export async function mapStorage(
     }
   }
 
-  return { volumes, volumeMounts, configMapEnv, securityRefs };
+  return { volumes, volumeMounts, configMapEnv, securityRefNames, podSecretRefs };
 }

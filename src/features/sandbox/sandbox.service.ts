@@ -39,6 +39,7 @@ import type { IMessageQueue } from '../../queue/interfaces.ts';
 import { SandboxStore } from './sandbox-store.ts';
 import { runtimeToNetwork, runtimeToContainers, runtimeToEvents } from './runtime-mapper.ts';
 import type { IAuditWriter } from '../../core/audit/types.ts';
+import { SecurityResourceService } from '../../core/security/service.ts';
 import { z } from 'zod';
 
 const FACILITY = createFacility('sandbox-service');
@@ -167,7 +168,8 @@ export class SandboxService implements ISandboxService {
     let providerId: string;
     let podId: string | undefined;
 
-    const podSpec = toPodSpec(input);
+    const securityStore = new SecurityResourceService(this.atomic, this.logger);
+    const podSpec = await toPodSpec(input, securityStore);
     try {
       const pod = await this.podService.provision(podSpec);
       providerId = pod.providerId ?? id;
@@ -642,12 +644,24 @@ function parseMemoryString(s: string): number {
 
 
 
-function toPodSpec(input: CreateSandboxInput): PodSpec {
-  const securityMounts: SecretMountConfig[] = input.securityResources?.map(sr => ({
-    mountPath: `/run/secrets/s3/${sr.resourceName}.json`,
-    data: JSON.stringify(sr.value),
-    mode: 0o600,
-  })) ?? [];
+async function toPodSpec(
+  input: CreateSandboxInput,
+  securityStore?: SecurityResourceService,
+): Promise<PodSpec> {
+  let securityMounts: SecretMountConfig[] = [];
+
+  if (input.securityRefNames?.length && securityStore) {
+    const { token, expiresAt: _expiresAt } = await securityStore.issueToken(
+      input.securityRefNames,
+      // sandboxId — use the name as a fallback identifier since we don't have the ID yet
+      input.name,
+    );
+    securityMounts = [{
+      mountPath: '/run/secrets/s3/token',
+      data: token,
+      mode: 0o600,
+    }];
+  }
 
   return {
     metadata: {

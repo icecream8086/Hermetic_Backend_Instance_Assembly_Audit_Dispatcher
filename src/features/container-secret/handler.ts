@@ -6,12 +6,13 @@ import { AppError } from '../../core/types.ts';
 import { ok } from '../../core/response.ts';
 import { OkResponse, ErrorResponse } from '../../core/http-docs/response-schema.ts';
 import { ContainerSecretResponseSchema, ContainerSecretListResponseSchema, PublicKeyResponseSchema, CheckAccessResponseSchema } from './response-schema.ts';
+import type { SecretProvisioner } from '../../core/security/secret-provisioner.ts';
 
-export function createContainerSecretRouter(svc: IContainerSecretService): OpenAPIHono {
+export function createContainerSecretRouter(svc: IContainerSecretService, provisioner?: SecretProvisioner): OpenAPIHono {
   const app = new OpenAPIHono();
 
   app.openapi(createRoute({ method: 'post', path: '/', tags: ['container-secrets'], summary: '创建 ContainerSecret', request: { body: { content: { 'application/json': { schema: CreateContainerSecretSchema } } } }, responses: { 201: { description: 'ContainerSecret', content: { 'application/json': { schema: OkResponse(ContainerSecretResponseSchema) } } }, 400: { description: 'Bad request', content: { 'application/json': { schema: ErrorResponse } } } } }), async (c) => {
-    const secret = await svc.create(await CreateContainerSecretSchema.parse(c.req.json()));
+    const secret = await svc.create(CreateContainerSecretSchema.parse(await c.req.json()));
     return c.json(ok(redact(secret)), 201);
   });
 
@@ -76,6 +77,18 @@ export function createContainerSecretRouter(svc: IContainerSecretService): OpenA
     const allowed = await svc.canAccess(c.req.param('id'), scopeId);
     return c.json(ok({ allowed }));
   });
+
+  // ── POST /{id}/sync — 手动触发 SecretProvisioner 同步 ──
+  if (provisioner) {
+    app.openapi(createRoute({ method: 'post', path: '/{id}/sync', tags: ['container-secrets'], summary: '同步 secret 到平台原生 store', responses: { 200: { description: 'ContainerSecret', content: { 'application/json': { schema: OkResponse(ContainerSecretResponseSchema) } } } } }), async (c) => {
+      const id = c.req.param('id');
+      const secret = await svc.get(id);
+      if (!secret) throw new AppError(404, 'SECRET_NOT_FOUND', 'Container secret not found');
+      const refs = await provisioner.provision(secret);
+      const updated = await svc.update(id, { platformRefs: refs });
+      return c.json(ok(redact(updated)));
+    });
+  }
 
   return app;
 }

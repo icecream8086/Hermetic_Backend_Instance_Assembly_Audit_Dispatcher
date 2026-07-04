@@ -319,7 +319,7 @@ export function createPermissionRouter(svc: IPermissionService): OpenAPIHono<{ V
 
   app.openapi(createRoute({ method: 'put', path: '/log-policy', tags: ['permission'], responses: { 200: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
     requireRoot(c);
-    const body = await UpdateLogPolicySchema.parse(c.req.json());
+    const body = UpdateLogPolicySchema.parse(await c.req.json());
     const policy = await svc.updateLogPolicy(z.custom<Partial<LogPolicy>>().parse(body), actorFrom(c));
     return c.json(ok(policy));
   });
