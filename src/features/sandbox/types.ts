@@ -395,6 +395,8 @@ export interface CreateSandboxInput {
   readonly securityRefNames?: readonly string[] | undefined;
   /** Platform-native secret references (ContainerSecret platformRefs). Populated by applicator, encoded by codec. */
   readonly podSecretRefs?: readonly import('../../core/pod/types.ts').PlatformSecretRef[] | undefined;
+  /** Resolved ContainerSecret values keyed by name. Decrypted at applicator layer, consumed by codec for inline fallback. */
+  readonly resolvedSecrets?: import('../../core/pod/types.ts').ResolvedSecretsMap | undefined;
   readonly network: SandboxNetworkConfig;
   readonly tags?: readonly Tag[];
   readonly account?: string | undefined;

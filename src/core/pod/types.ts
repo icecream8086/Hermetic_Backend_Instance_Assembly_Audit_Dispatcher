@@ -130,6 +130,8 @@ export interface PodSpec {
      *  Codec tries reference mode first, falls back to inline secretMounts if the
      *  platform doesn't support native secret references. */
     readonly secretRefs?: readonly PlatformSecretRef[] | undefined;
+    /** Resolved ContainerSecret values keyed by secretName. Decrypted at applicator layer for codec inline fallback. */
+    readonly resolvedSecrets?: ResolvedSecretsMap | undefined;
     /** Secret mounts — inject data as in-memory files (e.g. S3 presigned URLs).
      *  Provider-specific encoding (ECI ConfigFileVolume, Podman secrets). */
     readonly secretMounts?: readonly import('../provider/types.ts').SecretMountConfig[] | undefined;
@@ -146,6 +148,21 @@ export interface PodSpec {
   };
   readonly providerOverrides?: Record<string, unknown> | undefined;
 }
+
+/** Resolved ContainerSecret value for codec inline fallback.
+ *  Duplicates PlatformSecretRefs shape to avoid features→core dependency. */
+export interface ResolvedSecret {
+  readonly value?: string | undefined;
+  readonly platformRefs?: {
+    readonly eci?: string | undefined;
+    readonly k8s?: string | undefined;
+    readonly podman?: string | undefined;
+    readonly aws?: string | undefined;
+  } | undefined;
+}
+
+/** Map<secretName, ResolvedSecret> carried through the provision pipeline. */
+export type ResolvedSecretsMap = Record<string, ResolvedSecret>;
 
 // ═══════════════════════════════════════════════════════════════
 // Scheduling types

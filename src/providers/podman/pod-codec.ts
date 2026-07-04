@@ -36,6 +36,7 @@ export interface PodmanPodCreateBody {
   readonly addHosts?: readonly string[] | undefined;
   readonly cpus?: number | undefined;
   readonly memory?: string | undefined;
+  readonly terminationGracePeriodSeconds?: number | undefined;
 }
 
 export interface PodmanContainerCreateBody {
@@ -134,7 +135,11 @@ export class PodmanPodCodec implements PodCodec<PodmanCreateRequest> {
   public encode(input: PodSpec): PodmanCreateRequest {
     const portMappings = collectPortMappings(input.spec.containers);
 
-    const labels = { 'managed-by': 'hbi-aad', ...input.metadata.labels };
+    const labels: Record<string, string> = {
+      'managed-by': 'hbi-aad',
+      ...input.metadata.labels,
+      ...(input.spec.priority !== undefined ? { 'hbi-priority': String(input.spec.priority) } : {}),
+    };
 
     const dnsConfig = input.spec.dnsConfig;
     const dnsServers = dnsConfig?.nameservers?.length ? dnsConfig.nameservers : undefined;
@@ -151,6 +156,7 @@ export class PodmanPodCodec implements PodCodec<PodmanCreateRequest> {
 
     const totalCpu = input.spec.containers.reduce((s, c) => s + (c.resources?.limits?.cpu ?? 0), 0);
     const totalMem = input.spec.containers.reduce((s, c) => s + (c.resources?.limits?.memory ?? 0), 0);
+    const terminationGracePeriodSeconds = input.spec.terminationGracePeriodSeconds;
 
     const pod: PodmanPodCreateBody = {
       name: input.metadata.name,
@@ -165,6 +171,7 @@ export class PodmanPodCodec implements PodCodec<PodmanCreateRequest> {
       ...(networkName ? { networks: [{ name: networkName }] } : {}),
       ...(totalCpu > 0 ? { cpus: totalCpu } : {}),
       ...(totalMem > 0 ? { memory: `${String(totalMem)}m` } : {}),
+      ...(terminationGracePeriodSeconds !== undefined ? { terminationGracePeriodSeconds } : {}),
     };
 
     const containers = input.spec.containers.map(c => containerToCreateBody(c, false));

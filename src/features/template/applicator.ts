@@ -58,7 +58,7 @@ export async function applyTemplate(
   const gpuType = containers.find(c => (c.resources?.limits?.gpu ?? 0) > 0)?.resources?.limits?.gpuType;
 
   const ext = tpl.extensions;
-  const { volumes, volumeMounts, configMapEnv, securityRefNames, podSecretRefs } = await mapStorage(ext?.storage, resolveVolume, securityStore, resolveContainerSecret);
+  const { volumes, volumeMounts, configMapEnv, securityRefNames, podSecretRefs, resolvedSecrets } = await mapStorage(ext?.storage, resolveVolume, securityStore, resolveContainerSecret);
 
   // Assign volume mounts to first container only (backward compat)
   const mainVolMounts = volumeMounts.length > 0 ? volumeMounts : undefined;
@@ -144,6 +144,7 @@ export async function applyTemplate(
     ...(volumes.length > 0 ? { volumes } : {}),
     ...(securityRefNames.length > 0 ? { securityRefNames } : {}),
     ...(podSecretRefs.length > 0 ? { podSecretRefs } : {}),
+    ...(Object.keys(resolvedSecrets).length > 0 ? { resolvedSecrets } : {}),
     ...(container.account ? { account: container.account } : {}),
     ...(container.instanceId ? { instanceId: container.instanceId } : {}),
     ...(ext?.healthMaxRetries !== undefined ? { healthMaxRetries: ext.healthMaxRetries } : {}),
@@ -224,8 +225,9 @@ export async function mapStorage(
   configMapEnv: { name: string; value: string }[];
   securityRefNames: string[];
   podSecretRefs: import('../../core/pod/types.ts').PlatformSecretRef[];
+  resolvedSecrets: import('../../core/pod/types.ts').ResolvedSecretsMap;
 }> {
-  if (!storage || storage.length === 0) return { volumes: [], volumeMounts: [], configMapEnv: [], securityRefNames: [], podSecretRefs: [] };
+  if (!storage || storage.length === 0) return { volumes: [], volumeMounts: [], configMapEnv: [], securityRefNames: [], podSecretRefs: [], resolvedSecrets: {} };
 
   const now = Date.now();
   const volumes: Volume[] = [];
@@ -233,6 +235,7 @@ export async function mapStorage(
   const securityRefNames: string[] = [];
   const configMapEnv: { name: string; value: string }[] = [];
   const podSecretRefs: import('../../core/pod/types.ts').PlatformSecretRef[] = [];
+  const resolvedSecrets: import('../../core/pod/types.ts').ResolvedSecretsMap = {};
 
   for (const s of storage) {
     const vid = createVolumeId(s.name);
@@ -267,6 +270,12 @@ export async function mapStorage(
           keys: ref.keys,
           mode: 0o400,
         });
+        if (cs.value !== undefined || cs.platformRefs !== undefined) {
+          resolvedSecrets[ref.name] = {
+            ...(cs.value !== undefined ? { value: cs.value } : {}),
+            ...(cs.platformRefs !== undefined ? { platformRefs: cs.platformRefs } : {}),
+          };
+        }
       }
       continue;
     }
@@ -361,5 +370,5 @@ export async function mapStorage(
     }
   }
 
-  return { volumes, volumeMounts, configMapEnv, securityRefNames, podSecretRefs };
+  return { volumes, volumeMounts, configMapEnv, securityRefNames, podSecretRefs, resolvedSecrets };
 }

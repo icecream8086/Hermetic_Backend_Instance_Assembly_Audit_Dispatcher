@@ -670,6 +670,8 @@ async function toPodSpec(
     },
     spec: {
       secretMounts: securityMounts.length > 0 ? securityMounts : undefined,
+      secretRefs: input.podSecretRefs,
+      resolvedSecrets: input.resolvedSecrets,
       containers: input.containers.map(c => ({
         name: c.name,
         image: c.image,

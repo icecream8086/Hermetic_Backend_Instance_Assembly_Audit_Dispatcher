@@ -39,6 +39,7 @@ import type { AppContext, FeatureDeps, AppInstance } from './deps.ts';
 import { registerHealthCheck } from './events/health-check.ts';
 import { registerImagePullHandler } from './events/image-pull.ts';
 import { registerLogFetchHandler } from './events/log-fetch.ts';
+import { SecretProvisioner, EciSecretBackend } from './security/secret-provisioner.ts';
 import { AppError } from './types.ts';
 import { z } from 'zod';
 // Re-export for external consumers (index.ts, dev.ts, feature handlers)
@@ -138,7 +139,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
 
   registerScheduler('eventLoop', eventLoop);
 
-  // 5b. 健康检查事件 — 委托到 src/core/events/health-check.ts
+  // 5b1. 健康检查事件 — 委托到 src/core/events/health-check.ts
   registerHealthCheck({
     stores: { atomic: stores.atomic },
     providers: { resolveContainer: providers.resolveContainer.bind(providers) },
@@ -164,6 +165,15 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
     eventBus,
   });
 
+  // 5b4. 密钥下发 — SecretProvisioner 周期性同步到各平台后端
+  const secretProvisioner = new SecretProvisioner([new EciSecretBackend()], stores.atomic);
+  eventBus.on('secret:sync', async () => {
+    await secretProvisioner.syncAll().catch(e => {
+      console.error('[secret-provisioner] sync failed:', e instanceof Error ? e.message : String(e));
+    });
+    eventLoop.enqueuePriority({ type: 'secret:sync', payload: {} });
+  });
+  eventLoop.enqueuePriority({ type: 'secret:sync', payload: {} });
 
   // 5c. Load log policy into runtime
   try {

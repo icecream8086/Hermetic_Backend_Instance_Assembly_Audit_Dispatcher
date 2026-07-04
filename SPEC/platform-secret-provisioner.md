@@ -2,7 +2,7 @@
 
 > **Status**: Draft
 > **日期**: 2026-07-04
-> **基于**: ECI SecretVolume API 实测验证 (2026-07-04)
+> **基于**: ECI SecretVolume API 验证 (2026-07-04)
 
 ---
 
@@ -462,35 +462,15 @@ S3 JWT token:
 
 ## 11. TODO
 
-### 11.1 `encodeSecretRefs` — secrets Map 管线 (P1)
+> **主任务清单已移至** `SPEC/POD_V2_ARCHITECTURE_FINAL.md` §4。
 
-`encodeSecretRefs(refs, params, volumeBase, secrets?)` 的 `secrets` 参数用于内联降级时提供解密后的 Secret 明文。当前两个调用点都未传 `secrets`：
+本规范涉及的未完成项及对应任务 ID：
 
-| 调用点 | 位置 | 状态 |
+| 本规范 § | 任务 | 对应 |
 |---|---|---|
-| `buildCreateParams` | `eci-codec.ts:700` | `secrets` 未传 → 内联降级写入空 Payload |
-| `buildPodCreateParams` | `eci-codec.ts:918` | 同上 |
-
-**影响**: 引用模式（ECI on ACK, `platformRefs.eci` 存在）不受影响。ECI standalone 的降级内联无法注入实际 Secret 值。
-
-**修法**: 从 applicator → `CreateSandboxInput.podSecretRefs` → `PodSpec.spec.secretRefs` → `CreateContainerGroupInput.secretRefs` 的管线中，附带一个 `Map<secretName, { value: plaintext, platformRefs }>`。`buildCreateParams` / `buildPodCreateParams` 调用 `encodeSecretRefs` 时传入这个 Map。
-
-### 11.2 `parseVolumes` — SecretVolume 解析 (P2)
-
-`eci-codec.ts:582` 的 `parseVolumes()` 只处理 NFS 和 EmptyDir。需补充 SecretVolume 和 ConfigMapVolume 的出站解析。
-
-### 11.3 `ECI_VS_K8S_POD_COMPARISON.md:73` — SPEC 勘误 (P3)
-
-```
-- | **ConfigMap / Secret (volume)** | 配置文件挂载 | ECI Volume 支持 NFS，但不支持 ConfigMap/Secret 卷类型 |
-+ | **ConfigMap / Secret (volume)** | 配置文件挂载 | ECI 支持 ConfigMapVolume 和 SecretVolume（经 2026-07-04 API 实测验证，CreateContainerGroup 接受） |
-```
-
-### 11.4 Podman / K8s Codec (P4)
-
-- `Podman Backend`: 从 `podman-provider.ts` 提取 `podman secret create` 逻辑到 `SecretProvisioner`
-- `K8s Backend`: 新建 `K8sSecretBackend implements PlatformSecretBackend`
-
-### 11.5 SecretProvisioner 注册到 app.ts (P5)
-
-`app.ts` 中创建 `SecretProvisioner` 实例、注册 `EciSecretBackend`、加入 event-loop tick。
+| encodeSecretRefs Map 管线 | secrets 未传 → 内联降级写空值 | T1 |
+| parseVolumes SecretVolume | 出站解析缺分支 | T2 |
+| Podman Secret Backend | podman secret create 提取 | T4 |
+| SecretProvisioner → app.ts | 注册 + event-loop tick | T5 |
+| ECI_VS_K8S_POD_COMPARISON.md 勘误 | SPEC 修正 | T7 |
+| K8s/AWS Backend | 后续平台 | T9 |

@@ -590,6 +590,8 @@ function parseVolumes(vols: EciVolumeItem[] | undefined): VolumeRuntimeInfo[] {
     ...(v.EmptyDirVolume ? {
       emptyDir: { sizeLimit: v.EmptyDirVolume.SizeLimit ?? '', medium: v.EmptyDirVolume.Medium },
     } : {}),
+    ...(v.SecretVolume ? { secretVolume: { secretName: v.SecretVolume.SecretName ?? '' } } : {}),
+    ...(v.ConfigMapVolume ? { configMapVolume: { name: v.ConfigMapVolume.Name ?? '' } } : {}),
   }));
 }
 
@@ -698,9 +700,8 @@ export function buildCreateParams(
   // ── Secret Refs (platform-native secret references) ──
   if (input.secretRefs?.length) {
     const secretVolBase = input.volumes?.length ?? 0;
-    // TODO: pass decrypted containerSecrets Map as 4th arg — requires plumbing decrypted
-    // values from applicator → sandbox.service → pod.service → codec
-    const inlineFromRefs = encodeSecretRefs(input.secretRefs, p, secretVolBase);
+    const secretsMap = input.resolvedSecrets ? new Map(Object.entries(input.resolvedSecrets)) : undefined;
+    const inlineFromRefs = encodeSecretRefs(input.secretRefs, p, secretVolBase, secretsMap);
     const existingMountCount = input.secretMounts?.length ?? 0;
     inlineFromRefs.forEach((m, i) => {
       const spfx = `ConfigFileVolume.${String(existingMountCount + i + 1)}`;
@@ -917,8 +918,8 @@ export function buildPodCreateParams(spec: PodSpec, region: string): Record<stri
   // ── Secret Refs (platform-native secret references) ──
   if (spec.spec.secretRefs?.length) {
     const secretVolBase = spec.spec.volumes?.length ?? 0;
-    // TODO: pass decrypted containerSecrets Map as 4th arg (same as buildCreateParams)
-    const inlineFromRefs = encodeSecretRefs(spec.spec.secretRefs, p, secretVolBase);
+    const secretsMap = spec.spec.resolvedSecrets ? new Map(Object.entries(spec.spec.resolvedSecrets)) : undefined;
+    const inlineFromRefs = encodeSecretRefs(spec.spec.secretRefs, p, secretVolBase, secretsMap);
     // Write inline fallback mounts after existing secretMounts to avoid ConfigFileVolume index collision
     const existingSecretMountCount = spec.spec.secretMounts?.length ?? 0;
     inlineFromRefs.forEach((m, i) => {

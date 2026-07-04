@@ -98,6 +98,8 @@ export class PodmanContainerGroupProvider implements IContainerGroupProvider {
   readonly #dockerApi: string;   // Docker-compatible v1.24 (for per-container inspect)
   readonly #libpodApi: string;   // Libpod v5 (for pod operations)
   readonly #codec: PodmanPodCodec;
+  /** Tracks terminationGracePeriodSeconds by pod providerId for stop operations. */
+  readonly #terminationGracePeriodByPodId = new Map<string, number>();
 
   public constructor(endpoint = 'http://127.0.0.1:8080') {
     this.#dockerApi = `${endpoint}/v1.24`;
@@ -113,9 +115,10 @@ export class PodmanContainerGroupProvider implements IContainerGroupProvider {
   }
 
   public async stopGroup(providerId: string): Promise<void> {
-    const resp = await fetch(`${this.#libpodApi}/pods/${encodeURIComponent(providerId)}/stop`, {
-      method: 'POST',
-    });
+    const timeout = this.#terminationGracePeriodByPodId.get(providerId);
+    let url = `${this.#libpodApi}/pods/${encodeURIComponent(providerId)}/stop`;
+    if (timeout !== undefined) url += `?t=${String(timeout)}`;
+    const resp = await fetch(url, { method: 'POST' });
     if (!resp.ok && resp.status !== 304) {
       const err = await resp.text();
       throw new Error(`Podman pod stop failed (${String(resp.status)}): ${err}`);
@@ -123,6 +126,7 @@ export class PodmanContainerGroupProvider implements IContainerGroupProvider {
   }
 
   public async deleteGroup(providerId: string): Promise<void> {
+    this.#terminationGracePeriodByPodId.delete(providerId);
     await this.#forceDeletePod(providerId);
   }
 
@@ -173,6 +177,11 @@ export class PodmanContainerGroupProvider implements IContainerGroupProvider {
     if (networkName) {
       body.networks = [{ name: networkName }];
     }
+    // ── Scheduling fields ──
+    if (request.pod.dnsServers?.length) body.dns_server = [...request.pod.dnsServers];
+    if (request.pod.dnsSearches?.length) body.dns_search = [...request.pod.dnsSearches];
+    if (request.pod.dnsOptions?.length) body.dns_option = [...request.pod.dnsOptions];
+    if (request.pod.addHosts?.length) body.add_hosts = [...request.pod.addHosts];
 
     const podResp = await fetch(`${this.#libpodApi}/pods/create`, {
       method: 'POST',
@@ -184,6 +193,11 @@ export class PodmanContainerGroupProvider implements IContainerGroupProvider {
       throw new Error(`Podman pod create failed (${String(podResp.status)}): ${err}`);
     }
     const pod = podCreateResultSchema.parse(await podResp.json());
+
+    // Store terminationGracePeriodSeconds for stopGroup() timeout
+    if (request.pod.terminationGracePeriodSeconds !== undefined) {
+      this.#terminationGracePeriodByPodId.set(pod.Id, request.pod.terminationGracePeriodSeconds);
+    }
 
     for (const c of request.containers) {
       const containerResp = await fetch(

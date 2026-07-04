@@ -70,7 +70,7 @@
 | **Affinity / AntiAffinity** | Pod 间调度约束 | ECI 无——单实例调度，无节点概念 |
 | **Tolerations** | 容忍节点 taint | ECI 无节点概念，因此不需要 |
 | **TopologySpreadConstraints** | 拓扑分布约束 | ECI 用 ScheduleStrategy 部分替代 |
-| **ConfigMap / Secret (volume)** | 配置文件挂载 | ECI Volume 支持 NFS，但不支持 ConfigMap/Secret 卷类型 |
+| **ConfigMap / Secret (volume)** | 配置文件挂载 | ECI Volume 支持 NFS/ConfigMap/SecretVolume |
 | **EmptyDir** | 临时存储卷 | ECI 用 EphemeralStorage |
 | **PVC** | 持久卷声明 | ECI 通过独立 API (CreateDataCache) 或 NFS Volume |
 | **PodDisruptionBudget** | 自愿中断预算 | ECI 无 |

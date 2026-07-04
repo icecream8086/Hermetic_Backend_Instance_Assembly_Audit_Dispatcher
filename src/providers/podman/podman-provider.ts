@@ -19,6 +19,7 @@ import type {
 import type { CreateContainerGroupInput, ContainerGroupRuntime, OciContainerStatus } from '../../core/provider/types.ts';
 import { createContainerId } from '../../core/provider/types.ts';
 import { createRegionId } from '../../core/region/types.ts';
+import { z } from 'zod';
 import { debugLog } from '../../core/audit/log-policy.ts';
 
 interface PodmanContainer {
@@ -170,6 +171,17 @@ export class PodmanContainerProvider implements IContainerProvider {
     if (networkMode) {
       hostConfig.NetworkMode = networkMode;
     }
+    // ── Scheduling fields (from providerOverrides / PodSpec translation) ──
+    const stopTimeout = z.number().optional().parse(c.providerOverrides?.terminationGracePeriodSeconds);
+    if (stopTimeout !== undefined) hostConfig.StopTimeout = stopTimeout;
+    const dns = z.array(z.string()).optional().parse(c.providerOverrides?.dns);
+    if (dns?.length) hostConfig.Dns = dns;
+    const dnsSearch = z.array(z.string()).optional().parse(c.providerOverrides?.dnsSearch);
+    if (dnsSearch?.length) hostConfig.DnsSearch = dnsSearch;
+    const dnsOptions = z.array(z.string()).optional().parse(c.providerOverrides?.dnsOptions);
+    if (dnsOptions?.length) hostConfig.DnsOptions = dnsOptions;
+    const extraHosts = z.array(z.string()).optional().parse(c.providerOverrides?.extraHosts);
+    if (extraHosts?.length) hostConfig.ExtraHosts = extraHosts;
     if (Object.keys(portBindings).length > 0) hostConfig.PortBindings = portBindings;
     if (c.resources?.limits) {
       hostConfig.Memory = c.resources.limits.memory * 1024 * 1024;
@@ -234,6 +246,14 @@ export class PodmanContainerProvider implements IContainerProvider {
       ...(healthcheck ? { Healthcheck: healthcheck } : {}),
       ...(Object.keys(hostConfig).length > 0 ? { HostConfig: hostConfig } : {}),
     };
+
+    // ── Priority annotation for pod ordering ──
+    const priorityVal = z.number().optional().parse(c.providerOverrides?.priority);
+    if (priorityVal !== undefined) {
+      const lbls = z.record(z.string(), z.string()).default({}).parse(body.Labels);
+      lbls['hbi-priority'] = String(priorityVal);
+      body.Labels = lbls;
+    }
 
     // No container name — Podman auto-assigns a unique one.
     // We always refer to containers by their ID (providerId), so the name is irrelevant.

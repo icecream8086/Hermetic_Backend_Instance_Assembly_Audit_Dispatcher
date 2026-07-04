@@ -25,57 +25,9 @@ Provider 层 `CreateContainerGroupInput` 是活跃契约，`podSpecToGroupInput(
 
 ---
 
-## 2. 待实现：治理能力下沉
+## 2. 治理能力下沉 ✅ DONE (2026-07-04)
 
-Pod 当前是纯 compute 层。quota/audit/event 在 SandboxService 中，不在 PodService。
-
-| 能力 | PodService | SandboxService | 目标 |
-|---|---|---|---|
-| Compute | ✅ | ✅ 透传 Pod | 不变 |
-| 状态机 | 5 态 `store.transition` | 11 态 `isValidTransition` | 不变 |
-| 配额 | ❌ | QuotaService | **→ PodService** |
-| 审计 | ❌ | IAuditWriter | **→ PodService** |
-| 事件 | ❌ | EventBus | **→ PodService** |
-| 权限 | handler 已做 | handler 已做 | 不变 |
-
-### 2.1 目标态
-
-```
-PodService.provision(spec, creatorId?)
-  ├── QuotaService.checkQuota(creatorId, cpu, mem)     ← 入口校验
-  ├── provider.create(...)
-  ├── PodStore.insert(entity)
-  ├── QuotaService.recordCreate(creatorId, cpu, mem)    ← 记录消费
-  ├── AuditWriter.write('pod.created', ...)
-  └── EventBus.dispatch('pod.created', ...)
-
-PodService.terminate(podId)
-  ├── provider.delete(...)
-  ├── PodStore.remove(podId)
-  ├── QuotaService.recordDelete(creatorId, cpu, mem)    ← 释放配额
-  ├── AuditWriter.write('pod.terminated', ...)
-  └── EventBus.dispatch('pod.deleted', ...)
-```
-
-SandboxService 去除自身的 quota/audit/event 调用，由 PodService 承担。
-
-### 2.2 变更清单
-
-| # | 文件 | 操作 |
-|---|---|---|
-| 1 | `core/quota/quota.ts` | 新文件，从 `features/sandbox/quota.ts` 搬入 core，`maxSandboxes→maxResources` |
-| 2 | `features/sandbox/quota.ts` | 删实现，re-export from core |
-| 3 | `core/pod/service.ts` | 构造函数加 `quota?`, `audit?`, `eventBus?`；`provision/terminate/stop/start/restart` 嵌入 |
-| 4 | `core/pod/service.ts` | `provision(spec, creatorId?)` → populate `PodEntity.creatorId` |
-| 5 | `sandbox.service.ts` | 删 quota/audit/eventBus 调用 + 构造参数 |
-| 6 | `sandbox/index.ts` | 构造函数调用删对应实参 |
-| 7 | `handler.ts` | `POST /pod` 传 `c.var.currentUser?.id` 进 `provision()` |
-
-### 2.3 Sandbox 可选叠加
-
-若需 sandbox-specific 事件（如 `sandbox.provisioned` 区别于 `pod.created`），SandboxService 可选保留 `audit?`/`eventBus?` 仅用于追加一条 sandbox 事件。pod 事件由 PodService 统一发出，不重复。
-
----
+quota/audit/event 已全部迁移到 PodService。SandboxService 保留可选 audit/event 仅用于追加 sandbox 前缀事件（Section 2.3 设计）。
 
 ## 3. 远期：权限三层门控
 
@@ -89,12 +41,113 @@ Layer 3: MAC — label selector 匹配策略 DAG                  ← 待设计
 
 ---
 
-## 4. 已知缺口
+## 4. Pod 开发任务
 
-S3 `autoGenerateKeys`：密钥绑定已持久化到 atomic store（供 `terminate` 清理），但生成的密钥未注入容器挂载。旧代码通过 `secretMounts` 数组传给 provider input，PodService 路径下缺失此步骤。需在 `toPodSpec()` 或 `podSpecToGroupInput()` 中补充。
+> 合并来源：本文件 §4 + `platform-secret-provisioner.md` §11 + `storage-sync-api.md` §7 + code audit
 
 ---
 
-> 待实现：QuotaService 入 core → PodService 集成 quota/audit/event，净增 ~50 行。  
-> Provider 层 `CreateContainerGroupInput` 是活跃契约，不删。
-> 生成的密钥注入容器挂载 ❌ — v1 路径已删，PodService 路径未覆盖[暂不使用]
+### 4.1 必做（阻塞性）
+
+#### T1 — `encodeSecretRefs` secrets Map 管线
+
+**文件**: `eci-codec.ts:700,918`, `pod/service.ts:32`, `provider/types.ts:348`
+
+`encodeSecretRefs(refs, params, volumeBase, secrets?)` 的 `secrets` 参数未传——ECI standalone 降级内联写入空 Payload。
+
+**修法**:
+1. `CreateContainerGroupInput` 或 `PodSpec` 携带 `resolvedSecrets` Map
+2. `buildCreateParams` / `buildPodCreateParams` 传 secrets 给 `encodeSecretRefs`
+3. applicator → sandbox.service → pod.service 管线透传
+
+**来源**: `platform-secret-provisioner.md` Phase 1
+
+#### T2 — `parseVolumes` 补充 SecretVolume/ConfigMapVolume
+
+**文件**: `eci-codec.ts:582`
+
+ECI 支持 SecretVolume/ConfigMapVolume（入站编码完整），但出站 `parseVolumes()` 只解析 NFS + EmptyDir。
+
+**修法**: `parseVolumes` 增加 `v.SecretVolume` 和 `v.ConfigMapVolume` 分支。
+
+**来源**: code audit + `platform-secret-provisioner.md` §11.2
+
+---
+
+### 4.2 功能完整
+
+#### T3 — PodSpec scheduling fields → Codec
+
+**文件**: `eci-codec.ts` (ECI), `podman-provider.ts` (Podman)
+
+PodSpec 已定义的 11 个 K8s scheduling 字段未编码：
+
+| 字段 | ECI 映射 | Podman | 工作量 |
+|---|---|---|---|
+| `priority` | env HBI_PRIORITY | pod ordering | 小 |
+| `nodeSelector` | 忽略 | instance label match | 小 |
+| `terminationGracePeriodSeconds` | ECI API | `--time` | 小 |
+| `dnsConfig` | `DnsConfig` | `--dns` | 小 |
+| `hostAliases` | `HostAliase` | `--add-host` | 小 |
+| `topologySpreadConstraints` | `ScheduleStrategy` (部分) | N/A | 中 |
+| `affinity` | N/A | label select | 大 |
+| `tolerations` | N/A | N/A | — |
+| `preemptionPolicy` | N/A | N/A | — |
+
+各字段独立，可按行拆分。
+
+#### T4 — Podman Secret Backend
+
+**文件**: `core/security/secret-provisioner.ts` (新增 Backend), `podman-provider.ts` (提取)
+
+从 `podman-provider.ts` 的 `podman secret create` + `--secret` 逻辑提取为 `PodmanSecretBackend implements PlatformSecretBackend`。
+
+**来源**: `platform-secret-provisioner.md` Phase 2 (Provisioner)
+
+#### T5 — SecretProvisioner 注册到 app.ts
+
+**文件**: `src/core/app.ts`
+
+创建 `SecretProvisioner` 实例，注册 `EciSecretBackend`，加入 event-loop tick 调用 `syncAll()`。
+
+**来源**: `platform-secret-provisioner.md` Phase 2 (Provisioner)
+
+#### T6 — 存储同步 REST API
+
+**文件**: `src/features/storage/` (新建 feature)
+
+4 个端点：`GET /files`, `POST /diff`, `POST /presign`, `DELETE /files/{key}`。
+
+**来源**: `storage-sync-api.md`
+
+---
+
+### 4.3 清理
+
+#### T7 — ECI SPEC 勘误
+
+**文件**: `ECI_VS_K8S_POD_COMPARISON.md:73`
+
+```
+- ECI Volume 支持 NFS，但不支持 ConfigMap/Secret 卷类型
++ ECI Volume 支持 NFS/ConfigMap/SecretVolume
+```
+
+#### T8 — ContainerSpec / ContainerConfig 类型去重
+
+**文件**: `core/pod/types.ts`, `features/sandbox/types.ts`
+
+`ContainerSpec` 与 `ContainerConfig` 有 ~14 个相同字段。`PodNetwork`(4) 与 `NetworkInfo`(7) 是超集关系。合并非阻塞但减少维护负担。
+
+#### T9 — K8sSecretBackend + AwsSecretBackend
+
+**文件**: `core/security/secret-provisioner.ts` (新增 Backend)
+
+K8s: K8s API `POST /api/v1/namespaces/{ns}/secrets`。AWS: SDK `SecretsManager.CreateSecret`。后续平台，非阻塞。
+
+**来源**: `platform-secret-provisioner.md` §11.4
+
+---
+
+> **已完成**: QuotaService 入 core ✅ → PodService 集成 quota/audit/event ✅ → S3 autoGenerateKeys 废弃 → S3 JWT V3 ✅
+> **开发文档**: `SPEC/DEVLOG-pod-unification.md`
