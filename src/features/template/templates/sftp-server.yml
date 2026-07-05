@@ -3,39 +3,44 @@
 name: "SFTP Server"
 description: "Secure file transfer server (SFTP/SSH) — mount volumes for persistent storage, per-user UID/GID, SSH key auth support. Based on atmoz/sftp OpenSSH server."
 apiVersion: "hbi-aad/v1"
-kind: "Container"
-region: "cn-hangzhou"
-containers:
-  - name: "sftp"
-    image: "registry.cn-hangzhou.aliyuncs.com/minecraft-graalvm/ftp_bp:latest"
-    ports:
-      - containerPort: 22
-        protocol: "TCP"
-    env:
-      - name: "SFTP_USERS"
-        value: "sftpuser:changeme:::upload"
-    resources:
-      limits:
-        cpu: 2
-        memory: 2048
-    livenessProbe:
-      tcpSocket:
-        port: 22
-      periodSeconds: 30
-      initialDelaySeconds: 10
-    readinessProbe:
-      tcpSocket:
-        port: 22
-      periodSeconds: 10
-      initialDelaySeconds: 5
-network:
-  mode: "vpc"
-extensions:
-  healthMaxRetries: 3
+kind: "Pod"
+spec:
+  metadata:
+    name: "SFTP Server"
+  spec:
+    containers:
+      - name: "sftp"
+        image: "registry.cn-hangzhou.aliyuncs.com/minecraft-graalvm/ftp_bp:latest"
+        ports:
+          - containerPort: 22
+            protocol: "TCP"
+        env:
+          - name: "SFTP_USERS"
+            value: "sftpuser:changeme:::upload"
+        resources:
+          limits:
+            cpu: 2
+            memory: 2048
+        livenessProbe:
+          tcpSocket:
+            port: 22
+          periodSeconds: 30
+          initialDelaySeconds: 10
+        readinessProbe:
+          tcpSocket:
+            port: 22
+          periodSeconds: 10
+          initialDelaySeconds: 5
+    restartPolicy: "Always"
   providerOverrides:
     alibaba:
+      region: "cn-hangzhou"
+      healthMaxRetries: 3
       autoCreateEip: true
       eipBandwidth: 10
       securityGroupId: "sg-bp16o5urk39itwcqmdzj"
-      vSwitchId: "vsw-bp1xx36ys1jou7o1bsdpp,vsw-bp1grwzlgy2739dxnskbz,vsw-bp1rv5m61jx4kmld0cc12,vsw-bp1wfyusfye82wm3d3zew"
-restartPolicy: "Always"
+      subnetIds:
+        - "vsw-bp1xx36ys1jou7o1bsdpp"
+        - "vsw-bp1grwzlgy2739dxnskbz"
+        - "vsw-bp1rv5m61jx4kmld0cc12"
+        - "vsw-bp1wfyusfye82wm3d3zew"

@@ -2,33 +2,34 @@
 # tags: lifecycle, producer-consumer, multi-container, eci, v2
 name: "lifecycle-test"
 description: "全生命周期验证 — Producer/Consumer 双容器 localhost:9999 TCP 通信，验证 11 态状态机、重启、更新、删除、GC"
-apiVersion: "hbi-aad/v2"
-kind: "ContainerGroup"
-region: "cn-hangzhou"
-podSpec:
-  name: "lifecycle-test"
-  region: "cn-hangzhou"
-  resources:
-    cpu: "1.0"
-    memory: "512Mi"
-  services:
-    consumer:
-      image: "registry-vpc.cn-hangzhou.aliyuncs.com/minecraft-graalvm/ocibox:latest"
-      command:
-        - "/usr/local/bin/consumer"
-      ports:
-        - containerPort: 9999
-          protocol: "TCP"
-      resources:
-        cpu: "0.5"
-        memory: "256Mi"
-    producer:
-      image: "registry-vpc.cn-hangzhou.aliyuncs.com/minecraft-graalvm/ocibox:latest"
-      command:
-        - "/usr/local/bin/producer"
-        - "1"
-      dependsOn:
-        - "consumer"
-      resources:
-        cpu: "0.5"
-        memory: "256Mi"
+apiVersion: "hbi-aad/v1"
+kind: "Pod"
+spec:
+  metadata:
+    name: "lifecycle-test"
+  spec:
+    containers:
+      - name: "lifecycle-test-consumer"
+        image: "registry-vpc.cn-hangzhou.aliyuncs.com/minecraft-graalvm/ocibox:latest"
+        command:
+          - "/usr/local/bin/consumer"
+        ports:
+          - containerPort: 9999
+            protocol: "TCP"
+        resources:
+          limits:
+            cpu: 0.5
+            memory: 256
+      - name: "lifecycle-test-producer"
+        image: "registry-vpc.cn-hangzhou.aliyuncs.com/minecraft-graalvm/ocibox:latest"
+        command:
+          - "/usr/local/bin/producer"
+          - "1"
+        resources:
+          limits:
+            cpu: 0.5
+            memory: 256
+    restartPolicy: "Never"
+  providerOverrides:
+    alibaba:
+      region: "cn-hangzhou"

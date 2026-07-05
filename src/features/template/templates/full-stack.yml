@@ -3,19 +3,23 @@
 name: "full-stack"
 description: "Full stack — merges custom-alpine + nginx with app container"
 apiVersion: "hbi-aad/v1"
-kind: "Container"
-region: "local"
+kind: "Pod"
 dependsOn:
   - "custom-alpine"
   - "nginx"
-containers:
-  - name: "alpine"
-    env:
-      - name: "NGINX_HOST"
-        value: "localhost"
-      - name: "DB_URL"
-        value: "sqlite:///data/app.db"
-extensions:
+spec:
+  metadata:
+    name: "full-stack"
+  spec:
+    containers:
+      - name: "alpine"
+        env:
+          - name: "NGINX_HOST"
+            value: "localhost"
+          - name: "DB_URL"
+            value: "sqlite:///data/app.db"
+    restartPolicy: "Never"
   providerOverrides:
     alibaba:
+      region: "local"
       autoCreateEip: true

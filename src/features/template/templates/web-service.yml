@@ -3,35 +3,39 @@
 name: "web-service"
 description: "Nginx Web 服务 — 公网可达，HTTP 健康检查，支持 EIP 带宽配置"
 apiVersion: "hbi-aad/v1"
-kind: "Container"
-provider: "alibaba"
+kind: "Pod"
 dependsOn: ["base-network"]
-containers:
-  - name: "nginx"
-    image: "docker.io/library/nginx:alpine"
-    ports:
-      - containerPort: 80
-        protocol: "TCP"
-      - containerPort: 443
-        protocol: "TCP"
-    resources:
-      limits:
-        cpu: 1
-        memory: 256
-    livenessProbe:
-      httpGet:
-        port: 80
-        path: "/health"
-      periodSeconds: 15
-      initialDelaySeconds: 10
-    readinessProbe:
-      httpGet:
-        port: 80
-        path: "/health"
-      periodSeconds: 5
-extensions:
+spec:
+  metadata:
+    name: "web-service"
+  spec:
+    containers:
+      - name: "nginx"
+        image: "docker.io/library/nginx:alpine"
+        ports:
+          - containerPort: 80
+            protocol: "TCP"
+          - containerPort: 443
+            protocol: "TCP"
+        resources:
+          limits:
+            cpu: 1
+            memory: 256
+        livenessProbe:
+          httpGet:
+            port: 80
+            path: "/health"
+          periodSeconds: 15
+          initialDelaySeconds: 10
+        readinessProbe:
+          httpGet:
+            port: 80
+            path: "/health"
+          periodSeconds: 5
+    restartPolicy: "Never"
   providerOverrides:
     alibaba:
+      region: "local"
       autoCreateEip: true
       eipBandwidth: 50
       spotStrategy: "SpotAsPriceGo"

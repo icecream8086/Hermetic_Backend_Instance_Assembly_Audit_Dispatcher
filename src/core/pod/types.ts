@@ -12,7 +12,6 @@
 import { z } from 'zod';
 import type { EnvVar, ProbeSpec, ContainerPortConfig, VolumeMountConfig } from '../provider/types.ts';
 export type { ProbeSpec };
-import { SandboxStatus } from '../../features/sandbox/types.ts';
 import type { VersionId } from '../brand.ts';
 
 // ═══════════════════════════════════════════════════════════════
@@ -69,7 +68,7 @@ export interface ContainerSpec {
   readonly args?: readonly string[] | undefined;
   readonly env?: readonly EnvVar[] | undefined;
   readonly resources?: {
-    readonly limits?: { readonly cpu: number; readonly memory: number; readonly gpu?: number | undefined } | undefined;
+    readonly limits?: { readonly cpu: number; readonly memory: number; readonly gpu?: number | undefined; readonly gpuType?: string | undefined } | undefined;
   } | undefined;
   readonly ports?: readonly ContainerPortConfig[] | undefined;
   readonly volumeMounts?: readonly VolumeMountConfig[] | undefined;
@@ -315,34 +314,4 @@ export interface PodRuntime {
   readonly events: readonly PodEvent[];
   readonly network: PodNetwork;
   readonly createdAt?: string | undefined;
-}
-
-// ═══════════════════════════════════════════════════════════════
-// π: SandboxStatus → PodPhase (SPEC 018 §8)
-// ═══════════════════════════════════════════════════════════════
-
-/**
- * Project internal SandboxStatus (11) to K8s-standard PodPhase (5).
- * ECI is a refinement of K8s — each K8s phase decomposes into ECI sub-states.
- * @deprecated Use transitionPod() with UpdateFromProvider instead — this is only for codec backward compat.
- */
-export function sandboxStatusToPodPhase(status: SandboxStatus): PodPhase | null {
-  switch (status) {
-    case SandboxStatus.Scheduling:
-    case SandboxStatus.ScheduleFailed:
-    case SandboxStatus.Pending:
-      return 'Pending';
-    case SandboxStatus.Running:
-    case SandboxStatus.Restarting:
-    case SandboxStatus.Updating:
-    case SandboxStatus.Terminating:
-      return 'Running';
-    case SandboxStatus.Succeeded:
-      return 'Succeeded';
-    case SandboxStatus.Failed:
-    case SandboxStatus.Expired:
-      return 'Failed';
-    case SandboxStatus.Deleted:
-      return null;
-  }
 }

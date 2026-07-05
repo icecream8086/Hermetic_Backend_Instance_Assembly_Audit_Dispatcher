@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { secureHeaders } from 'hono/secure-headers';
 import { bodyLimit } from 'hono/body-limit';
-import { ok, fail } from './response.ts';
+import { ok } from './response.ts';
 import type { AppConfig } from '../config/types.ts';
 import { createStores } from './store/factory.ts';
 import { globalErrorHandler } from './middleware/error-handler.ts';
@@ -17,9 +17,6 @@ import { EventBus } from './event-bus/bus.ts';
 import { EventLoop } from './event-bus/loop.ts';
 import { SecretEncryption } from './auth/secret-encryption.ts';
 import type { IAuditWriter, IAuditReader } from './audit/types.ts';
-import type { Sandbox } from '../features/sandbox/types.ts';
-import { createSandboxId } from '../features/sandbox/types.ts';
-import type { ComputeInstance } from '../core/region/instance.ts';
 import { WorkersAuditLogger, KvAuditLogger, HybridAuditLogger, createAuditRouter, setBootId } from './audit/index.ts';
 import { LocalAuditLogger } from './audit/local-audit-logger.ts';
 import { NoopAuditLogger } from './audit/noop-audit-logger.ts';
@@ -37,7 +34,7 @@ import { RequestCachedAtomicStore } from './store/request-cache.ts';
 import { formatDmesgLine } from './utils/dmesg.ts';
 import { createMessageQueue } from '../queue/producer.ts';
 import type { AppContext, FeatureDeps, AppInstance } from './deps.ts';
-import { registerHealthCheck } from './events/health-check.ts';
+import { registerPodHealthCheck } from './events/health-check.ts';
 import { registerImagePullHandler } from './events/image-pull.ts';
 import { registerLogFetchHandler } from './events/log-fetch.ts';
 import { registerSecurityRefresh } from './events/security-refresh.ts';
@@ -144,15 +141,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
 
   registerScheduler('eventLoop', eventLoop);
 
-  // 5b. 健康检查事件 — 委托到 src/core/events/health-check.ts
-  registerHealthCheck({
-    stores: { atomic: stores.atomic },
-    providers: { resolveContainer: providers.resolveContainer.bind(providers) },
-    eventBus,
-    eventLoop,
-    audit,
-    queueProducer,
-  });
+  // (registerPodHealthCheck moved to after podService creation below)
 
   // 5b2. 镜像拉取事件 — 委托到 src/core/events/image-pull.ts
   registerImagePullHandler({
@@ -200,6 +189,17 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
     }
   });
   eventLoop.enqueuePriority({ type: 'pod:gc', payload: {} });
+
+  // 5b. Pod 健康检查 — PodPhase 驱动的 GC 监控
+  registerPodHealthCheck({
+    podService,
+    stores: { atomic: stores.atomic },
+    providers: { resolveContainer: providers.resolveContainer.bind(providers) },
+    eventBus,
+    eventLoop,
+    audit,
+    queueProducer,
+  });
 
   // 5c. Load log policy into runtime
   try {
@@ -444,81 +444,218 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
   // Called after features mount so DagScheduler etc. are registered before startAll runs.
   startAll();
 
-  // 12. Container logs — direct provider call (batch mode for ECI, Podman via Docker API)
-  app.get('/api/sandboxes/:id/logs', async (c) => {
-    const id = createSandboxId(c.req.param('id'));
-    const user = c.var.currentUser;
-    if (permService && user) {
-      const result = await permService.check({ userId: user.id, action: 'read', resource: 'sandbox' });
-      if (!result.allowed) return c.json(fail('FORBIDDEN', result.reason), 403);
+  // ══ TEMPORARY: Template migration endpoint (remove after migration) ══
+  function convertLegacyContainer(raw: Record<string, unknown>): Record<string, unknown> {
+    const containers = z.custom<Record<string, unknown>[]>().parse(raw.containers ?? []);
+    const initContainers = z.custom<Record<string, unknown>[]>().parse(raw.initContainers ?? []);
+    const restartPolicy = z.string().optional().parse(raw.restartPolicy) ?? 'Always';
+    const region = z.string().optional().parse(raw.region);
+    const network = z.record(z.string(), z.unknown()).optional().parse(raw.network);
+    const extensions = z.record(z.string(), z.unknown()).optional().parse(raw.extensions);
+
+    const alibabaOverrides: Record<string, unknown> = {};
+    if (region) alibabaOverrides.region = region;
+
+    const vpc = (network?.vpc as Record<string, unknown>) ?? {};
+    if (vpc.securityGroupId) alibabaOverrides.securityGroupId = vpc.securityGroupId;
+    if (vpc.subnetIds) alibabaOverrides.subnetIds = vpc.subnetIds;
+
+    const extOverrides = (extensions?.providerOverrides as Record<string, unknown>)?.alibaba as Record<string, unknown> ?? {};
+    Object.assign(alibabaOverrides, extOverrides);
+    if (extensions?.healthMaxRetries !== undefined) alibabaOverrides.healthMaxRetries = extensions.healthMaxRetries;
+
+    const healthChecks = z.custom<Record<string, unknown>[]>().optional().parse(raw.healthChecks) ?? [];
+    const probeMap = new Map<string, Record<string, unknown>>();
+    for (const hc of healthChecks) {
+      const target = String(hc.target ?? '');
+      const type = String(hc.type ?? '');
+      const probe: Record<string, unknown> = { ...(hc.probe as Record<string, unknown>) ?? {} };
+      if (hc.initialDelaySeconds !== undefined) probe.initialDelaySeconds = hc.initialDelaySeconds;
+      if (hc.periodSeconds !== undefined) probe.periodSeconds = hc.periodSeconds;
+      if (hc.timeoutSeconds !== undefined) probe.timeoutSeconds = hc.timeoutSeconds;
+      if (hc.successThreshold !== undefined) probe.successThreshold = hc.successThreshold;
+      if (hc.failureThreshold !== undefined) probe.failureThreshold = hc.failureThreshold;
+      probeMap.set(target, { [`${type}Probe`]: probe });
     }
 
-    const entry = await stores.atomic.get<Sandbox>('sandbox:' + id);
-    if (!entry) return c.json(fail('SANDBOX_NOT_FOUND', 'Sandbox not found'), 404);
-    const sandbox = entry.value;
-    if (!sandbox.providerId) return c.json(fail('NO_PROVIDER', 'Sandbox has no provider resource'), 400);
+    const mappedContainers = containers.map((c: Record<string, unknown>) => ({
+      name: c.name,
+      image: c.image,
+      ...(c.command ? { command: c.command } : {}),
+      ...(c.args ? { args: c.args } : {}),
+      ...(c.env ? { env: c.env } : {}),
+      ...(c.ports ? { ports: c.ports } : {}),
+      ...(c.resources ? { resources: c.resources } : {}),
+      ...(c.imagePullPolicy ? { imagePullPolicy: c.imagePullPolicy } : {}),
+      ...(c.tty !== undefined ? { tty: c.tty } : {}),
+      ...(c.stdin !== undefined ? { stdin: c.stdin } : {}),
+      ...(c.providerOverrides ? { providerOverrides: c.providerOverrides } : {}),
+      ...(probeMap.get(`container:${String(c.name)}`) ?? {}),
+    }));
 
-    const containers = sandbox.containers;
-    if (containers.length === 0) return c.json(fail('NO_CONTAINER', 'No containers in sandbox'), 400);
-    const containerName = containers[0]?.name ?? '';
-    const tailParam = c.req.query('tail');
-    const tail = tailParam ? parseInt(tailParam) : undefined;
-    const sinceParam = c.req.query('since');
-    const since = sinceParam ? parseInt(sinceParam) : undefined;
+    const mappedInit = initContainers.map((c: Record<string, unknown>) => ({
+      name: c.name,
+      image: c.image,
+      ...(c.command ? { command: c.command } : {}),
+      ...(c.args ? { args: c.args } : {}),
+      ...(c.env ? { env: c.env } : {}),
+      ...(c.resources ? { resources: c.resources } : {}),
+      ...(probeMap.get(`init:${String(c.name)}`) ?? {}),
+    }));
 
-    try {
-      const logProvider = await providers.resolveContainer(sandbox.config.instanceId);
-      const logResult = await logProvider.getLogs({
-        region: sandbox.config.region,
-        providerId: sandbox.providerId,
-        containerName,
-        ...(tail ? { limitBytes: tail } : {}),
-        ...(since ? { sinceSeconds: since } : {}),
-      });
-      // Persist for future requests
-      if (logResult.content) {
-        try { await stores.atomic.set('log:' + id, { content: logResult.content, containerName, timestamp: logResult.timestamp, fetchedAt: Date.now() }, null); } catch (e) {
-          console.log("noop");
+    const meta = raw.metadata as Record<string, unknown> | undefined;
+    const rawLabels = meta?.labels as Record<string, string> | undefined;
+
+    return {
+      metadata: {
+        name: String(raw.name ?? 'unknown'),
+        ...(rawLabels ? { labels: rawLabels } : {}),
+      },
+      spec: {
+        containers: mappedContainers,
+        ...(mappedInit.length > 0 ? { initContainers: mappedInit } : {}),
+        restartPolicy: restartPolicy as 'Always' | 'OnFailure' | 'Never',
+      },
+      ...(Object.keys(alibabaOverrides).length > 0 ? { providerOverrides: { alibaba: alibabaOverrides } } : {}),
+    };
+  }
+
+  function convertLegacyContainerGroup(raw: Record<string, unknown>): Record<string, unknown> {
+    const podSpecRaw = z.custom<Record<string, unknown>>().parse(raw.podSpec);
+    const services = z.custom<Record<string, Record<string, unknown>>>().parse(podSpecRaw.services ?? {});
+    const names = Object.keys(services);
+
+    function normalizeCommand(cmd: unknown): { command?: string[]; args?: string[] } {
+      if (!cmd) return {};
+      if (typeof cmd === 'string') return { command: ['/bin/sh', '-c'], args: [cmd] };
+      if (Array.isArray(cmd)) return cmd.length > 0 ? { command: cmd } : {};
+      return {};
+    }
+
+    function parseMemoryString(s: string): number {
+      const match = s.match(/^(\d+)\s*(Gi|Mi|Ki|G|M|K)?$/i);
+      if (!match) return 2048;
+      const val = parseInt(match[1]!, 10);
+      const unit = (match[2] ?? 'Mi').toLowerCase();
+      switch (unit) {
+        case 'gi': case 'g': return val * 1024;
+        case 'mi': case 'm': return val;
+        case 'ki': case 'k': return Math.ceil(val / 1024);
+        default: return val;
+      }
+    }
+
+    const allVolumes: Record<string, unknown>[] = [];
+    const seenVols = new Set<string>();
+    const allMounts: { volumeId: string; mountPath: string; readOnly: boolean }[] = [];
+
+    for (const svc of Object.values(services)) {
+      const vols = svc.volumes as { source: string; destination: string; readOnly?: boolean }[] | undefined;
+      if (vols) {
+        for (const v of vols) {
+          if (!seenVols.has(v.source)) {
+            seenVols.add(v.source);
+            allVolumes.push({ id: v.source, type: 'EmptyDirVolume', options: {} });
+          }
+          allMounts.push({ volumeId: v.source, mountPath: v.destination ?? '/mnt/' + v.source, readOnly: v.readOnly ?? false });
         }
       }
-      return c.json(ok({ content: logResult.content || '', containerName, timestamp: logResult.timestamp }));
-    } catch (e: unknown) {
-      // Try cached
-      const cached = await stores.atomic.get<{ content: string; containerName: string; fetchedAt: number }>('log:' + id);
-      if (cached) return c.json(ok({ content: cached.value.content, containerName: cached.value.containerName, cached: true }));
-      const errMsg = e instanceof Error ? e.message : String(e);
-      return c.json(fail('LOGS_UNAVAILABLE', errMsg || 'Logs unavailable'), 502);
     }
-  });
 
-  // Optional: WebSocket streaming via DO for Podman live tail
-  const logStreamNs = z.custom<DurableObjectNamespace>().optional().parse(platformBindings?.LOG_STREAM_DO);
-  if (logStreamNs) {
-    app.get('/api/sandboxes/:id/logs/stream', async (c) => {
-      const id = createSandboxId(c.req.param('id'));
-      const entry = await stores.atomic.get<Sandbox>('sandbox:' + id);
-      if (!entry) return c.json(fail('SANDBOX_NOT_FOUND', 'Sandbox not found'), 404);
-      const sandbox = entry.value;
-      if (!sandbox.providerId) return c.json(fail('NO_PROVIDER', 'Sandbox has no provider resource'), 400);
+    const containers = names.map((name: string, index: number) => {
+      const svc = services[name]!;
+      const cmd = normalizeCommand(svc.command);
+      const env = svc.environment
+        ? Object.entries(svc.environment as Record<string, string>).map(([k, v]) => ({ name: k, value: v }))
+        : undefined;
+      const resourcesRaw = svc.resources as Record<string, unknown> | undefined;
+      const cpu = resourcesRaw?.cpu ? parseFloat(String(resourcesRaw.cpu)) : 1;
+      const memory = resourcesRaw?.memory ? parseMemoryString(String(resourcesRaw.memory)) : 2048;
 
-      const instanceId = sandbox.config.instanceId;
-      let endpoint = 'http://127.0.0.1:8080/v1.24';
-      if (instanceId) {
-        const instEntry = await stores.atomic.get<ComputeInstance>('instance:' + instanceId);
-        if (instEntry) endpoint = instEntry.value.endpoint || endpoint;
-      }
-
-      const stub = logStreamNs.get(logStreamNs.idFromName('logstream:' + id));
-      const tailQ = c.req.query('tail');
-      const sinceQ = c.req.query('since');
-      const qs = new URLSearchParams({ providerId: sandbox.providerId, provider: 'podman', endpoint,
-        containerName: sandbox.containers[0]?.name ?? '',
-        ...(tailQ ? { tail: tailQ } : {}),
-        ...(sinceQ ? { since: sinceQ } : {}),
-      });
-      return stub.fetch(new URL(`/logs?${qs.toString()}`, 'https://do/'), c.req.raw);
+      return {
+        name: `${String(podSpecRaw.name ?? 'unknown')}-${name}`,
+        image: String(svc.image),
+        ...(cmd.command ? { command: cmd.command } : {}),
+        ...(cmd.args ? { args: cmd.args } : {}),
+        ...(env ? { env } : {}),
+        ...(svc.ports ? { ports: (svc.ports as { containerPort: number; protocol?: string }[]).map(p => ({ containerPort: p.containerPort, ...(p.protocol ? { protocol: p.protocol } : {}) })) } : {}),
+        resources: { limits: { cpu, memory } },
+        ...(index === 0 && allMounts.length > 0 ? { volumeMounts: allMounts } : {}),
+      };
     });
+
+    return {
+      metadata: {
+        name: String(podSpecRaw.name ?? 'unknown'),
+        ...(podSpecRaw.labels ? { labels: podSpecRaw.labels as Record<string, string> } : {}),
+      },
+      spec: {
+        containers,
+        restartPolicy: 'Never',
+        ...(allVolumes.length > 0 ? { volumes: allVolumes } : {}),
+      },
+      providerOverrides: {
+        alibaba: {
+          region: String(podSpecRaw.region ?? 'cn-hangzhou'),
+        },
+      },
+    };
   }
+
+  app.post('/api/admin/migrate-templates', async (c) => {
+    const user = c.var.currentUser;
+    if (!user) return c.json({ error: 'Authentication required' }, 401);
+
+    const atomic = stores.atomic;
+    const idx = await atomic.get<string[]>('tpl:ids');
+    if (!idx) return c.json({ migrated: 0, message: 'No templates to migrate' });
+
+    const results: { id: string; before: string; after: string; success: boolean; error?: string }[] = [];
+
+    for (const tid of idx.value) {
+      try {
+        const entry = await atomic.get<Record<string, unknown>>('tpl:' + tid);
+        if (!entry) continue;
+
+        const raw = entry.value;
+        const kind = z.string().optional().parse(raw.kind);
+        if (kind === 'Pod') continue;
+
+        let newSpec: Record<string, unknown>;
+        if (kind === 'ContainerGroup') {
+          newSpec = convertLegacyContainerGroup(raw);
+        } else {
+          newSpec = convertLegacyContainer(raw);
+        }
+
+        const migrated: Record<string, unknown> = {
+          ...raw,
+          kind: 'Pod',
+          apiVersion: 'hbi-aad/v1',
+          spec: newSpec,
+          updatedAt: Date.now(),
+          container: undefined,
+          podSpec: undefined,
+          healthChecks: undefined,
+          network: undefined,
+          extensions: undefined,
+        };
+
+        for (const k of Object.keys(migrated)) {
+          if (migrated[k] === undefined) delete migrated[k];
+        }
+
+        await atomic.set('tpl:' + tid, migrated, entry.version);
+        results.push({ id: tid, before: kind ?? 'unknown', after: 'Pod', success: true });
+      } catch (e: unknown) {
+        results.push({ id: tid, before: 'unknown', after: 'Pod', success: false, error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+
+    const succeeded = results.filter(r => r.success).length;
+    const failed = results.filter(r => !r.success).length;
+    return c.json({ migrated: succeeded, failed, total: results.length, results });
+  });
 
   // 13. Export
   return {

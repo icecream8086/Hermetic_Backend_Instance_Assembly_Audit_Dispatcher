@@ -1,37 +1,38 @@
 # category: demo
 # tags: pod, docker-compose, v2, multi-container
 name: "demo-pod"
-description: "v2 容器组 — nginx + alpine 共享网络 (docker-compose 风格)"
-apiVersion: "hbi-aad/v2"
-kind: "ContainerGroup"
-region: "local"
-podSpec:
-  name: "demo-pod"
-  region: "local"
-  resources:
-    cpu: "1.0"
-    memory: "512Mi"
-  services:
-    web:
-      image: "docker.io/library/nginx:latest"
-      command:
-        - "nginx"
-        - "-g"
-        - "daemon off;"
-      ports:
-        - containerPort: 80
-          protocol: "TCP"
-      resources:
-        cpu: "0.5"
-        memory: "128Mi"
-    sidecar:
-      image: "docker.io/library/alpine:latest"
-      command:
-        - "sh"
-        - "-c"
-        - "while true; do echo \"sidecar alive\"; sleep 30; done"
-      dependsOn:
-        - "web"
-      resources:
-        cpu: "0.25"
-        memory: "64Mi"
+description: "Pod — nginx + alpine 共享网络"
+apiVersion: "hbi-aad/v1"
+kind: "Pod"
+spec:
+  metadata:
+    name: "demo-pod"
+  spec:
+    containers:
+      - name: "demo-pod-web"
+        image: "docker.io/library/nginx:latest"
+        command:
+          - "nginx"
+          - "-g"
+          - "daemon off;"
+        ports:
+          - containerPort: 80
+            protocol: "TCP"
+        resources:
+          limits:
+            cpu: 0.5
+            memory: 128
+      - name: "demo-pod-sidecar"
+        image: "docker.io/library/alpine:latest"
+        command:
+          - "sh"
+          - "-c"
+          - "while true; do echo \"sidecar alive\"; sleep 30; done"
+        resources:
+          limits:
+            cpu: 0.25
+            memory: 64
+    restartPolicy: "Never"
+  providerOverrides:
+    alibaba:
+      region: "local"

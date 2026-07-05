@@ -3,27 +3,30 @@
 name: "SFTP Server (Local)"
 description: "Local Podman SFTP server for development/testing — mount local directories for file sharing. Configure SFTP_USERS env for user:pass:uid:gid:dirs."
 apiVersion: "hbi-aad/v1"
-kind: "Container"
-provider: "podman"
-containers:
-  - name: "sftp"
-    image: "docker.io/atmoz/sftp:alpine"
-    ports:
-      - containerPort: 22
-        protocol: "TCP"
-    env:
-      - name: "SFTP_USERS"
-        value: "dev:devpass:1000:1000:upload"
-    resources:
-      limits:
-        cpu: 0.5
-        memory: 256
-    livenessProbe:
-      tcpSocket:
-        port: 22
-      periodSeconds: 30
-      initialDelaySeconds: 10
-network:
-  allocatePublicIp: false
-  mode: "private"
-restartPolicy: "Always"
+kind: "Pod"
+spec:
+  metadata:
+    name: "SFTP Server (Local)"
+  spec:
+    containers:
+      - name: "sftp"
+        image: "docker.io/atmoz/sftp:alpine"
+        ports:
+          - containerPort: 22
+            protocol: "TCP"
+        env:
+          - name: "SFTP_USERS"
+            value: "dev:devpass:1000:1000:upload"
+        resources:
+          limits:
+            cpu: 0.5
+            memory: 256
+        livenessProbe:
+          tcpSocket:
+            port: 22
+          periodSeconds: 30
+          initialDelaySeconds: 10
+    restartPolicy: "Always"
+  providerOverrides:
+    alibaba:
+      region: "local"

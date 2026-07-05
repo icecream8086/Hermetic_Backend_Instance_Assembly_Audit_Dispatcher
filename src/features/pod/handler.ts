@@ -1,12 +1,12 @@
 import { z } from 'zod';
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import type { Context } from 'hono';
-import type { PodSpec } from '../../core/pod/types.ts';
-import { createPodId, type PodPhase } from '../../core/pod/types.ts';
+import { createPodId } from '../../core/pod/types.ts';
 import type { PodService } from '../../core/pod/service.ts';
 import type { AppContext } from '../../core/deps.ts';
 import { ok } from '../../core/response.ts';
 import { OkResponse } from '../../core/http-docs/response-schema.ts';
+import { PodSpecSchema, PodSpecPatchSchema } from '../../core/pod/schema.ts';
 import {
   PodCreateResponseSchema,
   PodPhaseChangeResponseSchema,
@@ -15,6 +15,7 @@ import {
   ContainerLogResultSchema,
   PodEntitySchema,
   PodListResponseSchema,
+  PodPhaseSchema,
 } from './response-schema.ts';
 import { AppError } from '../../core/types.ts';
 
@@ -40,15 +41,15 @@ export function createPodRouter(
 
   app.openapi(createRoute({ method: 'post', path: '/', tags: ['pods'], summary: '从 PodSpec 创建 Pod', responses: { 201: { description: 'Pod created', content: { 'application/json': { schema: OkResponse(PodCreateResponseSchema) } } } } }), async (c) => {
     await requirePerm(c, permissionChecker, 'create', 'pod');
-    const spec = z.custom<PodSpec>().parse(await c.req.json());
-    if (!spec.metadata.name || spec.spec.containers.length === 0) throw new AppError(400, 'VALIDATION_ERROR', 'PodSpec requires metadata.name and spec.containers');
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Zod schema validates at runtime; cast to known interface
+    const spec = PodSpecSchema.parse(await c.req.json()) as import('../../core/pod/types.ts').PodSpec;
     const pod = await podService.provision(spec, { creatorId: c.var.currentUser?.id });
     return c.json(ok({ podId: pod.podId, providerId: pod.providerId, phase: pod.phase, name: pod.name }), 201);
   });
 
   app.openapi(createRoute({ method: 'get', path: '/', tags: ['pods'], summary: '列出所有 Pod', responses: { 200: { description: '{ items, nextCursor }', content: { 'application/json': { schema: OkResponse(PodListResponseSchema) } } } } }), async (c) => {
     await requirePerm(c, permissionChecker, 'read', 'pod');
-    const phase = z.custom<PodPhase>().optional().parse(c.req.query('phase') || undefined);
+    const phase = PodPhaseSchema.optional().parse(c.req.query('phase') || undefined);
     const limit = parseInt(c.req.query('limit') ?? '50');
     const cursor = c.req.query('cursor');
     const result = await podService.list(phase, limit, cursor);
@@ -153,7 +154,7 @@ export function createPodRouter(
     const pod = await podService.getById(podId);
     if (!pod) throw new AppError(404, 'POD_NOT_FOUND', 'Pod not found');
     await requirePerm(c, permissionChecker, 'update', 'pod', pod.creatorId);
-    const specPatch = z.record(z.string(), z.unknown()).parse(await c.req.json());
+    const specPatch = PodSpecPatchSchema.parse(await c.req.json());
     const updated = await podService.update(podId, specPatch);
     return c.json(ok(updated));
   });

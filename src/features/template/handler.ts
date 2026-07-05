@@ -2,21 +2,21 @@ import { z } from 'zod';
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import type { Context } from 'hono';
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
-import { ok, fail } from '../../core/response.ts';
+import { ok } from '../../core/response.ts';
 import { OkResponse, PaginatedResponse } from '../../core/http-docs/response-schema.ts';
 import { TemplateSchema, ResolvedTemplateSchema, TemplateDeleteResponseSchema } from './response-schema.ts';
+import { PodCreateResponseSchema } from '../pod/response-schema.ts';
 import { AppError } from '../../core/types.ts';
 import type { AppContext } from '../../core/deps.ts';
-import type { Template, CreateTemplateInput, UpdateTemplateInput, ContainerSpec, ContainerDef, HealthCheckDef, TemplateInstanceLimit } from './types.ts';
+import type { Template, TemplateInstanceLimit } from './types.ts';
 import { KernLevel } from '../../core/audit/kern-level.ts';
 import { TemplateVisibility } from './types.ts';
 import type { IProviderRegistry } from '../../core/provider/interfaces.ts';
-import { applyTemplate } from './applicator.ts';
-import { assemblyToCorePodSpec } from './assembly-to-core.ts';
 import type { PodService } from '../../core/pod/service.ts';
-import type { PodSpec } from './assembly/types.ts';
+import type { PodSpec } from '../../core/pod/types.ts';
+import { PodSpecSchema } from '../../core/pod/schema.ts';
+import { mergePodSpec } from '../../core/pod/merge.ts';
 import { UserRole } from '../users/types.ts';
-import type { RegionId } from '../../core/region/types.ts';
 import { INSTANCE_TEMPLATES, type InstanceTemplateDef } from './templates.generated.ts';
 
 interface PermissionCheckFn { check(params: { userId: string; action: string; resource: string; ip?: string }): Promise<{ allowed: boolean; reason: string }> }
@@ -36,64 +36,33 @@ const INDEX_KEY = 'tpl:ids';
 
 function genId(): string { return `tpl_${crypto.randomUUID()}`; }
 
-/** Convert a YAML-generated InstanceTemplateDef to Template shape. */
-function fromGeneratedTemplate(def: InstanceTemplateDef, defaultInstanceId?: string): Template {
-  const s = def.spec;
+/** Convert a YAML-generated InstanceTemplateDef to the new Template shape. */
+function fromGeneratedTemplate(def: InstanceTemplateDef): Template {
   const now = Date.now();
-  const cid = defaultInstanceId;
+  const s = def.spec as Record<string, unknown>;
 
-  // Extract typed spec fields (Record<string, unknown> → domain types)
-  const apiVersion = z.string().optional().parse(s.apiVersion);
-  const kind = z.custom<Template['kind']>().optional().parse(s.kind);
   const dependsOn = z.array(z.string()).optional().parse(s.dependsOn);
-  const region = z.custom<RegionId>().optional().parse(s.region);
-  const restartPolicy = z.string().optional().parse(s.restartPolicy);
-  const containers = z.custom<ContainerDef[]>().optional().parse(s.containers);
-  const initContainers = z.custom<ContainerDef[]>().optional().parse(s.initContainers);
   const singleton = z.boolean().optional().parse(s.singleton);
-  const healthChecks = z.custom<HealthCheckDef[]>().optional().parse(s.healthChecks);
-  const network = z.custom<Record<string, unknown>>().optional().parse(s.network);
-  const extensions = z.custom<Record<string, unknown>>().optional().parse(s.extensions);
-  const podSpec = z.custom<PodSpec>().optional().parse(s.podSpec);
   const instanceLimit = z.custom<TemplateInstanceLimit>().optional().parse(s.instanceLimit);
 
-  // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- boolean OR chain for feature detection, not default values
-  const hasContainer = containers || initContainers || region !== undefined
-    || restartPolicy !== undefined || (cid && !s.instanceId);
-
-  if (kind === 'ContainerGroup' && !podSpec) {
-    throw new Error(`Template "${def.id}" has kind=ContainerGroup but no podSpec`);
-  }
-
-  const containerPart: { container: ContainerSpec } | Record<string, never> = hasContainer
-    ? {
-        container: {
-          ...(region !== undefined ? { region } : {}),
-          ...(cid && !s.instanceId ? { instanceId: cid } : {}),
-          ...(restartPolicy !== undefined ? { restartPolicy } : {}),
-          ...(containers !== undefined ? { containers } : {}),
-          ...(initContainers !== undefined ? { initContainers } : {}),
-        },
-      }
-    : {};
+  // spec field is core PodSpec (from YAML, pre-validated at build time)
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- generated template data, validated at build time
+  const podSpec = s.spec as PodSpec;
 
   return {
     id: def.id,
     name: def.name,
     description: def.description,
-    apiVersion: apiVersion ?? 'hbi-aad/v1',
-    kind: kind ?? 'Container',
-    dependsOn: dependsOn ?? [],
+    apiVersion: z.string().parse(s.apiVersion ?? 'hbi-aad/v1'),
+    kind: 'Pod' as const,
+    spec: podSpec,
+    ...(dependsOn?.length ? { dependsOn } : {}),
     createdAt: now,
     updatedAt: now,
-    ...containerPart,
     ...(singleton !== undefined ? { singleton } : {}),
-    ...(healthChecks !== undefined ? { healthChecks } : {}),
-    ...(network ? { network } : {}),
-    ...(extensions ? { extensions } : {}),
-    ...(podSpec ? { podSpec } : {}),
-    ...(instanceLimit ? { instanceLimit } : {}),
-  };
+    ...(instanceLimit !== undefined ? { instanceLimit } : {}),
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- generated template construction; validated at build time
+  } as Template;
 }
 
 /** Generated templates (YAML source-of-truth) as Template shape. */
@@ -178,51 +147,6 @@ function resolveDag(tpls: Template[], seedIds: string[]): Template[] {
   return result;
 }
 
-/** Deep-merge two plain objects — child values override parents. */
-export function deepMerge(parent: Record<string, unknown>, child: Record<string, unknown>): Record<string, unknown> {
-  const out = { ...parent };
-  for (const k of Object.keys(child)) {
-    if (k === 'containers' || k === 'initContainers') {
-      out[k] = mergeByName(out[k], child[k]);
-    } else if (k === 'healthChecks') {
-      out[k] = mergeHealthChecks(out[k], child[k]);
-    } else if (typeof child[k] === 'object' && child[k] !== null && !Array.isArray(child[k]) && typeof parent[k] === 'object' && parent[k] !== null) {
-      out[k] = deepMerge(parent[k], child[k]);
-    } else {
-      out[k] = child[k];
-    }
-  }
-  return out;
-}
-
-function mergeByName(parent: Record<string, unknown>[] | undefined, child: Record<string, unknown>[] | undefined): Record<string, unknown>[] {
-  if (!child) return parent ?? [];
-  if (!parent) return child;
-  const map = new Map<string, Record<string, unknown>>();
-  for (const item of parent) map.set(item.name, item);
-  for (const item of child) {
-    const existing = map.get(item.name);
-    if (existing) map.set(item.name, deepMerge(existing, item));
-    else map.set(item.name, item);
-  }
-  return [...map.values()];
-}
-
-function mergeHealthChecks(parent: Record<string, unknown>[] | undefined, child: Record<string, unknown>[] | undefined): Record<string, unknown>[] {
-  if (!child) return parent ?? [];
-  if (!parent) return child;
-  const keyFn = (h: Record<string, unknown>): string => `${String(h.target)}:${String(h.name)}`;
-  const map = new Map<string, Record<string, unknown>>();
-  for (const h of parent) map.set(keyFn(h), h);
-  for (const h of child) {
-    const k = keyFn(h);
-    const existing = map.get(k);
-    if (existing) map.set(k, deepMerge(existing, h));
-    else map.set(k, h);
-  }
-  return [...map.values()];
-}
-
 async function resolveTemplate(atomic: IAtomicStore, id: string): Promise<Template> {
   const result = await resolveTemplateWithChain(atomic, id);
   return result.template;
@@ -235,17 +159,15 @@ async function resolveTemplateWithChain(atomic: IAtomicStore, id: string): Promi
 
   const chain = resolveDag(allTemplates, [id]).reverse();
   const chainIds = chain.map(t => t.id);
-  let mergedSpec: Record<string, unknown> = {};
+
+  // DAG merge: sequentially merge each ancestor's PodSpec
+  let mergedSpec: PodSpec = tpl.spec;
   for (const t of chain) {
-    mergedSpec = deepMerge(mergedSpec, {
-      ...(t.container ? { container: t.container } : {}),
-      ...(t.healthChecks ? { healthChecks: t.healthChecks } : {}),
-      ...(t.network ? { network: t.network } : {}),
-      ...(t.extensions ? { extensions: t.extensions } : {}),
-      ...(t.podSpec ? { podSpec: t.podSpec } : {}),
-    });
+    if (t.id === id) continue;
+    mergedSpec = mergePodSpec(mergedSpec, t.spec);
   }
-  return { template: { ...tpl, ...mergedSpec }, chain: chainIds };
+
+  return { template: { ...tpl, spec: mergedSpec }, chain: chainIds };
 }
 
 async function listStored(atomic: IAtomicStore): Promise<Template[]> {
@@ -353,35 +275,6 @@ async function claimResourceBinding(
   await atomic.set(key, tpl.id, null);
 }
 
-async function releaseResourceBinding(atomic: IAtomicStore, tpl: Template): Promise<void> {
-  const binding = tpl.resourceBinding;
-  if (!binding?.domain || !binding.port) return;
-  const key = bindingKey(binding.domain, binding.port);
-  const entry = await atomic.get<string>(key);
-  try { if (entry) await atomic.set(key, null, entry.version); } catch {
-    console.debug("noop");
-  }
-}
-
-async function releaseInstanceSlot(atomic: IAtomicStore, tpl: Template, _userId: string): Promise<void> {
-  if (!tpl.singleton && !tpl.instanceLimit) return;
-  const baseKey = lockKey(tpl.id);
-  const entry = await atomic.get<number>(baseKey);
-  if (entry && entry.value > 0) {
-    try { await atomic.set(baseKey, entry.value - 1, entry.version); } catch {
-      console.debug("noop");
-    }
-  }
-  if (tpl.instanceLimit?.type === 'perUser') {
-    const userKey = lockKey(tpl.id, ':' + _userId);
-    const uEntry = await atomic.get<number>(userKey);
-    if (uEntry && uEntry.value > 0) {
-      try { await atomic.set(userKey, uEntry.value - 1, uEntry.version); } catch {
-        console.debug("noop");
-      }
-    }
-  }
-}
 
 function canAccessTemplate(tpl: Template, user: { id: string; role?: string } | undefined): boolean {
   if (isUserRoot(user)) return true;
@@ -398,28 +291,29 @@ export function createTemplateRouter(atomic: IAtomicStore, podSvc: PodService, _
   app.openapi(createRoute({ method: 'post', path: '/', tags: ['templates'], summary: '创建模板', responses: { 201: { description: 'Template', content: { 'application/json': { schema: OkResponse(TemplateSchema) } } } } }), async (c) => {
       await requirePerm(c, permissionChecker, 'create', 'template');
       const bodySchema = z.object({
-        name: z.string().optional(),
-        healthChecks: z.array(z.object({ type: z.string() })).optional(),
-        singleton: z.boolean().optional(),
-        instanceLimit: z.unknown().optional(),
+        name: z.string().min(1),
         description: z.string().optional(),
         apiVersion: z.string().optional(),
-        kind: z.string().optional(),
-        metadata: z.unknown().optional(),
+        kind: z.enum(['Pod']).optional(),
+        spec: PodSpecSchema,
         dependsOn: z.array(z.string()).optional(),
-        resourceBinding: z.unknown().optional(),
-        container: z.unknown().optional(),
-        network: z.unknown().optional(),
-        extensions: z.unknown().optional(),
-        podSpec: z.unknown().optional(),
+        singleton: z.boolean().optional(),
+        instanceLimit: z.object({
+          type: z.enum(['fixed', 'perUser', 'perSystem']),
+          max: z.number(),
+        }).optional(),
+        resourceBinding: z.object({
+          domain: z.string().optional(),
+          port: z.number().optional(),
+        }).optional(),
+        metadata: z.object({
+          labels: z.record(z.string(), z.string()).optional(),
+          annotations: z.record(z.string(), z.string()).optional(),
+        }).optional(),
       }).passthrough();
       const body = bodySchema.parse(await c.req.json());
-      if (!body.name) throw new AppError(400, 'VALIDATION_ERROR', 'name is required');
 
       const user = c.var.currentUser;
-      if (!isUserRoot(user) && body.healthChecks) {
-        body.healthChecks = body.healthChecks.filter(h => h.type !== 'liveness');
-      }
 
       if (body.singleton && body.instanceLimit) {
         throw new AppError(400, 'VALIDATION_ERROR', 'singleton and instanceLimit are mutually exclusive');
@@ -431,7 +325,7 @@ export function createTemplateRouter(atomic: IAtomicStore, podSvc: PodService, _
         name: body.name,
         description: body.description,
         apiVersion: body.apiVersion || 'hbi-aad/v1',
-        kind: body.kind || 'Container',
+        kind: 'Pod',
         metadata: body.metadata,
         dependsOn: body.dependsOn,
         creatorId: user?.id,
@@ -441,11 +335,7 @@ export function createTemplateRouter(atomic: IAtomicStore, podSvc: PodService, _
         singleton: body.singleton,
         instanceLimit: body.instanceLimit,
         resourceBinding: body.resourceBinding,
-        container: body.container,
-        healthChecks: body.healthChecks,
-        network: body.network,
-        extensions: body.extensions,
-        podSpec: body.podSpec,
+        spec: body.spec,
       };
       await atomic.set(PREFIX + tpl.id, tpl, null);
       const idx = await atomic.get<string[]>(INDEX_KEY);
@@ -465,12 +355,10 @@ export function createTemplateRouter(atomic: IAtomicStore, podSvc: PodService, _
       const page = parseInt(c.req.query('page') ?? '') || 1;
       const limit = parseInt(c.req.query('limit') ?? '') || 50;
       const name = c.req.query('name');
-      const kind = c.req.query('kind');
 
       let visible = await listAllLive(atomic);
       if (user) visible = visible.filter(t => canAccessTemplate(t, user));
       if (name) visible = visible.filter(t => t.name.toLowerCase().includes(name.toLowerCase()));
-      if (kind) visible = visible.filter(t => t.kind === kind);
 
       const total = visible.length;
       const start = (page - 1) * limit;
@@ -517,12 +405,8 @@ export function createTemplateRouter(atomic: IAtomicStore, podSvc: PodService, _
       ...(body.singleton !== undefined ? { singleton: body.singleton } : {}),
       ...(body.instanceLimit !== undefined ? { instanceLimit: body.instanceLimit ?? undefined } : {}),
       ...(body.resourceBinding !== undefined ? { resourceBinding: body.resourceBinding ?? undefined } : {}),
-      ...(body.container !== undefined ? { container: deepMerge(base.container ?? {}, body.container) } : {}),
-      ...(body.healthChecks !== undefined ? { healthChecks: body.healthChecks } : {}),
-      ...(body.network !== undefined ? { network: deepMerge(base.network ?? {}, body.network) } : {}),
-      ...(body.extensions !== undefined ? { extensions: deepMerge(base.extensions ?? {}, body.extensions) } : {}),
+      ...(body.spec !== undefined ? { spec: body.spec } : {}),
       ...(body.dependsOn !== undefined ? { dependsOn: body.dependsOn ?? [] } : {}),
-      ...(body.podSpec !== undefined ? { podSpec: body.podSpec ?? undefined } : {}),
       updatedAt: Date.now(),
       ...(resolved.source === 'generated' ? { __originalGenerated: true } : {}),
     };
@@ -613,65 +497,37 @@ export function createTemplateRouter(atomic: IAtomicStore, podSvc: PodService, _
   });
 
   // POST /:id/apply
-  app.openapi(createRoute({ method: 'post', path: '/{id}/apply', tags: ['templates'], summary: '应用模板', request: { params: z.object({ id: z.string() }) }, responses: { 201: { description: 'Pod', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/{id}/apply', tags: ['templates'], summary: '应用模板', request: { params: z.object({ id: z.string() }) }, responses: { 201: { description: 'Pod created', content: { 'application/json': { schema: OkResponse(PodCreateResponseSchema) } } } } }), async (c) => {
     await requirePerm(c, permissionChecker, 'create', 'sandbox');
-    let resolved;
-    try {
-      resolved = await resolveTemplate(atomic, c.req.param('id'));
-      const body = await z.object({ provider: z.string().optional(), instanceId: z.string().optional(), region: z.string().optional(), name: z.string().optional() }).parse(c.req.json());
+    const resolved = await resolveTemplate(atomic, c.req.param('id'));
 
-      const user = c.var.currentUser;
+    const user = c.var.currentUser;
 
-      if (!canAccessTemplate(resolved, user)) {
-        throw new AppError(404, 'TEMPLATE_NOT_FOUND', 'Template not found');
-      }
-
-      await claimInstanceSlot(atomic, resolved, user?.id ?? 'anonymous');
-      await claimResourceBinding(atomic, resolved);
-
-      if (resolved.kind === 'ContainerGroup' && resolved.podSpec) {
-        const coreSpec = assemblyToCorePodSpec(resolved.podSpec);
-        const pod = await podSvc.provision(coreSpec, {
-          creatorId: user?.id,
-          templateRef: resolved.id,
-        });
-        c.var.audit.write({
-          level: KernLevel.NOTICE,
-          facility: 'template',
-          message: `Template applied (v2) — ${resolved.name} → pod ${pod.podId}`,
-          metadata: { eventType: 'template.applied.v2', templateId: resolved.id, podId: pod.podId, actorId: user?.id },
-        });
-        return c.json(ok(pod), 201);
-      }
-
-      const applied = await applyTemplate(resolved, body.name, body.region, async (volumeId) => {
-        const volEntry = await atomic.get<Record<string, unknown>>('volume:' + volumeId);
-        return volEntry?.value ?? null;
-      });
-      const pod = await podSvc.provision(applied.podSpec, {
-        creatorId: user?.id,
-        templateRef: resolved.id,
-      });
-      c.var.audit.write({
-        level: KernLevel.NOTICE,
-        facility: 'template',
-        message: `Template applied — ${resolved.name} → pod ${pod.podId}`,
-        metadata: { eventType: 'template.applied', templateId: resolved.id, podId: pod.podId, actorId: user?.id },
-      });
-      return c.json(ok(pod), 201);
-    } catch (e: unknown) {
-      console.error(`[template] apply failed for ${c.req.param('id')}:`, e);
-      if (resolved) {
-        try { await releaseInstanceSlot(atomic, resolved, c.var.currentUser?.id ?? 'anonymous'); } catch {
-          console.debug("noop");
-        }
-        try { await releaseResourceBinding(atomic, resolved); } catch {
-          console.debug("noop");
-        }
-      }
-      if (e instanceof AppError) throw e;
-      throw new AppError(500, 'INTERNAL_ERROR', e instanceof Error ? e.message : String(e));
+    if (!canAccessTemplate(resolved, user)) {
+      throw new AppError(404, 'TEMPLATE_NOT_FOUND', 'Template not found');
     }
+
+    await claimInstanceSlot(atomic, resolved, user?.id ?? 'anonymous');
+    await claimResourceBinding(atomic, resolved);
+
+    const pod = await podSvc.provision(resolved.spec, {
+      creatorId: user?.id,
+      templateRef: resolved.id,
+    });
+
+    c.var.audit.write({
+      level: KernLevel.NOTICE,
+      facility: 'template',
+      message: `Template applied — ${resolved.name} → pod ${pod.podId}`,
+      metadata: { eventType: 'template.applied', templateId: resolved.id, podId: pod.podId, actorId: user?.id },
+    });
+
+    return c.json(ok({
+      podId: pod.podId,
+      providerId: pod.providerId,
+      phase: pod.phase,
+      name: pod.name,
+    }), 201);
   });
 
   return app;

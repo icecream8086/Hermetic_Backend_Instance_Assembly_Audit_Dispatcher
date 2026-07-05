@@ -1,7 +1,7 @@
-import type { VolumeType, NFSVolumeConfig, DiskVolumeConfig, SecretVolumeConfig, ConfigMapVolumeConfig, OSSVolumeConfig } from '../sandbox/types.ts';
+import type { VolumeType, NFSVolumeConfig, DiskVolumeConfig, SecretVolumeConfig, ConfigMapVolumeConfig, OSSVolumeConfig } from '../../core/volume/types.ts';
 
-export type { Volume, VolumeMount, VolumeId } from '../sandbox/types.ts';
-export { VolumeType, VolumeStatus, createVolumeId } from '../sandbox/types.ts';
+export type { Volume, VolumeMount, VolumeId } from '../../core/volume/types.ts';
+export { VolumeType, VolumeStatus, createVolumeId } from '../../core/volume/types.ts';
 
 export interface CreateVolumeInput {
   readonly name: string;

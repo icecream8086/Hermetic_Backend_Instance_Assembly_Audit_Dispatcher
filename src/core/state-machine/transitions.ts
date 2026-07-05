@@ -13,7 +13,7 @@ function assertExhaustive<S extends string>(_table: ExhaustiveTransitions<S>): v
 
 // ═══════════════ enum-based statuses ═══════════════
 
-import { VolumeStatus } from '../../features/sandbox/types.ts';
+import { VolumeStatus } from '../volume/types.ts';
 const _V = {
   [VolumeStatus.Detached]: [VolumeStatus.Attached],
   [VolumeStatus.Attached]: [VolumeStatus.Detached, VolumeStatus.Orphaned],
@@ -21,7 +21,12 @@ const _V = {
 } as const satisfies Record<VolumeStatus, readonly VolumeStatus[]>;
 assertExhaustive<VolumeStatus>(_V);
 
-import { ContainerStatus } from '../../features/sandbox/types.ts';
+enum ContainerStatus {
+  Waiting = 'Waiting',
+  Running = 'Running',
+  Terminated = 'Terminated',
+}
+
 const _C = {
   [ContainerStatus.Waiting]: [ContainerStatus.Running, ContainerStatus.Terminated],
   [ContainerStatus.Running]: [ContainerStatus.Terminated],

@@ -3,31 +3,38 @@
 name: "api-service"
 description: "Node.js API 服务 — 环境变量注入，HTTP 健康检查，日志监控"
 apiVersion: "hbi-aad/v1"
-kind: "Container"
-provider: "alibaba"
+kind: "Pod"
 dependsOn: ["base-network"]
-containers:
-  - name: "api"
-    image: "docker.io/library/node:20-alpine"
-    command:
-      - "node"
-      - "server.js"
-    env:
-      - name: "PORT"
-        value: "3000"
-      - name: "NODE_ENV"
-        value: "production"
-    ports:
-      - containerPort: 3000
-        protocol: "TCP"
-    resources:
-      limits:
-        cpu: 2
-        memory: 1024
-    livenessProbe:
-      httpGet:
-        port: 3000
-        path: "/health"
-      periodSeconds: 10
-    providerOverrides:
-      enableLogMonitor: true
+spec:
+  metadata:
+    name: "api-service"
+  spec:
+    containers:
+      - name: "api"
+        image: "docker.io/library/node:20-alpine"
+        command:
+          - "node"
+          - "server.js"
+        env:
+          - name: "PORT"
+            value: "3000"
+          - name: "NODE_ENV"
+            value: "production"
+        ports:
+          - containerPort: 3000
+            protocol: "TCP"
+        resources:
+          limits:
+            cpu: 2
+            memory: 1024
+        livenessProbe:
+          httpGet:
+            port: 3000
+            path: "/health"
+          periodSeconds: 10
+        providerOverrides:
+          enableLogMonitor: true
+    restartPolicy: "Never"
+  providerOverrides:
+    alibaba:
+      region: "local"

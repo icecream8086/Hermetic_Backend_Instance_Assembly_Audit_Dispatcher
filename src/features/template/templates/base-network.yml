@@ -3,17 +3,17 @@
 name: "base-network"
 description: "基础网络层 — VPC + 安全组 + 子网，被其他服务模板继承"
 apiVersion: "hbi-aad/v1"
-kind: "Container"
-provider: "alibaba"
-region: "cn-hangzhou"
-restartPolicy: "Always"
-network:
-  mode: "vpc"
-  vpc:
-    securityGroupId: "sg-bp1axxx"
-    subnetIds:
-      - "vsw-bp1xxx"
-extensions:
+kind: "Pod"
+spec:
+  metadata:
+    name: "base-network"
+  spec:
+    containers: []
+    restartPolicy: "Always"
   providerOverrides:
     alibaba:
+      region: "cn-hangzhou"
+      securityGroupId: "sg-bp1axxx"
+      subnetIds:
+        - "vsw-bp1xxx"
       instanceType: "ecs.g7.xlarge"

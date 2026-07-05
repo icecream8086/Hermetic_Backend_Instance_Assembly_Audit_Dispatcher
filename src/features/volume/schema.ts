@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { VolumeType } from '../sandbox/types.ts';
+import { VolumeType } from '../../core/volume/types.ts';
 
 const NFSOptionsSchema = z.object({
   server: z.string().min(1, 'NFS server is required'),

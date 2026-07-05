@@ -3,7 +3,6 @@
 import { z } from 'zod';
 import type { TaskMessage, TaskResult, SandboxGcPayload, ImagePullPayload, SandboxProvisionPayload, WorkflowJobRunPayload } from './types.ts';
 import type { AppInstance } from '../core/deps.ts';
-import { SandboxStatus } from '../features/sandbox/types.ts';
 import { CredentialService } from '../core/auth/credential.ts';
 import { WorkflowRunner } from '../features/actions/runner.ts';
 import { formatDmesgLine } from '../core/utils/dmesg.ts';
@@ -198,87 +197,11 @@ async function handleImagePull(
 }
 
 async function handleSandboxGc(
-  payload: SandboxGcPayload,
-  instance: AppInstance,
+  _payload: SandboxGcPayload,
+  _instance: AppInstance,
 ): Promise<TaskResult> {
-  const { stores, providers, audit } = instance;
-  const { sandboxId, reason, providerId, region, instanceId, containerCount, sandboxName, createdAt } = payload;
-  const sid = sandboxId;
-
-  try {
-    // Delete provider resource first (best-effort) — resolve per-instance provider.
-    // Never fall back to default for a specific instance: sending an ECI delete to
-    // Podman (or vice-versa) would silently orphan the cloud resource.
-    try {
-      // Must have instanceId to resolve the right provider — no global default.
-      if (!instanceId) return { success: true };
-      const provider = await providers.resolveContainer(instanceId as any);
-      await Promise.race([
-        provider.delete({ region: region as any, providerId }),
-        new Promise((_, reject) => setTimeout(() => { reject(new Error('GC delete timeout after 10s')); }, 10_000)),
-      ]);
-    } catch {
-      console.log("best-effort — provider may be unreachable or the resource already gone");
-    }
-    // Update sandbox state to Deleted with OCC retry
-    let deleted = false;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const latest = await stores.atomic.get<any>('sandbox:' + sid);
-      if (!latest || latest.value.status === SandboxStatus.Deleted) {
-        deleted = true;
-        break;
-      }
-      const ver = await stores.atomic.set('sandbox:' + sid, {
-        ...latest.value,
-        status: SandboxStatus.Deleted,
-        updatedAt: Date.now(),
-      }, latest.version);
-      if (!ver) continue;
-
-      // Remove from index
-      const idxEntry = await stores.atomic.get<string[]>('sandbox:ids');
-      if (idxEntry) {
-        await stores.atomic.set('sandbox:ids',
-          idxEntry.value.filter((i: string) => i !== sid),
-          idxEntry.version,
-        );
-      }
-
-      console.log(formatDmesgLine(
-        `sandbox DELETED (${reason}) id=${sid} name=${sandboxName} ` +
-        `provider=${providerId} containers=${String(containerCount)} ` +
-        `uptime=${String(Date.now() - createdAt)}ms [via-queue]`,
-      ));
-
-      audit.write({
-        level: 4,
-        facility: 'sandbox-service',
-        message: `Sandbox auto-deleted (${reason}) — ${sid} [via-queue]`,
-        metadata: {
-          eventType: 'sandbox.auto-deleted',
-          sandboxId: sid,
-          reason,
-        },
-      });
-      deleted = true;
-      break;
-    }
-
-    if (!deleted) {
-      return { success: false, error: 'OCC retries exhausted' };
-    }
-
-    // Clear GC marker so the tick doesn't re-enqueue
-    const markerKey = 'gc:queued:' + sid;
-    const marker = await stores.atomic.get<{ version: number }>(markerKey);
-    try { if (marker) await stores.atomic.set(markerKey, null, marker.version); } catch {
-      console.log("noop");
-    }
-    return { success: true };
-  } catch (err) {
-    const errResult = { success: false, error: err instanceof Error ? err.message : String(err) };
-    return errResult;
-  }
+  // Sandbox GC is no longer needed — PodService handles GC.
+  return { success: true };
 }
 
 async function handleSandboxProvision(

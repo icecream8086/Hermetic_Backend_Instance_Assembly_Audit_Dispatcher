@@ -27,53 +27,65 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
     "tags": [],
     "spec": {
       "apiVersion": "hbi-aad/v1",
-      "kind": "Container",
-      "provider": "alibaba",
+      "kind": "Pod",
       "dependsOn": [
         "base-network"
       ],
-      "containers": [
-        {
-          "name": "api",
-          "image": "docker.io/library/node:20-alpine",
-          "command": [
-            "node",
-            "server.js"
-          ],
-          "env": [
+      "spec": {
+        "metadata": {
+          "name": "api-service"
+        },
+        "spec": {
+          "containers": [
             {
-              "name": "PORT",
-              "value": "3000"
-            },
-            {
-              "name": "NODE_ENV",
-              "value": "production"
+              "name": "api",
+              "image": "docker.io/library/node:20-alpine",
+              "command": [
+                "node",
+                "server.js"
+              ],
+              "env": [
+                {
+                  "name": "PORT",
+                  "value": "3000"
+                },
+                {
+                  "name": "NODE_ENV",
+                  "value": "production"
+                }
+              ],
+              "ports": [
+                {
+                  "containerPort": 3000,
+                  "protocol": "TCP"
+                }
+              ],
+              "resources": {
+                "limits": {
+                  "cpu": 2,
+                  "memory": 1024
+                }
+              },
+              "livenessProbe": {
+                "httpGet": {
+                  "port": 3000,
+                  "path": "/health"
+                },
+                "periodSeconds": 10
+              },
+              "providerOverrides": {
+                "enableLogMonitor": true
+              }
             }
           ],
-          "ports": [
-            {
-              "containerPort": 3000,
-              "protocol": "TCP"
-            }
-          ],
-          "resources": {
-            "limits": {
-              "cpu": 2,
-              "memory": 1024
-            }
-          },
-          "livenessProbe": {
-            "httpGet": {
-              "port": 3000,
-              "path": "/health"
-            },
-            "periodSeconds": 10
-          },
-          "providerOverrides": {
-            "enableLogMonitor": true
+          "restartPolicy": "Never"
+        },
+        "providerOverrides": {
+          "alibaba": {
+            "region": "local"
           }
         }
-      ]
+      }
     }
   },
   {
@@ -84,25 +96,36 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
     "tags": [],
     "spec": {
       "apiVersion": "hbi-aad/v1",
-      "kind": "Container",
-      "region": "local",
-      "restartPolicy": "Never",
-      "containers": [
-        {
-          "name": "alpine",
-          "image": "docker.io/library/alpine:latest",
-          "command": [
-            "sleep",
-            "3600"
-          ],
-          "resources": {
-            "limits": {
-              "cpu": 0.25,
-              "memory": 256
+      "kind": "Pod",
+      "spec": {
+        "metadata": {
+          "name": "base-alpine"
+        },
+        "spec": {
+          "containers": [
+            {
+              "name": "alpine",
+              "image": "docker.io/library/alpine:latest",
+              "command": [
+                "sleep",
+                "3600"
+              ],
+              "resources": {
+                "limits": {
+                  "cpu": 0.25,
+                  "memory": 256
+                }
+              }
             }
+          ],
+          "restartPolicy": "Never"
+        },
+        "providerOverrides": {
+          "alibaba": {
+            "region": "local"
           }
         }
-      ]
+      }
     }
   },
   {
@@ -113,22 +136,22 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
     "tags": [],
     "spec": {
       "apiVersion": "hbi-aad/v1",
-      "kind": "Container",
-      "provider": "alibaba",
-      "region": "cn-hangzhou",
-      "restartPolicy": "Always",
-      "network": {
-        "mode": "vpc",
-        "vpc": {
-          "securityGroupId": "sg-bp1axxx",
-          "subnetIds": [
-            "vsw-bp1xxx"
-          ]
-        }
-      },
-      "extensions": {
+      "kind": "Pod",
+      "spec": {
+        "metadata": {
+          "name": "base-network"
+        },
+        "spec": {
+          "containers": [],
+          "restartPolicy": "Always"
+        },
         "providerOverrides": {
           "alibaba": {
+            "region": "cn-hangzhou",
+            "securityGroupId": "sg-bp1axxx",
+            "subnetIds": [
+              "vsw-bp1xxx"
+            ],
             "instanceType": "ecs.g7.xlarge"
           }
         }
@@ -143,84 +166,102 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
     "tags": [],
     "spec": {
       "apiVersion": "hbi-aad/v1",
-      "kind": "Container",
-      "region": "local",
-      "restartPolicy": "Never",
+      "kind": "Pod",
       "dependsOn": [
         "base-alpine"
       ],
-      "containers": [
-        {
-          "name": "alpine",
-          "command": [
-            "sh",
-            "-c",
-            "while true; do echo \"Hello from DAG\"; curl -s http://localhost/health 2>/dev/null || echo \"nginx not ready\"; sleep 10; done"
-          ],
-          "env": [
+      "spec": {
+        "metadata": {
+          "name": "custom-alpine"
+        },
+        "spec": {
+          "containers": [
             {
-              "name": "APP_ENV",
-              "value": "development"
-            },
-            {
-              "name": "LOG_LEVEL",
-              "value": "debug"
+              "name": "alpine",
+              "command": [
+                "sh",
+                "-c",
+                "while true; do echo \"Hello from DAG\"; curl -s http://localhost/health 2>/dev/null || echo \"nginx not ready\"; sleep 10; done"
+              ],
+              "env": [
+                {
+                  "name": "APP_ENV",
+                  "value": "development"
+                },
+                {
+                  "name": "LOG_LEVEL",
+                  "value": "debug"
+                }
+              ]
             }
-          ]
+          ],
+          "restartPolicy": "Never"
+        },
+        "providerOverrides": {
+          "alibaba": {
+            "region": "local"
+          }
         }
-      ]
+      }
     }
   },
   {
     "id": "demo-pod",
     "name": "demo-pod",
-    "description": "v2 容器组 — nginx + alpine 共享网络 (docker-compose 风格)",
+    "description": "Pod — nginx + alpine 共享网络",
     "category": "",
     "tags": [],
     "spec": {
-      "apiVersion": "hbi-aad/v2",
-      "kind": "ContainerGroup",
-      "region": "local",
-      "podSpec": {
-        "name": "demo-pod",
-        "region": "local",
-        "resources": {
-          "cpu": "1.0",
-          "memory": "512Mi"
+      "apiVersion": "hbi-aad/v1",
+      "kind": "Pod",
+      "spec": {
+        "metadata": {
+          "name": "demo-pod"
         },
-        "services": {
-          "web": {
-            "image": "docker.io/library/nginx:latest",
-            "command": [
-              "nginx",
-              "-g",
-              "daemon off;"
-            ],
-            "ports": [
-              {
-                "containerPort": 80,
-                "protocol": "TCP"
+        "spec": {
+          "containers": [
+            {
+              "name": "demo-pod-web",
+              "image": "docker.io/library/nginx:latest",
+              "command": [
+                "nginx",
+                "-g",
+                "daemon off;"
+              ],
+              "ports": [
+                {
+                  "containerPort": 80,
+                  "protocol": "TCP"
+                }
+              ],
+              "resources": {
+                "limits": {
+                  "cpu": 0.5,
+                  "memory": 128
+                }
               }
-            ],
-            "resources": {
-              "cpu": "0.5",
-              "memory": "128Mi"
+            },
+            {
+              "name": "demo-pod-sidecar",
+              "image": "docker.io/library/alpine:latest",
+              "command": [
+                "sh",
+                "-c",
+                "while true; do echo \"sidecar alive\"; sleep 30; done"
+              ],
+              "resources": {
+                "limits": {
+                  "cpu": 0.25,
+                  "memory": 64
+                }
+              }
             }
-          },
-          "sidecar": {
-            "image": "docker.io/library/alpine:latest",
-            "command": [
-              "sh",
-              "-c",
-              "while true; do echo \"sidecar alive\"; sleep 30; done"
-            ],
-            "dependsOn": [
-              "web"
-            ],
-            "resources": {
-              "cpu": "0.25",
-              "memory": "64Mi"
-            }
+          ],
+          "restartPolicy": "Never"
+        },
+        "providerOverrides": {
+          "alibaba": {
+            "region": "local"
           }
         }
       }
@@ -234,44 +275,48 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
     "tags": [],
     "spec": {
       "apiVersion": "hbi-aad/v1",
-      "kind": "Container",
-      "region": "local",
-      "restartPolicy": "Never",
-      "containers": [
-        {
-          "name": "fedora",
-          "image": "registry.fedoraproject.org/fedora:latest",
-          "command": [
-            "sleep",
-            "3600"
-          ],
-          "resources": {
-            "limits": {
-              "cpu": 0.25,
-              "memory": 256
+      "kind": "Pod",
+      "spec": {
+        "metadata": {
+          "name": "fedora"
+        },
+        "spec": {
+          "containers": [
+            {
+              "name": "fedora",
+              "image": "registry.fedoraproject.org/fedora:latest",
+              "command": [
+                "sleep",
+                "3600"
+              ],
+              "resources": {
+                "limits": {
+                  "cpu": 0.25,
+                  "memory": 256
+                }
+              },
+              "livenessProbe": {
+                "exec": {
+                  "command": [
+                    "sh",
+                    "-c",
+                    "kill -0 1"
+                  ]
+                },
+                "periodSeconds": 15,
+                "initialDelaySeconds": 5,
+                "failureThreshold": 3
+              }
             }
+          ],
+          "restartPolicy": "Never"
+        },
+        "providerOverrides": {
+          "alibaba": {
+            "region": "local"
           }
         }
-      ],
-      "healthChecks": [
-        {
-          "name": "fedora-alive",
-          "target": "container:fedora",
-          "type": "liveness",
-          "probe": {
-            "exec": {
-              "command": [
-                "sh",
-                "-c",
-                "kill -0 1"
-              ]
-            }
-          },
-          "periodSeconds": 15,
-          "initialDelaySeconds": 5,
-          "failureThreshold": 3
-        }
-      ]
+      }
     }
   },
   {
@@ -282,30 +327,36 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
     "tags": [],
     "spec": {
       "apiVersion": "hbi-aad/v1",
-      "kind": "Container",
-      "region": "local",
+      "kind": "Pod",
       "dependsOn": [
         "custom-alpine",
         "nginx"
       ],
-      "containers": [
-        {
-          "name": "alpine",
-          "env": [
+      "spec": {
+        "metadata": {
+          "name": "full-stack"
+        },
+        "spec": {
+          "containers": [
             {
-              "name": "NGINX_HOST",
-              "value": "localhost"
-            },
-            {
-              "name": "DB_URL",
-              "value": "sqlite:///data/app.db"
+              "name": "alpine",
+              "env": [
+                {
+                  "name": "NGINX_HOST",
+                  "value": "localhost"
+                },
+                {
+                  "name": "DB_URL",
+                  "value": "sqlite:///data/app.db"
+                }
+              ]
             }
-          ]
-        }
-      ],
-      "extensions": {
+          ],
+          "restartPolicy": "Never"
+        },
         "providerOverrides": {
           "alibaba": {
+            "region": "local",
             "autoCreateEip": true
           }
         }
@@ -315,69 +366,81 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
   {
     "id": "gpu-compute",
     "name": "gpu-compute",
-    "description": "GPU compute instance — NVIDIA CUDA 12.0 runtime, T4 GPU (ecs.gn6v), spot instance",
+    "description": "GPU compute instance — NVIDIA CUDA 12.0 runtime, T4 GPU, spot instance",
     "category": "",
     "tags": [],
     "spec": {
       "apiVersion": "hbi-aad/v1",
-      "kind": "Container",
-      "region": "cn-hangzhou",
-      "containers": [
-        {
-          "name": "gpu-worker",
-          "image": "docker.io/nvidia/cuda:12.0-runtime-ubuntu22.04",
-          "command": [
-            "nvidia-smi"
-          ],
-          "ports": [
+      "kind": "Pod",
+      "spec": {
+        "metadata": {
+          "name": "gpu-compute"
+        },
+        "spec": {
+          "containers": [
             {
-              "containerPort": 8888,
-              "protocol": "TCP"
-            }
-          ],
-          "env": [
-            {
-              "name": "NVIDIA_VISIBLE_DEVICES",
-              "value": "all"
-            },
-            {
-              "name": "CUDA_VISIBLE_DEVICES",
-              "value": "0"
-            }
-          ],
-          "resources": {
-            "limits": {
-              "cpu": 8,
-              "memory": 32768,
-              "gpu": 1,
-              "gpuType": "nvidia.com/gpu"
-            }
-          },
-          "livenessProbe": {
-            "tcpSocket": {
-              "port": 8888
-            },
-            "periodSeconds": 30,
-            "initialDelaySeconds": 60
-          },
-          "readinessProbe": {
-            "exec": {
+              "name": "gpu-worker",
+              "image": "docker.io/nvidia/cuda:12.0-runtime-ubuntu22.04",
               "command": [
                 "nvidia-smi"
-              ]
-            },
-            "periodSeconds": 30,
-            "initialDelaySeconds": 30
-          },
-          "imagePullPolicy": "IfNotPresent",
-          "stdin": true,
-          "tty": true
-        }
-      ],
-      "extensions": {
-        "healthMaxRetries": 3,
+              ],
+              "ports": [
+                {
+                  "containerPort": 8888,
+                  "protocol": "TCP"
+                }
+              ],
+              "env": [
+                {
+                  "name": "NVIDIA_VISIBLE_DEVICES",
+                  "value": "all"
+                },
+                {
+                  "name": "CUDA_VISIBLE_DEVICES",
+                  "value": "0"
+                }
+              ],
+              "resources": {
+                "limits": {
+                  "cpu": 8,
+                  "memory": 32768,
+                  "gpu": 1,
+                  "gpuType": "nvidia.com/gpu"
+                }
+              },
+              "livenessProbe": {
+                "tcpSocket": {
+                  "port": 8888
+                },
+                "periodSeconds": 30,
+                "initialDelaySeconds": 60
+              },
+              "readinessProbe": {
+                "exec": {
+                  "command": [
+                    "nvidia-smi"
+                  ]
+                },
+                "periodSeconds": 30,
+                "initialDelaySeconds": 30
+              },
+              "imagePullPolicy": "IfNotPresent",
+              "stdin": true,
+              "tty": true
+            }
+          ],
+          "restartPolicy": "OnFailure"
+        },
         "providerOverrides": {
           "alibaba": {
+            "region": "cn-hangzhou",
+            "securityGroupId": "sg-bp16o5urk39itwcqmdzj",
+            "subnetIds": [
+              "vsw-bp1xx36ys1jou7o1bsdpp",
+              "vsw-bp1grwzlgy2739dxnskbz",
+              "vsw-bp1rv5m61jx4kmld0cc12",
+              "vsw-bp1wfyusfye82wm3d3zew"
+            ],
             "spotStrategy": "SpotAsPriceGo",
             "instanceType": "ecs.gn6v-c8g1.2xlarge",
             "ingressBandwidth": 100,
@@ -385,23 +448,11 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
             "autoCreateEip": true,
             "eipBandwidth": 50,
             "autoMatchImageCache": true,
-            "cpuArchitecture": "AMD64"
+            "cpuArchitecture": "AMD64",
+            "healthMaxRetries": 3
           }
         }
-      },
-      "network": {
-        "mode": "vpc",
-        "vpc": {
-          "securityGroupId": "sg-bp16o5urk39itwcqmdzj",
-          "subnetIds": [
-            "vsw-bp1xx36ys1jou7o1bsdpp",
-            "vsw-bp1grwzlgy2739dxnskbz",
-            "vsw-bp1rv5m61jx4kmld0cc12",
-            "vsw-bp1wfyusfye82wm3d3zew"
-          ]
-        }
-      },
-      "restartPolicy": "OnFailure"
+      }
     }
   },
   {
@@ -412,36 +463,41 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
     "tags": [],
     "spec": {
       "apiVersion": "hbi-aad/v1",
-      "kind": "Container",
-      "region": "local",
-      "restartPolicy": "Always",
-      "containers": [
-        {
-          "name": "inference",
-          "image": "docker.io/nvidia/cuda:12.2-runtime",
-          "command": [
-            "python",
-            "-m",
-            "my_inference_server"
-          ],
-          "ports": [
+      "kind": "Pod",
+      "spec": {
+        "metadata": {
+          "name": "gpu-inference"
+        },
+        "spec": {
+          "containers": [
             {
-              "containerPort": 8080,
-              "protocol": "TCP"
+              "name": "inference",
+              "image": "docker.io/nvidia/cuda:12.2-runtime",
+              "command": [
+                "python",
+                "-m",
+                "my_inference_server"
+              ],
+              "ports": [
+                {
+                  "containerPort": 8080,
+                  "protocol": "TCP"
+                }
+              ],
+              "resources": {
+                "limits": {
+                  "cpu": 4,
+                  "memory": 8192,
+                  "gpu": 1
+                }
+              }
             }
           ],
-          "resources": {
-            "limits": {
-              "cpu": 4,
-              "memory": 8192,
-              "gpu": 1
-            }
-          }
-        }
-      ],
-      "extensions": {
+          "restartPolicy": "Never"
+        },
         "providerOverrides": {
           "alibaba": {
+            "region": "local",
             "autoCreateEip": true
           }
         }
@@ -455,49 +511,56 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
     "category": "",
     "tags": [],
     "spec": {
-      "apiVersion": "hbi-aad/v2",
-      "kind": "ContainerGroup",
-      "region": "cn-hangzhou",
-      "podSpec": {
-        "name": "lifecycle-bb",
-        "region": "cn-hangzhou",
-        "resources": {
-          "cpu": "0.5",
-          "memory": "256Mi"
+      "apiVersion": "hbi-aad/v1",
+      "kind": "Pod",
+      "spec": {
+        "metadata": {
+          "name": "lifecycle-bb"
         },
-        "services": {
-          "consumer": {
-            "image": "busybox:latest",
-            "command": [
-              "sh",
-              "-c",
-              "nc -l -p 9999 | while read line; do echo \"$line\" >> /tmp/received.txt; done"
-            ],
-            "ports": [
-              {
-                "containerPort": 9999,
-                "protocol": "TCP"
+        "spec": {
+          "containers": [
+            {
+              "name": "lifecycle-bb-consumer",
+              "image": "busybox:latest",
+              "command": [
+                "sh",
+                "-c",
+                "nc -l -p 9999 | while read line; do echo \"$line\" >> /tmp/received.txt; done"
+              ],
+              "ports": [
+                {
+                  "containerPort": 9999,
+                  "protocol": "TCP"
+                }
+              ],
+              "resources": {
+                "limits": {
+                  "cpu": 0.25,
+                  "memory": 128
+                }
               }
-            ],
-            "resources": {
-              "cpu": "0.25",
-              "memory": "128Mi"
+            },
+            {
+              "name": "lifecycle-bb-producer",
+              "image": "busybox:latest",
+              "command": [
+                "sh",
+                "-c",
+                "SEQ=0; while true; do SEQ=$((SEQ+1)); echo \"{\\\"seq\\\":$SEQ,\\\"ts\\\":$(date +%s)}\" | nc -w 1 localhost 9999; echo \"[producer] seq=$SEQ\"; sleep 1; done"
+              ],
+              "resources": {
+                "limits": {
+                  "cpu": 0.25,
+                  "memory": 128
+                }
+              }
             }
-          },
-          "producer": {
-            "image": "busybox:latest",
-            "command": [
-              "sh",
-              "-c",
-              "SEQ=0; while true; do SEQ=$((SEQ+1)); echo \"{\\\"seq\\\":$SEQ,\\\"ts\\\":$(date +%s)}\" | nc -w 1 localhost 9999; echo \"[producer] seq=$SEQ\"; sleep 1; done"
-            ],
-            "dependsOn": [
-              "consumer"
-            ],
-            "resources": {
-              "cpu": "0.25",
-              "memory": "128Mi"
-            }
+          ],
+          "restartPolicy": "Never"
+        },
+        "providerOverrides": {
+          "alibaba": {
+            "region": "cn-hangzhou"
           }
         }
       }
@@ -510,46 +573,53 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
     "category": "",
     "tags": [],
     "spec": {
-      "apiVersion": "hbi-aad/v2",
-      "kind": "ContainerGroup",
-      "region": "cn-hangzhou",
-      "podSpec": {
-        "name": "lifecycle-test",
-        "region": "cn-hangzhou",
-        "resources": {
-          "cpu": "1.0",
-          "memory": "512Mi"
+      "apiVersion": "hbi-aad/v1",
+      "kind": "Pod",
+      "spec": {
+        "metadata": {
+          "name": "lifecycle-test"
         },
-        "services": {
-          "consumer": {
-            "image": "registry-vpc.cn-hangzhou.aliyuncs.com/minecraft-graalvm/ocibox:latest",
-            "command": [
-              "/usr/local/bin/consumer"
-            ],
-            "ports": [
-              {
-                "containerPort": 9999,
-                "protocol": "TCP"
+        "spec": {
+          "containers": [
+            {
+              "name": "lifecycle-test-consumer",
+              "image": "registry-vpc.cn-hangzhou.aliyuncs.com/minecraft-graalvm/ocibox:latest",
+              "command": [
+                "/usr/local/bin/consumer"
+              ],
+              "ports": [
+                {
+                  "containerPort": 9999,
+                  "protocol": "TCP"
+                }
+              ],
+              "resources": {
+                "limits": {
+                  "cpu": 0.5,
+                  "memory": 256
+                }
               }
-            ],
-            "resources": {
-              "cpu": "0.5",
-              "memory": "256Mi"
+            },
+            {
+              "name": "lifecycle-test-producer",
+              "image": "registry-vpc.cn-hangzhou.aliyuncs.com/minecraft-graalvm/ocibox:latest",
+              "command": [
+                "/usr/local/bin/producer",
+                "1"
+              ],
+              "resources": {
+                "limits": {
+                  "cpu": 0.5,
+                  "memory": 256
+                }
+              }
             }
-          },
-          "producer": {
-            "image": "registry-vpc.cn-hangzhou.aliyuncs.com/minecraft-graalvm/ocibox:latest",
-            "command": [
-              "/usr/local/bin/producer",
-              "1"
-            ],
-            "dependsOn": [
-              "consumer"
-            ],
-            "resources": {
-              "cpu": "0.5",
-              "memory": "256Mi"
-            }
+          ],
+          "restartPolicy": "Never"
+        },
+        "providerOverrides": {
+          "alibaba": {
+            "region": "cn-hangzhou"
           }
         }
       }
@@ -563,65 +633,63 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
     "tags": [],
     "spec": {
       "apiVersion": "hbi-aad/v1",
-      "kind": "Container",
-      "region": "local",
-      "restartPolicy": "Always",
+      "kind": "Pod",
       "singleton": true,
-      "containers": [
-        {
-          "name": "minio",
-          "image": "quay.io/minio/minio:latest",
-          "command": [
-            "server",
-            "/data",
-            "--console-address",
-            ":9001"
-          ],
-          "ports": [
+      "spec": {
+        "metadata": {
+          "name": "minio-server"
+        },
+        "spec": {
+          "containers": [
             {
-              "containerPort": 9000,
-              "protocol": "TCP"
-            },
-            {
-              "containerPort": 9001,
-              "protocol": "TCP"
+              "name": "minio",
+              "image": "quay.io/minio/minio:latest",
+              "command": [
+                "server",
+                "/data",
+                "--console-address",
+                ":9001"
+              ],
+              "ports": [
+                {
+                  "containerPort": 9000,
+                  "protocol": "TCP"
+                },
+                {
+                  "containerPort": 9001,
+                  "protocol": "TCP"
+                }
+              ],
+              "env": [
+                {
+                  "name": "MINIO_ROOT_USER",
+                  "value": "minioadmin"
+                },
+                {
+                  "name": "MINIO_ROOT_PASSWORD",
+                  "value": "minioadmin"
+                }
+              ],
+              "resources": {
+                "limits": {
+                  "cpu": 0.5,
+                  "memory": 512
+                }
+              },
+              "readinessProbe": {
+                "tcpSocket": {
+                  "port": 9000
+                },
+                "periodSeconds": 5,
+                "initialDelaySeconds": 5
+              }
             }
           ],
-          "env": [
-            {
-              "name": "MINIO_ROOT_USER",
-              "value": "minioadmin"
-            },
-            {
-              "name": "MINIO_ROOT_PASSWORD",
-              "value": "minioadmin"
-            }
-          ],
-          "resources": {
-            "limits": {
-              "cpu": 0.5,
-              "memory": 512
-            }
-          }
-        }
-      ],
-      "healthChecks": [
-        {
-          "name": "minio-ready",
-          "target": "container:minio",
-          "type": "readiness",
-          "probe": {
-            "tcpSocket": {
-              "port": 9000
-            }
-          },
-          "periodSeconds": 5,
-          "initialDelaySeconds": 5
-        }
-      ],
-      "extensions": {
+          "restartPolicy": "Always"
+        },
         "providerOverrides": {
           "alibaba": {
+            "region": "local",
             "autoCreateEip": true
           }
         }
@@ -636,50 +704,54 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
     "tags": [],
     "spec": {
       "apiVersion": "hbi-aad/v1",
-      "kind": "Container",
-      "region": "local",
-      "restartPolicy": "Always",
+      "kind": "Pod",
       "singleton": true,
-      "containers": [
-        {
-          "name": "nginx-arg",
-          "image": "docker.io/library/nginx:latest",
-          "command": [
-            "nginx"
-          ],
-          "args": [
-            "-g",
-            "daemon off;"
-          ],
-          "ports": [
+      "spec": {
+        "metadata": {
+          "name": "nginx-arg"
+        },
+        "spec": {
+          "containers": [
             {
-              "containerPort": 80,
-              "protocol": "TCP"
+              "name": "nginx-arg",
+              "image": "docker.io/library/nginx:latest",
+              "command": [
+                "nginx"
+              ],
+              "args": [
+                "-g",
+                "daemon off;"
+              ],
+              "ports": [
+                {
+                  "containerPort": 80,
+                  "protocol": "TCP"
+                }
+              ],
+              "resources": {
+                "limits": {
+                  "cpu": 0.5,
+                  "memory": 128
+                }
+              },
+              "livenessProbe": {
+                "httpGet": {
+                  "path": "/",
+                  "port": 80
+                },
+                "periodSeconds": 10,
+                "initialDelaySeconds": 5
+              }
             }
           ],
-          "resources": {
-            "limits": {
-              "cpu": 0.5,
-              "memory": 128
-            }
+          "restartPolicy": "Always"
+        },
+        "providerOverrides": {
+          "alibaba": {
+            "region": "local"
           }
         }
-      ],
-      "healthChecks": [
-        {
-          "name": "nginx-arg-alive",
-          "target": "container:nginx-arg",
-          "type": "liveness",
-          "probe": {
-            "httpGet": {
-              "path": "/",
-              "port": 80
-            }
-          },
-          "periodSeconds": 10,
-          "initialDelaySeconds": 5
-        }
-      ]
+      }
     }
   },
   {
@@ -690,62 +762,61 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
     "tags": [],
     "spec": {
       "apiVersion": "hbi-aad/v1",
-      "kind": "Container",
-      "region": "local",
-      "restartPolicy": "Always",
+      "kind": "Pod",
       "singleton": true,
-      "containers": [
-        {
-          "name": "nginx",
-          "image": "docker.io/library/nginx:latest",
-          "command": [
-            "nginx"
-          ],
-          "args": [
-            "-g",
-            "daemon off;"
-          ],
-          "ports": [
+      "spec": {
+        "metadata": {
+          "name": "nginx"
+        },
+        "spec": {
+          "containers": [
             {
-              "containerPort": 80,
-              "protocol": "TCP"
+              "name": "nginx",
+              "image": "docker.io/library/nginx:latest",
+              "command": [
+                "nginx"
+              ],
+              "args": [
+                "-g",
+                "daemon off;"
+              ],
+              "ports": [
+                {
+                  "containerPort": 80,
+                  "protocol": "TCP"
+                }
+              ],
+              "resources": {
+                "limits": {
+                  "cpu": 0.5,
+                  "memory": 128
+                }
+              },
+              "livenessProbe": {
+                "httpGet": {
+                  "path": "/",
+                  "port": 80
+                },
+                "periodSeconds": 10,
+                "initialDelaySeconds": 5
+              },
+              "readinessProbe": {
+                "tcpSocket": {
+                  "port": 80
+                },
+                "periodSeconds": 5,
+                "initialDelaySeconds": 2
+              }
             }
           ],
-          "resources": {
-            "limits": {
-              "cpu": 0.5,
-              "memory": 128
-            }
+          "restartPolicy": "Always"
+        },
+        "providerOverrides": {
+          "alibaba": {
+            "region": "local"
           }
         }
-      ],
-      "healthChecks": [
-        {
-          "name": "nginx-alive",
-          "target": "container:nginx",
-          "type": "liveness",
-          "probe": {
-            "httpGet": {
-              "path": "/",
-              "port": 80
-            }
-          },
-          "periodSeconds": 10,
-          "initialDelaySeconds": 5
-        },
-        {
-          "name": "nginx-ready",
-          "target": "container:nginx",
-          "type": "readiness",
-          "probe": {
-            "tcpSocket": {
-              "port": 80
-            }
-          },
-          "periodSeconds": 5,
-          "initialDelaySeconds": 2
-        }
-      ]
+      }
     }
   },
   {
@@ -756,46 +827,52 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
     "tags": [],
     "spec": {
       "apiVersion": "hbi-aad/v1",
-      "kind": "Container",
+      "kind": "Pod",
       "dependsOn": [
         "web-service",
         "api-service",
         "redis-cache"
       ],
-      "containers": [
-        {
-          "name": "nginx",
-          "env": [
-            {
-              "name": "UPSTREAM_API",
-              "value": "api:3000"
-            }
-          ]
+      "spec": {
+        "metadata": {
+          "name": "prod-stack"
         },
-        {
-          "name": "api",
-          "env": [
+        "spec": {
+          "containers": [
             {
-              "name": "REDIS_URL",
-              "value": "redis://redis:6379"
+              "name": "nginx",
+              "env": [
+                {
+                  "name": "UPSTREAM_API",
+                  "value": "api:3000"
+                }
+              ]
             },
             {
-              "name": "DB_URL",
-              "value": "placeholder://replace-me"
+              "name": "api",
+              "env": [
+                {
+                  "name": "REDIS_URL",
+                  "value": "redis://redis:6379"
+                },
+                {
+                  "name": "DB_URL",
+                  "value": "placeholder://replace-me"
+                }
+              ]
+            },
+            {
+              "name": "redis"
             }
-          ]
+          ],
+          "restartPolicy": "Never"
         },
-        {
-          "name": "redis"
-        }
-      ],
-      "extensions": {
-        "healthMaxRetries": 3
-      },
-      "providerOverrides": {
-        "alibaba": {
-          "resourceGroupId": "rg-prod",
-          "deletionProtection": true
+        "providerOverrides": {
+          "alibaba": {
+            "healthMaxRetries": 3,
+            "resourceGroupId": "rg-prod",
+            "deletionProtection": true
+          }
         }
       }
     }
@@ -808,45 +885,52 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
     "tags": [],
     "spec": {
       "apiVersion": "hbi-aad/v1",
-      "kind": "Container",
-      "provider": "alibaba",
-      "region": "cn-hangzhou",
-      "containers": [
-        {
-          "name": "redis",
-          "image": "docker.io/library/redis:7-alpine",
-          "command": [
-            "redis-server",
-            "--save",
-            "",
-            "--appendonly",
-            "no"
-          ],
-          "resources": {
-            "limits": {
-              "cpu": 0.5,
-              "memory": 512
-            }
-          },
-          "ports": [
+      "kind": "Pod",
+      "spec": {
+        "metadata": {
+          "name": "redis-cache"
+        },
+        "spec": {
+          "containers": [
             {
-              "containerPort": 6379,
-              "protocol": "TCP"
+              "name": "redis",
+              "image": "docker.io/library/redis:7-alpine",
+              "command": [
+                "redis-server",
+                "--save",
+                "",
+                "--appendonly",
+                "no"
+              ],
+              "resources": {
+                "limits": {
+                  "cpu": 0.5,
+                  "memory": 512
+                }
+              },
+              "ports": [
+                {
+                  "containerPort": 6379,
+                  "protocol": "TCP"
+                }
+              ],
+              "livenessProbe": {
+                "tcpSocket": {
+                  "port": 6379
+                },
+                "periodSeconds": 10,
+                "initialDelaySeconds": 5
+              }
             }
           ],
-          "livenessProbe": {
-            "tcpSocket": {
-              "port": 6379
-            },
-            "periodSeconds": 10,
-            "initialDelaySeconds": 5
+          "restartPolicy": "Always"
+        },
+        "providerOverrides": {
+          "alibaba": {
+            "region": "cn-hangzhou"
           }
         }
-      ],
-      "network": {
-        "allocatePublicIp": false
-      },
-      "restartPolicy": "Always"
+      }
     }
   },
   {
@@ -857,44 +941,51 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
     "tags": [],
     "spec": {
       "apiVersion": "hbi-aad/v1",
-      "kind": "Container",
-      "provider": "podman",
-      "containers": [
-        {
-          "name": "sftp",
-          "image": "docker.io/atmoz/sftp:alpine",
-          "ports": [
+      "kind": "Pod",
+      "spec": {
+        "metadata": {
+          "name": "SFTP Server (Local)"
+        },
+        "spec": {
+          "containers": [
             {
-              "containerPort": 22,
-              "protocol": "TCP"
+              "name": "sftp",
+              "image": "docker.io/atmoz/sftp:alpine",
+              "ports": [
+                {
+                  "containerPort": 22,
+                  "protocol": "TCP"
+                }
+              ],
+              "env": [
+                {
+                  "name": "SFTP_USERS",
+                  "value": "dev:devpass:1000:1000:upload"
+                }
+              ],
+              "resources": {
+                "limits": {
+                  "cpu": 0.5,
+                  "memory": 256
+                }
+              },
+              "livenessProbe": {
+                "tcpSocket": {
+                  "port": 22
+                },
+                "periodSeconds": 30,
+                "initialDelaySeconds": 10
+              }
             }
           ],
-          "env": [
-            {
-              "name": "SFTP_USERS",
-              "value": "dev:devpass:1000:1000:upload"
-            }
-          ],
-          "resources": {
-            "limits": {
-              "cpu": 0.5,
-              "memory": 256
-            }
-          },
-          "livenessProbe": {
-            "tcpSocket": {
-              "port": 22
-            },
-            "periodSeconds": 30,
-            "initialDelaySeconds": 10
+          "restartPolicy": "Always"
+        },
+        "providerOverrides": {
+          "alibaba": {
+            "region": "local"
           }
         }
-      ],
-      "network": {
-        "allocatePublicIp": false,
-        "mode": "private"
-      },
-      "restartPolicy": "Always"
+      }
     }
   },
   {
@@ -905,61 +996,68 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
     "tags": [],
     "spec": {
       "apiVersion": "hbi-aad/v1",
-      "kind": "Container",
-      "region": "cn-hangzhou",
-      "containers": [
-        {
-          "name": "sftp",
-          "image": "registry.cn-hangzhou.aliyuncs.com/minecraft-graalvm/ftp_bp:latest",
-          "ports": [
+      "kind": "Pod",
+      "spec": {
+        "metadata": {
+          "name": "SFTP Server"
+        },
+        "spec": {
+          "containers": [
             {
-              "containerPort": 22,
-              "protocol": "TCP"
+              "name": "sftp",
+              "image": "registry.cn-hangzhou.aliyuncs.com/minecraft-graalvm/ftp_bp:latest",
+              "ports": [
+                {
+                  "containerPort": 22,
+                  "protocol": "TCP"
+                }
+              ],
+              "env": [
+                {
+                  "name": "SFTP_USERS",
+                  "value": "sftpuser:changeme:::upload"
+                }
+              ],
+              "resources": {
+                "limits": {
+                  "cpu": 2,
+                  "memory": 2048
+                }
+              },
+              "livenessProbe": {
+                "tcpSocket": {
+                  "port": 22
+                },
+                "periodSeconds": 30,
+                "initialDelaySeconds": 10
+              },
+              "readinessProbe": {
+                "tcpSocket": {
+                  "port": 22
+                },
+                "periodSeconds": 10,
+                "initialDelaySeconds": 5
+              }
             }
           ],
-          "env": [
-            {
-              "name": "SFTP_USERS",
-              "value": "sftpuser:changeme:::upload"
-            }
-          ],
-          "resources": {
-            "limits": {
-              "cpu": 2,
-              "memory": 2048
-            }
-          },
-          "livenessProbe": {
-            "tcpSocket": {
-              "port": 22
-            },
-            "periodSeconds": 30,
-            "initialDelaySeconds": 10
-          },
-          "readinessProbe": {
-            "tcpSocket": {
-              "port": 22
-            },
-            "periodSeconds": 10,
-            "initialDelaySeconds": 5
-          }
-        }
-      ],
-      "network": {
-        "mode": "vpc"
-      },
-      "extensions": {
-        "healthMaxRetries": 3,
+          "restartPolicy": "Always"
+        },
         "providerOverrides": {
           "alibaba": {
+            "region": "cn-hangzhou",
+            "healthMaxRetries": 3,
             "autoCreateEip": true,
             "eipBandwidth": 10,
             "securityGroupId": "sg-bp16o5urk39itwcqmdzj",
-            "vSwitchId": "vsw-bp1xx36ys1jou7o1bsdpp,vsw-bp1grwzlgy2739dxnskbz,vsw-bp1rv5m61jx4kmld0cc12,vsw-bp1wfyusfye82wm3d3zew"
+            "subnetIds": [
+              "vsw-bp1xx36ys1jou7o1bsdpp",
+              "vsw-bp1grwzlgy2739dxnskbz",
+              "vsw-bp1rv5m61jx4kmld0cc12",
+              "vsw-bp1wfyusfye82wm3d3zew"
+            ]
           }
         }
-      },
-      "restartPolicy": "Always"
+      }
     }
   },
   {
@@ -970,46 +1068,59 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
     "tags": [],
     "spec": {
       "apiVersion": "hbi-aad/v1",
-      "kind": "Container",
-      "region": "cn-hangzhou",
-      "containers": [
-        {
-          "name": "vsftp",
-          "image": "registry-vpc.cn-hangzhou.aliyuncs.com/minecraft-graalvm/ftp_bp:latest",
-          "ports": [
+      "kind": "Pod",
+      "spec": {
+        "metadata": {
+          "name": "vsftp_pub"
+        },
+        "spec": {
+          "containers": [
             {
-              "containerPort": 22,
-              "protocol": "TCP"
+              "name": "vsftp",
+              "image": "registry-vpc.cn-hangzhou.aliyuncs.com/minecraft-graalvm/ftp_bp:latest",
+              "ports": [
+                {
+                  "containerPort": 22,
+                  "protocol": "TCP"
+                }
+              ],
+              "env": [
+                {
+                  "name": "SFTP_USERS",
+                  "value": "test:test123:::upload"
+                }
+              ],
+              "resources": {
+                "limits": {
+                  "cpu": 2,
+                  "memory": 2048
+                }
+              },
+              "livenessProbe": {
+                "tcpSocket": {
+                  "port": 22
+                },
+                "periodSeconds": 30,
+                "initialDelaySeconds": 10
+              },
+              "imagePullPolicy": "Always",
+              "stdin": true,
+              "tty": true
             }
           ],
-          "env": [
-            {
-              "name": "SFTP_USERS",
-              "value": "test:test123:::upload"
-            }
-          ],
-          "resources": {
-            "limits": {
-              "cpu": 2,
-              "memory": 2048
-            }
-          },
-          "livenessProbe": {
-            "tcpSocket": {
-              "port": 22
-            },
-            "periodSeconds": 30,
-            "initialDelaySeconds": 10
-          },
-          "imagePullPolicy": "Always",
-          "stdin": true,
-          "tty": true
-        }
-      ],
-      "extensions": {
-        "healthMaxRetries": 3,
+          "restartPolicy": "Always"
+        },
         "providerOverrides": {
           "alibaba": {
+            "region": "cn-hangzhou",
+            "securityGroupId": "sg-bp16o5urk39itwcqmdzj",
+            "subnetIds": [
+              "vsw-bp1xx36ys1jou7o1bsdpp",
+              "vsw-bp1grwzlgy2739dxnskbz",
+              "vsw-bp1rv5m61jx4kmld0cc12",
+              "vsw-bp1wfyusfye82wm3d3zew"
+            ],
+            "healthMaxRetries": 3,
             "spotStrategy": "SpotAsPriceGo",
             "ingressBandwidth": 100,
             "egressBandwidth": 100,
@@ -1018,20 +1129,7 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
             "autoMatchImageCache": true
           }
         }
-      },
-      "network": {
-        "mode": "vpc",
-        "vpc": {
-          "securityGroupId": "sg-bp16o5urk39itwcqmdzj",
-          "subnetIds": [
-            "vsw-bp1xx36ys1jou7o1bsdpp",
-            "vsw-bp1grwzlgy2739dxnskbz",
-            "vsw-bp1rv5m61jx4kmld0cc12",
-            "vsw-bp1wfyusfye82wm3d3zew"
-          ]
-        }
-      },
-      "restartPolicy": "Always"
+      }
     }
   },
   {
@@ -1042,56 +1140,69 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
     "tags": [],
     "spec": {
       "apiVersion": "hbi-aad/v1",
-      "kind": "Container",
-      "region": "cn-hangzhou",
-      "containers": [
-        {
-          "name": "vsftp",
-          "image": "registry-vpc.cn-hangzhou.aliyuncs.com/minecraft-graalvm/ftp_bp:latest",
-          "ports": [
+      "kind": "Pod",
+      "spec": {
+        "metadata": {
+          "name": "vsftp_GPU"
+        },
+        "spec": {
+          "containers": [
             {
-              "containerPort": 22,
-              "protocol": "TCP"
+              "name": "vsftp",
+              "image": "registry-vpc.cn-hangzhou.aliyuncs.com/minecraft-graalvm/ftp_bp:latest",
+              "ports": [
+                {
+                  "containerPort": 22,
+                  "protocol": "TCP"
+                }
+              ],
+              "env": [
+                {
+                  "name": "SFTP_USERS",
+                  "value": "test:test123:::upload"
+                },
+                {
+                  "name": "NVIDIA_VISIBLE_DEVICES",
+                  "value": "all"
+                },
+                {
+                  "name": "CUDA_VISIBLE_DEVICES",
+                  "value": "0"
+                }
+              ],
+              "resources": {
+                "limits": {
+                  "cpu": 8,
+                  "memory": 32768,
+                  "gpu": 1,
+                  "gpuType": "nvidia.com/gpu"
+                }
+              },
+              "livenessProbe": {
+                "tcpSocket": {
+                  "port": 22
+                },
+                "periodSeconds": 30,
+                "initialDelaySeconds": 10
+              },
+              "imagePullPolicy": "Always",
+              "stdin": true,
+              "tty": true
             }
           ],
-          "env": [
-            {
-              "name": "SFTP_USERS",
-              "value": "test:test123:::upload"
-            },
-            {
-              "name": "NVIDIA_VISIBLE_DEVICES",
-              "value": "all"
-            },
-            {
-              "name": "CUDA_VISIBLE_DEVICES",
-              "value": "0"
-            }
-          ],
-          "resources": {
-            "limits": {
-              "cpu": 8,
-              "memory": 32768,
-              "gpu": 1,
-              "gpuType": "nvidia.com/gpu"
-            }
-          },
-          "livenessProbe": {
-            "tcpSocket": {
-              "port": 22
-            },
-            "periodSeconds": 30,
-            "initialDelaySeconds": 10
-          },
-          "imagePullPolicy": "Always",
-          "stdin": true,
-          "tty": true
-        }
-      ],
-      "extensions": {
-        "healthMaxRetries": 3,
+          "restartPolicy": "Always"
+        },
         "providerOverrides": {
           "alibaba": {
+            "region": "cn-hangzhou",
+            "securityGroupId": "sg-bp16o5urk39itwcqmdzj",
+            "subnetIds": [
+              "vsw-bp1xx36ys1jou7o1bsdpp",
+              "vsw-bp1grwzlgy2739dxnskbz",
+              "vsw-bp1rv5m61jx4kmld0cc12",
+              "vsw-bp1wfyusfye82wm3d3zew"
+            ],
+            "healthMaxRetries": 3,
             "spotStrategy": "SpotAsPriceGo",
             "instanceType": "ecs.gn6v-c8g1.2xlarge",
             "ingressBandwidth": 100,
@@ -1102,20 +1213,7 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
             "cpuArchitecture": "AMD64"
           }
         }
-      },
-      "network": {
-        "mode": "vpc",
-        "vpc": {
-          "securityGroupId": "sg-bp16o5urk39itwcqmdzj",
-          "subnetIds": [
-            "vsw-bp1xx36ys1jou7o1bsdpp",
-            "vsw-bp1grwzlgy2739dxnskbz",
-            "vsw-bp1rv5m61jx4kmld0cc12",
-            "vsw-bp1wfyusfye82wm3d3zew"
-          ]
-        }
-      },
-      "restartPolicy": "Always"
+      }
     }
   },
   {
@@ -1126,51 +1224,57 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
     "tags": [],
     "spec": {
       "apiVersion": "hbi-aad/v1",
-      "kind": "Container",
-      "provider": "alibaba",
+      "kind": "Pod",
       "dependsOn": [
         "base-network"
       ],
-      "containers": [
-        {
-          "name": "nginx",
-          "image": "docker.io/library/nginx:alpine",
-          "ports": [
+      "spec": {
+        "metadata": {
+          "name": "web-service"
+        },
+        "spec": {
+          "containers": [
             {
-              "containerPort": 80,
-              "protocol": "TCP"
-            },
-            {
-              "containerPort": 443,
-              "protocol": "TCP"
+              "name": "nginx",
+              "image": "docker.io/library/nginx:alpine",
+              "ports": [
+                {
+                  "containerPort": 80,
+                  "protocol": "TCP"
+                },
+                {
+                  "containerPort": 443,
+                  "protocol": "TCP"
+                }
+              ],
+              "resources": {
+                "limits": {
+                  "cpu": 1,
+                  "memory": 256
+                }
+              },
+              "livenessProbe": {
+                "httpGet": {
+                  "port": 80,
+                  "path": "/health"
+                },
+                "periodSeconds": 15,
+                "initialDelaySeconds": 10
+              },
+              "readinessProbe": {
+                "httpGet": {
+                  "port": 80,
+                  "path": "/health"
+                },
+                "periodSeconds": 5
+              }
             }
           ],
-          "resources": {
-            "limits": {
-              "cpu": 1,
-              "memory": 256
-            }
-          },
-          "livenessProbe": {
-            "httpGet": {
-              "port": 80,
-              "path": "/health"
-            },
-            "periodSeconds": 15,
-            "initialDelaySeconds": 10
-          },
-          "readinessProbe": {
-            "httpGet": {
-              "port": 80,
-              "path": "/health"
-            },
-            "periodSeconds": 5
-          }
-        }
-      ],
-      "extensions": {
+          "restartPolicy": "Never"
+        },
         "providerOverrides": {
           "alibaba": {
+            "region": "local",
             "autoCreateEip": true,
             "eipBandwidth": 50,
             "spotStrategy": "SpotAsPriceGo"
@@ -1213,7 +1317,7 @@ export const INSTANCE_TEMPLATE_METAS: InstanceTemplateMeta[] = [
   {
     "id": "demo-pod",
     "name": "demo-pod",
-    "description": "v2 容器组 — nginx + alpine 共享网络 (docker-compose 风格)",
+    "description": "Pod — nginx + alpine 共享网络",
     "category": "",
     "tags": []
   },
@@ -1234,7 +1338,7 @@ export const INSTANCE_TEMPLATE_METAS: InstanceTemplateMeta[] = [
   {
     "id": "gpu-compute",
     "name": "gpu-compute",
-    "description": "GPU compute instance — NVIDIA CUDA 12.0 runtime, T4 GPU (ecs.gn6v), spot instance",
+    "description": "GPU compute instance — NVIDIA CUDA 12.0 runtime, T4 GPU, spot instance",
     "category": "",
     "tags": []
   },

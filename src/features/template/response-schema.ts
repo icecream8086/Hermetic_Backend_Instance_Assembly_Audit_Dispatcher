@@ -9,12 +9,12 @@ export const TemplateSchema = z.object({
   name: z.string(),
   description: z.string().optional(),
   apiVersion: z.string(),
-  kind: z.enum(['Container', 'ContainerGroup']),
+  kind: z.enum(['Pod']),
   metadata: z.object({
-    author: z.string().optional(),
     labels: z.record(z.string(), z.string()).optional(),
     annotations: z.record(z.string(), z.string()).optional(),
   }).optional(),
+  spec: z.object({}),
   dependsOn: z.array(z.string()).readonly().optional(),
   createdAt: z.number(),
   updatedAt: z.number(),
@@ -29,19 +29,6 @@ export const TemplateSchema = z.object({
     domain: z.string().optional(),
     port: z.number().optional(),
   }).optional(),
-  container: z.object({
-    region: z.string(),
-    zone: z.string().optional(),
-    instanceId: z.string().optional(),
-    account: z.string().optional(),
-    restartPolicy: z.string().optional(),
-    containers: z.array(z.object({})).readonly(),
-    initContainers: z.array(z.object({})).readonly().optional(),
-  }).optional(),
-  healthChecks: z.array(z.object({})).readonly().optional(),
-  network: z.object({}).optional(),
-  extensions: z.object({}).optional(),
-  podSpec: z.object({}).optional(),
 });
 
 /** Template with resolved DAG chain. */

@@ -232,8 +232,6 @@ export interface ContainerGroupRuntime {
   readonly ephemeralStorageGiB?: number | undefined;
 }
 
-// ─── MetricSnapshot (moved from features/sandbox/types.ts to fix dep direction) ───
-
 export interface CPUMetrics {
   readonly usageNanoCores: number;
   readonly usageCores: number;

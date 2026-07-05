@@ -15,7 +15,11 @@ export class PodStore {
 
   public async getById(podId: PodId): Promise<PodEntity | null> {
     const entry = await this.atomic.get<PodEntity>(`${KEY_PREFIX}${podId}`);
-    return entry?.value ?? null;
+    if (!entry) return null;
+    // Use the atomic store's OCC version, not the entity's stale .version field.
+    // The entity's .version is set by createPod/transitionPod but the atomic
+    // store independently generates metadata.v for CAS — they are NOT the same value.
+    return { ...entry.value, version: entry.version };
   }
 
   public async list(phase?: PodPhase, limit = 50, cursor?: string): Promise<{ items: PodEntity[]; nextCursor?: string }> {
@@ -71,6 +75,8 @@ export class PodStore {
   public async update(podId: PodId, next: PodEntity, expectedVersion: VersionId | null): Promise<PodEntity> {
     const newVersion = await this.atomic.set(`${KEY_PREFIX}${podId}`, next, expectedVersion);
     if (!newVersion) throw new AppError(409, 'CONFLICT', 'Concurrent modification detected');
-    return next;
+    // Return entity with the atomic store's version so subsequent chained
+    // updates (e.g. terminate → MarkFailed) pass the correct expectedVersion.
+    return { ...next, version: newVersion };
   }
 }

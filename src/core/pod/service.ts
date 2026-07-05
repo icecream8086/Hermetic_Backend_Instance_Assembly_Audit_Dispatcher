@@ -19,6 +19,7 @@ import { createEvent } from '../event-bus/types.ts';
 import type { QuotaService } from '../quota/service.ts';
 import { transitionPod, createPod } from './transitions.ts';
 import { buildPodCreateParams } from '../../providers/alibaba/eci-codec.ts';
+import { AlibabaOverridesSchema } from './schema.ts';
 
 /** Context passed to PodService.provision() for sandbox-level concerns. */
 export interface ProvisionContext {
@@ -111,7 +112,8 @@ export class PodService {
     }
 
     const provider = await this.resolveProvider();
-    const aliRegion = ((spec.providerOverrides?.alibaba as Record<string, unknown> | undefined)?.region as string | undefined) ?? 'cn-hangzhou';
+    const ali = AlibabaOverridesSchema.parse(spec.providerOverrides?.alibaba ?? {});
+    const aliRegion = ali.region ?? 'cn-hangzhou';
     const groupInput: CreateContainerGroupInput = {
       name: spec.metadata.name,
       region: createRegionId(aliRegion),
@@ -295,7 +297,7 @@ export class PodService {
 
     // Step 1: mark Terminate (set deletionTimestamp + DisruptionTarget)
     const marked = transitionPod(pod, { type: 'Terminate' });
-    await this.store.update(podId, marked, pod.version);
+    const saved = await this.store.update(podId, marked, pod.version);
 
     // Step 2: delete provider resource (best-effort)
     if (pod.providerId) {
@@ -305,9 +307,9 @@ export class PodService {
       } catch { /* GC will retry */ }
     }
 
-    // Step 3: mark final state
-    const terminated = transitionPod(marked, { type: 'MarkFailed', reason: 'user requested termination' });
-    await this.store.update(podId, terminated, marked.version);
+    // Step 3: mark final state — use saved.version (atomic version) for OCC
+    const terminated = transitionPod(saved, { type: 'MarkFailed', reason: 'user requested termination' });
+    await this.store.update(podId, terminated, saved.version);
     await this.store.removeFromIndex(podId);
 
     // quota release

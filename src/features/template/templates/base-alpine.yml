@@ -3,16 +3,22 @@
 name: "base-alpine"
 description: "Base Alpine Linux — minimal OS layer, 256MB RAM, sleep 3600"
 apiVersion: "hbi-aad/v1"
-kind: "Container"
-region: "local"
-restartPolicy: "Never"
-containers:
-  - name: "alpine"
-    image: "docker.io/library/alpine:latest"
-    command:
-      - "sleep"
-      - "3600"
-    resources:
-      limits:
-        cpu: 0.25
-        memory: 256
+kind: "Pod"
+spec:
+  metadata:
+    name: "base-alpine"
+  spec:
+    containers:
+      - name: "alpine"
+        image: "docker.io/library/alpine:latest"
+        command:
+          - "sleep"
+          - "3600"
+        resources:
+          limits:
+            cpu: 0.25
+            memory: 256
+    restartPolicy: "Never"
+  providerOverrides:
+    alibaba:
+      region: "local"

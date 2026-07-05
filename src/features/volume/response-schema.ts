@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { VolumeStatus } from '../sandbox/types.ts';
+import { VolumeStatus } from '../../core/volume/types.ts';
 
 /** Volume response schema — matches the Volume entity shape for API docs. */
 export const VolumeSchema = z.object({

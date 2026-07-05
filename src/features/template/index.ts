@@ -1,7 +1,7 @@
 import type { Hono } from 'hono';
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
 import type { IProviderRegistry } from '../../core/provider/interfaces.ts';
-import type { FeatureDeps } from '../../core/deps.ts';
+import type { AppContext, FeatureDeps } from '../../core/deps.ts';
 import { PodService } from '../../core/pod/service.ts';
 import { createTemplateRouter } from './handler.ts';
 

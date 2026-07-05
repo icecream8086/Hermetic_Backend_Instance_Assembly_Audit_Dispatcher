@@ -8,7 +8,7 @@
  */
 
 import { z } from 'zod';
-import { VolumeType, VolumeStatus, createVolumeId } from '../sandbox/types.ts';
+import { VolumeType, VolumeStatus, createVolumeId } from '../../core/volume/types.ts';
 
 // ─── Sub-schemas ───
 
