@@ -63,8 +63,6 @@ export type SystemEvent =
   | 'ScheduleFailed'
   | 'InitSucceeded'
   | 'InitFailed'
-  | 'ContainerExited0'
-  | 'ContainerExitedNonZero'
   | 'InstanceExpired'
   | 'RestartSucceeded'
   | 'RestartFailed'
@@ -118,10 +116,6 @@ export const ECI_TRANSITIONS: readonly {
   { from: ContainerGroupState.Pending, trigger: { kind: 'System', event: 'InitSucceeded' }, to: ContainerGroupState.Running, rule: 'T3' },
   // T4: Pending + InitFailed → Failed
   { from: ContainerGroupState.Pending, trigger: { kind: 'System', event: 'InitFailed' }, to: ContainerGroupState.Failed, rule: 'T4' },
-  // T5: Running + ContainerExited0 → Succeeded (policy-dependent, handled by RestartPolicy trigger)
-  { from: ContainerGroupState.Running, trigger: { kind: 'System', event: 'ContainerExited0' }, to: ContainerGroupState.Succeeded, rule: 'T5' },
-  // T6: Running + ContainerExitedNonZero → Failed (policy-dependent)
-  { from: ContainerGroupState.Running, trigger: { kind: 'System', event: 'ContainerExitedNonZero' }, to: ContainerGroupState.Failed, rule: 'T6' },
   // T7: Running + RestartContainerGroup → Restarting
   { from: ContainerGroupState.Running, trigger: { kind: 'Api', operation: 'RestartContainerGroup' }, to: ContainerGroupState.Restarting, rule: 'T7' },
   // T8: Running + UpdateContainerGroup → Updating
@@ -183,7 +177,12 @@ export const ALL_TRANSITIONS: readonly {
 
 /** δ: State × Trigger → State
  *  Returns the target state if the transition is known, otherwise returns the
- *  input state unchanged (terminal absorption + invalid transition handling). */
+ *  input state unchanged (terminal absorption + invalid transition handling).
+ *
+ *  Container exit events MUST use the RestartPolicy trigger, which routes
+ *  through evaluateRestartPolicy. The old System/ContainerExited triggers
+ *  (T5/T6) have been removed — they hardcoded Succeeded/Failed, ignoring
+ *  RestartPolicy. */
 export function transition(
   state: ContainerGroupState,
   trigger: TransitionTrigger,

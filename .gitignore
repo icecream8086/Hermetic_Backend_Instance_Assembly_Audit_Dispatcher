@@ -28,3 +28,9 @@ eslint_out.json
 eslint_src.json
 eslint_src_out.json
 docs
+
+/.secap/
+
+/.oracle/
+
+/issues/

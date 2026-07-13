@@ -14,6 +14,48 @@ interface ContainerResolver { resolveContainer: IProviderRegistry['resolveContai
 /** GC reason enum — validated at dispatch so callers never bypass the type check. */
 const gcReasonSchema = z.enum(['stopped-gc', 'provider-gone', 'exited-gc', 'unhealthy-gc', 'manual', 'failed-gc', 'expired-gc', 'stuck-gc']);
 
+export type GcReason = 'stopped-gc' | 'provider-gone' | 'exited-gc' | 'unhealthy-gc' | 'failed-gc' | 'expired-gc' | 'stuck-gc' | 'terminating-gc';
+
+/** Pure GC decision function — extracts the branching logic from registerPodHealthCheck.
+ *  Maps PodPhase (5-state) to GC reason or null (no action needed).
+ *  Independent from event handler wiring; used for differential testing against NRI. */
+export function decidePodGc(
+  phase: string,
+  durationMs: number,
+  providerAlive: boolean | undefined,
+  containerAlive: boolean[],
+  fails: number,
+  maxRetries: number,
+): GcReason | null {
+  if (phase === 'Succeeded') {
+    return durationMs >= 60_000 ? 'stopped-gc' : null;
+  }
+  if (phase === 'Failed') {
+    return durationMs >= 24 * 60 * 60 * 1000 ? 'failed-gc' : null;
+  }
+  if (phase === 'Pending') {
+    if (providerAlive === false) return 'provider-gone';
+    if (durationMs >= 10 * 60 * 1000) return 'stuck-gc';
+    return null;
+  }
+  if (phase === 'Running') {
+    if (providerAlive === false) return 'provider-gone';
+    if (maxRetries === -1) return null;
+    const anyAlive = containerAlive.some(a => a);
+    const allAlive = containerAlive.every(a => a);
+    if (!anyAlive) {
+      return fails >= maxRetries ? 'exited-gc' : null;
+    }
+    if (!allAlive) {
+      return fails >= maxRetries ? 'unhealthy-gc' : null;
+    }
+    return null;
+  }
+  // Unknown phase — catch-all GC after long timeout
+  if (durationMs >= 24 * 60 * 60 * 1000) return 'stuck-gc';
+  return null;
+}
+
 // ═══════════════════════════════════════════════════════════════
 // Pod GC — PodPhase-based health check
 // ═══════════════════════════════════════════════════════════════
@@ -238,7 +280,7 @@ function resolvePodGcInstanceId(raw: string | undefined): InstanceId | undefined
   if (!raw) return undefined;
   try { return createInstanceId(raw); } catch {
 
-    console.log("");
+    return undefined;
 
   }
 }

@@ -26,6 +26,7 @@ import { createImagesRouter } from '../src/features/images/handler.ts';
 import { createActionsRouter } from '../src/features/actions/handler.ts';
 import { createContainerSecretRouter } from '../src/features/container-secret/handler.ts';
 import { createInstancesRouter } from '../src/features/instances/handler.ts';
+import { createSecurityRouter } from '../src/features/security/handler.ts';
 import { createAuditRouter } from '../src/core/audit/audit-router.ts';
 import { WorkersAuditLogger } from '../src/core/audit/workers-audit-logger.ts';
 
@@ -205,6 +206,16 @@ const stubContainerSecretSvc: any = {
 };
 collect('Container Secrets', '/api/container-secrets', createContainerSecretRouter(stubContainerSecretSvc));
 
+const stubSecuritySvc: any = {
+  provision: async () => ({}),
+  list: async () => [],
+  getById: async () => null,
+  revoke: async () => {},
+  delete: async () => {},
+  getByBucketId: async () => null,
+};
+const stubS3Resolver: any = async () => ({ provider: { getPresignedUrl: async () => '', putPresignedUrl: async () => '', listObjects: async () => ({}) }, bucket: { name: '', endpoint: '', region: '' } });
+
 const stubInstancesSvc: any = {
   register: async () => ({ runner: {}, token: '' }),
   list: async () => [],
@@ -221,6 +232,10 @@ const stubInstancesSvc: any = {
   deleteGroup: async () => {},
 };
 collect('Instances', '/api/instances', createInstancesRouter(stubInstancesSvc));
+
+const stubSecuritySvc2: any = { provision: async () => ({}), list: async () => [], getById: async () => null, revoke: async () => {}, delete: async () => {}, getByBucketId: async () => null };
+const stubS3Resolver2: any = async () => ({ provider: { getPresignedUrl: async () => '', putPresignedUrl: async () => '', listObjects: async () => ({}) }, bucket: { name: '', endpoint: '', region: '' } });
+collect('Security', '/api/security', createSecurityRouter({ securityService: stubSecuritySvc2, s3ProviderResolver: stubS3Resolver2 }));
 
 const stubActionDeps2: any = {
   stores: { atomic: null as any, blob: null as any, query: null as any, metrics: null as any },

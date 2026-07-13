@@ -42,7 +42,7 @@ stateDiagram-v2
     ScheduleFailed --> Deleted : expired-gc (24h)
     Expired --> Deleted : expired-gc (24h)
     Succeeded --> Deleted : stopped-gc (60s)
-    Failed --> Deleted : failed-gc (60s)
+    Failed --> Deleted : failed-gc (24h)
 
     Succeeded --> Running : restart (GHA)
     Failed --> Running : restart (GHA)
@@ -312,12 +312,14 @@ sequenceDiagram
 |---|---|---|---|---|
 | `provider-gone` | `getStatus()` → null | 主动探测 | 即时 | S, P, Rs, U, R |
 | `stopped-gc` | Succeeded > 60s | 超时 | 60s | Su |
-| `failed-gc` | Failed > 60s | 超时 | 60s | F |
+| `failed-gc` | Failed > 24h | 超时 | 24h | F |
 | `terminating-gc` | Terminating > 60s | 超时 | 60s | T |
 | `stuck-gc` | 瞬态 > 10min | 超时 | 10min | S, P, Rs, U |
 | `exited-gc` | 容器全退 + fail ≥ maxRetries | 计数 | maxRetries × tick | R |
 | `unhealthy-gc` | 容器不健康 + fail ≥ maxRetries | 计数 | maxRetries × tick | R |
 | `expired-gc` | 硬终态 > 24h | 超时 | 24h | SF, E |
+
+> Note: `failed-gc` uses 24h window for audit data preservation (crash logs, metrics in failed container), matching `expired-gc` behavior.
 
 ## 9. 表 4: 共享资源生命周期
 
