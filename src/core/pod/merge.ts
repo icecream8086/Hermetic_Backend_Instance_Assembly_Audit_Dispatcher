@@ -110,13 +110,41 @@ export function mergePodSpec(parent: PodSpec, child: PodSpec): PodSpec {
 
 // ─── Internal helpers ──────────────────────────────────────────────────────
 
+/** Field-level deep merge: child's fields win, omitted fields inherit from parent.
+ *  CEA: if ContainerSpec grows a field, the line below errors — forcing this
+ *  function to handle it explicitly. */
+function mergeContainerSpec(parent: ContainerSpec, child: ContainerSpec): ContainerSpec {
+  return {
+    name: child.name,
+    image: child.image ?? parent.image,
+    command: child.command ?? parent.command,
+    args: child.args ?? parent.args,
+    env: child.env ?? parent.env,
+    resources: child.resources ?? parent.resources,
+    ports: child.ports ?? parent.ports,
+    volumeMounts: child.volumeMounts ?? parent.volumeMounts,
+    livenessProbe: child.livenessProbe ?? parent.livenessProbe,
+    readinessProbe: child.readinessProbe ?? parent.readinessProbe,
+    startupProbe: child.startupProbe ?? parent.startupProbe,
+    imagePullPolicy: child.imagePullPolicy ?? parent.imagePullPolicy,
+    tty: child.tty ?? parent.tty,
+    stdin: child.stdin ?? parent.stdin,
+    networkMode: child.networkMode ?? parent.networkMode,
+    providerOverrides: child.providerOverrides ?? parent.providerOverrides,
+    // CEA: all ContainerSpec fields must appear above — add new fields here
+  } satisfies Record<keyof ContainerSpec, unknown>;
+}
+
 function mergeContainersByIdentity(
   parent: readonly ContainerSpec[],
   child: readonly ContainerSpec[],
 ): ContainerSpec[] {
   const map = new Map<string, ContainerSpec>();
   for (const c of parent) map.set(c.name, c);
-  for (const c of child) map.set(c.name, c);
+  for (const c of child) {
+    const existing = map.get(c.name);
+    map.set(c.name, existing ? mergeContainerSpec(existing, c) : c);
+  }
   return Array.from(map.values());
 }
 

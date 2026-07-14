@@ -377,13 +377,13 @@ export function createPermissionRouter(svc: IPermissionService): OpenAPIHono<{ V
   // ─── Compare ───
   app.openapi(createRoute({ method: 'post', path: '/compare/perm-groups', tags: ['permission'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(CompareResultSchema) } } } } }), async (c) => {
     requireRoot(c);
-    const { idA, idB } = await z.object({ idA: z.string(), idB: z.string() }).parse(c.req.json());
+    const { idA, idB } = z.object({ idA: z.string(), idB: z.string() }).parse(await c.req.json());
     return c.json(ok(await svc.comparePermGroups(idA, idB)), 201);
   });
 
   app.openapi(createRoute({ method: 'post', path: '/compare/user-groups', tags: ['permission'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(CompareResultSchema) } } } } }), async (c) => {
     requireRoot(c);
-    const { idA, idB } = await z.object({ idA: z.string(), idB: z.string() }).parse(c.req.json());
+    const { idA, idB } = z.object({ idA: z.string(), idB: z.string() }).parse(await c.req.json());
     return c.json(ok(await svc.compareUserGroups(idA, idB)), 201);
   });
 

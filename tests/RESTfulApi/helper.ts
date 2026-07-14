@@ -10,15 +10,24 @@ import { createApp } from '../../src/core/app.ts';
 export interface TestServer {
   server: ServerType;
   baseUrl: string;
+  dataDir: string;
   dispose: () => Promise<void>;
+}
+
+export interface TestServerOpts {
+  authz?: { enabled: boolean };
+  /** Called with the temp dataDir after it's created but before the app initializes. */
+  beforeApp?: (dataDir: string) => void;
 }
 
 /**
  * Start the Hono app locally with file-based storage.
  * Each call uses a unique temp directory so parallel test files don't collide.
  */
-export async function startTestServer(): Promise<TestServer> {
+export async function startTestServer(opts?: TestServerOpts): Promise<TestServer> {
   const dataDir = mkdtempSync(join(tmpdir(), 'hbi-test-'));
+
+  if (opts?.beforeApp) opts.beforeApp(dataDir);
 
   const config = loadConfig({
     storage: {
@@ -32,7 +41,7 @@ export async function startTestServer(): Promise<TestServer> {
       intervalMs: 60000,
       batchSize: 0,
     },
-    authz: { enabled: false },
+    authz: { enabled: opts?.authz?.enabled ?? false },
   });
 
   const instance = await createApp(config);
@@ -46,6 +55,7 @@ export async function startTestServer(): Promise<TestServer> {
         resolve({
           server,
           baseUrl,
+          dataDir,
           dispose: async () => {
             await instance.dispose();
             await new Promise<void>((r) => server.close(() => r()));

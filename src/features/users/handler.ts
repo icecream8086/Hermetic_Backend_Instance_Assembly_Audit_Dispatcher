@@ -50,7 +50,7 @@ async function requirePerm(c: Context<UsersEnv>, checker: PermissionCheckFn | un
 export function createUserRouter(userService: IUserService, permissionChecker?: PermissionCheckFn): OpenAPIHono<{ Variables: AppContext }> {
   const app = new OpenAPIHono<{ Variables: AppContext }>();
 
-  app.openapi(createRoute({ method: 'post', path: '/register', tags: ['users'], summary: '注册新用户', request: { body: { content: { 'application/json': { schema: RegisterUserSchema } } } }, responses: { 201: { description: 'LoginResponse', content: { 'application/json': { schema: OkResponse(LoginResponseSchema) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/register', tags: ['users'], summary: '注册新用户', responses: { 201: { description: 'LoginResponse', content: { 'application/json': { schema: OkResponse(LoginResponseSchema) } } } } }), async (c) => {
     const body = RegisterUserSchema.parse(await c.req.json());
     const atomic = c.var.stores.atomic;
     const initKey = '_sys:initialized';

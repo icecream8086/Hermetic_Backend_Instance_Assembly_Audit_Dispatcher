@@ -128,16 +128,19 @@ function resolveDag(tpls: Template[], seedIds: string[]): Template[] {
       inStack.delete(frame.id);
       continue;
     }
+    if (visited.has(frame.id)) continue;
     if (inStack.has(frame.id)) {
       throw new AppError(400, 'CYCLE_DETECTED', `Cycle detected: template "${frame.id}" depends on itself (directly or transitively)`);
     }
-    if (visited.has(frame.id)) continue;
     inStack.add(frame.id);
     const tpl = tpls.find(t => t.id === frame.id);
     if (tpl) {
       result.push(tpl);
+      // exit must be pushed BEFORE deps: LIFO ensures deps are popped first,
+      // keeping this node in inStack while children are traversed.
+      // This way back-edges from children correctly trigger CYCLE_DETECTED.
+      stack.push({ id: frame.id, phase: 'exit' });
       if (tpl.dependsOn) {
-        stack.push({ id: frame.id, phase: 'exit' });
         for (const dep of tpl.dependsOn) {
           stack.push({ id: dep, phase: 'enter' });
         }
@@ -157,14 +160,17 @@ async function resolveTemplateWithChain(atomic: IAtomicStore, id: string): Promi
   const tpl = allTemplates.find(t => t.id === id);
   if (!tpl) throw new AppError(404, 'TEMPLATE_NOT_FOUND', 'Template not found');
 
-  const chain = resolveDag(allTemplates, [id]).reverse();
-  const chainIds = chain.map(t => t.id);
+  // Chain: nearest ancestor first so mergePodSpec(ancestor, mergedSpec)
+  // lets mergedSpec (target) override ancestor, and omitted fields inherit
+  // from the nearest ancestor that sets them.
+  const templateOrder = resolveDag(allTemplates, [id]);
+  const chainIds = templateOrder.map(t => t.id);
+  const chain = templateOrder; // DFS: target first → ancestors in visitation order
 
-  // DAG merge: sequentially merge each ancestor's PodSpec
   let mergedSpec: PodSpec = tpl.spec;
   for (const t of chain) {
     if (t.id === id) continue;
-    mergedSpec = mergePodSpec(mergedSpec, t.spec);
+    mergedSpec = mergePodSpec(t.spec, mergedSpec);
   }
 
   return { template: { ...tpl, spec: mergedSpec }, chain: chainIds };

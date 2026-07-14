@@ -109,11 +109,14 @@ export function registerPodHealthCheck(deps: PodHealthCheckDeps): void {
           const providerId = pod.providerId;
           const instanceId = z.string().optional().parse((pod.spec.providerOverrides)?.instanceId);
 
-          // ── Succeeded > 60s → stopped-gc ──
+          const durationMs = Date.now() - pod.updatedAt;
+
+          // ── Phase-based GC via pure decision function ──
           if (phase === 'Succeeded') {
-            if (Date.now() - pod.updatedAt > 60_000) {
+            const reason = decidePodGc('Succeeded', durationMs, undefined, [], 0, 0);
+            if (reason) {
               await dispatchPodGc(stores.atomic, queueProducer, providers, audit, {
-                podId: pid, reason: 'stopped-gc', providerId: providerId ?? pid,
+                podId: pid, reason, providerId: providerId ?? pid,
                 podName: pod.name, createdAt: pod.createdAt,
                 ...(instanceId ? { instanceId } : {}),
               });
@@ -121,11 +124,11 @@ export function registerPodHealthCheck(deps: PodHealthCheckDeps): void {
             continue;
           }
 
-          // ── Failed > 24h → failed-gc (long window for audit) ──
           if (phase === 'Failed') {
-            if (Date.now() - pod.updatedAt > 24 * 60 * 60 * 1000) {
+            const reason = decidePodGc('Failed', durationMs, undefined, [], 0, 0);
+            if (reason) {
               await dispatchPodGc(stores.atomic, queueProducer, providers, audit, {
-                podId: pid, reason: 'failed-gc', providerId: providerId ?? pid,
+                podId: pid, reason, providerId: providerId ?? pid,
                 podName: pod.name, createdAt: pod.createdAt,
                 ...(instanceId ? { instanceId } : {}),
               });
@@ -135,28 +138,24 @@ export function registerPodHealthCheck(deps: PodHealthCheckDeps): void {
 
           // ── Pending — transient state with provider resource ──
           if (phase === 'Pending') {
-            const TRANSIENT_TIMEOUT_MS = 10 * 60 * 1000;
-            const duration = Date.now() - pod.updatedAt;
+            let providerAlive: boolean | undefined;
 
             if (providerId && instanceId) {
               try {
                 const rt = await podService.checkProviderStatus(createPodId(pid));
                 if (!rt) {
-                  await dispatchPodGc(stores.atomic, queueProducer, providers, audit, {
-                    podId: pid, reason: 'provider-gone', providerId,
-                    podName: pod.name, createdAt: pod.createdAt,
-                    ...(instanceId ? { instanceId } : {}),
-                  });
-                  continue;
-                }
-                // Scheduling → Running auto-promotion
-                if (rt.status === ContainerGroupState.Running) {
-                  try { await podService.syncRuntime(createPodId(pid)); } catch {
+                  providerAlive = false;
+                } else {
+                  providerAlive = true;
+                  // Scheduling → Running auto-promotion
+                  if (rt.status === ContainerGroupState.Running) {
+                    try { await podService.syncRuntime(createPodId(pid)); } catch {
 
-                    console.log("best-effort");
+                      console.log("best-effort");
 
+                    }
+                    continue;
                   }
-                  continue;
                 }
               } catch {
 
@@ -165,9 +164,10 @@ export function registerPodHealthCheck(deps: PodHealthCheckDeps): void {
               }
             }
 
-            if (duration > TRANSIENT_TIMEOUT_MS) {
+            const reason = decidePodGc('Pending', durationMs, providerAlive, [], 0, 0);
+            if (reason) {
               await dispatchPodGc(stores.atomic, queueProducer, providers, audit, {
-                podId: pid, reason: 'stuck-gc', providerId: providerId ?? pid,
+                podId: pid, reason, providerId: providerId ?? pid,
                 podName: pod.name, createdAt: pod.createdAt,
                 ...(instanceId ? { instanceId } : {}),
               });
@@ -194,57 +194,51 @@ export function registerPodHealthCheck(deps: PodHealthCheckDeps): void {
             }
             if (!runtime) {
               stableSince.delete(pid);
+              const reason = decidePodGc('Running', durationMs, false, [], 0, maxRetries);
+              if (reason) {
+                await dispatchPodGc(stores.atomic, queueProducer, providers, audit, {
+                  podId: pid, reason, providerId: providerId ?? pid,
+                  podName: pod.name, createdAt: pod.createdAt,
+                  ...(instanceId ? { instanceId } : {}),
+                });
+              }
+              continue;
+            }
+
+            const containerAlive = runtime.containers.map(c => c.alive);
+            const anyAlive = containerAlive.some(a => a);
+            const allAlive = containerAlive.every(a => a);
+            const failKey = `pod:health:fails:${pid}`;
+            const failEntry = await stores.atomic.get<number>(failKey);
+
+            // All containers healthy — reset counter, mark stable
+            if (anyAlive && allAlive) {
+              if (failEntry) await stores.atomic.set(failKey, 0, failEntry.version);
+              stableSince.set(pid, pod.updatedAt);
+              continue;
+            }
+
+            // Some or all unhealthy — increment fail counter
+            stableSince.delete(pid);
+            const currentFails = (failEntry?.value ?? 0) + 1;
+            await stores.atomic.set(failKey, currentFails, failEntry?.version ?? null);
+
+            const reason = decidePodGc('Running', durationMs, true, containerAlive, currentFails, maxRetries);
+            if (reason) {
               await dispatchPodGc(stores.atomic, queueProducer, providers, audit, {
-                podId: pid, reason: 'provider-gone', providerId,
+                podId: pid, reason, providerId: providerId ?? pid,
                 podName: pod.name, createdAt: pod.createdAt,
                 ...(instanceId ? { instanceId } : {}),
               });
-              continue;
-            }
-
-            const allHealthy = runtime.containers.every(cc => cc.alive);
-            const anyRunning = runtime.containers.some(cc => cc.alive);
-            const failKey = `pod:health:fails:${pid}`;
-
-            if (!anyRunning) {
-              stableSince.delete(pid);
-              const failEntry = await stores.atomic.get<number>(failKey);
-              const fails = (failEntry?.value ?? 0) + 1;
-              await stores.atomic.set(failKey, fails, failEntry?.version ?? null);
-              if (fails >= maxRetries) {
-                await dispatchPodGc(stores.atomic, queueProducer, providers, audit, {
-                  podId: pid, reason: 'exited-gc', providerId,
-                  podName: pod.name, createdAt: pod.createdAt,
-                  ...(instanceId ? { instanceId } : {}),
-                });
-              }
-              continue;
-            }
-
-            if (allHealthy) {
-              const failEntry = await stores.atomic.get<number>(failKey);
-              if (failEntry) await stores.atomic.set(failKey, 0, failEntry.version);
-              stableSince.set(pid, pod.updatedAt);
-            } else {
-              stableSince.delete(pid);
-              const failEntry = await stores.atomic.get<number>(failKey);
-              const fails = (failEntry?.value ?? 0) + 1;
-              await stores.atomic.set(failKey, fails, failEntry?.version ?? null);
-              if (fails >= maxRetries) {
-                await dispatchPodGc(stores.atomic, queueProducer, providers, audit, {
-                  podId: pid, reason: 'unhealthy-gc', providerId,
-                  podName: pod.name, createdAt: pod.createdAt,
-                  ...(instanceId ? { instanceId } : {}),
-                });
-              }
             }
             continue;
           }
 
           // ── Unknown — unexpected phase, GC after long timeout ──
-          if (Date.now() - pod.updatedAt > 24 * 60 * 60 * 1000) {
+          const reason = decidePodGc(phase, durationMs, undefined, [], 0, 0);
+          if (reason) {
             await dispatchPodGc(stores.atomic, queueProducer, providers, audit, {
-              podId: pid, reason: 'stuck-gc', providerId: providerId ?? pid,
+              podId: pid, reason, providerId: providerId ?? pid,
               podName: pod.name, createdAt: pod.createdAt,
               ...(instanceId ? { instanceId } : {}),
             });

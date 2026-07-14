@@ -5,7 +5,7 @@ import type { ISysGroupService } from './service.ts';
 import { AppError } from '../../core/types.ts';
 import type { AppContext } from '../../core/deps.ts';
 import { CreateSysGroupSchema, UpdateSysGroupSchema } from './schema.ts';
-import { ok } from '../../core/response.ts';
+import { ok, fail } from '../../core/response.ts';
 import { OkResponse, ErrorResponse, PaginatedResponse } from '../../core/http-docs/response-schema.ts';
 import { SysGroupSchema } from './response-schema.ts';
 
@@ -17,7 +17,13 @@ function requireRoot<E extends { Variables: { currentUser?: { role?: string } } 
 }
 
 export function createSysGroupRouter(svc: ISysGroupService): OpenAPIHono<{ Variables: AppContext }> {
-  const app = new OpenAPIHono<{ Variables: AppContext }>();
+  const app = new OpenAPIHono<{ Variables: AppContext }>({
+    defaultHook: (result, c) => {
+      if (!result.success) {
+        return c.json(fail('VALIDATION_ERROR', result.error.issues.map(i => i.message).join('; ')), 400);
+      }
+    },
+  });
 
   app.openapi(
     createRoute({

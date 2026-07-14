@@ -45,7 +45,7 @@ describe('Compare permission groups', () => {
     await spec()
       .post('/api/permissions/compare/perm-groups')
       .withJson({ idA: _grpA, idB: _grpB })
-      .expectStatus(200)
+      .expectStatus(201)
       .expect((ctx) => {
         const d = ctx.res.body?.data;
         if (!d) throw new Error('No data');
@@ -59,7 +59,7 @@ describe('Compare permission groups', () => {
     await spec()
       .post('/api/permissions/compare/perm-groups')
       .withJson({ idA: _grpA, idB: _grpB })
-      .expectStatus(200)
+      .expectStatus(201)
       .expect((ctx) => {
         const d = ctx.res.body?.data;
         if (!d) throw new Error('No data');
@@ -121,7 +121,7 @@ describe('Compare user groups', () => {
     await spec()
       .post('/api/permissions/compare/user-groups')
       .withJson({ idA: _grpX, idB: _grpY })
-      .expectStatus(200)
+      .expectStatus(201)
       .expect((ctx) => {
         const d = ctx.res.body?.data;
         if (!d) throw new Error('No data');
@@ -135,7 +135,7 @@ describe('Compare user groups', () => {
     await spec()
       .post('/api/permissions/compare/user-groups')
       .withJson({ idA: _grpX, idB: _grpY })
-      .expectStatus(200)
+      .expectStatus(201)
       .expect((ctx) => {
         const d = ctx.res.body?.data;
         if (!d) throw new Error('No data');
@@ -154,7 +154,7 @@ describe('Compare user groups', () => {
     await spec()
       .post('/api/permissions/compare/user-groups')
       .withJson({ idA: _grpX, idB: _grpX })
-      .expectStatus(200)
+      .expectStatus(201)
       .expect((ctx) => {
         const d = ctx.res.body?.data;
         if (!d) throw new Error('No data');
