@@ -7,6 +7,7 @@ import { CredentialService } from '../../../src/core/auth/credential.ts';
 import type { CreateInstanceInput } from '../../../src/core/region/instance.ts';
 import type { CreateCredentialInput } from '../../../src/core/auth/credential.ts';
 import { CredentialResolutionError } from '../../../src/core/provider/errors.ts';
+import { AppError } from '../../../src/core/types.ts';
 
 function atomic() { return new FileKVAtomicStore(join(tmpdir(), 'hbi-resolver-' + crypto.randomUUID().slice(0, 8))); }
 
@@ -144,11 +145,8 @@ describe('InstanceProviderResolver credential resolution', () => {
       expect(typeof provider.create).toBe('function');
     });
 
-    it('returns StubContainerProvider when no instanceId and no online instances', async () => {
-      const provider = await resolver.resolveContainer(undefined);
-      expect(provider).toBeDefined();
-      const result = await provider.describe({ region: 'local' as any });
-      expect(result.sandboxes).toEqual([]);
+    it('throws AppError when no instanceId and no online instances (silent degradation removed)', async () => {
+      await expect(resolver.resolveContainer(undefined)).rejects.toThrow(AppError);
     });
   });
 });

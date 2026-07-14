@@ -14,8 +14,8 @@ export function createUserId(raw: string): UserId { return userIdSchema.parse(ra
 export function createSessionToken(raw: string): SessionToken { return sessionTokenSchema.parse(raw); }
 export function generateUserId(): UserId { return userIdSchema.parse(crypto.randomUUID()); }
 export function generateSessionToken(): SessionToken { return sessionTokenSchema.parse(`sess_${crypto.randomUUID()}`); }
-export function createUid(n: number): Uid { return uidSchema.parse(n); }
-export function createGid(n: number): Gid { return gidSchema.parse(n); }
+export function createUid(n: number): Uid { try { return uidSchema.parse(n); } catch { throw new Error('Invalid UID'); } }
+export function createGid(n: number): Gid { try { return gidSchema.parse(n); } catch { throw new Error('Invalid GID'); } }
 
 export const UID_MIN = 1000;
 export const GID_MIN = 1000;

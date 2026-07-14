@@ -57,14 +57,14 @@ export interface IEventLoopControl {
    * Convenience: create an Event from a public TriggerEventInput and enqueue it.
    * This is the method external HTTP callers route through.
    */
-  public enqueueTrigger<T>(input: TriggerEventInput<T>): Event;
+  enqueueTrigger<T>(input: TriggerEventInput<T>): Event;
 
   /**
    * Enqueue a system event that bypasses the maxQueueSize limit.
    * Use for critical internal events (health:check, etc.) that must
    * never be dropped due to queue pressure.
    */
-  public enqueuePriority<T>(input: TriggerEventInput<T>): Event;
+  enqueuePriority<T>(input: TriggerEventInput<T>): Event;
 
   /** List pending events in the queue (type + id, no payload). */
   pendingEvents(): { type: string; id: string }[];

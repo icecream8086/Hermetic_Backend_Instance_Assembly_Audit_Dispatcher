@@ -21,6 +21,11 @@ export class ConsoleLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
     void this.log(entry);
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await -- delegates to async log
+  public async writeSync(entry: AuditEntry): Promise<LogId> {
+    return this.log(entry);
+  }
+
   // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>
   private async log(entry: AuditEntry): Promise<LogId> {
     const id = generateLogId();

@@ -56,7 +56,7 @@ const txnOpSchema = z.object({
 });
 
 const doRequestSchema = z.object({
-  op: z.enum(['get', 'set', 'batchGet', 'transact']),
+  op: z.string(),
   key: z.string().optional(),
   keys: z.array(z.string()).optional(),
   value: z.unknown().optional(),
@@ -320,11 +320,13 @@ export class DurableObjectAtomicStore implements IAtomicStore {
       method: 'POST',
       body: JSON.stringify({ op: 'get', key }),
     });
-    const body = getResponseSchema.parse(await resp.json());
-    if (body.value === null || body.value === undefined) return null;
-    if (body.version === null) return null;
-    const version = createVersionId(body.version);
-    const entry: { value: T; version: VersionId } = { value: body.value as T, version };
+    const body = await resp.json();
+    if (!resp.ok) return null;
+    const parsed = getResponseSchema.parse(body);
+    if (parsed.value === null || parsed.value === undefined) return null;
+    if (parsed.version === null) return null;
+    const version = createVersionId(parsed.version);
+    const entry: { value: T; version: VersionId } = { value: parsed.value as T, version };
     return entry;
   }
 
@@ -334,8 +336,10 @@ export class DurableObjectAtomicStore implements IAtomicStore {
       method: 'POST',
       body: JSON.stringify({ op: 'set', key, value, expectedVersion, ttlSeconds }),
     });
-    const body = setResponseSchema.parse(await resp.json());
-    return body.version !== null ? createVersionId(body.version) : null;
+    const body = await resp.json();
+    if (!resp.ok) return body.version;
+    const parsed = setResponseSchema.parse(body);
+    return parsed.version !== null ? createVersionId(parsed.version) : null;
   }
 
   public async transact<T>(action: (txn: IStoreTransaction) => Promise<T>): Promise<T> {

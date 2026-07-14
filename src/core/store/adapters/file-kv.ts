@@ -117,6 +117,8 @@ export class FileKVAtomicStore implements IAtomicStore {
 
             console.debug("");
 
+            readSet.set(key, null);
+            return null;
           }
         },
         getMany: async <V>(keys: string[]) => {
@@ -134,6 +136,8 @@ export class FileKVAtomicStore implements IAtomicStore {
               results.push(entry.value);
             } catch (e) {
               console.debug("");
+              readSet.set(key, null);
+              results.push(null);
             }
           }
           return results;
@@ -158,6 +162,7 @@ export class FileKVAtomicStore implements IAtomicStore {
           currentVersion = entry.metadata.v;
         } catch (e) {
           console.debug("");
+          currentVersion = null;
         }
         if (currentVersion !== expectedVersion) {
           throw new TransactConflictError(

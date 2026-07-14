@@ -34,10 +34,10 @@ function normalizeUser(user: User): User {
     ...user,
     uid: user.uid || createUid(UID_MIN),
     gid: user.gid || createGid(GID_MIN),
-    gecos: user.gecos,
+    gecos: user.gecos || user.name,
     directory: user.directory || `${DEFAULT_HOME_PREFIX}${user.email}`,
     shell: user.shell || DEFAULT_SHELL,
-    supplementaryGids: user.supplementaryGids.length > 0 ? user.supplementaryGids : [],
+    supplementaryGids: (user.supplementaryGids ?? []).length > 0 ? user.supplementaryGids : [],
   };
 }
 

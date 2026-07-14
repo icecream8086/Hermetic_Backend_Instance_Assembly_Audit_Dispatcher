@@ -88,7 +88,8 @@ export class ImageCacheTracker {
     const existing = await this.atomic.get<ImageCacheEntry>(this.#key(imageId));
     if (!existing) return;
     await this.atomic.transact(async (txn) => {
-      await this.#addToTotalSize(-existing.value.sizeBytes);
+      const cur = (await txn.get<number>(CACHE_TOTAL_SIZE_KEY)) ?? 0;
+      txn.set(CACHE_TOTAL_SIZE_KEY, Math.max(0, cur - existing.value.sizeBytes));
       txn.set(this.#key(imageId), null);
     });
     await this.#removeFromIndex(imageId);

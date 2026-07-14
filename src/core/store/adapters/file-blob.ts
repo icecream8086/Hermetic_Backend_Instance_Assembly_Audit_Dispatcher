@@ -60,6 +60,7 @@ export class FileBlobStore implements IBlobStore {
 
       console.debug("");
 
+      return null;
     }
   }
 

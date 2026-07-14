@@ -20,25 +20,19 @@ export class KvAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
   }
 
   public write(entry: AuditEntry): void {
-    void this.#store(entry);
-  }
-
-  async #store(entry: AuditEntry): Promise<LogId> {
     const id = generateLogId();
-    const now = Date.now();
     const facilityCode = resolveFacility(entry.facility);
 
-    await this.atomic.set(AUDIT_PREFIX + id, entry, null, AUDIT_TTL_SEC);
+    void this.atomic.set(AUDIT_PREFIX + id, entry, null, AUDIT_TTL_SEC);
 
     const stored: StoredAuditEntry = {
-      id, timestamp: now, priority: encodePriority(facilityCode, entry.level),
+      id, timestamp: Date.now(), priority: encodePriority(facilityCode, entry.level),
       level: entry.level, facility: entry.facility,
       message: entry.message, actorId: entry.actorId,
       ...(entry.metadata ? { metadata: entry.metadata } : {}),
     };
     this.#entries.push(stored);
     if (this.#entries.length > this.#capacity) this.#entries.shift();
-    return id;
   }
 
   // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<T>

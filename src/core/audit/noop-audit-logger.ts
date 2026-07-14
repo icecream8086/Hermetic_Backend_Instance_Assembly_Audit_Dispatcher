@@ -3,7 +3,8 @@ import type { IAuditWriter, IAuditReader, IAuditAdmin, AuditEntry, StoredAuditEn
 import type { LogId } from '../brand.ts';
 
 export class NoopAuditLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
-  public write(_entry: AuditEntry): void { /* no-op */ }
+  // eslint-disable-next-line @typescript-eslint/require-await -- interface contract requires Promise<void>
+  public async write(_entry: AuditEntry): Promise<void> { /* no-op */ }
   public async query(_params?: LogQuery): Promise<{ entries: StoredAuditEntry[]; nextCursor?: string; total?: number }> {
     return { entries: [], total: 0 };
   }
