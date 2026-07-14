@@ -97,6 +97,36 @@ const noHandwrittenGuard = {
   },
 };
 
+/**
+ * 检查 node 是否位于某个 .parse() 调用的参数子树内（不限嵌套深度与中间节点类型）。
+ *
+ * 向上遍历父节点链，直到文件根或函数作用域边界。
+ * 只要遇到 callee 为 MemberExpression 且 property.name === 'parse' 的 CallExpression 即返回 true。
+ */
+function isInsideParse(node) {
+  let n = node.parent;
+  while (n) {
+    if (
+      n.type === 'CallExpression' &&
+      n.callee?.type === 'MemberExpression' &&
+      n.callee.property?.name === 'parse'
+    ) {
+      return true;
+    }
+    // 到达函数 / 模块顶层就停止，避免跨函数误判
+    if (
+      n.type === 'FunctionDeclaration' ||
+      n.type === 'FunctionExpression' ||
+      n.type === 'ArrowFunctionExpression' ||
+      n.type === 'Program'
+    ) {
+      break;
+    }
+    n = n.parent;
+  }
+  return false;
+}
+
 /** enforce-decode-layer: 强制 JSON.parse() / c.req.json() 经过 Zod schema.parse() */
 const enforceDecodeLayer = {
   meta: {
@@ -112,15 +142,13 @@ const enforceDecodeLayer = {
     if (context.filename.includes('/providers/')) return {};
     return {
       'CallExpression[callee.object.name="JSON"][callee.property.name="parse"]'(node) {
-        const parent = node.parent;
-        if (parent?.callee?.property?.name === 'parse') return; // wrapped in .parse()
+        if (isInsideParse(node)) return;
         context.report({ node, messageId: 'bareJsonParse' });
       },
       'CallExpression[callee.property.name="json"]'(node) {
         const obj = node.callee?.object;
         if (!obj || obj.type !== 'MemberExpression' || obj.object?.name !== 'c' || obj.property?.name !== 'req') return;
-        const parent = node.parent;
-        if (parent?.callee?.property?.name === 'parse') return; // wrapped in .parse()
+        if (isInsideParse(node)) return;
         context.report({ node, messageId: 'bareReqJson' });
       },
     };
