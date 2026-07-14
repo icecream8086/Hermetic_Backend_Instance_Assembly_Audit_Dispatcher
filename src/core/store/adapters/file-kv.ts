@@ -1,5 +1,6 @@
 import { readFile, writeFile, mkdir, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import { z } from 'zod';
 import type { IAtomicStore, IStoreTransaction } from '../interfaces.ts';
 import { TransactConflictError } from '../interfaces.ts';
 import type { VersionId } from '../../brand.ts';
@@ -57,7 +58,7 @@ export class FileKVAtomicStore implements IAtomicStore {
       await this.#ensureDir();
       try {
         const raw = await readFile(this.#filePath(key), 'utf-8');
-        const entry = parseJson(raw) as FileEntry<T>;
+        const entry: FileEntry<T> = parseJson(raw);
         if (entry.metadata.e && Date.now() > entry.metadata.e) {
           // TTL expired — delete file and return null
           try { await rm(this.#filePath(key), { force: true }); } catch (e) {
@@ -68,7 +69,8 @@ export class FileKVAtomicStore implements IAtomicStore {
         }
         // null value = deleted — consistent with DO adapter behavior
         if (entry.value === null) return null;
-        return { value: entry.value, version: entry.metadata.v as VersionId };
+        const ver: VersionId = entry.metadata.v;
+        return { value: entry.value, version: ver };
       } catch (e) { const _r = null; return _r; }
     });
   }
@@ -81,7 +83,7 @@ export class FileKVAtomicStore implements IAtomicStore {
 
       let current: FileEntry | null = null;
       try {
-        current = parseJson(await readFile(fp, 'utf-8')) as FileEntry;
+        current = parseJson(await readFile(fp, 'utf-8'));
       } catch (e) {
         console.debug("");
       }
@@ -106,11 +108,11 @@ export class FileKVAtomicStore implements IAtomicStore {
       const txn: IStoreTransaction = {
         get: async <V>(key: string) => {
           const dw = deferredWrites.get(key);
-          if (dw !== undefined) return dw.value as V;
+          if (dw !== undefined) return z.custom<V>().parse(dw.value);
 
           try {
             const raw = await readFile(this.#filePath(key), 'utf-8');
-            const entry = parseJson(raw) as FileEntry<V>;
+            const entry: FileEntry<V> = parseJson(raw);
             readSet.set(key, entry.metadata.v);
             return entry.value;
           } catch (e) {
@@ -131,7 +133,7 @@ export class FileKVAtomicStore implements IAtomicStore {
             }
             try {
               const raw = await readFile(this.#filePath(key), 'utf-8');
-              const entry = parseJson(raw) as FileEntry<V>;
+              const entry: FileEntry<V> = parseJson(raw);
               readSet.set(key, entry.metadata.v);
               results.push(entry.value);
             } catch (e) {

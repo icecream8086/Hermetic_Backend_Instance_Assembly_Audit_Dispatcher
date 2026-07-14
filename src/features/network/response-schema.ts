@@ -34,4 +34,4 @@ export const SecurityGroupSchema = z.object({
   status: z.enum(['Active', 'Inactive', 'Error']),
   createdAt: z.number(),
   updatedAt: z.number(),
-});
+}).openapi({ ref: 'SecurityGroup' });

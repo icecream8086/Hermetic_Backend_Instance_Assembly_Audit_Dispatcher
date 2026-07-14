@@ -17,7 +17,7 @@ export const SecurityResourceSchema = z.object({
   status: z.enum([SecurityResourceStatus.Active, SecurityResourceStatus.Expired, SecurityResourceStatus.Revoked]),
   createdAt: z.number(),
   updatedAt: z.number(),
-});
+}).openapi({ ref: 'SecurityResource' });
 
 export const SecurityResourceListResponseSchema = z.object({
   items: z.array(SecurityResourceSchema).readonly(),

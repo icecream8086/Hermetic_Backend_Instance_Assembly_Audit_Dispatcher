@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 // ── Shared ──
 
-export const PodPhaseSchema = z.enum(['Pending', 'Running', 'Succeeded', 'Failed', 'Unknown']);
+export const PodPhaseSchema = z.enum(['Pending', 'Running', 'Succeeded', 'Failed', 'Unknown']).openapi({ ref: 'PodPhase' });
 
 // ── Pod response shapes ──
 
@@ -16,7 +16,7 @@ export const PodCreateResponseSchema = z.object({
 export const PodPhaseChangeResponseSchema = z.object({
   podId: z.string(),
   phase: PodPhaseSchema,
-});
+}).openapi({ ref: 'PodPhaseChange' });
 
 export const PodHealthSchema = z.object({
   containerName: z.string(),
@@ -46,7 +46,7 @@ export const PodEntitySchema = z.object({
   creatorId: z.string().optional(),
   createdAt: z.number(),
   updatedAt: z.number(),
-});
+}).openapi({ ref: 'PodEntity' });
 
 export const PodListResponseSchema = z.object({
   items: z.array(PodEntitySchema).readonly(),

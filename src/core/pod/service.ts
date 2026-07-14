@@ -195,7 +195,7 @@ export class PodService {
     if (!pod) throw new AppError(404, 'POD_NOT_FOUND', `Pod ${podId} not found`);
     if (pod.providerId) {
       const provider = await this.resolveProvider();
-      try { await provider.stop?.(pod.providerId); } catch { /* best-effort */ }
+      try { await provider.stop?.(pod.providerId); } catch (e) { console.error('stop failed (best-effort):', e); }
     }
     const updated = transitionPod(pod, { type: 'Stop' });
     const result = await this.store.update(podId, updated, pod.version);
@@ -217,7 +217,7 @@ export class PodService {
     const updated = transitionPod(pod, { type: 'Start' });
     if (pod.providerId) {
       const provider = await this.resolveProvider();
-      try { await provider.start?.(pod.providerId); } catch { /* best-effort */ }
+      try { await provider.start?.(pod.providerId); } catch (e) { console.error('start failed (best-effort):', e); }
     }
     const result = await this.store.update(podId, updated, pod.version);
     this.audit?.write({
@@ -238,7 +238,7 @@ export class PodService {
     const updated = transitionPod(pod, { type: 'Restart' });
     if (pod.providerId) {
       const provider = await this.resolveProvider();
-      try { await provider.restart?.(pod.providerId); } catch { /* best-effort */ }
+      try { await provider.restart?.(pod.providerId); } catch (e) { console.error('restart failed (best-effort):', e); }
     }
     const result = await this.store.update(podId, updated, pod.version);
     this.audit?.write({
@@ -259,8 +259,8 @@ export class PodService {
 
     // Try sync for Running pods to get fresh container state
     if (pod.phase === 'Running' && pod.providerId) {
-      try { await this.syncRuntime(podId); } catch {
-        /* stale OK */
+      try { await this.syncRuntime(podId); } catch (e) {
+        console.error('syncRuntime failed (stale OK):', e);
       }
     }
 
@@ -304,7 +304,7 @@ export class PodService {
       const provider = await this.resolveProvider();
       try {
         await provider.delete({ region: createRegionId('cn-hangzhou'), providerId: pod.providerId });
-      } catch { /* GC will retry */ }
+      } catch (e) { console.error('terminate provider delete failed:', e); /* GC will retry */ }
     }
 
     // Step 3: mark final state — use saved.version (atomic version) for OCC
@@ -356,14 +356,14 @@ export class PodService {
           const updated = transitionPod(pod, { type: 'MarkSucceeded' });
           if (pod.providerId) {
             const provider = await this.resolveProvider();
-            try { await provider.delete({ region: createRegionId('cn-hangzhou'), providerId: pod.providerId }); } catch { }
+            try { await provider.delete({ region: createRegionId('cn-hangzhou'), providerId: pod.providerId }); } catch (e) { console.error('GC provider delete failed:', e); }
           }
           await this.store.update(podId, updated, pod.version);
         } else {
           const updated = transitionPod(pod, { type: 'MarkFailed', reason: 'GC cleanup' });
           if (pod.providerId) {
             const provider = await this.resolveProvider();
-            try { await provider.delete({ region: createRegionId('cn-hangzhou'), providerId: pod.providerId }); } catch { }
+            try { await provider.delete({ region: createRegionId('cn-hangzhou'), providerId: pod.providerId }); } catch (e) { console.error('GC provider delete failed:', e); }
           }
           await this.store.update(podId, updated, pod.version);
         }
@@ -375,7 +375,7 @@ export class PodService {
     if (pod.deletionTimestamp && duration > 60_000) {
       if (pod.providerId) {
         const provider = await this.resolveProvider();
-        try { await provider.delete({ region: createRegionId('cn-hangzhou'), providerId: pod.providerId }); } catch { return; }
+        try { await provider.delete({ region: createRegionId('cn-hangzhou'), providerId: pod.providerId }); } catch (e) { console.error('force delete failed:', e); }
       }
       const updated = transitionPod(pod, { type: 'ForceDelete' });
       await this.store.update(podId, updated, pod.version);
@@ -392,8 +392,8 @@ export class PodService {
     let providerStatus: ContainerGroupRuntime | null = null;
     try {
       providerStatus = await provider.getStatus(pod.providerId);
-    } catch (_e) {
-      /* provider unreachable — treat as resource gone */
+    } catch (e) {
+      console.error('getStatus failed (treat as gone):', e);
     }
     return providerStatus;
   }
@@ -462,7 +462,7 @@ export class PodService {
     if (pod.providerId) {
       const provider = await this.resolveProvider();
       if (provider.update) {
-        try { await provider.update(pod.providerId, buildPodCreateParams(mergedSpec, 'cn-hangzhou')); } catch { /* best-effort */ }
+        try { await provider.update(pod.providerId, buildPodCreateParams(mergedSpec, 'cn-hangzhou')); } catch (e) { console.error('provider update failed:', e); }
       }
     }
 

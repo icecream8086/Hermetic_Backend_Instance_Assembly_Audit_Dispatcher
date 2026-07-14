@@ -1,16 +1,18 @@
 /**
  * Generate OpenAPI 3.0 specification from Hono route metadata.
+ * Uses @hono/zod-openapi's built-in getOpenAPIDocument() to extract
+ * full Zod schemas instead of empty { type: 'object' } shells.
  *
  * Usage: npx tsx scripts/export-openapi.ts
  * Output: openapi.json (in project root)
- *
- * The generated spec can be consumed by openapi-generator or
- * swagger-ui for frontend code generation and API exploration.
  */
 
 import { writeFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { OpenAPIHono } from '@hono/zod-openapi';
+import type { OpenAPIObject } from 'openapi3-ts/oas30';
+
 import { createInfoHandler } from '../src/features/info/info.handler.ts';
 import { createUserRouter } from '../src/features/users/handler.ts';
 import { createPermissionRouter } from '../src/features/permission/handler.ts';
@@ -30,110 +32,14 @@ import { createSecurityRouter } from '../src/features/security/handler.ts';
 import { createAuditRouter } from '../src/core/audit/audit-router.ts';
 import { WorkersAuditLogger } from '../src/core/audit/workers-audit-logger.ts';
 
-// ─── Helpers ───
-
-type OpenApiPathItem = Record<string, unknown>;
-type OpenApiSpec = {
-  openapi: string;
-  info: { title: string; version: string; description: string };
-  servers: { url: string; description: string }[];
-  paths: Record<string, OpenApiPathItem>;
-  components: { schemas: Record<string, unknown>; securitySchemes: Record<string, unknown> };
-  tags: { name: string; description: string }[];
-};
-
-/** Infer a rough JSON Schema type from a requestBody example value. */
-function inferSchema(example: unknown): Record<string, unknown> {
-  if (example === null) return { type: 'null' };
-  if (Array.isArray(example)) {
-    return {
-      type: 'array',
-      items: example.length > 0 ? inferSchema(example[0]) : { type: 'object' },
-    };
-  }
-  const t = typeof example;
-  if (t === 'string') return { type: 'string' };
-  if (t === 'number') return { type: 'number' };
-  if (t === 'boolean') return { type: 'boolean' };
-  if (t === 'object') {
-    const props: Record<string, unknown> = {};
-    const required: string[] = [];
-    for (const [k, v] of Object.entries(example as Record<string, unknown>)) {
-      props[k] = inferSchema(v);
-      if (v !== undefined && v !== null && !String(k).endsWith('?')) required.push(k);
-    }
-    const schema: Record<string, unknown> = { type: 'object', properties: props };
-    if (required.length > 0) schema.required = required;
-    return schema;
-  }
-  return {};
-}
-
-/** Convert an HTTP path with :param placeholders to OpenAPI {param} syntax. */
+/** Convert Hono :param to OpenAPI {param} syntax. */
 function toOpenApiPath(path: string): string {
   return path.replace(/:(\w+)/g, '{$1}');
 }
 
-/** Capitalize a tag name. */
-function tagLabel(name: string): string {
-  return name.charAt(0).toUpperCase() + name.slice(1);
-}
+// ─── Stub services (needed for handler factory init, not executed) ───
 
-// ─── Build spec ───
-
-const spec: OpenApiSpec = {
-  openapi: '3.0.3',
-  info: {
-    title: 'HBI-AAD API',
-    version: '4.0.0',
-    description: 'Hermetic Backend Instance Assembly Audit Dispatcher — Cloudflare Workers based game server sandbox orchestration API.\n\nAuthentication: Bearer token obtained via `POST /api/users/register` or `POST /api/users/login`.\n\nAll API endpoints are prefixed with `/api/` except the info endpoint.',
-  },
-  servers: [
-    { url: 'http://localhost:3000', description: 'Local development' },
-    { url: 'https://hbi-aad.example.com', description: 'Production' },
-  ],
-  paths: {},
-  components: {
-    schemas: {},
-    securitySchemes: {
-      bearerAuth: {
-        type: 'http',
-        scheme: 'bearer',
-        bearerFormat: 'UUID',
-        description: 'Session token from POST /api/users/register or /api/users/login',
-      },
-    },
-  },
-  tags: [],
-};
-
-const tagSet = new Set<string>();
-
-// ─── Router registration ───
-
-interface RouteDoc {
-  method: string;
-  path: string;
-  tag: string;
-}
-
-const routes: RouteDoc[] = [];
-
-function collect(
-  label: string,
-  basePath: string,
-  app: { routes: Array<{ method: string; path: string }> },
-) {
-  for (const r of app.routes) {
-    const method = r.method.toUpperCase();
-    const relPath = r.path;
-    const absPath = `${basePath}${relPath}`.replace(/\/+/g, '/').replace(/\/$/, '') || '/';
-    routes.push({ method, path: absPath, tag: label });
-    tagSet.add(label);
-  }
-}
-
-const stubUserService = {
+const stubUserService: any = {
   register: async () => { throw new Error('stub'); },
   login: async () => { throw new Error('stub'); },
   loginNoPassword: async () => { throw new Error('stub'); },
@@ -147,201 +53,248 @@ const stubUserService = {
   getLoginInfo: async () => ({ exists: false, methods: [] as string[] }),
   refresh: async () => null,
 };
-
-const AUTH_PATHS = new Set(['/register', '/login']);
-const stubStores = { metrics: { snapshot: () => ({ gets: 0, hits: 0, misses: 0, sets: 0, hitRate: 0 }) } };
-const stubPermService = {
-  createPolicy: async () => ({ id: '', name: '', effect: 'allow' as const, actions: [], priority: 0, enabled: true, createdAt: 0, updatedAt: 0 }),
-  listPolicies: async () => [],
-  getPolicy: async () => null,
-  updatePolicy: async () => { throw new Error('stub'); },
-  deletePolicy: async () => {},
+const stubStores: any = { metrics: { snapshot: () => ({ gets: 0, hits: 0, misses: 0, sets: 0, hitRate: 0 }) } };
+const stubPermService: any = {
+  createPolicy: async () => ({}), listPolicies: async () => [], getPolicy: async () => null,
+  updatePolicy: async () => { throw new Error('stub'); }, deletePolicy: async () => {},
   check: async () => ({ allowed: true, reason: 'stub' }),
 };
-const stubSysGroupService = { create: async () => ({ id: '', name: '', rules: [], priority: 0, createdAt: 0, updatedAt: 0 }), list: async () => [], get: async () => null, update: async () => { throw new Error('stub'); }, delete: async () => {} };
+const stubSysGroupService: any = { create: async () => ({}), list: async () => [], get: async () => null, update: async () => { throw new Error('stub'); }, delete: async () => {} };
 const stubAtomic: any = { get: async () => null, set: async () => null };
 const stubPodSvc: any = { getById: async () => null, provision: async () => ({}), stop: async () => ({}), terminate: async () => {}, syncRuntime: async () => ({}), start: async () => ({}), restart: async () => ({}), getHealth: async () => [], getLogs: async () => ({}), exec: async () => ({}), update: async () => ({}), list: async () => ({ items: [] }), getAllIds: async () => [] };
 const stubVolumeSvc: any = { create: async () => ({}), get: async () => null, listPaginated: async () => ({ items: [], total: 0, page: 1, limit: 50 }), update: async () => ({}), delete: async () => {} };
 const stubRegistry: any = { availableProviders: () => [{ name: 'stub' }, { name: 'podman' }] };
-
-collect('Info', '/', createInfoHandler(stubStores as any));
-collect('Auth', '/api/users', createUserRouter(stubUserService as any));
-collect('Users', '/api/users', createUserRouter(stubUserService as any));
-collect('Audit', '/api/audit', createAuditRouter(new WorkersAuditLogger()));
-collect('Permissions', '/api/permissions', createPermissionRouter(stubPermService as any));
-collect('System Groups', '/api/system-groups', createSysGroupRouter(stubSysGroupService as any));
-collect('Templates', '/api/templates', createTemplateRouter(stubAtomic as any));
-collect('Pods', '/api/pods', createPodRouter(undefined, stubPodSvc as any));
-collect('Platforms', '/api/platforms', createPlatformsRouter(stubRegistry as any));
-collect('Volumes', '/api/volumes', createVolumeRouter(stubVolumeSvc as any));
-collect('Networks', '/api/networks', createSecurityGroupRouter({
-  create: async () => ({} as any),
-  list: async () => ({ items: [], total: 0, page: 1, limit: 20 }),
-  get: async () => null,
-  update: async () => ({} as any),
-  delete: async () => {},
-}));
-
+const stubNetworkSvc: any = { create: async () => ({} as any), list: async () => ({ items: [], total: 0, page: 1, limit: 20 }), get: async () => null, update: async () => ({} as any), delete: async () => {} };
 const stubSubnetSvc: any = { create: async () => ({}), list: async () => ({ items: [], total: 0, page: 1, limit: 20 }), get: async () => null, update: async () => ({}), delete: async () => {} };
-collect('Subnets', '/api/subnets', createSubnetRouter(stubSubnetSvc));
-
 const stubClusterSvc: any = { create: async () => ({}), get: async () => null, list: async () => [], update: async () => ({}), delete: async () => {} };
 const stubBucketSvc: any = { create: async () => ({}), get: async () => null, list: async () => [], update: async () => ({}), delete: async () => {} };
 const stubImageSvc: any = { create: async () => ({}), get: async () => null, list: async () => [], update: async () => ({}), delete: async () => {} };
 const stubPolicyMgr: any = { list: async () => [], create: async () => ({}), get: async () => null, update: async () => ({}), delete: async () => {} };
-collect('Topology', '/api/topology', createTopologyRouter(stubClusterSvc, stubBucketSvc, stubImageSvc, undefined, stubPolicyMgr));
-
 const stubImageProvider: any = { list: async () => [], inspect: async () => null, pull: async () => ({}), remove: async () => {}, tag: async () => {}, search: async () => [], prune: async () => ({}), history: async () => [], build: async () => ({}) };
 const stubProvidersRegistry: any = { image: stubImageProvider, resolveImage: async () => stubImageProvider };
-collect('Images', '/api/images', createImagesRouter(stubProvidersRegistry));
-
-const stubContainerSecretSvc: any = {
-  create: async () => ({}),
-  get: async () => null,
-  list: async () => [],
-  update: async () => ({}),
-  delete: async () => {},
-  uploadBlob: async () => ({}),
-  resolveData: async () => '',
-};
-collect('Container Secrets', '/api/container-secrets', createContainerSecretRouter(stubContainerSecretSvc));
-
-const stubSecuritySvc: any = {
-  provision: async () => ({}),
-  list: async () => [],
-  getById: async () => null,
-  revoke: async () => {},
-  delete: async () => {},
-  getByBucketId: async () => null,
-};
+const stubContainerSecretSvc: any = { create: async () => ({}), get: async () => null, list: async () => [], update: async () => ({}), delete: async () => {}, uploadBlob: async () => ({}), resolveData: async () => '' };
+const stubSecuritySvc: any = { provision: async () => ({}), list: async () => [], getById: async () => null, revoke: async () => {}, delete: async () => {}, getByBucketId: async () => null };
 const stubS3Resolver: any = async () => ({ provider: { getPresignedUrl: async () => '', putPresignedUrl: async () => '', listObjects: async () => ({}) }, bucket: { name: '', endpoint: '', region: '' } });
-
-const stubInstancesSvc: any = {
-  register: async () => ({ runner: {}, token: '' }),
-  list: async () => [],
-  get: async () => null,
-  update: async () => ({}),
-  delete: async () => {},
-  heartbeat: async () => ({}),
-  markStaleOffline: async () => 0,
-  createRegistrationToken: async () => ({}),
-  validateRegistrationToken: async () => ({ valid: true }),
-  createGroup: async () => ({}),
-  listGroups: async () => [],
-  getGroup: async () => null,
-  deleteGroup: async () => {},
-};
-collect('Instances', '/api/instances', createInstancesRouter(stubInstancesSvc));
-
-const stubSecuritySvc2: any = { provision: async () => ({}), list: async () => [], getById: async () => null, revoke: async () => {}, delete: async () => {}, getByBucketId: async () => null };
-const stubS3Resolver2: any = async () => ({ provider: { getPresignedUrl: async () => '', putPresignedUrl: async () => '', listObjects: async () => ({}) }, bucket: { name: '', endpoint: '', region: '' } });
-collect('Security', '/api/security', createSecurityRouter({ securityService: stubSecuritySvc2, s3ProviderResolver: stubS3Resolver2 }));
-
-const stubActionDeps2: any = {
-  stores: { atomic: null as any, blob: null as any, query: null as any, metrics: null as any },
-  providers: { container: {} as any, dns: {} as any, resolveContainer: async () => ({} as any) },
+const stubInstancesSvc: any = { register: async () => ({ runner: {}, token: '' }), list: async () => [], get: async () => null, update: async () => ({}), delete: async () => {}, heartbeat: async () => ({}), markStaleOffline: async () => 0, createRegistrationToken: async () => ({}), validateRegistrationToken: async () => ({ valid: true }), createGroup: async () => ({}), listGroups: async () => [], getGroup: async () => null, deleteGroup: async () => {} };
+const stubActionDeps: any = {
+  stores: { atomic: null, blob: null, query: null, metrics: null },
+  providers: { container: {}, dns: {}, resolveContainer: async () => ({}) },
   audit: { write: async () => {} },
-  eventBus: { on: () => {}, dispatch: async () => {} } as any,
-  eventLoop: { enqueuePriority: () => {} } as any,
-  queueProducer: { send: async () => false, sendSandboxGc: async () => false, sendImagePull: async () => false, sendSandboxProvision: async () => false, sendBatch: async () => 0 } as any,
-  secretEncryption: undefined,
+  eventBus: { on: () => {}, dispatch: async () => {} },
+  eventLoop: { enqueuePriority: () => {} },
+  queueProducer: { send: async () => false, sendSandboxGc: async () => false, sendImagePull: async () => false, sendSandboxProvision: async () => false, sendBatch: async () => 0 },
 };
-collect('Actions', '/api/actions', createActionsRouter(stubActionDeps2));
 
-// Manually-added routes
-function addRoute(method: string, path: string, tag: string) {
-  routes.push({ method, path, tag });
-  tagSet.add(tag);
+// ─── Build spec ───
+
+const app = new OpenAPIHono();
+
+// Register all OpenAPIHono routers
+app.route('/', createInfoHandler(stubStores as any));
+app.route('/api/users', createUserRouter(stubUserService as any));
+app.route('/api/permissions', createPermissionRouter(stubPermService as any));
+app.route('/api/system-groups', createSysGroupRouter(stubSysGroupService as any));
+app.route('/api/templates', createTemplateRouter(stubAtomic as any, stubPodSvc));
+app.route('/api/pods', createPodRouter(undefined, stubPodSvc));
+app.route('/api/platforms', createPlatformsRouter(stubRegistry as any));
+app.route('/api/volumes', createVolumeRouter(stubVolumeSvc));
+app.route('/api/networks', createSecurityGroupRouter(stubNetworkSvc));
+app.route('/api/subnets', createSubnetRouter(stubSubnetSvc));
+app.route('/api/topology', createTopologyRouter(stubClusterSvc, stubBucketSvc, stubImageSvc, undefined, stubPolicyMgr));
+app.route('/api/images', createImagesRouter(stubProvidersRegistry as any));
+app.route('/api/container-secrets', createContainerSecretRouter(stubContainerSecretSvc));
+app.route('/api/instances', createInstancesRouter(stubInstancesSvc));
+app.route('/api/security', createSecurityRouter({ securityService: stubSecuritySvc, s3ProviderResolver: stubS3Resolver }));
+app.route('/api/actions', createActionsRouter(stubActionDeps));
+// Audit router uses plain Hono (not OpenAPIHono) — routes added manually below
+const auditRouter = createAuditRouter(new WorkersAuditLogger());
+const auditRoutes: { method: string; path: string }[] = [];
+for (const r of auditRouter.routes) {
+  auditRoutes.push({ method: r.method.toUpperCase(), path: '/api/audit' + r.path });
 }
-addRoute('POST', '/__tick', 'Dev');
-addRoute('POST', '/__admin/migrate-user-index', 'Dev');
-addRoute('GET', '/api/openapi.json', 'Public');
-addRoute('GET', '/api/ws/notifications', 'Notifications');
-addRoute('POST', '/api/events', 'Events');
-addRoute('GET', '/api/events/loop/status', 'Events');
-addRoute('POST', '/api/events/loop/start', 'Events');
-addRoute('POST', '/api/events/loop/stop', 'Events');
-addRoute('POST', '/api/events/loop/pause', 'Events');
-addRoute('POST', '/api/events/loop/resume', 'Events');
-addRoute('POST', '/api/events/loop/configure', 'Events');
 
-// Dev / Sudo
-addRoute('POST', '/api/sudo', 'Dev');
-
-// ─── Convert routes to OpenAPI paths ───
-
-for (const route of routes) {
-  const openApiPath = toOpenApiPath(route.path);
-  if (!spec.paths[openApiPath]) spec.paths[openApiPath] = {};
-
-  const method = route.method.toLowerCase();
-  const operation: Record<string, unknown> = {
-    tags: [route.tag],
-    summary: `${route.method} ${route.path}`,
-    description: '',
-    parameters: [],
-    responses: {
-      '200': {
-        description: 'Success',
-        content: { 'application/json': { schema: { type: 'object' } } },
+// Generate spec from OpenAPIHono registry
+const spec: OpenAPIObject = app.getOpenAPIDocument({
+  openapi: '3.0.3',
+  info: {
+    title: 'HBI-AAD API',
+    version: '4.0.0',
+    description:
+      'Hermetic Backend Instance Assembly Audit Dispatcher — Cloudflare Workers based pod orchestration API.\n\n'
+      + 'Authentication: Bearer token obtained via `POST /api/users/register` or `POST /api/users/login`.\n\n'
+      + 'All API endpoints are prefixed with `/api/` except the info endpoint.',
+  },
+  servers: [
+    { url: 'http://localhost:3000', description: 'Local development' },
+    { url: 'https://hbi-aad.example.com', description: 'Production' },
+  ],
+  components: {
+    securitySchemes: {
+      bearerAuth: {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'UUID',
+        description: 'Session token from POST /api/users/register or /api/users/login',
       },
     },
-  };
+  },
+  // ponytail: tags are auto-generated by getOpenAPIDocument from route metadata
+});
 
-  // Extract path parameters
-  const pathParams = [...route.path.matchAll(/:(\w+)/g)].map(m => m[1]);
-  for (const pp of pathParams) {
-    (operation.parameters as unknown[]).push({
-      name: pp,
-      in: 'path',
-      required: true,
-      schema: { type: 'string' },
-      description: pp,
-    });
-  }
+// ─── Fix paths: getOpenAPIDocument outputs :param but OpenAPI needs {param} ───
 
-  // Error responses
-  if (!(operation.responses as Record<string, unknown>)['400']) {
-    (operation.responses as Record<string, unknown>)['400'] = { description: 'Validation error' };
+const paramRe = /:(\w+)/g;
+for (const [oldPath, methods] of Object.entries(spec.paths)) {
+  const newPath = oldPath.replace(paramRe, '{$1}');
+  if (newPath !== oldPath) {
+    spec.paths[newPath] = methods;
+    delete spec.paths[oldPath];
   }
-  if (!(operation.responses as Record<string, unknown>)['403']) {
-    (operation.responses as Record<string, unknown>)['403'] = { description: 'Forbidden / authentication required' };
-  }
-  if (!(operation.responses as Record<string, unknown>)['500']) {
-    (operation.responses as Record<string, unknown>)['500'] = { description: 'Internal server error' };
-  }
-
-  // Security: all /api/ routes require bearer auth except auth endpoints
-  if (route.path.startsWith('/api/')) {
-    operation.security = [{ bearerAuth: [] }];
-  }
-
-  (spec.paths[openApiPath] as Record<string, unknown>)[method] = operation;
 }
 
-// ─── Tags ───
+// ─── Post-process: extract inline schemas into components.schemas with $ref ───
+// OkResponse(schema) wraps schema in { success: true, data: ... }, which prevents
+// zod-to-openapi from generating $ref. We scan all paths for OkResponse-shaped
+// schemas, extract unique data schemas into components, and replace with $ref.
 
-spec.tags = [...tagSet].map(name => ({
-  name,
-  description: `${tagLabel(name)} API endpoints`,
-}));
+const dataSchemaMap = new Map<string, { schema: any; count: number; name?: string }>();
+for (const [, methods] of Object.entries(spec.paths)) {
+  for (const [, op] of Object.entries(methods as object)) {
+    const resp = (op as any).responses;
+    if (!resp) continue;
+    for (const [, content] of Object.entries(resp)) {
+      const jsonSchema = (content as any)?.content?.['application/json']?.schema;
+      if (!jsonSchema || jsonSchema.$ref) continue;
+      const props = jsonSchema.properties;
+      if (jsonSchema.type !== 'object' || !props?.success || !props?.data) continue;
+      const key = JSON.stringify(props.data);
+      const entry = dataSchemaMap.get(key) ?? { schema: props.data, count: 0 };
+      entry.count++;
+      dataSchemaMap.set(key, entry);
+    }
+  }
+}
+// Assign names: simple numeric naming for shared schemas
+let schemaIndex = 0;
+if (!spec.components) spec.components = {};
+if (!spec.components.schemas) spec.components.schemas = {};
+for (const [key, entry] of dataSchemaMap) {
+  if (entry.count < 2) continue;
+  const parsed = JSON.parse(key);
+  const name = `Shared${++schemaIndex}`;
+  spec.components.schemas[name] = parsed;
+  entry.name = name;
+}
+// Second pass: replace data schemas with $ref where components were created
+for (const [, methods] of Object.entries(spec.paths)) {
+  for (const [, op] of Object.entries(methods as object)) {
+    const resp = (op as any).responses;
+    if (!resp) continue;
+    for (const [, content] of Object.entries(resp)) {
+      const jsonSchema = (content as any)?.content?.['application/json']?.schema;
+      if (!jsonSchema || jsonSchema.$ref) continue;
+      const props = jsonSchema.properties;
+      if (jsonSchema.type !== 'object' || !props?.success || !props?.data) continue;
+      const key = JSON.stringify(props.data);
+      const match = [...dataSchemaMap.values()].find(e => e.name && JSON.stringify(e.schema) === key);
+      if (match?.name) {
+        props.data = { $ref: `#/components/schemas/${match.name}` };
+      }
+    }
+  }
+}
+
+// ─── Manually add routes not in OpenAPIRegistry ───
+
+const manualRoutes: { method: string; path: string; tag: string; description: string }[] = [
+  // Audit (plain Hono router, no schema metadata)
+  ...auditRoutes.map(r => ({ ...r, tag: 'Audit', description: '' })),
+  // Dev
+  { method: 'POST', path: '/__tick', tag: 'Dev', description: 'Tick the event loop' },
+  { method: 'POST', path: '/__admin/migrate-user-index', tag: 'Dev', description: 'Migrate user index' },
+  { method: 'POST', path: '/api/sudo', tag: 'Dev', description: 'Sudo action' },
+  // Public
+  { method: 'GET', path: '/api/openapi.json', tag: 'Public', description: 'OpenAPI specification' },
+  // Notifications
+  { method: 'GET', path: '/api/ws/notifications', tag: 'Notifications', description: 'WebSocket notifications' },
+  // Events sub-router
+  { method: 'POST', path: '/api/events', tag: 'Events', description: 'Publish event' },
+  { method: 'GET', path: '/api/events/loop/status', tag: 'Events', description: 'Event loop status' },
+  { method: 'POST', path: '/api/events/loop/start', tag: 'Events', description: 'Start event loop' },
+  { method: 'POST', path: '/api/events/loop/stop', tag: 'Events', description: 'Stop event loop' },
+  { method: 'POST', path: '/api/events/loop/pause', tag: 'Events', description: 'Pause event loop' },
+  { method: 'POST', path: '/api/events/loop/resume', tag: 'Events', description: 'Resume event loop' },
+  { method: 'POST', path: '/api/events/loop/configure', tag: 'Events', description: 'Configure event loop' },
+];
+
+for (const mr of manualRoutes) {
+  const p = toOpenApiPath(mr.path);
+  if (!spec.paths[p]) spec.paths[p] = {};
+  if (!(spec.paths[p] as Record<string, unknown>)[mr.method.toLowerCase()]) {
+    const parameters: Record<string, unknown>[] = [];
+    for (const pp of mr.path.matchAll(/:(\w+)/g)) {
+      parameters.push({ name: pp[1]!, in: 'path', required: true, schema: { type: 'string' }, description: pp[1] });
+    }
+    (spec.paths[p] as Record<string, unknown>)[mr.method.toLowerCase()] = {
+      tags: [mr.tag],
+      summary: `${mr.method} ${mr.path}`,
+      description: mr.description,
+      parameters,
+      responses: { '200': { description: 'Success', content: { 'application/json': { schema: { type: 'object' } } } } },
+    };
+  }
+}
+
+// Add security scheme to all /api/ endpoints
+for (const [path, methods] of Object.entries(spec.paths)) {
+  if (!path.startsWith('/api/')) continue;
+  if (path === '/api/users/register' || path === '/api/users/login') continue;
+  for (const method of Object.keys(methods as Record<string, unknown>)) {
+    const op = (methods as Record<string, unknown>)[method] as Record<string, unknown>;
+    if (!op.security) op.security = [{ bearerAuth: [] }];
+  }
+}
+
+// ─── Auto-fill missing path parameters ───
+for (const [path, methods] of Object.entries(spec.paths)) {
+  const expected = [...path.matchAll(/\{(\w+)\}/g)].map(m => m[1]);
+  if (expected.length === 0) continue;
+  for (const [, op] of Object.entries(methods as object)) {
+    const opObj = op as Record<string, unknown>;
+    const existing = new Set(((opObj.parameters ?? []) as Array<Record<string, unknown>>)
+      .filter(p => p.in === 'path').map(p => p.name));
+    for (const pp of expected) {
+      if (!existing.has(pp)) {
+        if (!opObj.parameters) opObj.parameters = [];
+        (opObj.parameters as Array<Record<string, unknown>>).push({
+          name: pp, in: 'path', required: true, schema: { type: 'string' }, description: pp,
+        });
+      }
+    }
+  }
+}
 
 // ─── Write output ───
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const outputPath = resolve(__dirname, '..', 'openapi.json');
 writeFileSync(outputPath, JSON.stringify(spec, null, 2), 'utf-8');
-console.log(`✓ Generated ${outputPath} (${routes.length} routes, ${Object.keys(spec.paths).length} paths)`);
+const routeCount = Object.values(spec.paths).reduce((sum, m) => sum + Object.keys(m as object).length, 0);
+console.log(`✓ Generated ${outputPath} (${routeCount} routes, ${Object.keys(spec.paths).length} paths)`);
 
-// ─── Also export a summary ───
+// ─── Summary ───
 
 const summary = {
-  totalRoutes: routes.length,
+  totalRoutes: routeCount,
   totalPaths: Object.keys(spec.paths).length,
-  tags: spec.tags.map(t => t.name),
-  endpoints: routes.map(r => `${r.method} ${r.path}`),
+  tags: spec.tags?.map((t: any) => t.name ?? t) ?? [],
+  endpoints: Object.entries(spec.paths).flatMap(([p, methods]) =>
+    Object.keys(methods as object).map(m => `${m.toUpperCase()} ${p}`),
+  ),
 };
-
 const summaryPath = resolve(__dirname, '..', 'openapi-summary.json');
 writeFileSync(summaryPath, JSON.stringify(summary, null, 2), 'utf-8');
 console.log(`✓ Generated ${summaryPath}`);
+
+// Exit cleanly — DagScheduler etc. may have background timers
+process.exit(0);

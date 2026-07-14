@@ -11,6 +11,24 @@ interface AstNode {
   parent?: TSESTree.Node;
 }
 
+function parentIsParseCall(node: TSESTree.Node): boolean {
+  return (
+    node.parent?.type === 'CallExpression' &&
+    node.parent.callee.type === 'MemberExpression' &&
+    node.parent.callee.property.type === 'Identifier' &&
+    node.parent.callee.property.name === 'parse'
+  );
+}
+
+/** Walk up through AwaitExpression to find enclosing .parse() call. */
+function isEnclosedByParseCall(node: TSESTree.Node): boolean {
+  if (parentIsParseCall(node)) return true;
+  if (node.parent?.type === 'AwaitExpression') {
+    return isEnclosedByParseCall(node.parent);
+  }
+  return false;
+}
+
 /**
  * Enforce that all `JSON.parse()` / `c.req.json()` calls go through
  * a Zod schema `.parse()`.
@@ -41,16 +59,7 @@ const rule: TSESLint.RuleModule<MessageIds> = {
       'CallExpression[callee.object.name="JSON"][callee.property.name="parse"]'(
         node: TSESTree.CallExpression,
       ) {
-        const nodeParent: AstNode = node;
-        const parent = nodeParent.parent;
-        if (
-          parent?.type === 'CallExpression' &&
-          parent.callee.type === 'MemberExpression' &&
-          parent.callee.property.type === 'Identifier' &&
-          parent.callee.property.name === 'parse'
-        ) {
-          return;
-        }
+        if (isEnclosedByParseCall(node)) return;
         context.report({ node, messageId: 'bareJsonParse' });
       },
 
@@ -70,16 +79,7 @@ const rule: TSESLint.RuleModule<MessageIds> = {
           obj.property.type === 'Identifier' &&
           obj.property.name === 'req'
         ) {
-          const nodeParent: AstNode = node;
-          const parent = nodeParent.parent;
-          if (
-            parent?.type === 'CallExpression' &&
-            parent.callee.type === 'MemberExpression' &&
-            parent.callee.property.type === 'Identifier' &&
-            parent.callee.property.name === 'parse'
-          ) {
-            return;
-          }
+          if (isEnclosedByParseCall(node)) return;
           context.report({ node, messageId: 'bareReqJson' });
         }
       },

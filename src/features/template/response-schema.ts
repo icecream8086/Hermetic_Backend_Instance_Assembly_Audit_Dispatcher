@@ -29,7 +29,7 @@ export const TemplateSchema = z.object({
     domain: z.string().optional(),
     port: z.number().optional(),
   }).optional(),
-});
+}).openapi({ ref: 'PodTemplate' });
 
 /** Template with resolved DAG chain. */
 export const ResolvedTemplateSchema = TemplateSchema.extend({

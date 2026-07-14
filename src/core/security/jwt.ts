@@ -1,5 +1,41 @@
 import type { S3AccessTokenClaims } from './types.ts';
 
+// ─── Authorization check ───
+
+export interface AccessCheckAllow {
+  readonly allowed: true;
+}
+export interface AccessCheckDeny {
+  readonly allowed: false;
+  readonly reason: string;
+}
+export type AccessCheckResult = AccessCheckAllow | AccessCheckDeny;
+
+/**
+ * Check whether JWT claims authorize an operation on (bucket, key, requiredPerm).
+ * For 'list', key is ignored (no prefix check). For read/write, key is required.
+ * Succeeds if ANY grant covers all of (bucket, prefix, perm) — multi-grant-same-bucket safe.
+ */
+export function authorizeAccess(
+  claims: S3AccessTokenClaims,
+  bucket: string,
+  key: string | null,
+  requiredPerm: 'read' | 'write' | 'list',
+): AccessCheckResult {
+  // read/write without a key has no scope to check
+  if (requiredPerm !== 'list' && key === null) {
+    return { allowed: false, reason: 'Key required for read/write authorization' };
+  }
+  const allowed = claims.grants.some(g =>
+    g.bucket === bucket
+    && g.permissions.includes(requiredPerm)
+    && (requiredPerm === 'list' || key.startsWith(g.prefix))
+  );
+  return allowed
+    ? { allowed: true }
+    : { allowed: false, reason: `No matching grant for ${requiredPerm} on bucket "${bucket}"` };
+}
+
 const ENCODER = new TextEncoder();
 const DECODER = new TextDecoder();
 

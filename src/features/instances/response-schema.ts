@@ -11,7 +11,7 @@ export const RunnerInstanceSchema = z.object({
   groupIds: z.array(z.string()).readonly(),
   registeredAt: z.number(),
   lastHeartbeatAt: z.number(),
-});
+}).openapi({ ref: 'RunnerInstance' });
 
 export const RegistrationTokenSchema = z.object({
   token: z.string(),
@@ -27,7 +27,7 @@ export const RunnerGroupSchema = z.object({
   dependsOn: z.array(z.string()).readonly(),
   createdAt: z.number(),
   updatedAt: z.number(),
-});
+}).openapi({ ref: 'RunnerGroup' });
 
 export const RegisterResultSchema = z.object({
   runner: RunnerInstanceSchema,

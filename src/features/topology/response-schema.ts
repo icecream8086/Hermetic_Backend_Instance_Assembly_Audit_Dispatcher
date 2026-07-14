@@ -27,7 +27,7 @@ export const ComputeInstanceSchema = z.object({
   labels: z.record(z.string(), z.string()).optional(),
   createdAt: z.number(),
   updatedAt: z.number(),
-});
+}).openapi({ ref: 'ComputeInstance' });
 
 /** RegionBucket response schema. */
 export const RegionBucketSchema = z.object({
@@ -42,7 +42,7 @@ export const RegionBucketSchema = z.object({
   status: z.enum(['Active', 'Inactive']),
   createdAt: z.number(),
   updatedAt: z.number(),
-});
+}).openapi({ ref: 'RegionBucket' });
 
 /** MaskedCredential response schema (secrets masked). */
 export const MaskedCredentialSchema = z.object({
@@ -64,7 +64,7 @@ export const MaskedCredentialSchema = z.object({
   status: z.enum(['active', 'inactive']),
   createdAt: z.number(),
   updatedAt: z.number(),
-});
+}).openapi({ ref: 'MaskedCredential' });
 
 /** ImageRepository response schema. */
 export const ImageRepositorySchema = z.object({
@@ -85,7 +85,7 @@ export const ImageRepositorySchema = z.object({
   status: z.enum(['active', 'inactive']),
   createdAt: z.number(),
   updatedAt: z.number(),
-});
+}).openapi({ ref: 'ImageRepository' });
 
 /** S3Policy response schema. */
 export const S3PolicySchema = z.object({
@@ -100,7 +100,7 @@ export const S3PolicySchema = z.object({
   priority: z.number(),
   createdAt: z.number(),
   updatedAt: z.number(),
-});
+}).openapi({ ref: 'S3Policy' });
 
 /** Pull task response schema. */
 export const PullTaskSchema = z.object({

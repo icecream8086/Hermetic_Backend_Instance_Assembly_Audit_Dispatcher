@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { FeatureDeps, AppContext } from '../../core/deps.ts';
 import { AppError } from '../../core/types.ts';
 import { ok } from '../../core/response.ts';
-import { OkResponse } from '../../core/http-docs/response-schema.ts';
+import { OkResponse, validationHook } from '../../core/http-docs/response-schema.ts';
 import {
   WorkflowDefResponseSchema,
   WorkflowRunResponseSchema,
@@ -73,7 +73,7 @@ import { buildDagFromWorkflow, createDagRunFromTrigger } from './dag-builder.ts'
 import { PodService } from '../../core/pod/service.ts';
 
 export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables: AppContext }> {
-  const app = new OpenAPIHono<{ Variables: AppContext }>();
+  const app = new OpenAPIHono<{ Variables: AppContext }>({ defaultHook: validationHook });
   const atomic = deps.stores.atomic;
   const blob = deps.stores.blob;
 
@@ -142,7 +142,7 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
 
   // ── Workflow CRUD ──
 
-  app.openapi(createRoute({ method: 'post', path: '/workflows', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(WorkflowDefResponseSchema) } } } } }), async (c) => { await guard('create', 'action:workflow')(c);
+  app.openapi(createRoute({ method: 'post', path: '/workflows', tags: ['actions'], request: { body: { content: { 'application/json': { schema: CreateWorkflowSchema } } } }, responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(WorkflowDefResponseSchema) } } } } }), async (c) => { await guard('create', 'action:workflow')(c);
     const input = CreateWorkflowSchema.parse(await c.req.json());
     const id = createWorkflowDefId(`wf_${crypto.randomUUID()}`);
     const now = Date.now();
@@ -194,7 +194,7 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
     return c.json(ok(entry.value));
   });
 
-  app.openapi(createRoute({ method: 'patch', path: '/workflows/:id', tags: ['actions'], responses: { 200: { description: '', content: { 'application/json': { schema: OkResponse(WorkflowDefResponseSchema) } } } } }), async (c) => { await guard('update', 'action:workflow')(c);
+  app.openapi(createRoute({ method: 'patch', path: '/workflows/:id', tags: ['actions'], request: { body: { content: { 'application/json': { schema: UpdateWorkflowSchema } } } }, responses: { 200: { description: '', content: { 'application/json': { schema: OkResponse(WorkflowDefResponseSchema) } } } } }), async (c) => { await guard('update', 'action:workflow')(c);
     const wid = c.req.param('id');
     const entry = await atomic.get<WorkflowDef>(PFX_WORKFLOW_DEF + wid);
     if (!entry) throw new AppError(404, 'WORKFLOW_NOT_FOUND', 'Workflow not found');
@@ -229,15 +229,13 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
 
   // ── Triggers ──
 
-  app.openapi(createRoute({ method: 'post', path: '/workflows/:id/trigger', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(WorkflowRunResponseSchema) } } } } }), async (c) => { await guard('execute', 'action:workflow')(c);
+  app.openapi(createRoute({ method: 'post', path: '/workflows/:id/trigger', tags: ['actions'], request: { body: { content: { 'application/json': { schema: TriggerWorkflowSchema } } } }, responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(WorkflowRunResponseSchema) } } } } }), async (c) => { await guard('execute', 'action:workflow')(c);
     const wid = c.req.param('id');
     const entry = await atomic.get<WorkflowDef>(PFX_WORKFLOW_DEF + wid);
     if (!entry) throw new AppError(404, 'WORKFLOW_NOT_FOUND', 'Workflow not found');
 
-    let body;
-    try { body = await c.req.json(); } catch { body = {}; }
-    const parsed = TriggerWorkflowSchema.safeParse(body);
-    const inputs = parsed.success ? (parsed.data.inputs ?? {}) : {};
+    const parsed = TriggerWorkflowSchema.parse(await c.req.json());
+    const inputs = parsed.inputs ?? {};
 
     const run = await runner.startRun(entry.value, 'manual', undefined, inputs,
       c.var.currentUser?.id ?? 'anonymous');
@@ -278,15 +276,13 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
    *  Converts WorkflowDef → DagDef → DagRun and submits to the Airflow-style
    *  scheduler. The scheduler handles dependency resolution, concurrency, and
    *  retries via TriggerRule + 5-step filter. */
-  app.openapi(createRoute({ method: 'post', path: '/workflows/:id/schedule', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(ScheduleRunResponseSchema) } } } } }), async (c) => { await guard('execute', 'action:workflow')(c);
+  app.openapi(createRoute({ method: 'post', path: '/workflows/:id/schedule', tags: ['actions'], request: { body: { content: { 'application/json': { schema: TriggerWorkflowSchema } } } }, responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(ScheduleRunResponseSchema) } } } } }), async (c) => { await guard('execute', 'action:workflow')(c);
     const wid = c.req.param('id');
     const entry = await atomic.get<WorkflowDef>(PFX_WORKFLOW_DEF + wid);
     if (!entry) throw new AppError(404, 'WORKFLOW_NOT_FOUND', 'Workflow not found');
 
-    let body;
-    try { body = await c.req.json(); } catch { body = {}; }
-    const parsed = TriggerWorkflowSchema.safeParse(body);
-    const inputs = parsed.success ? (parsed.data.inputs ?? {}) : {};
+    const parsed = TriggerWorkflowSchema.parse(await c.req.json());
+    const inputs = parsed.inputs ?? {};
 
     // Build DAG and persist
     const { dag } = buildDagFromWorkflow(entry.value);
@@ -312,10 +308,9 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
   /** Generic webhook endpoint: POST /api/actions/webhook
    *  Matches incoming webhook payloads against all workflows that have
    *  on.push configured.  Basic branch-name matching for now. */
-  app.openapi(createRoute({ method: 'post', path: '/webhook', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(TriggeredWebhookResponseSchema) } } } } }), async (c) => {
-    let payload;
-    try { payload = await c.req.json(); } catch { payload = {}; }
-    const payloadObj = z.object({ ref: z.string().optional() }).passthrough().parse(payload);
+  const WebhookPayloadSchema = z.object({ ref: z.string().optional() }).passthrough();
+  app.openapi(createRoute({ method: 'post', path: '/webhook', tags: ['actions'], request: { body: { content: { 'application/json': { schema: WebhookPayloadSchema } } } }, responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(TriggeredWebhookResponseSchema) } } } } }), async (c) => {
+    const payloadObj = WebhookPayloadSchema.parse(await c.req.json());
     const branch = payloadObj.ref?.replace('refs/heads/', '') ?? '';
 
     const idx = await atomic.get<string[]>(IDX_WORKFLOW_IDS);
@@ -492,8 +487,9 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
     return c.json(ok(o));
   });
 
-  app.openapi(createRoute({ method: 'post', path: '/orgs/:id/members', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(OkTrueResponseSchema) } } } } }), async (c) => {
-    const { userId } = z.object({ userId: z.string() }).parse(await c.req.json());
+  const AddMemberSchema = z.object({ userId: z.string() });
+  app.openapi(createRoute({ method: 'post', path: '/orgs/:id/members', tags: ['actions'], request: { body: { content: { 'application/json': { schema: AddMemberSchema } } } }, responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(OkTrueResponseSchema) } } } } }), async (c) => {
+    const { userId } = AddMemberSchema.parse(await c.req.json());
     await orgService.addMember(c.req.param('id'), userId);
     return c.json(ok({ ok: true }));
   });
@@ -516,14 +512,16 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
 
   const approvalService = new ApprovalService(atomic);
 
-  app.openapi(createRoute({ method: 'post', path: '/runs/:id/approvals', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(ApprovalNodeResponseSchema) } } } } }), async (c) => {
-    const { jobName, approvers } = z.object({ jobName: z.string(), approvers: z.array(z.string()) }).parse(await c.req.json());
+  const CreateApprovalSchema = z.object({ jobName: z.string(), approvers: z.array(z.string()) });
+  app.openapi(createRoute({ method: 'post', path: '/runs/:id/approvals', tags: ['actions'], request: { body: { content: { 'application/json': { schema: CreateApprovalSchema } } } }, responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(ApprovalNodeResponseSchema) } } } } }), async (c) => {
+    const { jobName, approvers } = CreateApprovalSchema.parse(await c.req.json());
     const node = await approvalService.request(c.req.param('id'), jobName, approvers);
     return c.json(ok(node), 201);
   });
 
-  app.openapi(createRoute({ method: 'post', path: '/approvals/:id/decide', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(ApprovalNodeResponseSchema) } } } } }), async (c) => {
-    const { approved, reason } = z.object({ approved: z.boolean(), reason: z.string().optional() }).parse(await c.req.json());
+  const DecideApprovalSchema = z.object({ approved: z.boolean(), reason: z.string().optional() });
+  app.openapi(createRoute({ method: 'post', path: '/approvals/:id/decide', tags: ['actions'], request: { body: { content: { 'application/json': { schema: DecideApprovalSchema } } } }, responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(ApprovalNodeResponseSchema) } } } } }), async (c) => {
+    const { approved, reason } = DecideApprovalSchema.parse(await c.req.json());
     const currentUserId = c.var.currentUser?.id ?? 'anonymous';
     const node = await approvalService.decide(c.req.param('id'), currentUserId, approved, reason);
     return c.json(ok(node));
@@ -538,7 +536,8 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
 
   const secretService = new WorkflowSecretService(atomic, deps.secretEncryption);
 
-  app.openapi(createRoute({ method: 'post', path: '/workflows/:id/secrets', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(WorkflowSecretCreatedResponseSchema) } } } } }), async (c) => {
+  const UpsertSecretSchema = z.object({ key: z.string(), value: z.string() });
+  app.openapi(createRoute({ method: 'post', path: '/workflows/:id/secrets', tags: ['actions'], request: { body: { content: { 'application/json': { schema: UpsertSecretSchema } } } }, responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(WorkflowSecretCreatedResponseSchema) } } } } }), async (c) => {
     const wid = c.req.param('id');
     const wfEntry = await atomic.get<WorkflowDef>(PFX_WORKFLOW_DEF + wid);
     if (!wfEntry) throw new AppError(404, 'WORKFLOW_NOT_FOUND', 'Workflow not found');
@@ -587,9 +586,10 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
     return c.json(ok(safe));
   });
 
+  const LaunchLinkSchema = z.object({ password: z.string().optional() });
   /** Guest access: validate and trigger. No auth required. */
-  app.openapi(createRoute({ method: 'post', path: '/shared-links/:id/launch', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(LaunchResponseSchema) } } } } }), async (c) => {
-    const body = z.object({ password: z.string().optional() }).parse(await c.req.json());
+  app.openapi(createRoute({ method: 'post', path: '/shared-links/:id/launch', tags: ['actions'], request: { body: { content: { 'application/json': { schema: LaunchLinkSchema } } } }, responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(LaunchResponseSchema) } } } } }), async (c) => {
+    const body = LaunchLinkSchema.parse(await c.req.json());
     const password = body.password;
 
     const link = await sharedLinkService.validate(c.req.param('id'), password);

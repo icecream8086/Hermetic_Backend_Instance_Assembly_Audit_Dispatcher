@@ -5,7 +5,7 @@ import { createPodId } from '../../core/pod/types.ts';
 import type { PodService } from '../../core/pod/service.ts';
 import type { AppContext } from '../../core/deps.ts';
 import { ok } from '../../core/response.ts';
-import { OkResponse } from '../../core/http-docs/response-schema.ts';
+import { OkResponse, validationHook } from '../../core/http-docs/response-schema.ts';
 import { PodSpecSchema, PodSpecPatchSchema } from '../../core/pod/schema.ts';
 import {
   PodCreateResponseSchema,
@@ -35,11 +35,11 @@ export function createPodRouter(
   permissionChecker: PermissionCheckFn | undefined,
   podService: PodService,
 ): OpenAPIHono<{ Variables: AppContext }> {
-  const app = new OpenAPIHono<{ Variables: AppContext }>();
+  const app = new OpenAPIHono<{ Variables: AppContext }>({ defaultHook: validationHook });
 
   // ─── Pod CRUD ───
 
-  app.openapi(createRoute({ method: 'post', path: '/', tags: ['pods'], summary: '从 PodSpec 创建 Pod', responses: { 201: { description: 'Pod created', content: { 'application/json': { schema: OkResponse(PodCreateResponseSchema) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/', tags: ['pods'], summary: '从 PodSpec 创建 Pod', request: { body: { content: { 'application/json': { schema: PodSpecSchema } } } }, responses: { 201: { description: 'Pod created', content: { 'application/json': { schema: OkResponse(PodCreateResponseSchema) } } } } }), async (c) => {
     await requirePerm(c, permissionChecker, 'create', 'pod');
     // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Zod schema validates at runtime; cast to known interface
     const spec = PodSpecSchema.parse(await c.req.json()) as import('../../core/pod/types.ts').PodSpec;
@@ -135,21 +135,19 @@ export function createPodRouter(
     return c.json(ok(result));
   });
 
-  app.openapi(createRoute({ method: 'post', path: '/{id}/exec', tags: ['pods'], summary: 'Pod 容器执行命令', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'Exec result', content: { 'application/json': { schema: OkResponse(PodExecResponseSchema) } } } } }), async (c) => {
+  const ExecBodySchema = z.object({ cmd: z.array(z.string()), containerName: z.string().optional() });
+  app.openapi(createRoute({ method: 'post', path: '/{id}/exec', tags: ['pods'], summary: 'Pod 容器执行命令', request: { params: z.object({ id: z.string() }), body: { content: { 'application/json': { schema: ExecBodySchema } } } }, responses: { 200: { description: 'Exec result', content: { 'application/json': { schema: OkResponse(PodExecResponseSchema) } } } } }), async (c) => {
     const podId = createPodId(c.req.param('id'));
     const pod = await podService.getById(podId);
     if (!pod) throw new AppError(404, 'POD_NOT_FOUND', 'Pod not found');
     await requirePerm(c, permissionChecker, 'update', 'pod', pod.creatorId);
-    const body = z.object({
-      cmd: z.array(z.string()),
-      containerName: z.string().optional(),
-    }).parse(await c.req.json());
+    const body = ExecBodySchema.parse(await c.req.json());
     if (body.cmd.length === 0) throw new AppError(400, 'VALIDATION_ERROR', 'Body.cmd (string array) is required');
     const result = await podService.exec(podId, body.cmd, body.containerName);
     return c.json(ok(result));
   });
 
-  app.openapi(createRoute({ method: 'patch', path: '/{id}', tags: ['pods'], summary: '部分更新 PodSpec', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'PodEntity', content: { 'application/json': { schema: OkResponse(PodEntitySchema) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'patch', path: '/{id}', tags: ['pods'], summary: '部分更新 PodSpec', request: { params: z.object({ id: z.string() }), body: { content: { 'application/json': { schema: PodSpecPatchSchema } } } }, responses: { 200: { description: 'PodEntity', content: { 'application/json': { schema: OkResponse(PodEntitySchema) } } } } }), async (c) => {
     const podId = createPodId(c.req.param('id'));
     const pod = await podService.getById(podId);
     if (!pod) throw new AppError(404, 'POD_NOT_FOUND', 'Pod not found');

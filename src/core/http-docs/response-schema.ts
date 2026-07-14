@@ -1,4 +1,16 @@
 import { z } from 'zod';
+import type { Context, Env } from 'hono';
+import { fail } from '../response.ts';
+
+/**
+ * Shared defaultHook for OpenAPIHono handlers using `request.body`.
+ * Returns 400 errors in ApiError format matching the global error handler.
+ */
+export function validationHook<E extends Env>(result: { success: boolean; error?: z.ZodError }, c: Context<E>) {
+  if (!result.success) {
+    return c.json(fail('VALIDATION_ERROR', result.error!.issues.map(i => i.message).join('; ')), 400);
+  }
+}
 
 /**
  * Shared OpenAPI response schema wrappers.

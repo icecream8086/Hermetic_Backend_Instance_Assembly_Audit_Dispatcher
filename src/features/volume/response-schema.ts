@@ -47,7 +47,7 @@ export const VolumeSchema = z.object({
     readOnly: z.boolean().optional(),
     endpoint: z.string().optional(),
   }).optional(),
-});
+}).openapi({ ref: 'Volume' });
 
 /** Paginated volume list wrapper. */
 export const VolumeListResponseSchema = z.object({

@@ -9,7 +9,7 @@ import { SecurityResourceStatus } from '../../core/security/types.ts';
 import { createInstanceId } from '../../core/region/instance.ts';
 import type { IS3Provider } from '../../core/provider/s3.ts';
 import type { S3AccessTokenClaims } from '../../core/security/types.ts';
-import { verifyToken, base64urlDecode } from '../../core/security/jwt.ts';
+import { verifyToken, base64urlDecode, authorizeAccess } from '../../core/security/jwt.ts';
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
 import { CreateSecurityResourceSchema, PresignQuerySchema, BatchPresignSchema, ListQuerySchema } from './schema.ts';
 import { ok } from '../../core/response.ts';
@@ -170,15 +170,9 @@ export function createSecurityRouter(deps: SecurityRouterDeps): OpenAPIHono<{ Va
     });
 
     // Authorize: check grant covers (bucket, key, method)
-    const grant = claims.grants.find(g => g.bucket === query.bucket);
-    if (!grant) throw new AppError(403, 'FORBIDDEN', `No access to bucket "${query.bucket}"`);
-    if (!query.key.startsWith(grant.prefix)) {
-      throw new AppError(403, 'FORBIDDEN', `Key "${query.key}" not under allowed prefix "${grant.prefix}"`);
-    }
     const requiredPerm = query.method === 'GET' ? 'read' : 'write';
-    if (!grant.permissions.includes(requiredPerm)) {
-      throw new AppError(403, 'FORBIDDEN', `No "${requiredPerm}" permission on "${query.bucket}"`);
-    }
+    const auth = authorizeAccess(claims, query.bucket, query.key, requiredPerm);
+    if (!auth.allowed) throw new AppError(403, 'FORBIDDEN', auth.reason);
 
     const resource = await securityService.getByBucketId(query.bucket);
     const urlTtl = resource?.presignedUrlTtl ?? 300;
@@ -200,15 +194,9 @@ export function createSecurityRouter(deps: SecurityRouterDeps): OpenAPIHono<{ Va
 
     // Authorize each file
     for (const f of body.files) {
-      const grant = claims.grants.find(g => g.bucket === f.bucket);
-      if (!grant) throw new AppError(403, 'FORBIDDEN', `No access to bucket "${f.bucket}"`);
-      if (!f.key.startsWith(grant.prefix)) {
-        throw new AppError(403, 'FORBIDDEN', `Key "${f.key}" not under allowed prefix "${grant.prefix}"`);
-      }
       const requiredPerm = f.method === 'GET' ? 'read' : 'write';
-      if (!grant.permissions.includes(requiredPerm)) {
-        throw new AppError(403, 'FORBIDDEN', `No "${requiredPerm}" permission`);
-      }
+      const auth = authorizeAccess(claims, f.bucket, f.key, requiredPerm);
+      if (!auth.allowed) throw new AppError(403, 'FORBIDDEN', auth.reason);
     }
 
     const resource = await securityService.getByBucketId(body.files[0]!.bucket);
@@ -242,12 +230,9 @@ export function createSecurityRouter(deps: SecurityRouterDeps): OpenAPIHono<{ Va
       continuationToken: c.req.query('continuationToken'),
     });
 
-    const grant = claims.grants.find(g => g.bucket === query.bucket);
-    if (!grant) throw new AppError(403, 'FORBIDDEN', `No access to bucket "${query.bucket}"`);
-    if (!grant.permissions.includes('list')) {
-      throw new AppError(403, 'FORBIDDEN', `No "list" permission on "${query.bucket}"`);
-    }
-
+    const auth = authorizeAccess(claims, query.bucket, null, 'list');
+    if (!auth.allowed) throw new AppError(403, 'FORBIDDEN', auth.reason);
+    // ponytail: prefix scope for list is handled by the query parameter
     const { provider } = await s3ProviderResolver(query.bucket);
     const s3Result = await provider.listObjects(query.bucket, {
       ...(query.prefix !== undefined ? { prefix: query.prefix } : {}),

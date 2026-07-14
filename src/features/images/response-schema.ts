@@ -9,7 +9,7 @@ export const ImageInfoResponseSchema = z.object({
   architecture: z.string().optional(),
   os: z.string().optional(),
   layers: z.number().optional(),
-});
+}).openapi({ ref: 'ImageInfo' });
 
 /** Search result item. */
 export const ImageSearchResultItemSchema = z.object({

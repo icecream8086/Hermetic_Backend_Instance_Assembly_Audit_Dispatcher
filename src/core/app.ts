@@ -180,9 +180,11 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
     try {
       const ids = await podStore.getAllIds();
       for (const id of ids) {
-        await podService.gcCleanup(createPodId(id)).catch(e => {
+        try {
+          await podService.gcCleanup(createPodId(id));
+        } catch (e) {
           console.log(`[pod-gc] cleanup failed for ${id}: ${e instanceof Error ? e.message : String(e)}`);
-        });
+        }
       }
     } finally {
       eventLoop.enqueuePriority({ type: 'pod:gc', payload: {} });
@@ -448,7 +450,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
   function convertLegacyContainer(raw: Record<string, unknown>): Record<string, unknown> {
     const containers = z.custom<Record<string, unknown>[]>().parse(raw.containers ?? []);
     const initContainers = z.custom<Record<string, unknown>[]>().parse(raw.initContainers ?? []);
-    const restartPolicy = z.string().optional().parse(raw.restartPolicy) ?? 'Always';
+    const restartPolicy = z.enum(['Always', 'OnFailure', 'Never']).optional().parse(raw.restartPolicy) ?? 'Always';
     const region = z.string().optional().parse(raw.region);
     const network = z.record(z.string(), z.unknown()).optional().parse(raw.network);
     const extensions = z.record(z.string(), z.unknown()).optional().parse(raw.extensions);
@@ -461,8 +463,8 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
     if (vpc.subnetIds) alibabaOverrides.subnetIds = vpc.subnetIds;
 
     const extOverrides = (extensions?.providerOverrides as Record<string, unknown>)?.alibaba as Record<string, unknown> ?? {};
-    Object.assign(alibabaOverrides, extOverrides);
-    if (extensions?.healthMaxRetries !== undefined) alibabaOverrides.healthMaxRetries = extensions.healthMaxRetries;
+    const mergedAli = { ...alibabaOverrides, ...extOverrides };
+    if (extensions?.healthMaxRetries !== undefined) mergedAli.healthMaxRetries = extensions.healthMaxRetries;
 
     const healthChecks = z.custom<Record<string, unknown>[]>().optional().parse(raw.healthChecks) ?? [];
     const probeMap = new Map<string, Record<string, unknown>>();
@@ -514,9 +516,9 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
       spec: {
         containers: mappedContainers,
         ...(mappedInit.length > 0 ? { initContainers: mappedInit } : {}),
-        restartPolicy: restartPolicy as 'Always' | 'OnFailure' | 'Never',
+        restartPolicy,
       },
-      ...(Object.keys(alibabaOverrides).length > 0 ? { providerOverrides: { alibaba: alibabaOverrides } } : {}),
+      ...(Object.keys(mergedAli).length > 0 ? { providerOverrides: { alibaba: mergedAli } } : {}),
     };
   }
 
@@ -525,11 +527,13 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
     const services = z.custom<Record<string, Record<string, unknown>>>().parse(podSpecRaw.services ?? {});
     const names = Object.keys(services);
 
+    const NormalizedCmd = z.union([
+      z.string().transform(s => s ? { command: ['/bin/sh', '-c'], args: [s] } : {}),
+      z.array(z.string()).transform(arr => arr.length > 0 ? { command: arr } : {}),
+    ]);
     function normalizeCommand(cmd: unknown): { command?: string[]; args?: string[] } {
       if (!cmd) return {};
-      if (typeof cmd === 'string') return { command: ['/bin/sh', '-c'], args: [cmd] };
-      if (Array.isArray(cmd)) return cmd.length > 0 ? { command: cmd } : {};
-      return {};
+      return NormalizedCmd.parse(cmd);
     }
 
     function parseMemoryString(s: string): number {
@@ -578,7 +582,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
         ...(cmd.command ? { command: cmd.command } : {}),
         ...(cmd.args ? { args: cmd.args } : {}),
         ...(env ? { env } : {}),
-        ...(svc.ports ? { ports: (svc.ports as { containerPort: number; protocol?: string }[]).map(p => ({ containerPort: p.containerPort, ...(p.protocol ? { protocol: p.protocol } : {}) })) } : {}),
+        ...(svc.ports ? { ports: z.array(z.object({ containerPort: z.number(), protocol: z.string().optional() })).parse(svc.ports).map(p => ({ containerPort: p.containerPort, ...(p.protocol ? { protocol: p.protocol } : {}) })) } : {}),
         resources: { limits: { cpu, memory } },
         ...(index === 0 && allMounts.length > 0 ? { volumeMounts: allMounts } : {}),
       };
@@ -587,7 +591,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
     return {
       metadata: {
         name: String(podSpecRaw.name ?? 'unknown'),
-        ...(podSpecRaw.labels ? { labels: podSpecRaw.labels as Record<string, string> } : {}),
+        ...(podSpecRaw.labels ? { labels: z.record(z.string(), z.string()).parse(podSpecRaw.labels) } : {}),
       },
       spec: {
         containers,

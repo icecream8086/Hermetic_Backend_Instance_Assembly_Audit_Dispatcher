@@ -18,7 +18,7 @@ import {
   CreateInviteSchema,
 } from './schema.ts';
 import { ok, fail } from '../../core/response.ts';
-import { OkResponse } from '../../core/http-docs/response-schema.ts';
+import { OkResponse, validationHook } from '../../core/http-docs/response-schema.ts';
 import {
   TemplateSchema, InvitationSchema,
   UserCapsSchema, UserCapsResultSchema, GroupCapsSchema, GroupCapsResultSchema,
@@ -150,11 +150,11 @@ function queryFilter<T extends { pathPrefix?: string | null; method?: string | n
 // ═══════════════════════════════════════════════════════════════
 
 export function createPermissionRouter(svc: IPermissionService): OpenAPIHono<{ Variables: AppContext }> {
-  const app = new OpenAPIHono<{ Variables: AppContext }>();
+  const app = new OpenAPIHono<{ Variables: AppContext }>({ defaultHook: validationHook });
 
   // ─── Policies CRUD ───
   {
-    const policies = new OpenAPIHono();
+    const policies = new OpenAPIHono({ defaultHook: validationHook });
     registerCrudRoutes(policies, subCrud({
       guard: requireRoot,
       createSchema: CreatePolicySchema,
@@ -174,7 +174,7 @@ export function createPermissionRouter(svc: IPermissionService): OpenAPIHono<{ V
 
   // ─── User groups CRUD ───
   {
-    const userGroups = new OpenAPIHono();
+    const userGroups = new OpenAPIHono({ defaultHook: validationHook });
     registerCrudRoutes(userGroups, subCrud({
       guard: requireWheel,
       createSchema: CreateUserGroupSchema,
@@ -194,7 +194,7 @@ export function createPermissionRouter(svc: IPermissionService): OpenAPIHono<{ V
 
   // ─── Permission groups CRUD ───
   {
-    const permGroups = new OpenAPIHono();
+    const permGroups = new OpenAPIHono({ defaultHook: validationHook });
 
     registerCrudRoutes(permGroups, subCrud({
       guard: requireRoot,
@@ -243,7 +243,7 @@ export function createPermissionRouter(svc: IPermissionService): OpenAPIHono<{ V
 
   // ─── UserTemplate CRUD ───
   {
-    const userTemplates = new OpenAPIHono();
+    const userTemplates = new OpenAPIHono({ defaultHook: validationHook });
     registerCrudRoutes(userTemplates, subCrud({
       guard: requireRoot,
       createSchema: CreateUserTplSchema,
@@ -263,7 +263,7 @@ export function createPermissionRouter(svc: IPermissionService): OpenAPIHono<{ V
 
   // ─── Route ACL CRUD ───
   {
-    const routeAcls = new OpenAPIHono();
+    const routeAcls = new OpenAPIHono({ defaultHook: validationHook });
     registerCrudRoutes(routeAcls, subCrud({
       guard: requireRoot,
       createSchema: CreateRouteAclSchema,
@@ -282,7 +282,7 @@ export function createPermissionRouter(svc: IPermissionService): OpenAPIHono<{ V
   }
 
   // ─── Invitations ───
-  app.openapi(createRoute({ method: 'post', path: '/invite', tags: ['permission'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(InvitationSchema) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/invite', tags: ['permission'], request: { body: { content: { 'application/json': { schema: CreateInviteSchema } } } }, responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(InvitationSchema) } } } } }), async (c) => {
     const body = await z.unknown().parse(c.req.json());
     const inviteData = CreateInviteSchema.parse(body);
     const user = c.var.currentUser;
@@ -317,7 +317,7 @@ export function createPermissionRouter(svc: IPermissionService): OpenAPIHono<{ V
     return c.json(ok(await svc.getLogPolicy()));
   });
 
-  app.openapi(createRoute({ method: 'put', path: '/log-policy', tags: ['permission'], responses: { 200: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'put', path: '/log-policy', tags: ['permission'], request: { body: { content: { 'application/json': { schema: UpdateLogPolicySchema } } } }, responses: { 200: { description: '', content: { 'application/json': { schema: OkResponse(z.unknown()) } } } } }), async (c) => {
     requireRoot(c);
     const body = UpdateLogPolicySchema.parse(await c.req.json());
     const policy = await svc.updateLogPolicy(z.custom<Partial<LogPolicy>>().parse(body), actorFrom(c));
@@ -375,20 +375,20 @@ export function createPermissionRouter(svc: IPermissionService): OpenAPIHono<{ V
   });
 
   // ─── Compare ───
-  app.openapi(createRoute({ method: 'post', path: '/compare/perm-groups', tags: ['permission'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(CompareResultSchema) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/compare/perm-groups', tags: ['permission'], request: { body: { content: { 'application/json': { schema: z.object({ idA: z.string(), idB: z.string() }) } } } }, responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(CompareResultSchema) } } } } }), async (c) => {
     requireRoot(c);
     const { idA, idB } = z.object({ idA: z.string(), idB: z.string() }).parse(await c.req.json());
     return c.json(ok(await svc.comparePermGroups(idA, idB)), 201);
   });
 
-  app.openapi(createRoute({ method: 'post', path: '/compare/user-groups', tags: ['permission'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(CompareResultSchema) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/compare/user-groups', tags: ['permission'], request: { body: { content: { 'application/json': { schema: z.object({ idA: z.string(), idB: z.string() }) } } } }, responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(CompareResultSchema) } } } } }), async (c) => {
     requireRoot(c);
     const { idA, idB } = z.object({ idA: z.string(), idB: z.string() }).parse(await c.req.json());
     return c.json(ok(await svc.compareUserGroups(idA, idB)), 201);
   });
 
   // ─── Permission check ───
-  app.openapi(createRoute({ method: 'post', path: '/check', tags: ['permission'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(PolicyMatchResultSchema) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/check', tags: ['permission'], request: { body: { content: { 'application/json': { schema: PermissionCheckSchema } } } }, responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(PolicyMatchResultSchema) } } } } }), async (c) => {
     requireRoot(c);
     const body = await z.unknown().parse(c.req.json());
     const checkData = PermissionCheckSchema.parse(body);

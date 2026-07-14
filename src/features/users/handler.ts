@@ -8,7 +8,7 @@ import { RegisterUserSchema, LoginUserSchema, UpdateUserSchema, UserResponseSche
 import type { UserResponse } from './schema.ts';
 import { createUserId, createSessionToken, createGid, UserRole, type User } from './types.ts';
 import { ok } from '../../core/response.ts';
-import { OkResponse, PaginatedResponse } from '../../core/http-docs/response-schema.ts';
+import { OkResponse, PaginatedResponse, validationHook } from '../../core/http-docs/response-schema.ts';
 
 // ─── Avatar constants ───
 const AVATAR_MAX_SIZE = 1048576;
@@ -48,9 +48,9 @@ async function requirePerm(c: Context<UsersEnv>, checker: PermissionCheckFn | un
 }
 
 export function createUserRouter(userService: IUserService, permissionChecker?: PermissionCheckFn): OpenAPIHono<{ Variables: AppContext }> {
-  const app = new OpenAPIHono<{ Variables: AppContext }>();
+  const app = new OpenAPIHono<{ Variables: AppContext }>({ defaultHook: validationHook });
 
-  app.openapi(createRoute({ method: 'post', path: '/register', tags: ['users'], summary: '注册新用户', responses: { 201: { description: 'LoginResponse', content: { 'application/json': { schema: OkResponse(LoginResponseSchema) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/register', tags: ['users'], summary: '注册新用户', request: { body: { content: { 'application/json': { schema: RegisterUserSchema } } } }, responses: { 201: { description: 'LoginResponse', content: { 'application/json': { schema: OkResponse(LoginResponseSchema) } } } } }), async (c) => {
     const body = RegisterUserSchema.parse(await c.req.json());
     const atomic = c.var.stores.atomic;
     const initKey = '_sys:initialized';
@@ -144,7 +144,7 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
     return c.json(ok(user.loginPolicy ?? { enabled: true, timeRanges: [], allowedCIDRs: [] }));
   });
 
-  app.openapi(createRoute({ method: 'put', path: '/{id}/login-policy', tags: ['users'], summary: '更新用户登录策略', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'LoginPolicy', content: { 'application/json': { schema: OkResponse(LoginPolicySchema.nullable()) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'put', path: '/{id}/login-policy', tags: ['users'], summary: '更新用户登录策略', request: { params: z.object({ id: z.string() }), body: { content: { 'application/json': { schema: LoginPolicySchema } } } }, responses: { 200: { description: 'LoginPolicy', content: { 'application/json': { schema: OkResponse(LoginPolicySchema.nullable()) } } } } }), async (c) => {
     const id = createUserId(c.req.param('id'));
     await requirePerm(c, permissionChecker, 'update', 'user', id);
     const body = LoginPolicySchema.parse(await c.req.json());
@@ -166,9 +166,10 @@ export function createUserRouter(userService: IUserService, permissionChecker?: 
     return c.json(ok(user.publicKeyEd25519 ?? null));
   });
 
-  app.openapi(createRoute({ method: 'put', path: '/{id}/public-key', tags: ['users'], summary: '设置用户 Ed25519 公钥', request: { params: z.object({ id: z.string() }) }, responses: { 200: { description: 'string', content: { 'application/json': { schema: OkResponse(z.union([z.string(), z.null()])) } } } } }), async (c) => {
+  const PublicKeyBodySchema = z.object({ publicKey: PublicKeySchema });
+  app.openapi(createRoute({ method: 'put', path: '/{id}/public-key', tags: ['users'], summary: '设置用户 Ed25519 公钥', request: { params: z.object({ id: z.string() }), body: { content: { 'application/json': { schema: PublicKeyBodySchema } } } }, responses: { 200: { description: 'string', content: { 'application/json': { schema: OkResponse(z.union([z.string(), z.null()])) } } } } }), async (c) => {
     const id = createUserId(c.req.param('id'));
-    const data = z.object({ publicKey: PublicKeySchema }).parse(await c.req.json());
+    const data = PublicKeyBodySchema.parse(await c.req.json());
     await requirePerm(c, permissionChecker, 'update', 'user', id);
     const user = await userService.update(id, { name: undefined, password: undefined, role: undefined, loginPolicy: undefined, publicKeyEd25519: data.publicKey, gecos: undefined, directory: undefined, shell: undefined, supplementaryGids: undefined });
     return c.json(ok(user.publicKeyEd25519 ?? null));

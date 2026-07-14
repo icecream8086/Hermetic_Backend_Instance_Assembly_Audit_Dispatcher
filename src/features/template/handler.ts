@@ -3,7 +3,7 @@ import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import type { Context } from 'hono';
 import type { IAtomicStore } from '../../core/store/interfaces.ts';
 import { ok } from '../../core/response.ts';
-import { OkResponse, PaginatedResponse } from '../../core/http-docs/response-schema.ts';
+import { OkResponse, PaginatedResponse, validationHook } from '../../core/http-docs/response-schema.ts';
 import { TemplateSchema, ResolvedTemplateSchema, TemplateDeleteResponseSchema } from './response-schema.ts';
 import { PodCreateResponseSchema } from '../pod/response-schema.ts';
 import { AppError } from '../../core/types.ts';
@@ -291,33 +291,24 @@ function canAccessTemplate(tpl: Template, user: { id: string; role?: string } | 
 // ─── Router ───
 
 export function createTemplateRouter(atomic: IAtomicStore, podSvc: PodService, _providers?: IProviderRegistry, permissionChecker?: PermissionCheckFn): OpenAPIHono<{ Variables: AppContext }> {
-  const app = new OpenAPIHono<{ Variables: AppContext }>();
+  const app = new OpenAPIHono<{ Variables: AppContext }>({ defaultHook: validationHook });
 
+  const CreateTemplateBodySchema = z.object({
+    name: z.string().min(1),
+    description: z.string().optional(),
+    apiVersion: z.string().optional(),
+    kind: z.enum(['Pod']).optional(),
+    spec: PodSpecSchema,
+    dependsOn: z.array(z.string()).optional(),
+    singleton: z.boolean().optional(),
+    instanceLimit: z.object({ type: z.enum(['fixed', 'perUser', 'perSystem']), max: z.number() }).optional(),
+    resourceBinding: z.object({ domain: z.string().optional(), port: z.number().optional() }).optional(),
+    metadata: z.object({ labels: z.record(z.string(), z.string()).optional(), annotations: z.record(z.string(), z.string()).optional() }).optional(),
+  }).passthrough();
   // POST / — 创建模板
-  app.openapi(createRoute({ method: 'post', path: '/', tags: ['templates'], summary: '创建模板', responses: { 201: { description: 'Template', content: { 'application/json': { schema: OkResponse(TemplateSchema) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/', tags: ['templates'], summary: '创建模板', request: { body: { content: { 'application/json': { schema: CreateTemplateBodySchema } } } }, responses: { 201: { description: 'Template', content: { 'application/json': { schema: OkResponse(TemplateSchema) } } } } }), async (c) => {
       await requirePerm(c, permissionChecker, 'create', 'template');
-      const bodySchema = z.object({
-        name: z.string().min(1),
-        description: z.string().optional(),
-        apiVersion: z.string().optional(),
-        kind: z.enum(['Pod']).optional(),
-        spec: PodSpecSchema,
-        dependsOn: z.array(z.string()).optional(),
-        singleton: z.boolean().optional(),
-        instanceLimit: z.object({
-          type: z.enum(['fixed', 'perUser', 'perSystem']),
-          max: z.number(),
-        }).optional(),
-        resourceBinding: z.object({
-          domain: z.string().optional(),
-          port: z.number().optional(),
-        }).optional(),
-        metadata: z.object({
-          labels: z.record(z.string(), z.string()).optional(),
-          annotations: z.record(z.string(), z.string()).optional(),
-        }).optional(),
-      }).passthrough();
-      const body = bodySchema.parse(await c.req.json());
+      const body = CreateTemplateBodySchema.parse(await c.req.json());
 
       const user = c.var.currentUser;
 
