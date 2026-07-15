@@ -7,7 +7,7 @@
     "generate": "node scripts/generate-features.mjs && node scripts/generate-templates.mjs && node scripts/generate-instance-templates.mjs",
     "predev": "npm run generate",
     "predev:worker": "npm run generate",
-    "pretypecheck": "npm run generate",
+    "pretypecheck": "npm run generate && npm run gen:sdk",
     "predeploy": "npm run generate",
     "dev": "tsx watch src/dev.ts",
     "dev:worker": "wrangler dev --log-level debug",
@@ -18,6 +18,8 @@
     "deploy": "wrangler deploy",
     "docs:http": "tsx scripts/export-http.ts",
     "docs:openapi": "tsx scripts/export-openapi.ts",
+    "gen:sdk": "npx openapi-typescript openapi.json -o src/generated/sdk.d.ts",
+    "gen:all": "npm run docs:openapi && npm run gen:sdk",
     "docs:arch": "npx tsx scripts/arch-doc.ts",
     "docs:gen": "npx tsx scripts/gendoc.ts",
     "tail": "wrangler tail --format pretty",
@@ -58,6 +60,7 @@
     "@hono/zod-validator": "^0.8.0",
     "@vitest/coverage-v8": "^4.1.6",
     "hono": "^4.12.23",
+    "openapi-fetch": "^0.17.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
@@ -75,6 +78,7 @@
     "fast-check": "^4.8.0",
     "knip": "^6.16.0",
     "madge": "^8.0.0",
+    "openapi-typescript": "^7.13.0",
     "pactum": "^3.9.1",
     "ts-morph": "^28.0.0",
     "tsx": "^4.22.4",

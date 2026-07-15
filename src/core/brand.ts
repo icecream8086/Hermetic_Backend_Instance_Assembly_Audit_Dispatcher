@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 const logIdSchema = z.string().regex(/^\d{16}-[a-f0-9]{12}$/).brand('LogId');
-const versionIdSchema = z.string().min(1).brand('VersionId');
+export const versionIdSchema = z.string().min(1).brand('VersionId');
 const serializedBodySchema = z.string().brand('SerializedBody');
 const facilitySchema = z.string().regex(/^[a-z][a-z0-9-]{1,63}$/).brand('Facility');
 const orderIdSchema = z.string().regex(/^ord_[a-f0-9-]{36}$/).brand('OrderId');

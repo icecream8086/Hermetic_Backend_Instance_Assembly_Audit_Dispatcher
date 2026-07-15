@@ -30,7 +30,7 @@ export const ProbeSpecSchema = z.object({
     port: z.number(),
   }).optional(),
   exec: z.object({
-    command: z.array(z.string()),
+    command: z.array(z.string()).readonly(),
   }).optional(),
   initialDelaySeconds: z.number().optional(),
   periodSeconds: z.number().optional(),
@@ -100,13 +100,9 @@ export const PodSpecSchema = z.object({
       }).optional(),
     })).optional(),
     secretMounts: z.array(z.object({
-      name: z.string(),
       mountPath: z.string(),
-      items: z.array(z.object({
-        key: z.string(),
-        path: z.string(),
-        mode: z.number().optional(),
-      })).readonly().optional(),
+      data: z.string(),
+      mode: z.number().optional(),
     })).readonly().optional(),
   }),
   providerOverrides: z.record(z.string(), z.unknown()).optional(),
@@ -144,4 +140,72 @@ export const PodSpecPatchSchema = z.object({
     restartPolicy: z.enum(['Always', 'OnFailure', 'Never']).optional(),
   }).optional(),
   providerOverrides: z.record(z.string(), z.unknown()).optional(),
+});
+
+export const PodNetworkSchema = z.object({
+  privateIp: z.string().optional(),
+  publicIp: z.string().optional(),
+  vpcId: z.string().optional(),
+  subnetId: z.string().optional(),
+  securityGroupId: z.string().optional(),
+});
+
+export const ConditionStatusSchema = z.enum(['True', 'False', 'Unknown']);
+
+export const ContainerStateSchema = z.discriminatedUnion('state', [
+  z.object({
+    state: z.literal('Waiting'),
+    reason: z.string().optional(),
+  }),
+  z.object({
+    state: z.literal('Running'),
+    startedAt: z.string(),
+  }),
+  z.object({
+    state: z.literal('Terminated'),
+    exitCode: z.number(),
+    reason: z.string().optional(),
+    signal: z.number().optional(),
+    startedAt: z.string().optional(),
+    finishedAt: z.string().optional(),
+  }),
+]);
+
+export const PodConditionSchema = z.object({
+  type: z.enum(['PodScheduled', 'Initialized', 'ContainersReady', 'Ready', 'DisruptionTarget']),
+  status: ConditionStatusSchema,
+  reason: z.string().optional(),
+  message: z.string().optional(),
+  lastTransitionTime: z.number(),
+});
+
+export const ContainerRuntimeSchema = z.object({
+  name: z.string(),
+  image: z.string(),
+  state: ContainerStateSchema,
+  env: z.record(z.string(), z.string()),
+  ports: z.array(z.object({
+    containerPort: z.number(),
+    hostPort: z.number().optional(),
+    protocol: z.string().optional(),
+  })).readonly().optional(),
+  resources: z.object({
+    cpu: z.number(),
+    memory: z.number(),
+    gpu: z.number().optional(),
+  }).optional(),
+  labels: z.record(z.string(), z.string()),
+  annotations: z.record(z.string(), z.string()),
+  mounts: z.array(z.object({
+    source: z.string(),
+    destination: z.string(),
+    type: z.string().optional(),
+  })).readonly(),
+});
+
+export const PodEventSchema = z.object({
+  reason: z.string(),
+  message: z.string(),
+  type: z.string(),
+  count: z.number(),
 });

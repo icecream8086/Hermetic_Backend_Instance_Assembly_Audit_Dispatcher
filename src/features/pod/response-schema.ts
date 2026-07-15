@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { PodSpecSchema, PodNetworkSchema, ContainerRuntimeSchema, PodConditionSchema, PodEventSchema } from '../../core/pod/schema.ts';
+import { versionIdSchema } from '../../core/brand.ts';
 
 // ── Shared ──
 
@@ -37,7 +39,6 @@ export const ContainerLogResultSchema = z.object({
   timestamp: z.string().optional(),
 });
 
-/** Minimal PodEntity — documented known fields. */
 export const PodEntitySchema = z.object({
   podId: z.string(),
   name: z.string(),
@@ -46,6 +47,14 @@ export const PodEntitySchema = z.object({
   creatorId: z.string().optional(),
   createdAt: z.number(),
   updatedAt: z.number(),
+  spec: PodSpecSchema,
+  deletionTimestamp: z.string().optional(),
+  network: PodNetworkSchema,
+  containers: z.array(ContainerRuntimeSchema).readonly(),
+  conditions: z.array(PodConditionSchema).readonly(),
+  events: z.array(PodEventSchema).readonly(),
+  version: versionIdSchema,
+  templateRef: z.string().optional(),
 }).openapi('PodEntity');
 
 export const PodListResponseSchema = z.object({
