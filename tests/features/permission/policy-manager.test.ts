@@ -17,7 +17,7 @@ describe('PolicyManager', () => {
 
   it('creates and retrieves a policy', async () => {
     const p = await mgr.create({
-      name: 'Allow Read', effect: 'allow', actions: ['read'], resource: 'sandbox', priority: 100,
+      name: 'Allow Read', effect: 'allow', actions: ['read'], resource: 'pod', priority: 100,
     });
     expect(p.name).toBe('Allow Read');
     expect(p.effect).toBe('allow');
@@ -28,27 +28,27 @@ describe('PolicyManager', () => {
   });
 
   it('lists all policies', async () => {
-    await mgr.create({ name: 'P1', effect: 'allow', actions: ['read'], resource: 'sandbox' });
+    await mgr.create({ name: 'P1', effect: 'allow', actions: ['read'], resource: 'pod' });
     await mgr.create({ name: 'P2', effect: 'deny', actions: ['*'], resource: '*' });
     const all = await mgr.list();
     expect(all).toHaveLength(2);
   });
 
   it('updates a policy', async () => {
-    const p = await mgr.create({ name: 'Old', effect: 'allow', actions: ['read'], resource: 'sandbox' });
+    const p = await mgr.create({ name: 'Old', effect: 'allow', actions: ['read'], resource: 'pod' });
     const updated = await mgr.update(p.id, { name: 'New' });
     expect(updated.name).toBe('New');
   });
 
   it('deletes a policy', async () => {
-    const p = await mgr.create({ name: 'ToDelete', effect: 'allow', actions: ['read'], resource: 'sandbox' });
+    const p = await mgr.create({ name: 'ToDelete', effect: 'allow', actions: ['read'], resource: 'pod' });
     await mgr.delete(p.id);
     const found = await mgr.get(p.id);
     expect(found).toBeNull();
   });
 
   it('updating enabled field toggles policy', async () => {
-    const p = await mgr.create({ name: 'Toggle', effect: 'allow', actions: ['read'], resource: 'sandbox' });
+    const p = await mgr.create({ name: 'Toggle', effect: 'allow', actions: ['read'], resource: 'pod' });
     // Update to disable
     const disabled = await mgr.update(p.id, { enabled: false });
     expect(disabled.enabled).toBe(false);
@@ -58,7 +58,7 @@ describe('PolicyManager', () => {
   });
 
   it('listPaginated returns correct pages', async () => {
-    for (let i = 0; i < 5; i++) await mgr.create({ name: `P${i}`, effect: 'allow', actions: ['read'], resource: 'sandbox' });
+    for (let i = 0; i < 5; i++) await mgr.create({ name: `P${i}`, effect: 'allow', actions: ['read'], resource: 'pod' });
     const page1 = await mgr.listPaginated(1, 2);
     expect(page1.items).toHaveLength(2);
     expect(page1.total).toBe(5);

@@ -94,7 +94,7 @@ function pathToResource(path: string): string {
   // Map known routes to permission resources
   const mapping: Record<string, string> = {
     'actions': 'action:workflow',
-    'sandboxes': 'sandbox',
+    'pods': 'pod',
     'users': 'user',
     'permissions': 'permission',
     'templates': 'template',

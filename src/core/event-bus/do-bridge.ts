@@ -15,8 +15,8 @@ export class DoBridge {
     bus: EventBus,
     private readonly notifDO: DurableObjectNamespace,
   ) {
-    bus.on('sandbox.provisioned', this.#forward('sandbox.provisioned'));
-    bus.on('sandbox.status', this.#forward('sandbox.status'));
+    bus.on('pod.provisioned', this.#forward('pod.provisioned'));
+    bus.on('pod.status', this.#forward('pod.status'));
     // Action system events
     bus.on('workflow:completed', this.#forward('workflow:completed'));
     bus.on('workflow:job:status', this.#forward('workflow:job:status'));

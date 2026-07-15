@@ -34,7 +34,7 @@ function neverNode(
 const emptyCheck: PermissionCheck = {
   actor: 'user1',
   action: 'read',
-  resource: 'sandbox',
+  resource: 'pod',
 };
 
 // ─── Arbitraries ───

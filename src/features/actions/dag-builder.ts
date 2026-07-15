@@ -66,7 +66,7 @@ function jobToTask(
   return {
     id: taskId,
     name: jobName,
-    operatorType: 'sandbox',
+    operatorType: 'pod',
     config: {
       jobName,
       needs: jobDef.needs ?? [],

@@ -11,10 +11,10 @@ import type { Event, EventHandler, EventBusConfig } from './types.ts';
  * @example
  * ```ts
  * const bus = new EventBus();
- * bus.on('sandbox.create', async (e) => {
- *   await createSandbox(e.payload);
+ * bus.on('pod.create', async (e) => {
+ *   await createPod(e.payload);
  * });
- * await bus.dispatch(createEvent('sandbox.create', { name: 'game-01' }));
+ * await bus.dispatch(createEvent('pod.create', { name: 'game-01' }));
  * ```
  */
 export class EventBus {

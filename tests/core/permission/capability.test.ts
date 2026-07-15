@@ -10,11 +10,11 @@ import {
 } from '../../../src/core/permission/capability.ts';
 
 const SINGLE_BITS: number[] = [
-  Cap.SANDBOX_CREATE,
-  Cap.SANDBOX_DELETE,
-  Cap.SANDBOX_UPDATE,
-  Cap.SANDBOX_EXEC,
-  Cap.SANDBOX_ADMIN,
+  Cap.POD_CREATE,
+  Cap.POD_DELETE,
+  Cap.POD_UPDATE,
+  Cap.POD_EXEC,
+  Cap.POD_ADMIN,
   Cap.IMAGE_PULL,
   Cap.IMAGE_DELETE,
   Cap.IMAGE_COMMIT,
@@ -32,7 +32,7 @@ const SINGLE_BITS: number[] = [
 ];
 
 const COMPOSITE_SETS: number[] = [
-  Cap.SANDBOX_FULL,
+  Cap.POD_FULL,
   Cap.IMAGE_FULL,
   Cap.VOLUME_FULL,
   Cap.NETWORK_FULL,
@@ -70,14 +70,14 @@ describe('hasCapability', () => {
 
   it('matches (caps & required) === required for mixed values', () => {
     const testCases: [number, number][] = [
-      [Cap.SANDBOX_CREATE | Cap.IMAGE_PULL, Cap.SANDBOX_CREATE],
-      [Cap.SANDBOX_CREATE | Cap.IMAGE_PULL, Cap.IMAGE_PULL],
-      [Cap.SANDBOX_CREATE | Cap.IMAGE_PULL, Cap.SANDBOX_CREATE | Cap.IMAGE_PULL],
-      [Cap.SANDBOX_CREATE | Cap.IMAGE_PULL, Cap.SANDBOX_DELETE],
-      [Cap.SANDBOX_CREATE | Cap.IMAGE_PULL, Cap.SANDBOX_CREATE | Cap.IMAGE_DELETE],
-      [Cap.SANDBOX_FULL, Cap.SANDBOX_CREATE | Cap.SANDBOX_EXEC],
-      [Cap.SANDBOX_FULL, Cap.SANDBOX_CREATE | Cap.SANDBOX_ADMIN],
-      [Cap.SANDBOX_CREATE, 0],
+      [Cap.POD_CREATE | Cap.IMAGE_PULL, Cap.POD_CREATE],
+      [Cap.POD_CREATE | Cap.IMAGE_PULL, Cap.IMAGE_PULL],
+      [Cap.POD_CREATE | Cap.IMAGE_PULL, Cap.POD_CREATE | Cap.IMAGE_PULL],
+      [Cap.POD_CREATE | Cap.IMAGE_PULL, Cap.POD_DELETE],
+      [Cap.POD_CREATE | Cap.IMAGE_PULL, Cap.POD_CREATE | Cap.IMAGE_DELETE],
+      [Cap.POD_FULL, Cap.POD_CREATE | Cap.POD_EXEC],
+      [Cap.POD_FULL, Cap.POD_CREATE | Cap.POD_ADMIN],
+      [Cap.POD_CREATE, 0],
     ];
     for (const [caps, req] of testCases) {
       expect(hasCapability(caps, req)).toBe((caps & req) === req);
@@ -99,13 +99,13 @@ describe('addCapability', () => {
   it('addCapability(addCapability(c, a), b) == addCapability(c, a | b) (associativity)', () => {
     const values: number[] = [
       0,
-      Cap.SANDBOX_CREATE,
-      Cap.SANDBOX_DELETE,
+      Cap.POD_CREATE,
+      Cap.POD_DELETE,
       Cap.IMAGE_PULL,
       Cap.VOLUME_MOUNT,
       Cap.NETWORK_BIND,
       Cap.SYS_CONFIG,
-      Cap.SANDBOX_FULL,
+      Cap.POD_FULL,
       Cap.IMAGE_FULL,
       Cap.VOLUME_FULL,
       Cap.ALL,
@@ -126,21 +126,21 @@ describe('addCapability', () => {
 
 describe('removeCapability', () => {
   it('removing a set bit clears it', () => {
-    const mask = Cap.SANDBOX_CREATE | Cap.SANDBOX_DELETE | Cap.SANDBOX_UPDATE;
-    expect(removeCapability(mask, Cap.SANDBOX_DELETE)).toBe(Cap.SANDBOX_CREATE | Cap.SANDBOX_UPDATE);
-    expect(removeCapability(mask, Cap.SANDBOX_CREATE)).toBe(Cap.SANDBOX_DELETE | Cap.SANDBOX_UPDATE);
-    expect(removeCapability(mask, Cap.SANDBOX_UPDATE)).toBe(Cap.SANDBOX_CREATE | Cap.SANDBOX_DELETE);
-    expect(removeCapability(mask, Cap.SANDBOX_CREATE | Cap.SANDBOX_DELETE)).toBe(Cap.SANDBOX_UPDATE);
+    const mask = Cap.POD_CREATE | Cap.POD_DELETE | Cap.POD_UPDATE;
+    expect(removeCapability(mask, Cap.POD_DELETE)).toBe(Cap.POD_CREATE | Cap.POD_UPDATE);
+    expect(removeCapability(mask, Cap.POD_CREATE)).toBe(Cap.POD_DELETE | Cap.POD_UPDATE);
+    expect(removeCapability(mask, Cap.POD_UPDATE)).toBe(Cap.POD_CREATE | Cap.POD_DELETE);
+    expect(removeCapability(mask, Cap.POD_CREATE | Cap.POD_DELETE)).toBe(Cap.POD_UPDATE);
   });
 
   it('removing a bit not set is a no-op', () => {
-    const mask = Cap.SANDBOX_CREATE | Cap.IMAGE_PULL;
-    expect(removeCapability(mask, Cap.SANDBOX_DELETE)).toBe(mask);
-    expect(removeCapability(mask, Cap.SANDBOX_UPDATE | Cap.IMAGE_DELETE)).toBe(mask);
+    const mask = Cap.POD_CREATE | Cap.IMAGE_PULL;
+    expect(removeCapability(mask, Cap.POD_DELETE)).toBe(mask);
+    expect(removeCapability(mask, Cap.POD_UPDATE | Cap.IMAGE_DELETE)).toBe(mask);
   });
 
   it('removing 0 is a no-op', () => {
-    const mask = Cap.SANDBOX_FULL | Cap.IMAGE_FULL;
+    const mask = Cap.POD_FULL | Cap.IMAGE_FULL;
     expect(removeCapability(mask, 0)).toBe(mask);
   });
 });
@@ -155,12 +155,12 @@ describe('actionToCapability', () => {
   const zeroActions = ['read', 'list', 'unknown'];
 
   it('maps expected actions to their correct specific capabilities', () => {
-    expect(actionToCapability('create')).toBe(Cap.SANDBOX_CREATE);
-    expect(actionToCapability('delete')).toBe(Cap.SANDBOX_DELETE);
-    expect(actionToCapability('update')).toBe(Cap.SANDBOX_UPDATE);
-    expect(actionToCapability('execute')).toBe(Cap.SANDBOX_EXEC);
-    expect(actionToCapability('admin')).toBe(Cap.SANDBOX_ADMIN);
-    expect(actionToCapability('*')).toBe(Cap.SANDBOX_ADMIN);
+    expect(actionToCapability('create')).toBe(Cap.POD_CREATE);
+    expect(actionToCapability('delete')).toBe(Cap.POD_DELETE);
+    expect(actionToCapability('update')).toBe(Cap.POD_UPDATE);
+    expect(actionToCapability('execute')).toBe(Cap.POD_EXEC);
+    expect(actionToCapability('admin')).toBe(Cap.POD_ADMIN);
+    expect(actionToCapability('*')).toBe(Cap.POD_ADMIN);
     expect(actionToCapability('pull')).toBe(Cap.IMAGE_PULL);
     expect(actionToCapability('commit')).toBe(Cap.IMAGE_COMMIT);
     expect(actionToCapability('mount')).toBe(Cap.VOLUME_MOUNT);
@@ -188,11 +188,11 @@ describe('actionToCapability', () => {
 describe('formatCapabilities / parseCapabilities round-trip', () => {
   const roundTripValues: number[] = [
     0,
-    Cap.SANDBOX_CREATE,
-    Cap.SANDBOX_FULL,
+    Cap.POD_CREATE,
+    Cap.POD_FULL,
     Cap.IMAGE_PULL,
-    Cap.SANDBOX_CREATE | Cap.IMAGE_PULL | Cap.NETWORK_BIND | Cap.SYS_AUDIT_READ,
-    Cap.SANDBOX_CREATE | Cap.SANDBOX_DELETE,
+    Cap.POD_CREATE | Cap.IMAGE_PULL | Cap.NETWORK_BIND | Cap.SYS_AUDIT_READ,
+    Cap.POD_CREATE | Cap.POD_DELETE,
     Cap.ALL,
     Cap.VOLUME_FULL | Cap.USER_FULL,
   ];

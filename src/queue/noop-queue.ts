@@ -12,8 +12,6 @@ export class NoopMessageQueue implements IMessageQueue {
   public readonly available: boolean = false;
 
   public async sendImagePull(): Promise<boolean> { return false; }
-  public async sendSandboxGc(): Promise<boolean> { return false; }
-  public async sendSandboxProvision(): Promise<boolean> { return false; }
   public async send(): Promise<boolean> { return false; }
   public async sendBatch(_messages: any[]): Promise<number> { return 0; }
 }

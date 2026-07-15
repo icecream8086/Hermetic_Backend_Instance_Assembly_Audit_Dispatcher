@@ -64,7 +64,7 @@ describe('GroupManager', () => {
       const pg = await mgr.createPermGroup({
         name: 'Read Access',
         userGroupIds: ['ug1'],
-        rules: [{ effect: 'allow', actions: ['read'], resource: 'sandbox' }],
+        rules: [{ effect: 'allow', actions: ['read'], resource: 'pod' }],
       });
       expect(pg.name).toBe('Read Access');
       expect(pg.rules).toHaveLength(1);
@@ -109,7 +109,7 @@ describe('GroupManager', () => {
     });
 
     it('detects rules present in both permission groups', async () => {
-      const rule = { effect: 'allow' as const, actions: ['read'], resource: 'sandbox' };
+      const rule = { effect: 'allow' as const, actions: ['read'], resource: 'pod' };
       const pg1 = await mgr.createPermGroup({ name: 'PG1', rules: [rule] });
       const pg2 = await mgr.createPermGroup({ name: 'PG2', rules: [rule, { effect: 'deny' as const, actions: ['*'], resource: '*' }] });
       const result = await mgr.comparePermGroups(pg1.id, pg2.id);

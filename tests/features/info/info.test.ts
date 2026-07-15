@@ -17,7 +17,7 @@ describe('GET /info', () => {
         name: 'HBI-AAD',
         version: '4.0.0',
         platform: 'cloudflare-workers',
-        features: { sandbox: true, assembly: true, audit: true },
+        features: { pod: true, assembly: true, audit: true },
       },
       error: null,
     });

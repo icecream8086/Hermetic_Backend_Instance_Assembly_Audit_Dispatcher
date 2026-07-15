@@ -102,7 +102,7 @@ const SECRET = crypto.getRandomValues(new Uint8Array(32));
 
 function validClaims(grants?: S3AccessTokenClaims['grants']): S3AccessTokenClaims {
   return {
-    jti: crypto.randomUUID(), iss: 'hbi-aad', sub: 'sandbox',
+    jti: crypto.randomUUID(), iss: 'hbi-aad', sub: 'pod',
     iat: Math.floor(Date.now() / 1000) - 10,
     exp: Math.floor(Date.now() / 1000) + 3600,
     grants: grants ?? [G.rw],

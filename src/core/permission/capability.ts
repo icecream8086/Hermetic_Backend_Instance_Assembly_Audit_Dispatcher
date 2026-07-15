@@ -9,7 +9,7 @@
  *   P (Permitted)   = user's own caps ∪ inherited group caps
  *   E (Effective)   = P (simplified: auto-activated for non-setuid context)
  *   B (Bounding)    = system max (ALL)
- *   I (Inheritable) = passed to child sandboxes
+ *   I (Inheritable) = passed to child pods
  *   A (Ambient)     = preserved across non-privileged exec
  *
  * For this project, we use a simplified 2-layer model:
@@ -23,12 +23,12 @@
 
 export const Cap = {
   NONE:                    0,
-  // Sandbox lifecycle
-  SANDBOX_CREATE:          1 << 0,   // 1
-  SANDBOX_DELETE:          1 << 1,   // 2
-  SANDBOX_UPDATE:          1 << 2,   // 4
-  SANDBOX_EXEC:            1 << 3,   // 8
-  SANDBOX_ADMIN:           1 << 4,   // 16
+  // Pod lifecycle
+  POD_CREATE:          1 << 0,   // 1
+  POD_DELETE:          1 << 1,   // 2
+  POD_UPDATE:          1 << 2,   // 4
+  POD_EXEC:            1 << 3,   // 8
+  POD_ADMIN:           1 << 4,   // 16
   // Image management
   IMAGE_PULL:              1 << 5,   // 32
   IMAGE_DELETE:            1 << 6,   // 64
@@ -49,7 +49,7 @@ export const Cap = {
   SYS_AUDIT_WRITE:         1 << 17,  // 131072
   SYS_CONFIG:              1 << 18,  // 262144
   // Composite sets
-  SANDBOX_FULL:            (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3) | (1 << 4),
+  POD_FULL:            (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3) | (1 << 4),
   IMAGE_FULL:              (1 << 5) | (1 << 6) | (1 << 7),
   VOLUME_FULL:             (1 << 8) | (1 << 9) | (1 << 10),
   NETWORK_FULL:            (1 << 11) | (1 << 12),
@@ -62,11 +62,11 @@ export type CapabilityValue = number;
 
 /** Human-readable names for capability bits. */
 export const CAP_NAMES: Readonly<Record<number, string>> = {
-  [Cap.SANDBOX_CREATE]:  'SANDBOX_CREATE',
-  [Cap.SANDBOX_DELETE]:  'SANDBOX_DELETE',
-  [Cap.SANDBOX_UPDATE]:  'SANDBOX_UPDATE',
-  [Cap.SANDBOX_EXEC]:    'SANDBOX_EXEC',
-  [Cap.SANDBOX_ADMIN]:   'SANDBOX_ADMIN',
+  [Cap.POD_CREATE]:  'POD_CREATE',
+  [Cap.POD_DELETE]:  'POD_DELETE',
+  [Cap.POD_UPDATE]:  'POD_UPDATE',
+  [Cap.POD_EXEC]:    'POD_EXEC',
+  [Cap.POD_ADMIN]:   'POD_ADMIN',
   [Cap.IMAGE_PULL]:      'IMAGE_PULL',
   [Cap.IMAGE_DELETE]:    'IMAGE_DELETE',
   [Cap.IMAGE_COMMIT]:    'IMAGE_COMMIT',
@@ -126,11 +126,11 @@ export function parseCapabilities(names: string): CapabilityValue {
 
 export function actionToCapability(action: string): CapabilityValue {
   switch (action) {
-    case 'create': return Cap.SANDBOX_CREATE;
-    case 'delete': return Cap.SANDBOX_DELETE;
-    case 'update': return Cap.SANDBOX_UPDATE;
-    case 'execute': return Cap.SANDBOX_EXEC;
-    case 'admin': case '*': return Cap.SANDBOX_ADMIN;
+    case 'create': return Cap.POD_CREATE;
+    case 'delete': return Cap.POD_DELETE;
+    case 'update': return Cap.POD_UPDATE;
+    case 'execute': return Cap.POD_EXEC;
+    case 'admin': case '*': return Cap.POD_ADMIN;
     case 'pull': return Cap.IMAGE_PULL;
     case 'commit': return Cap.IMAGE_COMMIT;
     case 'mount': return Cap.VOLUME_MOUNT;

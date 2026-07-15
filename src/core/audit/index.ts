@@ -41,8 +41,8 @@ export type { TailSession, TailOptions, TailWsMessage } from './tail.ts';
 
 // Namespace isolation (journald §4 trusted fields)
 export {
-  NamespacedAuditReader, sandboxLogReader, facilityLogReader,
-  buildSandboxQuery, buildFacilityQuery,
+  NamespacedAuditReader, podLogReader, facilityLogReader,
+  buildPodQuery, buildFacilityQuery,
 } from './namespace.ts';
 export type { LogNamespace } from './namespace.ts';
 

@@ -83,11 +83,11 @@ describe('EventLoop', () => {
     it('enqueueTrigger creates event from external input', () => {
       const bus = new EventBus();
       const loop = new EventLoop(bus, undefined, new FakeTimerBackend());
-      const input: TriggerEventInput = { type: 'sandbox.create', payload: { cpu: 2 } };
+      const input: TriggerEventInput = { type: 'pod.create', payload: { cpu: 2 } };
 
       const event = loop.enqueueTrigger(input);
 
-      expect(event.type).toBe('sandbox.create');
+      expect(event.type).toBe('pod.create');
       expect(event.payload).toEqual({ cpu: 2 });
       expect(event.id).toBeTruthy();
       expect(event.timestamp).toBeGreaterThan(0);

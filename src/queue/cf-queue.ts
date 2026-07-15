@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 import type { IMessageQueue } from './interfaces.ts';
-import type { TaskMessage, TaskType, ImagePullPayload, SandboxGcPayload, SandboxProvisionPayload } from './types.ts';
+import type { TaskMessage, TaskType, ImagePullPayload } from './types.ts';
 
 /**
  * Cloudflare Queues producer — wraps the platform Queue binding.
@@ -24,14 +24,6 @@ export class CfQueueProducer implements IMessageQueue {
 
   public async sendImagePull(payload: ImagePullPayload): Promise<boolean> {
     return this.#send(this.#message('image:pull', payload));
-  }
-
-  public async sendSandboxGc(payload: SandboxGcPayload): Promise<boolean> {
-    return this.#send(this.#message('sandbox:gc', payload));
-  }
-
-  public async sendSandboxProvision(payload: SandboxProvisionPayload): Promise<boolean> {
-    return this.#send(this.#message('sandbox:provision', payload));
   }
 
   public async send(message: TaskMessage): Promise<boolean> {

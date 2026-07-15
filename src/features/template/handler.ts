@@ -495,7 +495,7 @@ export function createTemplateRouter(atomic: IAtomicStore, podSvc: PodService, _
 
   // POST /:id/apply
   app.openapi(createRoute({ method: 'post', path: '/{id}/apply', tags: ['templates'], summary: '应用模板', request: { params: z.object({ id: z.string() }) }, responses: { 201: { description: 'Pod created', content: { 'application/json': { schema: OkResponse(PodCreateResponseSchema) } } } } }), async (c) => {
-    await requirePerm(c, permissionChecker, 'create', 'sandbox');
+    await requirePerm(c, permissionChecker, 'create', 'pod');
     const resolved = await resolveTemplate(atomic, c.req.param('id'));
 
     const user = c.var.currentUser;

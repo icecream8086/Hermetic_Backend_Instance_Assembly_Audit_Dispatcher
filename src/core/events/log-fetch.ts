@@ -5,11 +5,11 @@
  * Instead of blocking the HTTP response or simulating a stream, this handler:
  * 1. Listens for `log:fetch` events on the EventBus
  * 2. Calls the provider's getLogs() asynchronously
- * 3. Caches the result in the atomic store under `log:cache:{sandboxId}:{containerName}`
+ * 3. Caches the result in the atomic store under `log:cache:{podId}:{containerName}`
  *
  * Frontend flow:
- *   POST /api/sandboxes/:id/logs → dispatches log:fetch → returns cached (possibly stale) immediately
- *   GET  /api/sandboxes/:id/logs → returns latest cached content
+ *   POST /api/pods/:id/logs → dispatches log:fetch → returns cached (possibly stale) immediately
+ *   GET  /api/pods/:id/logs → returns latest cached content
  *
  * This gives eventual consistency with no WebSocket/DO dependency.
  */
@@ -28,7 +28,7 @@ export interface LogFetchDeps {
 }
 
 export interface LogFetchPayload {
-  readonly sandboxId: string;
+  readonly podId: string;
   readonly providerId: string;
   readonly region: string;
   readonly containerName: string;
@@ -39,8 +39,8 @@ export interface LogFetchPayload {
 
 const LOG_CACHE_PREFIX = 'log:cache:';
 
-function cacheKey(sandboxId: string, containerName: string): string {
-  return `${LOG_CACHE_PREFIX}${sandboxId}:${containerName}`;
+function cacheKey(podId: string, containerName: string): string {
+  return `${LOG_CACHE_PREFIX}${podId}:${containerName}`;
 }
 
 export function registerLogFetchHandler(deps: LogFetchDeps): void {
@@ -48,7 +48,7 @@ export function registerLogFetchHandler(deps: LogFetchDeps): void {
 
   eventBus.on('log:fetch', async (event: { type: string; payload?: unknown }) => {
     const payloadSchema = z.object({
-      sandboxId: z.string(),
+      podId: z.string(),
       providerId: z.string(),
       region: z.string(),
       containerName: z.string(),
@@ -57,12 +57,12 @@ export function registerLogFetchHandler(deps: LogFetchDeps): void {
       sinceSeconds: z.number().optional(),
     }).passthrough().optional();
     const payload = payloadSchema.parse(event.payload);
-    if (!payload || !payload.sandboxId || !payload.containerName) return;
-    const { sandboxId, providerId, region, containerName, tail, sinceSeconds } = payload;
+    if (!payload || !payload.podId || !payload.containerName) return;
+    const { podId, providerId, region, containerName, tail, sinceSeconds } = payload;
 
     try {
       // Check cache marker so concurrent refreshes don't pile up
-      const markerKey = `log:fetching:${sandboxId}:${containerName}`;
+      const markerKey = `log:fetching:${podId}:${containerName}`;
       const marker = await atomic.get<{ startedAt: number }>(markerKey);
       if (marker && Date.now() - marker.value.startedAt < 10_000) return; // dedup within 10s
 
@@ -84,8 +84,8 @@ export function registerLogFetchHandler(deps: LogFetchDeps): void {
       });
 
       // Cache the result with metadata
-      const existing = await atomic.get<{ content: string; containerName?: string; timestamp?: string; fetchedAt: number }>(cacheKey(sandboxId, containerName));
-      await atomic.set(cacheKey(sandboxId, containerName), {
+      const existing = await atomic.get<{ content: string; containerName?: string; timestamp?: string; fetchedAt: number }>(cacheKey(podId, containerName));
+      await atomic.set(cacheKey(podId, containerName), {
         content: result.content,
         containerName: result.containerName,
         timestamp: result.timestamp,
@@ -98,16 +98,16 @@ export function registerLogFetchHandler(deps: LogFetchDeps): void {
         console.log("noop");
       }
     } catch (e: unknown) {
-      console.error(`[log:fetch] ${sandboxId}/${containerName} failed:`, e instanceof Error ? e.message : String(e));
+      console.error(`[log:fetch] ${podId}/${containerName} failed:`, e instanceof Error ? e.message : String(e));
     }
   });
 }
 
 export async function getCachedLogs(
   atomic: IAtomicStore,
-  sandboxId: string,
+  podId: string,
   containerName: string,
 ): Promise<{ content: string; containerName?: string; timestamp?: string; fetchedAt?: number } | null> {
-  const entry = await atomic.get<{ content: string; containerName?: string; timestamp?: string; fetchedAt?: number }>(cacheKey(sandboxId, containerName));
+  const entry = await atomic.get<{ content: string; containerName?: string; timestamp?: string; fetchedAt?: number }>(cacheKey(podId, containerName));
   return entry?.value ?? null;
 }

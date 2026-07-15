@@ -37,7 +37,7 @@ export function kernLevelName(level: KernLevel): string {
 /** Syslog-style facility codes. Values 0-23, with 16-23 reserved for local use. */
 export const enum AuditFacility {
   KERN     = 0,  // 内核/系统
-  SANDBOX  = 1,  // 沙箱操作
+  POD      = 1,  // Pod 操作
   IMAGE    = 2,  // 镜像管理
   AUTH     = 3,  // 认证
   PERM     = 4,  // 权限检查
@@ -54,7 +54,7 @@ export const enum AuditFacility {
 }
 
 const FACILITY_NAMES: Record<number, string> = {
-  0: 'kern', 1: 'sandbox', 2: 'image', 3: 'auth', 4: 'perm',
+  0: 'kern', 1: 'pod', 2: 'image', 3: 'auth', 4: 'perm',
   5: 'network', 6: 'volume', 7: 'http', 8: 'provider', 9: 'dns',
   10: 'queue', 11: 'template',
   16: 'local0', 17: 'local1', 18: 'local2', 19: 'local3',
@@ -69,7 +69,7 @@ const FACILITY_NAMES: Record<number, string> = {
  */
 const NAME_TO_FACILITY = {
   kern: AuditFacility.KERN, system: AuditFacility.KERN,
-  sandbox: AuditFacility.SANDBOX, 'sandbox-service': AuditFacility.SANDBOX,
+  pod: AuditFacility.POD, 'pod-service': AuditFacility.POD,
   image: AuditFacility.IMAGE, 'image-pull': AuditFacility.IMAGE,
   auth: AuditFacility.AUTH, authz: AuditFacility.AUTH,
   perm: AuditFacility.PERM, 'perm-audit': AuditFacility.PERM,

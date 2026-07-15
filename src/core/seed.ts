@@ -68,7 +68,7 @@ export async function seedPolicyLibrary(atomic: IAtomicStore): Promise<void> {
     count++;
   }
   if (rootGid) {
-    await atomic.set(GROUP_CAP_KEY + rootGid, Cap.SANDBOX_FULL | Cap.IMAGE_FULL | Cap.VOLUME_FULL | Cap.NETWORK_FULL | Cap.USER_FULL, null);
+    await atomic.set(GROUP_CAP_KEY + rootGid, Cap.POD_FULL | Cap.IMAGE_FULL | Cap.VOLUME_FULL | Cap.NETWORK_FULL | Cap.USER_FULL, null);
     count++;
   }
 
@@ -103,7 +103,7 @@ export async function seedPolicyLibrary(atomic: IAtomicStore): Promise<void> {
     await atomic.set('permgroup:' + pgId, {
       id: pgId, name: 'perm.owner',
       rules: [
-        { effect: 'allow' as const, actions: ['create', 'read', 'update', 'delete'], resource: 'sandbox:$self', priority: 90 },
+        { effect: 'allow' as const, actions: ['create', 'read', 'update', 'delete'], resource: 'pod:$self', priority: 90 },
         { effect: 'allow' as const, actions: ['create', 'read', 'update', 'delete'], resource: 'template:$self', priority: 90 },
       ],
       userGroupIds: [usersUgId], userIds: [], dependsOn: [],
@@ -120,7 +120,7 @@ export async function seedPolicyLibrary(atomic: IAtomicStore): Promise<void> {
     wheel: [{ method: '*', pathPrefix: '/', priority: 1000 }],
     root: [
       { method: '*', pathPrefix: '/api/networks', priority: 100 },
-      { method: '*', pathPrefix: '/api/sandboxes', priority: 100 },
+
       { method: '*', pathPrefix: '/api/templates', priority: 100 },
       { method: '*', pathPrefix: '/api/topology', priority: 100 },
       { method: 'GET', pathPrefix: '/api/audit', priority: 100 },
@@ -133,9 +133,7 @@ export async function seedPolicyLibrary(atomic: IAtomicStore): Promise<void> {
       { method: 'GET', pathPrefix: '/api/networks', priority: 50 },
       { method: 'GET', pathPrefix: '/api/templates', priority: 50 },
       { method: 'POST', pathPrefix: '/api/templates', priority: 50 },
-      { method: 'GET', pathPrefix: '/api/sandboxes', priority: 50 },
-      { method: 'POST', pathPrefix: '/api/sandboxes', priority: 50 },
-      { method: 'PUT', pathPrefix: '/api/sandboxes', priority: 50 },
+
       { method: 'GET', pathPrefix: '/api/platforms', priority: 50 },
       { method: 'GET', pathPrefix: '/api/users', priority: 10 },
       { method: 'PUT', pathPrefix: '/api/users', priority: 10 },
@@ -236,7 +234,7 @@ async function seedLogPolicy(atomic: IAtomicStore): Promise<void> {
     defaultLevel: 'info',
     auditLevel: 'info',
     facilities: [
-      { facility: 'sandbox-service', level: 'debug' },
+      { facility: 'pod-service', level: 'debug' },
       { facility: 'perm', level: 'debug' },
       { facility: 'authz', level: 'debug' },
       { facility: 'health', level: 'info' },

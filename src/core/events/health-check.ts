@@ -11,9 +11,6 @@ import { formatDmesgLine } from '../utils/dmesg.ts';
 
 interface ContainerResolver { resolveContainer: IProviderRegistry['resolveContainer'] }
 
-/** GC reason enum — validated at dispatch so callers never bypass the type check. */
-const gcReasonSchema = z.enum(['stopped-gc', 'provider-gone', 'exited-gc', 'unhealthy-gc', 'manual', 'failed-gc', 'expired-gc', 'stuck-gc']);
-
 export type GcReason = 'stopped-gc' | 'provider-gone' | 'exited-gc' | 'unhealthy-gc' | 'failed-gc' | 'expired-gc' | 'stuck-gc' | 'terminating-gc';
 
 /** Pure GC decision function — extracts the branching logic from registerPodHealthCheck.
@@ -92,7 +89,7 @@ const POD_GC_MARKER_TTL_MS = 120_000;
  * Finer differentiation within a phase is done via provider status checks.
  */
 export function registerPodHealthCheck(deps: PodHealthCheckDeps): void {
-  const { podService, stores, providers, eventBus, eventLoop, audit, queueProducer } = deps;
+  const { podService, stores, providers, eventBus, eventLoop, audit } = deps;
 
   /** Track last stable updatedAt per pod to skip redundant provider checks. */
   const stableSince = new Map<string, number>();
@@ -115,7 +112,7 @@ export function registerPodHealthCheck(deps: PodHealthCheckDeps): void {
           if (phase === 'Succeeded') {
             const reason = decidePodGc('Succeeded', durationMs, undefined, [], 0, 0);
             if (reason) {
-              await dispatchPodGc(stores.atomic, queueProducer, providers, audit, {
+              await dispatchPodGc(stores.atomic, providers, audit, {
                 podId: pid, reason, providerId: providerId ?? pid,
                 podName: pod.name, createdAt: pod.createdAt,
                 ...(instanceId ? { instanceId } : {}),
@@ -127,7 +124,7 @@ export function registerPodHealthCheck(deps: PodHealthCheckDeps): void {
           if (phase === 'Failed') {
             const reason = decidePodGc('Failed', durationMs, undefined, [], 0, 0);
             if (reason) {
-              await dispatchPodGc(stores.atomic, queueProducer, providers, audit, {
+              await dispatchPodGc(stores.atomic, providers, audit, {
                 podId: pid, reason, providerId: providerId ?? pid,
                 podName: pod.name, createdAt: pod.createdAt,
                 ...(instanceId ? { instanceId } : {}),
@@ -162,7 +159,7 @@ export function registerPodHealthCheck(deps: PodHealthCheckDeps): void {
 
             const reason = decidePodGc('Pending', durationMs, providerAlive, [], 0, 0);
             if (reason) {
-              await dispatchPodGc(stores.atomic, queueProducer, providers, audit, {
+              await dispatchPodGc(stores.atomic, providers, audit, {
                 podId: pid, reason, providerId: providerId ?? pid,
                 podName: pod.name, createdAt: pod.createdAt,
                 ...(instanceId ? { instanceId } : {}),
@@ -190,7 +187,7 @@ export function registerPodHealthCheck(deps: PodHealthCheckDeps): void {
               stableSince.delete(pid);
               const reason = decidePodGc('Running', durationMs, false, [], 0, maxRetries);
               if (reason) {
-                await dispatchPodGc(stores.atomic, queueProducer, providers, audit, {
+                await dispatchPodGc(stores.atomic, providers, audit, {
                   podId: pid, reason, providerId,
                   podName: pod.name, createdAt: pod.createdAt,
                   ...(instanceId ? { instanceId } : {}),
@@ -219,7 +216,7 @@ export function registerPodHealthCheck(deps: PodHealthCheckDeps): void {
 
             const reason = decidePodGc('Running', durationMs, true, containerAlive, currentFails, maxRetries);
             if (reason) {
-              await dispatchPodGc(stores.atomic, queueProducer, providers, audit, {
+              await dispatchPodGc(stores.atomic, providers, audit, {
                 podId: pid, reason, providerId,
                 podName: pod.name, createdAt: pod.createdAt,
                 ...(instanceId ? { instanceId } : {}),
@@ -231,7 +228,7 @@ export function registerPodHealthCheck(deps: PodHealthCheckDeps): void {
           // ── Unknown — unexpected phase, GC after long timeout ──
           const reason = decidePodGc(phase, durationMs, undefined, [], 0, 0);
           if (reason) {
-            await dispatchPodGc(stores.atomic, queueProducer, providers, audit, {
+            await dispatchPodGc(stores.atomic, providers, audit, {
               podId: pid, reason, providerId: providerId ?? pid,
               podName: pod.name, createdAt: pod.createdAt,
               ...(instanceId ? { instanceId } : {}),
@@ -275,7 +272,6 @@ function resolvePodGcInstanceId(raw: string | undefined): InstanceId | undefined
 
 async function dispatchPodGc(
   atomic: IAtomicStore,
-  queueProducer: IMessageQueue,
   providers: ContainerResolver,
   audit: IAuditWriter | undefined,
   params: PodGcParams,
@@ -286,20 +282,9 @@ async function dispatchPodGc(
   const marker = await atomic.get<{ expiresAt: number }>(markerKey);
   if (marker && marker.value.expiresAt > now) return;
 
-  // Queue dispatch — reuses sandbox:gc queue but with pod-scoped markers
-  const qSent = await queueProducer.sendSandboxGc({
-    sandboxId: params.podId, reason: gcReasonSchema.parse(params.reason),
-    providerId: params.providerId, region: 'cn-hangzhou',
-    ...(params.instanceId ? { instanceId: params.instanceId } : {}),
-    containerCount: 0,
-    sandboxName: params.podName, createdAt: params.createdAt,
-  });
-
   await atomic.set(markerKey, { expiresAt: now + POD_GC_MARKER_TTL_MS }, marker?.version ?? null);
 
-  if (qSent) return;
-
-  // Queue unavailable — inline fallback
+  // Inline cleanup
   const instId = resolvePodGcInstanceId(params.instanceId);
   if (instId) {
     try {

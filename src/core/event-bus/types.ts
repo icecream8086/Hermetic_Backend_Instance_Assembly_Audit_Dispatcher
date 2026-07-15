@@ -24,11 +24,11 @@ export interface Event<T = unknown> {
  * @example
  * ```json
  * // POST /api/events
- * { "type": "sandbox.create", "payload": { "name": "game-01", "cpu": 2 } }
+ * { "type": "pod.create", "payload": { "name": "game-01", "cpu": 2 } }
  * ```
  */
 export interface TriggerEventInput<T = unknown> {
-  /** Event type discriminator (e.g. `"sandbox.create"`, `"dns.sync"`). */
+  /** Event type discriminator (e.g. `"pod.create"`, `"dns.sync"`). */
   type: string;
   /** JSON-serialisable payload. */
   payload?: T;

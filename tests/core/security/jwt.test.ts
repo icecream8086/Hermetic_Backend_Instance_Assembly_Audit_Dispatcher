@@ -8,7 +8,7 @@ function makeClaims(overrides?: Partial<S3AccessTokenClaims>): S3AccessTokenClai
   return {
     jti: crypto.randomUUID(),
     iss: 'hbi-aad',
-    sub: 'sandbox-123',
+    sub: 'pod-123',
     iat: Math.floor(Date.now() / 1000),
     exp: Math.floor(Date.now() / 1000) + 3600,
     grants: [{ bucket: 'my-bucket', prefix: 'data/', permissions: ['read', 'write'] }],
@@ -44,7 +44,7 @@ describe('signToken / verifyToken', () => {
     expect(result.valid).toBe(true);
     if (result.valid) {
       expect(result.claims.jti).toBe(claims.jti);
-      expect(result.claims.sub).toBe('sandbox-123');
+      expect(result.claims.sub).toBe('pod-123');
       expect(result.claims.grants).toHaveLength(1);
       expect(result.claims.grants[0]!.bucket).toBe('my-bucket');
     }

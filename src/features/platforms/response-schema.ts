@@ -22,7 +22,7 @@ const ExtensionFieldDefSchema = z.object({
     max: z.number().optional(),
     pattern: z.string().optional(),
   }).optional(),
-  scope: z.enum(['sandbox', 'container', 'volume', 'network']),
+  scope: z.enum(['pod', 'container', 'volume', 'network']),
   category: z.string().optional(),
 });
 

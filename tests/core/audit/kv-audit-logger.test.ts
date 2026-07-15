@@ -10,15 +10,15 @@ describe('KvAuditLogger (white-box)', () => {
   describe('write', () => {
     it('writes an entry and makes it queryable', async () => {
       const logger = new KvAuditLogger(store());
-      await logger.write({ level: KernLevel.ERR, facility: 'sandbox-service', message: 'GC failed', actorId: 'user_1', metadata: { sandboxId: 'sb_1' } });
+      await logger.write({ level: KernLevel.ERR, facility: 'pod-service', message: 'GC failed', actorId: 'user_1', metadata: { podId: 'sb_1' } });
       const result = await logger.query();
       expect(result.total).toBe(1);
       const line = result.entries[0]!;
       expect(line.level).toBe(KernLevel.ERR);
-      expect(line.facility).toBe('sandbox-service');
+      expect(line.facility).toBe('pod-service');
       expect(line.message).toBe('GC failed');
       expect(line.actorId).toBe('user_1');
-      expect(line.metadata!.sandboxId).toBe('sb_1');
+      expect(line.metadata!.podId).toBe('sb_1');
     });
 
     it('generates unique IDs per entry', async () => {
@@ -34,18 +34,18 @@ describe('KvAuditLogger (white-box)', () => {
   describe('query filtering', () => {
     const logger = new KvAuditLogger(store());
     beforeAll(async () => {
-      await logger.write({ level: KernLevel.ERR, facility: 'sandbox', message: 'error msg' });
-      await logger.write({ level: KernLevel.WARNING, facility: 'sandbox', message: 'warning msg' });
+      await logger.write({ level: KernLevel.ERR, facility: 'pod', message: 'error msg' });
+      await logger.write({ level: KernLevel.WARNING, facility: 'pod', message: 'warning msg' });
       await logger.write({ level: KernLevel.INFO, facility: 'audit', message: 'info msg' });
     });
 
     it('filters by facility', async () => {
-      const r = await logger.query({ facility: 'sandbox' });
+      const r = await logger.query({ facility: 'pod' });
       expect(r.total).toBe(2);
     });
 
-    it('filters by time range for sandbox entries', async () => {
-      const r = await logger.query({ facility: 'sandbox' });
+    it('filters by time range for pod entries', async () => {
+      const r = await logger.query({ facility: 'pod' });
       expect(r.total).toBe(2);
       // Entries stored FIFO (insertion order): ERR first, then WARNING
       expect(r.entries[0]!.level).toBe(KernLevel.ERR);

@@ -180,15 +180,15 @@ export class WorkflowRunner {
     }
 
     try {
-      const { sandboxId, podId } = await this.#provisionJobSandbox(jobDef, wfEntry.value.env, jobRun.jobName);
+      const { podId } = await this.#provisionJobPod(jobDef, wfEntry.value.env, jobRun.jobName);
 
       const sEntry = await atomic.get<JobRun>(PFX_JOB_RUN + jobRunId);
       if (sEntry) {
-        current = { ...current, sandboxId, ...(podId ? { podId } : {}), version: generateVersionId() };
+        current = { ...current, podId, version: generateVersionId() };
         await atomic.set(PFX_JOB_RUN + jobRunId, current, sEntry.version);
       }
 
-      const stepRuns = await this.#executeSteps(jobDef.steps, wfEntry.value.env, sandboxId, jobRunId);
+      const stepRuns = await this.#executeSteps(jobDef.steps, wfEntry.value.env, podId, jobRunId);
 
       const allOk = stepRuns.every(s => s.status !== 'Failure');
       const finalEntry = await atomic.get<JobRun>(PFX_JOB_RUN + jobRunId);
@@ -416,11 +416,11 @@ export class WorkflowRunner {
     }
   }
 
-  async #provisionJobSandbox(
+  async #provisionJobPod(
     jobDef: JobDef,
     env: Record<string, string>,
     jobName: string,
-  ): Promise<{ sandboxId: string; podId?: string }> {
+  ): Promise<{ podId: string }> {
     const instanceId = jobDef.instanceId;
     const region = jobDef.region ?? 'local';
     const mergedEnv = { ...env, ...jobDef.env };
@@ -431,7 +431,7 @@ export class WorkflowRunner {
     if (this.deps.podService) {
       const podSpec = this.#jobToPodSpec(jobName, container, mergedEnv, jobDef);
       const pod = await this.deps.podService.provision(podSpec);
-      return { sandboxId: pod.providerId ?? pod.podId, podId: pod.podId };
+      return { podId: pod.providerId ?? pod.podId };
     }
 
     // v2 fallback: direct provider.create()
@@ -459,7 +459,7 @@ export class WorkflowRunner {
       network: { allocatePublicIp: false },
     });
 
-    return { sandboxId: result.providerId };
+    return { podId: result.providerId };
   }
 
   /** Build a PodSpec from a job definition for PodService.provision(). */
@@ -499,7 +499,7 @@ export class WorkflowRunner {
   async #executeSteps(
     steps: readonly StepDef[],
     env: Record<string, string>,
-    sandboxId: string,
+    podId: string,
     jobRunId: string,
   ): Promise<StepRun[]> {
     const stepRuns: StepRun[] = [];
@@ -519,7 +519,7 @@ export class WorkflowRunner {
 
       try {
         if (step.run != null) {
-          await this.#executeRunStep(step, env, sandboxId, provider);
+          await this.#executeRunStep(step, env, podId, provider);
           await appendStepLog(this.deps.stores.blob, jobRunId, name,
             `Step completed: ${name} (exit 0)`);
           stepRuns.push({ name, status: 'Success', startedAt, completedAt: Date.now(), exitCode: 0 });
@@ -532,7 +532,7 @@ export class WorkflowRunner {
           stepRuns.push({ name, status: 'Success', startedAt, completedAt: Date.now() });
 
         } else if (step.uses != null) {
-          await this.#executeUsesStep(step, env, sandboxId, provider);
+          await this.#executeUsesStep(step, env, podId, provider);
           await appendStepLog(this.deps.stores.blob, jobRunId, name,
             `Action completed: ${step.uses}`);
           stepRuns.push({ name, status: 'Success', startedAt, completedAt: Date.now(), exitCode: 0 });
@@ -564,7 +564,7 @@ export class WorkflowRunner {
   async #executeRunStep(
     step: RunStepDef,
     env: Record<string, string>,
-    sandboxId: string,
+    podId: string,
     provider: ExecProvider,
   ): Promise<void> {
     const shell = step.shell ?? '/bin/sh';
@@ -581,7 +581,7 @@ export class WorkflowRunner {
     );
 
     const result = await provider.exec({
-      providerId: sandboxId,
+      providerId: podId,
       command: [shell, '-c', script],
       env: envList,
       timeout: step.timeout ? step.timeout * 1000 : undefined,
@@ -598,7 +598,7 @@ export class WorkflowRunner {
   async #executeUsesStep(
     step: UsesStepDef,
     env: Record<string, string>,
-    sandboxId: string,
+    podId: string,
     provider: ExecProvider,
   ): Promise<void> {
     const registry = this.deps.actionRegistry;
@@ -608,7 +608,7 @@ export class WorkflowRunner {
         const mergedEnv = { ...env, ...step.env, ...step.with };
         const envList = Object.entries(mergedEnv).map(([k, v]) => `${k}=${v}`);
         const result = await provider.exec({
-          providerId: sandboxId,
+          providerId: podId,
           command: ['/bin/sh', '-c', `echo 'Running action: ${step.uses}'`],
           env: envList,
           timeout: step.timeout ? step.timeout * 1000 : undefined,
@@ -626,13 +626,13 @@ export class WorkflowRunner {
       throw new Error(`Action not found: ${step.uses}. Register it via POST /api/actions/actions or use a container image reference (e.g. docker.io/library/node:20).`);
     }
 
-    // For container-based actions, exec the entrypoint inside the sandbox
+    // For container-based actions, exec the entrypoint inside the pod
     if (provider.exec != null) {
       const mergedEnv = { ...env, ...step.env, ...step.with };
       const envList = Object.entries(mergedEnv).map(([k, v]) => `${k}=${v}`);
       const cmd = resolved.entrypoint ?? ['/bin/sh', '-c', `echo 'Action: ${step.uses}'`];
       const result = await provider.exec({
-        providerId: sandboxId,
+        providerId: podId,
         command: cmd,
         env: envList,
         timeout: step.timeout ? step.timeout * 1000 : undefined,

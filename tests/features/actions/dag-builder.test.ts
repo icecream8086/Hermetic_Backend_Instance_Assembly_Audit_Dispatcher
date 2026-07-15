@@ -44,7 +44,7 @@ describe('buildDagFromWorkflow', () => {
   it('tasks have correct operatorType', () => {
     const { dag } = buildDagFromWorkflow(dummyWorkflow());
     for (const task of dag.tasks) {
-      expect(task.operatorType).toBe('sandbox');
+      expect(task.operatorType).toBe('pod');
     }
   });
 

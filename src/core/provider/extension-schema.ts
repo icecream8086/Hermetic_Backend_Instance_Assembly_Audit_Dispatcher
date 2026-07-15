@@ -9,7 +9,7 @@ import { z } from 'zod';
  *
  * Two endpoints consume these schemas:
  *   GET  /api/extension-fields?instanceId=xxx  — schema for a specific instance
- *   POST /api/sandboxes                       — validated via providerOverrides
+ *   POST /api/pods                       — validated via providerOverrides
  */
 
 // ─── Field type ───
@@ -37,7 +37,7 @@ export interface ExtensionFieldDef {
   readonly transform?: 'boolean-string' | 'number-string' | 'json-string' | 'comma-sep';
   readonly validation?: ExtensionFieldValidation;
   /** Which level the parameter applies to. */
-  readonly scope: 'sandbox' | 'container' | 'volume' | 'network';
+  readonly scope: 'pod' | 'container' | 'volume' | 'network';
   /** Optional category grouping for UI. */
   readonly category?: string;
 }

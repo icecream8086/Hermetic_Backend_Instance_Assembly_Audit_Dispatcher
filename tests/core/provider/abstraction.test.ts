@@ -50,7 +50,7 @@ describe('IContainerProvider contract', () => {
 describe('Provider type shapes', () => {
   it('CreateContainerGroupInput accepts all fields including secretMounts', () => {
     const input: CreateContainerGroupInput = {
-      name: 'test-sandbox', region: 'local' as any,
+      name: 'test-pod', region: 'local' as any,
       cpu: 1, memory: 512, restartPolicy: 'Always',
       containers: [{
         name: 'main', image: 'nginx:latest',

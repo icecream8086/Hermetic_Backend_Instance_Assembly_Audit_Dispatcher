@@ -12,24 +12,25 @@ function fakeCtx(overrides?: Record<string, any>) {
 }
 
 describe('globalErrorHandler', () => {
-  it('returns structured AppError response with correct status and code', () => {
+  it('returns structured AppError response with correct status and code', async () => {
     const err = new AppError(404, 'SANDBOX_NOT_FOUND', 'Sandbox abc not found');
-    const result = globalErrorHandler(err, fakeCtx()) as any;
+    const result = await globalErrorHandler(err, fakeCtx()) as Response;
     expect(result.status).toBe(404);
-    expect(result.body.error.code).toBe('SANDBOX_NOT_FOUND');
-    expect(result.body.error.message).toBe('Sandbox abc not found');
-    expect(result.body.success).toBe(false);
+    const body = await result.json();
+    expect(body.error.code).toBe('SANDBOX_NOT_FOUND');
+    expect(body.error.message).toBe('Sandbox abc not found');
+    expect(body.success).toBe(false);
   });
 
-  it('returns AppError with 401 for auth failures', () => {
+  it('returns AppError with 401 for auth failures', async () => {
     const err = new AppError(401, 'UNAUTHORIZED', 'Invalid token');
-    const result = globalErrorHandler(err, fakeCtx()) as any;
+    const result = await globalErrorHandler(err, fakeCtx()) as Response;
     expect(result.status).toBe(401);
   });
 
-  it('returns AppError with 429 for rate limiting', () => {
+  it('returns AppError with 429 for rate limiting', async () => {
     const err = new AppError(429, 'RATE_LIMITED', 'Too many requests');
-    const result = globalErrorHandler(err, fakeCtx()) as any;
+    const result = await globalErrorHandler(err, fakeCtx()) as Response;
     expect(result.status).toBe(429);
   });
 

@@ -1,7 +1,7 @@
 /// <reference types="@cloudflare/workers-types" />
 
 import { z } from 'zod';
-import type { TaskMessage, TaskResult, SandboxGcPayload, ImagePullPayload, SandboxProvisionPayload, WorkflowJobRunPayload } from './types.ts';
+import type { TaskMessage, TaskResult, ImagePullPayload, WorkflowJobRunPayload } from './types.ts';
 import type { AppInstance } from '../core/deps.ts';
 import { CredentialService } from '../core/auth/credential.ts';
 import { WorkflowRunner } from '../features/actions/runner.ts';
@@ -84,8 +84,6 @@ export async function handleTask(
 ): Promise<TaskResult> {
   switch (msg.type) {
     case 'image:pull':         return handleImagePull(validateImagePullPayload(msg.payload), instance);
-    case 'sandbox:gc':         return handleSandboxGc(validateSandboxGcPayload(msg.payload), instance);
-    case 'sandbox:provision':  return handleSandboxProvision(validateSandboxProvisionPayload(msg.payload), instance);
     case 'workflow:job:run':   return handleWorkflowJobRun(validateWorkflowJobRunPayload(msg.payload), instance);
     default: {
       const _exhaustive: never = msg.type;
@@ -110,31 +108,12 @@ const imagePullPayloadSchema = z.object({
   }).optional(),
 });
 
-const sandboxGcPayloadSchema = z.object({
-  sandboxId: z.string(),
-  reason: z.enum(['stopped-gc', 'provider-gone', 'exited-gc', 'unhealthy-gc', 'manual', 'failed-gc', 'expired-gc', 'stuck-gc']),
-  providerId: z.string(),
-  region: z.string(),
-  instanceId: z.string().optional(),
-  containerCount: z.number(),
-  sandboxName: z.string(),
-  createdAt: z.number(),
-});
-
-const sandboxProvisionPayloadSchema = z.object({
-  sandboxId: z.string(),
-  providerId: z.string(),
-  instanceId: z.string().optional(),
-});
-
 const workflowJobRunPayloadSchema = z.object({
   jobRunId: z.string(),
   workflowRunId: z.string(),
 });
 
 function validateImagePullPayload(p: unknown): ImagePullPayload { return imagePullPayloadSchema.parse(p); }
-function validateSandboxGcPayload(p: unknown): SandboxGcPayload { return sandboxGcPayloadSchema.parse(p); }
-function validateSandboxProvisionPayload(p: unknown): SandboxProvisionPayload { return sandboxProvisionPayloadSchema.parse(p); }
 function validateWorkflowJobRunPayload(p: unknown): WorkflowJobRunPayload { return workflowJobRunPayloadSchema.parse(p); }
 
 // ─── Task handlers ───
@@ -184,44 +163,15 @@ async function handleImagePull(
     }, entry.version);
     return { success: true };
   } catch (e: unknown) {
-    console.error(`[queue] image.pull ${taskId} failed:`, e instanceof Error ? e.message : String(e));
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(`[queue] image.pull ${taskId} failed:`, msg);
     await stores.atomic.set('pull-task:' + taskId, {
       ...taskBase,
       status: 'failed',
-      error: e.message,
+      error: msg,
       failedAt: Date.now(),
     }, entry.version);
-    const errResult = { success: false, error: e.message };
-    return errResult;
-  }
-}
-
-async function handleSandboxGc(
-  _payload: SandboxGcPayload,
-  _instance: AppInstance,
-): Promise<TaskResult> {
-  // Sandbox GC is no longer needed — PodService handles GC.
-  return { success: true };
-}
-
-async function handleSandboxProvision(
-  payload: SandboxProvisionPayload,
-  { stores }: AppInstance,
-): Promise<TaskResult> {
-  // Post-provision async steps: bucket key bindings, DNS, etc.
-  // These don't block the create response — they run after provision returns.
-  try {
-    const entry = await stores.atomic.get<any>('sandbox:' + payload.sandboxId);
-    if (!entry) return { success: true };
-
-    // Future: auto-generate bucket keys, register DNS records, send notifications
-    // Currently these are done synchronously in sandbox.service.ts provision().
-    // This handler exists as a migration target — once provision is refactored
-    // to push async steps here, the sync path can shed latency.
-
-    return { success: true };
-  } catch (err) {
-    const errResult = { success: false, error: err instanceof Error ? err.message : String(err) };
+    const errResult = { success: false, error: msg };
     return errResult;
   }
 }

@@ -1,5 +1,5 @@
 /**
- * Log namespace isolation — per-facility + per-sandbox query helpers.
+ * Log namespace isolation — per-facility + per-pod query helpers.
  *
  * journald §4 model:
  *   _SYSTEMD_UNIT  → per-service isolation
@@ -8,7 +8,7 @@
  *
  * For this project:
  *   facility       → AuditFacility (0-23)
- *   _sandbox_id    → per-sandbox log isolation
+ *   _pod_id        → per-pod log isolation
  *   _boot_id       → per-session isolation
  */
 
@@ -21,8 +21,8 @@ import type { LogId } from '../brand.ts';
 export interface LogNamespace {
   /** Facility filter — restricts queries to this facility. */
   readonly facility?: string;
-  /** Sandbox ID filter — restricts queries to this sandbox. */
-  readonly sandboxId?: string;
+  /** Pod ID filter — restricts queries to this pod. */
+  readonly podId?: string;
   /** Boot ID filter — restricts queries to this boot session. */
   readonly bootId?: string;
   /** Minimum priority level. */
@@ -46,12 +46,12 @@ export class NamespacedAuditReader implements IAuditReader {
 
     const result = await this.reader.query(merged);
 
-    // Client-side filter for sandbox/boot ID (if not natively supported)
+    // Client-side filter for pod/boot ID (if not natively supported)
     let entries = result.entries;
-    if (this.ns.sandboxId) {
+    if (this.ns.podId) {
       entries = entries.filter(e =>
-        z.custom<Record<string, unknown>>().parse(e)['_sandbox_id'] === this.ns.sandboxId ||
-        e.metadata?.sandboxId === this.ns.sandboxId,
+        z.custom<Record<string, unknown>>().parse(e)['_pod_id'] === this.ns.podId ||
+        e.metadata?.podId === this.ns.podId,
       );
     }
     if (this.ns.bootId) {
@@ -73,10 +73,10 @@ export class NamespacedAuditReader implements IAuditReader {
   }
 }
 
-// ─── Per-sandbox helper ───
+// ─── Per-pod helper ───
 
-export function sandboxLogReader(reader: IAuditReader, sandboxId: string): IAuditReader {
-  return new NamespacedAuditReader(reader, { sandboxId });
+export function podLogReader(reader: IAuditReader, podId: string): IAuditReader {
+  return new NamespacedAuditReader(reader, { podId });
 }
 
 export function facilityLogReader(reader: IAuditReader, facility: string): IAuditReader {
@@ -85,7 +85,7 @@ export function facilityLogReader(reader: IAuditReader, facility: string): IAudi
 
 // ─── Query builders ───
 
-export function buildSandboxQuery(_sandboxId: string, base?: LogQuery): LogQuery {
+export function buildPodQuery(_podId: string, base?: LogQuery): LogQuery {
   return { ...base };
 }
 

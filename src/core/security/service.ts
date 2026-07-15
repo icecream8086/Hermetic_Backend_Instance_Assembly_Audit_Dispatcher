@@ -54,15 +54,15 @@ export class SecurityResourceService {
     return resource;
   }
 
-  // ── Issue JWT for sandbox ──
+  // ── Issue JWT for pod ──
 
   /**
    * Issue a JWT token encoding the access policy from all given SecurityResources.
-   * Call at sandbox provision time. Token is injected into the container.
+   * Call at pod provision time. Token is injected into the container.
    */
   public async issueToken(
     resourceNames: readonly string[],
-    sandboxId: string,
+    podId: string,
   ): Promise<{ token: string; expiresAt: string }> {
     const resources = await Promise.all(
       resourceNames.map(name => this.getByName(name)),
@@ -81,7 +81,7 @@ export class SecurityResourceService {
     const claims: S3AccessTokenClaims = {
       jti: crypto.randomUUID(),
       iss: 'hbi-aad',
-      sub: sandboxId,
+      sub: podId,
       iat: now,
       exp: now + ttl,
       grants: found.flatMap(r =>

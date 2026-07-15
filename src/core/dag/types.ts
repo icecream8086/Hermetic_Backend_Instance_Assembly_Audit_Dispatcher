@@ -36,7 +36,7 @@ export type OperatorType =
   | 'run'        // shell command inside container
   | 'uses'       // reusable action reference (container image or JS)
   | 'dns'        // DNS record upsert/delete
-  | 'sandbox'    // provision a full container group
+  | 'pod'    // provision a full container group
   | 'noop';      // no-op (placeholder / passthrough)
 
 // ─── Task definition ───

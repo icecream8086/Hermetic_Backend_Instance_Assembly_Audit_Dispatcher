@@ -26,11 +26,11 @@ interface ExecProvider {
  * JobOperator — executes a GitHub Actions–style Job as a single Task.
  *
  * This is the bridge between the Airflow scheduler and the existing
- * step-execution infrastructure. It provisions a sandbox and runs
+ * step-execution infrastructure. It provisions a pod and runs
  * the job's steps inside it.
  */
 export class JobOperator implements ITaskExecutor {
-  public readonly key = 'sandbox';
+  public readonly key = 'pod';
 
   public constructor(
     private readonly deps: {
@@ -62,8 +62,8 @@ export class JobOperator implements ITaskExecutor {
     const steps = config.steps;
 
     try {
-      // Provision sandbox
-      const sandboxId = await this.provisionSandbox(config);
+      // Provision pod
+      const podId = await this.provisionPod(config);
 
       // Execute steps sequentially
       for (const step of steps) {
@@ -77,11 +77,11 @@ export class JobOperator implements ITaskExecutor {
 
         try {
           if (step.run != null) {
-            await this.executeRunStep(step, config.env, sandboxId);
+            await this.executeRunStep(step, config.env, podId);
           } else if (step.dns != null) {
             await executeDnsStep(step, this.deps.providers.dns, this.deps.audit);
           } else if (step.uses != null) {
-            await this.executeUsesStep(step, config.env, sandboxId);
+            await this.executeUsesStep(step, config.env, podId);
           }
           await appendStepLog(this.deps.stores.blob, ti.id, name, `Step completed: ${name}`);
         } catch (err) {
@@ -124,7 +124,7 @@ export class JobOperator implements ITaskExecutor {
     return '';
   }
 
-  private async provisionSandbox(config: {
+  private async provisionPod(config: {
     jobName: string;
     env: Record<string, string>;
     container?: ActionContainerConfig;
@@ -202,7 +202,7 @@ export class JobOperator implements ITaskExecutor {
   private async executeRunStep(
     step: RunStepDef,
     env: Record<string, string>,
-    sandboxId: string,
+    podId: string,
   ): Promise<void> {
     const provider = z.custom<ExecProvider>().parse(await this.deps.providers.resolveContainer(undefined));
     if (provider?.exec == null) return;
@@ -211,7 +211,7 @@ export class JobOperator implements ITaskExecutor {
     const mergedEnv = Object.entries({ ...env, ...step.env }).map(([k, v]) => `${k}=${v}`);
 
     const result = await provider.exec({
-      providerId: sandboxId,
+      providerId: podId,
       command: [shell, '-c', step.run],
       env: mergedEnv,
       timeout: step.timeout ? step.timeout * 1000 : undefined,
@@ -225,7 +225,7 @@ export class JobOperator implements ITaskExecutor {
   private async executeUsesStep(
     step: UsesStepDef,
     env: Record<string, string>,
-    sandboxId: string,
+    podId: string,
   ): Promise<void> {
     const registry = this.deps.actionRegistry;
     const provider = z.custom<ExecProvider>().parse(await this.deps.providers.resolveContainer(undefined));
@@ -240,7 +240,7 @@ export class JobOperator implements ITaskExecutor {
       const envList = Object.entries(mergedEnv).map(([k, v]) => `${k}=${v}`);
       const cmd = resolved.entrypoint ?? ['/bin/sh', '-c', `echo 'Action: ${step.uses}'`];
       const result = await provider.exec({
-        providerId: sandboxId,
+        providerId: podId,
         command: cmd,
         env: envList,
         timeout: step.timeout ? step.timeout * 1000 : undefined,
@@ -252,7 +252,7 @@ export class JobOperator implements ITaskExecutor {
       const mergedEnv = { ...env, ...step.env, ...step.with };
       const envList = Object.entries(mergedEnv).map(([k, v]) => `${k}=${v}`);
       const result = await provider.exec({
-        providerId: sandboxId,
+        providerId: podId,
         command: ['/bin/sh', '-c', `echo 'Running action: ${step.uses}'`],
         env: envList,
         timeout: step.timeout ? step.timeout * 1000 : undefined,

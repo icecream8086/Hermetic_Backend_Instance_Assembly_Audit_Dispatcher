@@ -17,7 +17,7 @@ export interface TrustedFields {
   _user_id?: string;
   _source_ip?: string;
   _boot_id?: string;
-  _sandbox_id?: string;
+  _pod_id?: string;
 }
 
 /** Input for writing an audit/log entry. */
@@ -80,7 +80,7 @@ export interface LogQuery {
   offset?: number;
   /** Resume from after this cursor (exclusive). Use nextCursor from previous LogQueryResult. */
   afterCursor?: string;
-  /** Filter by priority range (inclusive). priorityMin=16 → SANDBOX.EMERG and above. */
+  /** Filter by priority range (inclusive). priorityMin=16 → POD.EMERG and above. */
   priorityMin?: number;
   priorityMax?: number;
 }

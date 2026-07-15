@@ -33,11 +33,11 @@ export function createInfoHandler(stores: Stores): OpenAPIHono {
     const stats = stores.metrics.snapshot();
     const info = {
       name: 'HBI-AAD',
-      description: 'Hermetic Backend Instance Assembly Audit Dispatcher — sandbox lifecycle management for game server fleets.',
+      description: 'Hermetic Backend Instance Assembly Audit Dispatcher — pod lifecycle management for game server fleets.',
       version: '4.0.0',
       platform: 'cloudflare-workers',
       region: process.env.CF_REGION ?? 'auto',
-      features: { sandbox: true, assembly: true, audit: true } satisfies Record<string, boolean>,
+      features: { pod: true, assembly: true, audit: true } satisfies Record<string, boolean>,
       uptime: Date.now() - START_TIME,
       storeMetrics: stats,
     };

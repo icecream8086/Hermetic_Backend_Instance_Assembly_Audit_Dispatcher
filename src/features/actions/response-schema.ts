@@ -134,7 +134,6 @@ export const JobRunResponseSchema = z.object({
   workflowRunId: z.string(),
   jobName: z.string(),
   status: z.enum(['Queued', 'Running', 'Success', 'Failure', 'Skipped', 'Cancelled']),
-  sandboxId: z.string().optional(),
   podId: z.string().optional(),
   attempts: z.number(),
   stepRuns: z.array(StepRunResponseSchema).readonly(),

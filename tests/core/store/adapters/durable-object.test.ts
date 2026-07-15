@@ -417,8 +417,8 @@ describe('DurableObjectAtomicStore (white-box)', () => {
         createMockNs(createMockStub(undefined, { failOps: new Set(['set']) })),
       );
       const version = await store.set('k', 'value', null);
-      // Adapter returns body.version directly (undefined from the error JSON)
-      expect(version).toBeUndefined();
+      // Adapter returns body.version directly (null from the error JSON)
+      expect(version).toBeNull();
     });
 
     it('transact throws when DO returns non-200', async () => {

@@ -108,7 +108,7 @@ describe('Permission group CRUD', () => {
       .withJson({
         name: 'Operators',
         rules: [
-          { effect: 'allow', actions: ['read', 'update'], resource: 'sandbox', priority: 10 },
+          { effect: 'allow', actions: ['read', 'update'], resource: 'pod', priority: 10 },
           { effect: 'deny', actions: ['delete'], priority: 99 },
         ],
         userGroupIds: ['$S{userGroupId}'],

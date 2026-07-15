@@ -40,16 +40,12 @@ describe('idempotency middleware', () => {
       headers: { 'Idempotency-Key': 'my-key' },
     });
     let nextCalled = false;
-    let jsonResponse: any = null;
-    // Mock c.json
-    const origJson = (ctx as any).json;
-    ctx.json = (body: any, status: number) => { jsonResponse = { body, status }; };
-
-    await mw(ctx, async () => { nextCalled = true; });
+    const result = await mw(ctx, async () => { nextCalled = true; }) as Response;
     expect(nextCalled).toBe(false);
-    expect(jsonResponse).toBeDefined();
-    expect(jsonResponse.status).toBe(201);
-    expect(jsonResponse.body.data).toBe('cached');
+    expect(result).toBeInstanceOf(Response);
+    const body = await result.json();
+    expect(result.status).toBe(201);
+    expect(body.data).toBe('cached');
   });
 
   it('executes request and stores response when key is new', async () => {

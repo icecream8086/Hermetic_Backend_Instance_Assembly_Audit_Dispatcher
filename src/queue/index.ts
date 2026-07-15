@@ -4,8 +4,6 @@ export type {
   TaskMessage,
   TaskResult,
   ImagePullPayload,
-  SandboxGcPayload,
-  SandboxProvisionPayload,
 } from './types.ts';
 
 // ─── Abstraction ───

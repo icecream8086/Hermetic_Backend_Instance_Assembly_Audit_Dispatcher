@@ -180,9 +180,7 @@ export interface JobRun {
   readonly workflowRunId: WorkflowRunId;
   readonly jobName: string;
   readonly status: JobRunStatus;
-  /** Provider-assigned resource ID (backward compat). */
-  readonly sandboxId?: string;
-  /** PodService-assigned PodId for lifecycle tracking (v3 unified path). */
+  /** Provider-assigned or PodService-assigned resource ID. */
   readonly podId?: string;
   readonly attempts: number;
   readonly stepRuns: readonly StepRun[];

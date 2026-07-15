@@ -45,7 +45,7 @@ describe('encodePriority', () => {
     expect(encodePriority(AuditFacility.LOCAL7, KernLevel.DEBUG)).toBe(191);
   });
   it('encode rounds to facility * 8 + level', () => {
-    expect(encodePriority(AuditFacility.SANDBOX, KernLevel.WARNING)).toBe(12);
+    expect(encodePriority(AuditFacility.POD, KernLevel.WARNING)).toBe(12);
     expect(encodePriority(AuditFacility.LOCAL0, KernLevel.CRIT)).toBe(130);
   });
 
@@ -104,7 +104,7 @@ describe('resolveFacility', () => {
   });
   it('aliases', () => {
     expect(resolveFacility('system')).toBe(AuditFacility.KERN);
-    expect(resolveFacility('sandbox-service')).toBe(AuditFacility.SANDBOX);
+    expect(resolveFacility('pod-service')).toBe(AuditFacility.POD);
   });
   it('case-insensitive', () => {
     expect(resolveFacility('KERN')).toBe(AuditFacility.KERN);

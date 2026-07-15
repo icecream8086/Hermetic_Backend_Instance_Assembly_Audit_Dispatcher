@@ -84,7 +84,7 @@ describe('SecurityResourceService', () => {
         accessPolicy: [{ prefix: 'logs/', permissions: ['read', 'write'] }],
       }));
 
-      const { token, expiresAt } = await svc.issueToken(['resource-a', 'resource-b'], 'sandbox-001');
+      const { token, expiresAt } = await svc.issueToken(['resource-a', 'resource-b'], 'pod-001');
       expect(token).toBeTruthy();
       expect(token.split('.')).toHaveLength(3);
       expect(expiresAt).toBeTruthy();
@@ -96,7 +96,7 @@ describe('SecurityResourceService', () => {
       const result = await verifyToken(token, secret);
       expect(result.valid).toBe(true);
       if (result.valid) {
-        expect(result.claims.sub).toBe('sandbox-001');
+        expect(result.claims.sub).toBe('pod-001');
         expect(result.claims.iss).toBe('hbi-aad');
         // Should have merged grants from both resources
         const buckets = result.claims.grants.map(g => g.bucket);
@@ -108,7 +108,7 @@ describe('SecurityResourceService', () => {
 
     it('throws when a resource is not found', async () => {
       await svc.provision(makeCreateInput({ name: 'exists' }));
-      await expect(svc.issueToken(['exists', 'does-not-exist'], 'sandbox-001'))
+      await expect(svc.issueToken(['exists', 'does-not-exist'], 'pod-001'))
         .rejects.toThrow('does-not-exist');
     });
   });

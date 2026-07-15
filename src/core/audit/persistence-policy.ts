@@ -65,7 +65,7 @@ export function buildDefaultPersistencePolicy(): PersistencePolicy {
       { facility: 'perm', minLevel: KernLevel.WARNING, sampleRate: 1 },
       { facility: 'perm-audit', minLevel: KernLevel.WARNING, sampleRate: 1 },
       // Tier 2 overrides for critical infrastructure
-      { facility: 'sandbox', minLevel: KernLevel.ERR, sampleRate: 1 },
+      { facility: 'pod', minLevel: KernLevel.ERR, sampleRate: 1 },
       { facility: 'provider', minLevel: KernLevel.ERR, sampleRate: 1 },
       { facility: 'queue', minLevel: KernLevel.WARNING, sampleRate: 1 },
       // High-volume facilities: only persist ERR+

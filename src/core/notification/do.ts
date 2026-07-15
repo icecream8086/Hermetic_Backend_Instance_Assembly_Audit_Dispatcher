@@ -18,8 +18,8 @@ import { z } from 'zod';
 const MAX_BROADCAST_BYTES = 65_536;
 
 const ALLOWED_EVENT_TYPES = new Set([
-  'sandbox.provisioned',
-  'sandbox.status',
+  'pod.provisioned',
+  'pod.status',
 ]);
 
 export class NotificationDO implements DurableObject {
@@ -97,7 +97,7 @@ export class NotificationDO implements DurableObject {
     }
   }
 
-  /** Check if event type matches any subscription channel (supports wildcard: "sandbox.*"). */
+  /** Check if event type matches any subscription channel (supports wildcard: "pod.*"). */
   #matches(channels: Set<string>, eventType: string): boolean {
     for (const ch of channels) {
       if (ch === '*' || ch === eventType) return true;

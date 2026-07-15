@@ -45,12 +45,12 @@ const LOG_POLICY_KEY = '_sys:log-policy';
 // ─── Built-in templates ───
 const TEMPLATES: Template[] = [
   { id: 'admin', name: 'Administrator', description: 'Full access to all resources', rules: [{ effect: 'allow', actions: ['*'], resource: '*', priority: 100 }] },
-  { id: 'operator', name: 'Operator', description: 'CRUD access on sandboxes and users, no admin actions', rules: [{ effect: 'allow', actions: ['create', 'read', 'update', 'delete'], priority: 80 }, { effect: 'deny', actions: ['admin'], priority: 90 }] },
+  { id: 'operator', name: 'Operator', description: 'CRUD access on pods and users, no admin actions', rules: [{ effect: 'allow', actions: ['create', 'read', 'update', 'delete'], priority: 80 }, { effect: 'deny', actions: ['admin'], priority: 90 }] },
   { id: 'viewer', name: 'Viewer', description: 'Read-only access to resources', rules: [{ effect: 'allow', actions: ['read'], priority: 70 }] },
   { id: 'login-only', name: 'Login Only', description: 'Can only authenticate, no resource access', rules: [{ effect: 'allow', actions: ['login'], resource: 'session', priority: 60 }, { effect: 'deny', actions: ['*'], resource: '*', priority: 50 }] },
-  { id: 'daemon', name: 'Daemon Service Account', description: 'Key-only auth, sandbox CRUD on $self, no user management', rules: [
+  { id: 'daemon', name: 'Daemon Service Account', description: 'Key-only auth, pod CRUD on $self, no user management', rules: [
     { effect: 'allow', actions: ['login'], resource: 'session', priority: 60 },
-    { effect: 'allow', actions: ['read', 'update'], resource: 'sandbox:$self', priority: 50 },
+    { effect: 'allow', actions: ['read', 'update'], resource: 'pod:$self', priority: 50 },
     { effect: 'allow', actions: ['read'], resource: 'image', priority: 50 },
     { effect: 'allow', actions: ['read'], resource: 'template', priority: 50 },
     { effect: 'deny', actions: ['admin', 'delete', 'create'], resource: 'user', priority: 99 },
