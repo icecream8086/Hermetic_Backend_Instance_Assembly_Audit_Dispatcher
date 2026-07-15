@@ -431,6 +431,194 @@ describe('mergePodSpec', () => {
     expect(result.spec.tolerations).toEqual(parent.spec.tolerations);
   });
 
+  // ─── Algebraic properties (ISSUE-00016) ─────────────────────────────
+
+  describe('幂等: merge(x, x) === x', () => {
+    it('minimal PodSpec', () => {
+      const spec: PodSpec = {
+        metadata: { name: 'test' },
+        spec: {
+          containers: [{ name: 'web', image: 'nginx' }],
+          restartPolicy: 'Always',
+        },
+      };
+      expect(mergePodSpec(spec, spec)).toEqual(spec);
+    });
+
+    it('PodSpec with all optional fields', () => {
+      const spec: PodSpec = {
+        metadata: { name: 'full', labels: { app: 'myapp' }, annotations: { note: 'a' } },
+        spec: {
+          containers: [{ name: 'web', image: 'nginx:1', command: ['run'], args: ['--port=80'], ports: [{ containerPort: 80 }], resources: { limits: { cpu: 1, memory: 512 } } }],
+          initContainers: [{ name: 'setup', image: 'busybox' }],
+          volumes: [{ id: 'v1', type: 'NFSVolume' }],
+          restartPolicy: 'OnFailure',
+          priority: 10, nodeSelector: { disk: 'ssd' },
+          terminationGracePeriodSeconds: 30,
+          dnsConfig: { nameservers: ['8.8.8.8'] },
+          hostAliases: [{ ip: '127.0.0.1', hostnames: ['local'] }],
+          secretRefs: [{ secretName: 's1', mountPath: '/s1' }],
+          resolvedSecrets: { s1: { value: 'v1' } },
+          secretMounts: [{ mountPath: '/mnt', data: 'd1' }],
+          topologySpreadConstraints: [{ maxSkew: 1, topologyKey: 'zone', whenUnsatisfiable: 'ScheduleAnyway' }],
+          affinity: { nodeAffinity: { requiredDuringSchedulingIgnoredDuringExecution: { nodeSelectorTerms: [{ matchExpressions: [{ key: 'type', operator: 'In', values: ['compute'] }] }] } } },
+          tolerations: [{ key: 'spot', operator: 'Exists' }],
+          preemptionPolicy: 'Never',
+        },
+        providerOverrides: { alibaba: { region: 'cn-hangzhou' } },
+      };
+      expect(mergePodSpec(spec, spec)).toEqual(spec);
+    });
+
+    it('multiple containers with providerOverrides', () => {
+      const spec: PodSpec = {
+        metadata: { name: 'multi' },
+        spec: {
+          containers: [
+            { name: 'web', image: 'nginx', env: [{ key: 'B', value: '2' }] },
+            { name: 'sidecar', image: 'sidecar', args: ['--debug'], tty: true },
+          ],
+          restartPolicy: 'Always',
+          volumes: [{ id: 'd1', type: 'DiskVolume' }],
+        },
+        providerOverrides: { aws: { region: 'us-east-1' } },
+      };
+      expect(mergePodSpec(spec, spec)).toEqual(spec);
+    });
+  });
+
+  describe('结合律: merge(merge(a,b),c) === merge(a,merge(b,c))', () => {
+    const base: PodSpec = {
+      metadata: { name: 'base', labels: { app: 'myapp' }, annotations: { team: 'alpha' } },
+      spec: {
+        containers: [{ name: 'web', image: 'nginx:1.0' }],
+        restartPolicy: 'Always',
+        priority: 1, volumes: [{ id: 'v1', type: 'NFSVolume' }],
+      },
+    };
+    const a: PodSpec = {
+      metadata: { name: 'a', labels: { tier: 'frontend' } },
+      spec: {
+        containers: [{ name: 'web', image: 'nginx:1.5', ports: [{ containerPort: 80 }] }, { name: 'sidecar', image: 'side:1.0' }],
+        restartPolicy: 'OnFailure', priority: 5,
+        volumes: [{ id: 'v1', type: 'DiskVolume' }, { id: 'v2', type: 'EmptyDirVolume' }],
+        hostAliases: [{ ip: '10.0.0.1', hostnames: ['srv1'] }],
+        secretMounts: [{ mountPath: '/sec', data: 'd1' }],
+      },
+      providerOverrides: { alibaba: { region: 'cn-hangzhou' } },
+    };
+    const b: PodSpec = {
+      metadata: { name: 'b', labels: { env: 'staging' } },
+      spec: {
+        containers: [{ name: 'web', image: 'nginx:2.0' }, { name: 'worker', image: 'worker:1.0' }],
+        restartPolicy: 'Never', priority: 10,
+        volumes: [{ id: 'v2', type: 'OSSVolume' }],
+        hostAliases: [{ ip: '10.0.0.2', hostnames: ['srv2'] }],
+        secretMounts: [{ mountPath: '/sec', data: 'd2' }, { mountPath: '/other', data: 'o1' }],
+        tolerations: [{ key: 'gpu', operator: 'Exists' }],
+      },
+      providerOverrides: { aws: { region: 'us-east-1' } },
+    };
+
+    it('associativity of three-template merge (base + a + b)', () => {
+      expect(mergePodSpec(mergePodSpec(base, a), b)).toEqual(mergePodSpec(base, mergePodSpec(a, b)));
+    });
+
+    it('associativity with empty intermediate (base + empty + a)', () => {
+      const empty: PodSpec = {
+        metadata: { name: 'empty' },
+        spec: { containers: [{ name: 'web', image: 'nginx' }], restartPolicy: 'Always' },
+      };
+      expect(mergePodSpec(mergePodSpec(base, empty), a)).toEqual(mergePodSpec(base, mergePodSpec(empty, a)));
+    });
+  });
+
+  describe('子覆盖父: child fields override parent', () => {
+    it('same-name container: child image replaces, parent command inherited', () => {
+      const parent: PodSpec = {
+        metadata: { name: 'p' }, spec: { containers: [{ name: 'web', image: 'nginx:1.0', command: ['old'] }], restartPolicy: 'Always' },
+      };
+      const child: PodSpec = {
+        metadata: { name: 'c' }, spec: { containers: [{ name: 'web', image: 'nginx:2.0' }], restartPolicy: 'Always' },
+      };
+      const r = mergePodSpec(parent, child);
+      expect(r.spec.containers.find(c => c.name === 'web')!.image).toBe('nginx:2.0');
+      expect(r.spec.containers.find(c => c.name === 'web')!.command).toEqual(['old']);
+    });
+
+    it('same-id volume: child replaces parent', () => {
+      const parent: PodSpec = {
+        metadata: { name: 'p' }, spec: { containers: [{ name: 'web', image: 'nginx' }], restartPolicy: 'Always', volumes: [{ id: 'v1', type: 'NFSVolume' }] },
+      };
+      const child: PodSpec = {
+        metadata: { name: 'c' }, spec: { containers: [{ name: 'web', image: 'nginx' }], restartPolicy: 'Always', volumes: [{ id: 'v1', type: 'OSSVolume' }] },
+      };
+      expect(mergePodSpec(parent, child).spec.volumes![0].type).toBe('OSSVolume');
+    });
+
+    it('metadata: child labels overwrite parent entirely', () => {
+      const parent: PodSpec = {
+        metadata: { name: 'p', labels: { app: 'myapp', tier: 'web' } }, spec: { containers: [{ name: 'web', image: 'nginx' }], restartPolicy: 'Always' },
+      };
+      const child: PodSpec = {
+        metadata: { name: 'c', labels: { env: 'prod' } }, spec: { containers: [{ name: 'web', image: 'nginx' }], restartPolicy: 'Always' },
+      };
+      expect(mergePodSpec(parent, child).metadata.labels).toEqual({ env: 'prod' });
+    });
+
+    it('all 14 ContainerSpec optional fields inherited when child omits them', () => {
+      const parent: PodSpec = {
+        metadata: { name: 'p' },
+        spec: {
+          containers: [{
+            name: 'web', image: 'nginx:1.0',
+            command: ['run'], args: ['--port=80'],
+            env: [{ key: 'NODE_ENV', value: 'prod' }],
+            resources: { limits: { cpu: 2, memory: 4096, gpu: 1, gpuType: 'nvidia' } },
+            ports: [{ containerPort: 80, protocol: 'TCP' }],
+            volumeMounts: [{ name: 'data', mountPath: '/data' }],
+            livenessProbe: { httpGet: { path: '/health', port: 80 }, initialDelaySeconds: 5 },
+            readinessProbe: { httpGet: { path: '/ready', port: 80 }, initialDelaySeconds: 3 },
+            startupProbe: { httpGet: { path: '/startup', port: 80 }, failureThreshold: 30 },
+            imagePullPolicy: 'Always',
+            tty: true, stdin: true,
+            networkMode: 'host',
+            providerOverrides: { alibaba: { spot: true } },
+          }],
+          restartPolicy: 'Always',
+        },
+      };
+      const child: PodSpec = {
+        metadata: { name: 'c' },
+        spec: {
+          containers: [{ name: 'web', image: 'nginx:2.0' }],
+          restartPolicy: 'Always',
+        },
+      };
+      const result = mergePodSpec(parent, child);
+      expect(result.spec.containers).toHaveLength(1);
+      const c = result.spec.containers[0]!;
+      // Child name+image override
+      expect(c.name).toBe('web');
+      expect(c.image).toBe('nginx:2.0');
+      // All optional fields inherited from parent
+      expect(c.command).toEqual(['run']);
+      expect(c.args).toEqual(['--port=80']);
+      expect(c.env).toEqual([{ key: 'NODE_ENV', value: 'prod' }]);
+      expect(c.resources).toEqual({ limits: { cpu: 2, memory: 4096, gpu: 1, gpuType: 'nvidia' } });
+      expect(c.ports).toEqual([{ containerPort: 80, protocol: 'TCP' }]);
+      expect(c.volumeMounts).toEqual([{ name: 'data', mountPath: '/data' }]);
+      expect(c.livenessProbe).toEqual({ httpGet: { path: '/health', port: 80 }, initialDelaySeconds: 5 });
+      expect(c.readinessProbe).toEqual({ httpGet: { path: '/ready', port: 80 }, initialDelaySeconds: 3 });
+      expect(c.startupProbe).toEqual({ httpGet: { path: '/startup', port: 80 }, failureThreshold: 30 });
+      expect(c.imagePullPolicy).toBe('Always');
+      expect(c.tty).toBe(true);
+      expect(c.stdin).toBe(true);
+      expect(c.networkMode).toBe('host');
+      expect(c.providerOverrides).toEqual({ alibaba: { spot: true } });
+    });
+  });
+
   // ─── Edge: providerOverrides absent in child ──────────────────────────
 
   it('preserves parent providerOverrides when child does not set them', () => {

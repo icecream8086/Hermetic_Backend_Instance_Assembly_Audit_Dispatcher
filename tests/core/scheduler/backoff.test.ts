@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import fc from 'fast-check';
 import {
   backoffDelay,
   shouldResetBackoff,
@@ -69,5 +70,11 @@ describe('shouldRestart', () => {
       policy: 'Always',
       rules: [{ action: 'DoNotRestart', operator: 'NotIn', exitCodes: { values: [1, 2] } }],
     })).toBe(false);
+  });
+});
+
+describe('backoffDelay monotonic property (PBT)', () => {
+  it('never decreases as n increases', () => {
+    fc.assert(fc.property(fc.integer({ min: 1, max: 20 }), (n) => backoffDelay(n) <= backoffDelay(n + 1)));
   });
 });

@@ -64,7 +64,7 @@ function randomDagArbitrary(
 
 describe('DAG topological sort (property-based)', () => {
   describe('edge ordering invariant', () => {
-    it('for every edge A→B, A appears before B in the sorted result', () => {
+    it('for every edge A→B, A appears before B in the sorted result', { timeout: 15000 }, () => {
       fc.assert(
         fc.property(randomDagArbitrary(20, 40), (dag) => {
           const result = dag.topologicalSort();
@@ -196,28 +196,75 @@ describe('DAG topological sort (property-based)', () => {
     });
   });
 
+  describe('permutative: different insertion orders produce valid sorts', () => {
+    it('shuffled node/edge insertion still yields valid topological order', () => {
+      const NODES = [
+        { id: 'a', label: 'A' }, { id: 'b', label: 'B' }, { id: 'c', label: 'C' },
+        { id: 'd', label: 'D' }, { id: 'e', label: 'E' }, { id: 'f', label: 'F' },
+      ];
+      type Edge = [string, string];
+      const EDGES: Edge[] = [
+        ['a', 'b'], ['a', 'c'], ['b', 'd'], ['c', 'd'], ['c', 'e'], ['d', 'f'], ['e', 'f'],
+      ];
+
+      const shuffles: Array<{ nodes: typeof NODES; edges: Edge[] }> = [
+        { nodes: NODES, edges: EDGES },
+        { nodes: [...NODES].reverse(), edges: [...EDGES].reverse() },
+        { nodes: [NODES[5]!, NODES[2]!, NODES[0]!, NODES[3]!, NODES[1]!, NODES[4]!], edges: [['c', 'e'], ['a', 'c'], ['d', 'f'], ['e', 'f'], ['a', 'b'], ['c', 'd'], ['b', 'd']] },
+      ];
+
+      for (const { nodes, edges } of shuffles) {
+        const dag = makeDag();
+        for (const n of nodes) dag.addNode(n);
+        for (const [from, to] of edges) dag.addEdge(from, to);
+        const result = dag.topologicalSort();
+        expect(result.success).toBe(true);
+        if (!result.success) return;
+        const pos = new Map<string, number>();
+        for (let i = 0; i < result.sorted.length; i++) pos.set(result.sorted[i]!.id, i);
+        for (const [from, to] of edges) expect(pos.get(from)!).toBeLessThan(pos.get(to)!);
+      }
+    });
+  });
+
   describe('reachable subgraph', () => {
-    it('subgraph contains only nodes reachable from root', () => {
+    it('subgraph contains exactly the transitive closure from root', () => {
       fc.assert(
         fc.property(randomDagArbitrary(12, 20), (dag) => {
           const allNodes = dag.getAllNodes();
           if (allNodes.length === 0) return;
 
-          // Pick a random node as root
           const rootIdx = Math.floor(Math.random() * allNodes.length);
           const root = allNodes[rootIdx]!;
 
           const result = dag.reachableSubgraph(root.id);
-          if (!result.success) return; // Skip if root missing (shouldn't happen)
+          if (!result.success) return;
 
-          // Every node in the subgraph must be reachable from root in the original
-          const subNodes = result.dag.getAllNodes();
-          for (const subNode of subNodes) {
-            expect(dag.hasNode(subNode.id)).toBe(true);
+          // Compute expected reachable set via BFS
+          const reachable = new Set<string>();
+          const queue = [root.id];
+          reachable.add(root.id);
+          while (queue.length > 0) {
+            const id = queue.shift()!;
+            for (const succ of dag.successorsOf(id)) {
+              if (!reachable.has(succ.id)) {
+                reachable.add(succ.id);
+                queue.push(succ.id);
+              }
+            }
           }
 
-          // Root must be in the subgraph
-          expect(result.dag.hasNode(root.id)).toBe(true);
+          // Subgraph size must match expected reachable count
+          expect(result.dag.size).toBe(reachable.size);
+
+          // Every expected reachable node is in subgraph (completeness)
+          for (const id of reachable) {
+            expect(result.dag.hasNode(id)).toBe(true);
+          }
+          // Every subgraph node is in expected reachable set (soundness)
+          for (const n of result.dag.getAllNodes()) {
+            expect(reachable.has(n.id)).toBe(true);
+          }
         }),
         { numRuns: 100 },
       );

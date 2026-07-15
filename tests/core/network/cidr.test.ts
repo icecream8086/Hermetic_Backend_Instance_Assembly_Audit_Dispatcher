@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseCidr, formatCidr, contains, subnets, nextSubnet, hostCount } from '../../../src/core/network/cidr.ts';
+import { parseCidr, formatCidr, contains, subnets, nextSubnet, hostCount, broadcast, cidrKey } from '../../../src/core/network/cidr.ts';
 
 describe('CIDR utilities', () => {
   it('parses and formats CIDR', () => {
@@ -73,5 +73,53 @@ describe('CIDR utilities', () => {
     expect(hostCount(parseCidr('10.0.0.0/24'))).toBe(254);
     expect(hostCount(parseCidr('10.0.0.0/31'))).toBe(2); // ptp
     expect(hostCount(parseCidr('10.0.0.0/32'))).toBe(1);
+  });
+});
+
+describe('broadcast', () => {
+  it('broadcast of 10.0.0.0/24 is 10.0.0.255', () => {
+    expect(formatCidr({ ip: broadcast(parseCidr('10.0.0.0/24')), bits: 32 })).toBe('10.0.0.255/32');
+  });
+});
+
+describe('format(parse(s)) == s round-trip', () => {
+  it.each([
+    '10.0.0.0/24',
+    '192.168.0.0/16',
+    '10.2.3.4/32',
+  ])('%s', (input) => {
+    expect(formatCidr(parseCidr(input))).toBe(input);
+  });
+});
+
+describe('subnets disjoint and union', () => {
+  it('subnets(10.0.0.0/24, 26) yields 4 disjoint subnets contained in parent', () => {
+    const parent = parseCidr('10.0.0.0/24');
+    const parts = [...subnets(parent, 26)];
+    expect(parts).toHaveLength(4);
+    expect(formatCidr(parts[0])).toBe('10.0.0.0/26');
+    expect(formatCidr(parts[1])).toBe('10.0.0.64/26');
+    expect(formatCidr(parts[2])).toBe('10.0.0.128/26');
+    expect(formatCidr(parts[3])).toBe('10.0.0.192/26');
+    // each contained in parent
+    for (const part of parts) {
+      expect(contains(parent, part)).toBe(true);
+    }
+    // pairwise disjoint
+    for (let i = 0; i < parts.length; i++) {
+      for (let j = i + 1; j < parts.length; j++) {
+        expect(contains(parts[i], parts[j])).toBe(false);
+        expect(contains(parts[j], parts[i])).toBe(false);
+      }
+    }
+  });
+});
+
+describe('contains() issue spec examples', () => {
+  it('/8 contains /24', () => {
+    expect(contains(parseCidr('10.0.0.0/8'), parseCidr('10.0.0.0/24'))).toBe(true);
+  });
+  it('/24 does not contain /8', () => {
+    expect(contains(parseCidr('10.0.0.0/24'), parseCidr('10.0.0.0/8'))).toBe(false);
   });
 });

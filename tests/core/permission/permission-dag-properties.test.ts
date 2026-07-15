@@ -251,4 +251,93 @@ describe('PermissionDag (property-based)', () => {
       expect(result.allowed).toBe(true);
     });
   });
+
+  // ═════════════════════════════════════════════════════════════
+  // ISSUE-00019 — topological order + additive + edge cases
+  // ═════════════════════════════════════════════════════════════
+
+  describe('topological ordering in evaluation', () => {
+    it('evaluation respects dependency chain order', () => {
+      // early=DENY(no match) → middle=ALLOW(match) → late=DENY(match)
+      // If topo order respected: early skip, middle allow, then late deny-overrides
+      const dag = new PermissionDag();
+      dag.addPolicy(neverNode(p('early'), PermissionEffect.DENY));
+      dag.addPolicy(alwaysNode(p('middle'), PermissionEffect.ALLOW));
+      dag.addPolicy(alwaysNode(p('late'), PermissionEffect.DENY, 'should-deny'));
+      dag.addDependency(p('early'), p('middle'));
+      dag.addDependency(p('middle'), p('late'));
+      const result = dag.evaluate(emptyCheck);
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain('should-deny');
+    });
+
+    it('multi-level DAG: DENY wins regardless of depth', () => {
+      const dag = new PermissionDag();
+      for (let i = 0; i < 5; i++) {
+        dag.addPolicy(alwaysNode(p(`n${i}`), i === 1 ? PermissionEffect.DENY : PermissionEffect.ALLOW));
+        if (i > 0) dag.addDependency(p(`n${i - 1}`), p(`n${i}`));
+      }
+      expect(dag.evaluate(emptyCheck).allowed).toBe(false);
+    });
+
+    it('matchedPolicy reports the first matching ALLOW in topological order', () => {
+      const dag = new PermissionDag();
+      dag.addPolicy(alwaysNode(p('first'), PermissionEffect.ALLOW, 'first-allow'));
+      dag.addPolicy(alwaysNode(p('second'), PermissionEffect.ALLOW, 'second-allow'));
+      dag.addDependency(p('first'), p('second'));
+
+      const result = dag.evaluate(emptyCheck);
+      expect(result.allowed).toBe(true);
+      expect(result.matchedPolicy).toBeDefined();
+      expect(result.matchedPolicy!.id).toBe(p('first'));
+    });
+
+    it('matchedPolicy picks first ALLOW in topo order even when insertion order differs', () => {
+      const dag = new PermissionDag();
+      dag.addPolicy(alwaysNode(p('second'), PermissionEffect.ALLOW, 'second-allow'));
+      dag.addPolicy(alwaysNode(p('first'), PermissionEffect.ALLOW, 'first-allow'));
+      dag.addDependency(p('first'), p('second'));
+
+      const result = dag.evaluate(emptyCheck);
+      expect(result.allowed).toBe(true);
+      expect(result.matchedPolicy!.id).toBe(p('first'));
+    });
+  });
+
+  describe('additive: unrelated policies do not change result', () => {
+    it('adding non-matching nodes does not change DENY result', () => {
+      const dag = new PermissionDag();
+      dag.addPolicy(alwaysNode(p('deny'), PermissionEffect.DENY));
+      dag.addPolicy(neverNode(p('extra-deny'), PermissionEffect.DENY));
+      dag.addPolicy(neverNode(p('extra-allow'), PermissionEffect.ALLOW));
+      expect(dag.evaluate(emptyCheck).allowed).toBe(false);
+    });
+
+    it('PBT: adding unrelated policies does not flip ALLOW→DENY', () => {
+      fc.assert(fc.property(fc.integer({ min: 1, max: 8 }), fc.integer({ min: 0, max: 5 }), (ac, ec) => {
+        const dag = new PermissionDag();
+        for (let i = 0; i < ac; i++) dag.addPolicy(alwaysNode(p(`a${i}`), PermissionEffect.ALLOW));
+        for (let i = 0; i < ec; i++) dag.addPolicy(neverNode(p(`e${i}`), PermissionEffect.DENY));
+        expect(dag.evaluate(emptyCheck).allowed).toBe(true);
+      }), { numRuns: 100 });
+    });
+  });
+
+  describe('conditional matching', () => {
+    it('actor-specific allow/deny', () => {
+      const dag = new PermissionDag();
+      dag.addPolicy({ id: p('admin'), effect: PermissionEffect.ALLOW, description: 'admin', match: p => p.actor === 'admin' });
+      dag.addPolicy({ id: p('deny-guest'), effect: PermissionEffect.DENY, description: 'no guest', match: p => p.actor === 'guest' });
+      expect(dag.evaluate({ actor: 'admin', action: 'read', resource: 'x' }).allowed).toBe(true);
+      expect(dag.evaluate({ actor: 'guest', action: 'read', resource: 'x' }).allowed).toBe(false);
+    });
+
+    it('resource-specific deny overrides broad allow', () => {
+      const dag = new PermissionDag();
+      dag.addPolicy({ id: p('allow-all'), effect: PermissionEffect.ALLOW, description: 'allow all', match: () => true });
+      dag.addPolicy({ id: p('deny-del'), effect: PermissionEffect.DENY, description: 'deny deleted', match: p => p.resource.startsWith('deleted-') });
+      expect(dag.evaluate({ actor: 'u1', action: 'read', resource: 'normal' }).allowed).toBe(true);
+      expect(dag.evaluate({ actor: 'u1', action: 'read', resource: 'deleted-x' }).allowed).toBe(false);
+    });
+  });
 });

@@ -88,13 +88,22 @@ const NAME_TO_FACILITY = {
 /** Known facility name — derived from NAME_TO_FACILITY keys. Typo → compile error. */
 export type FacilityName = keyof typeof NAME_TO_FACILITY;
 
+const MAX_FACILITY = 23;
+const MAX_LEVEL = 7;
+
 /** Encode facility + severity into a single priority integer (0-191). */
-export function encodePriority(facility: AuditFacility, level: KernLevel): number {
+export function encodePriority(facility: number, level: number): number {
+  if (facility < 0 || facility > MAX_FACILITY || !Number.isInteger(facility)) {
+    throw new RangeError(`encodePriority: facility ${String(facility)} out of range [0, ${String(MAX_FACILITY)}]`);
+  }
+  if (level < 0 || level > MAX_LEVEL || !Number.isInteger(level)) {
+    throw new RangeError(`encodePriority: level ${String(level)} out of range [0, ${String(MAX_LEVEL)}]`);
+  }
   return (facility << 3) | level;
 }
 
 /** Decode a priority integer back to facility and severity. */
-export function decodePriority(priority: number): { facility: AuditFacility; level: KernLevel } {
+export function decodePriority(priority: number): { facility: number; level: number } {
   return { facility: (priority >> 3), level: (priority & 0x7) };
 }
 

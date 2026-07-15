@@ -28,7 +28,7 @@ export function evaluateTriggerRule(
       return upstreamStates.every(s => s === 'SUCCESS');
 
     case 'all_failed': {
-      if (upstreamStates.length === 0) return false;
+      // NOTE: empty upstream already returned true at line 24 — this branch is for non-empty only
       return upstreamStates.every(s => s === 'FAILED' || s === 'UPSTREAM_FAILED');
     }
 
