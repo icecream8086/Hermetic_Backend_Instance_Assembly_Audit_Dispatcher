@@ -17,4 +17,4 @@ export const SubnetSchema = z.object({
   status: z.enum(['Active', 'Inactive', 'Full', 'Error']),
   createdAt: z.number(),
   updatedAt: z.number(),
-}).openapi({ ref: 'Subnet' });
+}).openapi('Subnet');

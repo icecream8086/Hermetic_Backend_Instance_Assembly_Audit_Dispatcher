@@ -29,7 +29,7 @@ export const ContainerSecretResponseSchema = z.object({
   version: z.number(),
   createdAt: z.number(),
   updatedAt: z.number(),
-}).openapi({ ref: 'ContainerSecret' });
+}).openapi('ContainerSecret');
 
 /** ContainerSecret list response: { items, total }. */
 export const ContainerSecretListResponseSchema = z.object({

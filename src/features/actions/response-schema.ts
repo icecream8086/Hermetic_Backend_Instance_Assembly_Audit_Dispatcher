@@ -96,7 +96,7 @@ export const WorkflowDefResponseSchema = z.object({
   createdAt: z.number(),
   updatedAt: z.number(),
   version: z.string(),
-}).openapi({ ref: 'WorkflowDef' });
+}).openapi('WorkflowDef');
 
 // ─── Step run (inside JobRun) ───
 
@@ -125,7 +125,7 @@ export const WorkflowRunResponseSchema = z.object({
   completedAt: z.number().optional(),
   error: z.string().optional(),
   version: z.string(),
-}).openapi({ ref: 'WorkflowRun' });
+}).openapi('WorkflowRun');
 
 // ─── Job run (response) ───
 
@@ -141,7 +141,7 @@ export const JobRunResponseSchema = z.object({
   completedAt: z.number().optional(),
   error: z.string().optional(),
   version: z.string(),
-}).openapi({ ref: 'JobRun' });
+}).openapi('JobRun');
 
 // ─── DAG visualization response ───
 

@@ -6,14 +6,14 @@ export const PermissionRuleSchema = z.object({
   resource: z.string().optional(),
   priority: z.number(),
   description: z.string().optional(),
-}).openapi({ ref: 'PermissionRule' });
+}).openapi('PermissionRule');
 
 export const TemplateSchema = z.object({
   id: z.string(),
   name: z.string(),
   description: z.string(),
   rules: z.array(PermissionRuleSchema).readonly(),
-}).openapi({ ref: 'PermissionTemplate' });
+}).openapi('PermissionTemplate');
 
 export const InvitationSchema = z.object({
   id: z.string(),

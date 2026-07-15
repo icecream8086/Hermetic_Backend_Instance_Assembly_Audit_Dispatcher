@@ -11,4 +11,4 @@ export const SysGroupSchema = z.object({
   dependsOn: z.array(z.string()).readonly(),
   createdAt: z.number(),
   updatedAt: z.number(),
-}).openapi({ ref: 'SysGroup' });
+}).openapi('SysGroup');

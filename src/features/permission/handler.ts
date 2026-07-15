@@ -39,7 +39,7 @@ const KernLevelNames = z.enum([
 
 const KNOWN_FACILITIES = [
   'user-service', 'perm', 'perm-audit', 'authz', 'sysgrp',
-  'sandbox-service', 'template', 'dns-service', 'quota', 'http',
+  'pod-service', 'template', 'dns-service', 'quota', 'http',
   'subnet', 'secgroup', 'system',
 ] as const;
 
