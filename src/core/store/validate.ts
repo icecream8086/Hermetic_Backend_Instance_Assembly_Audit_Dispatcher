@@ -12,7 +12,7 @@
  *   // vol is Volume | null, guaranteed to match the schema
  */
 
-import { z, ZodError, type ZodType } from 'zod';
+import { ZodError, type ZodType } from 'zod';
 import type { IAtomicStore } from './interfaces.ts';
 import type { VersionId } from '../brand.ts';
 
@@ -29,15 +29,16 @@ export async function getValidated<T>(
 ): Promise<T | null> {
   const entry = await atomic.get<unknown>(key);
   if (!entry) return null;
+  let result: T | null = null;
   try {
-    return schema.parse(entry.value);
+    result = schema.parse(entry.value);
   } catch (err) {
     const issues = err instanceof ZodError ? err.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; ') : String(err);
     console.error(`[store] Schema validation failed for ${key}: ${issues}`);
     // In production, return null to prevent corrupt data propagation.
     // In dev/test, this is a bug — the data should have been valid when written.
-    return null;
   }
+  return result;
 }
 
 /**
@@ -53,9 +54,9 @@ export async function setValidated<T>(
 ): Promise<VersionId | null> {
   try {
     const parsed = schema.parse(value);
-    return atomic.set(key, parsed, expectedVersion);
+    return await atomic.set(key, parsed, expectedVersion);
   } catch (err) {
     const issues = err instanceof ZodError ? err.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; ') : String(err);
-    throw new Error(`[store] Refusing to write invalid data to ${key}: ${issues}`);
+    throw new Error(`[store] Refusing to write invalid data to ${key}: ${issues}`, { cause: err });
   }
 }

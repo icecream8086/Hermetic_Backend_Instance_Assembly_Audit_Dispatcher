@@ -6,20 +6,21 @@
  */
 
 import type { PlatformSecretBackend, PlatformSecretParams, PlatformUpsertResult } from './secret-provisioner.ts';
+import { z } from 'zod';
 
 export class PodmanSecretBackend implements PlatformSecretBackend {
-  readonly platform = 'podman' as const;
+  public readonly platform = 'podman' as const;
   readonly #apiBase: string;
 
   /**
    * @param apiBase - Podman API root URL, e.g. "http://127.0.0.1:8080".
    *                  Should NOT include the Docker v1.24 path suffix.
    */
-  constructor(apiBase: string) {
+  public constructor(apiBase: string) {
     this.#apiBase = apiBase;
   }
 
-  async upsert(params: PlatformSecretParams): Promise<PlatformUpsertResult> {
+  public async upsert(params: PlatformSecretParams): Promise<PlatformUpsertResult> {
     const secretData = Object.values(params.data).join('\n');
 
     const body: Record<string, unknown> = {
@@ -30,6 +31,7 @@ export class PodmanSecretBackend implements PlatformSecretBackend {
       body.labels = params.labels;
     }
 
+    let result: PlatformUpsertResult;
     try {
       const resp = await fetch(`${this.#apiBase}/libpod/secrets/create`, {
         method: 'POST',
@@ -39,25 +41,27 @@ export class PodmanSecretBackend implements PlatformSecretBackend {
 
       if (!resp.ok) {
         const err = await resp.text();
-        return {
+        result = {
           platformRef: '',
           ok: false,
           error: `Podman secret create failed (${String(resp.status)}): ${err}`,
         };
+      } else {
+        const parsed = z.object({ ID: z.string() }).parse(await resp.json());
+        result = { platformRef: parsed.ID, ok: true };
       }
-
-      const result = await resp.json() as { ID: string };
-      return { platformRef: result.ID, ok: true };
     } catch (err: unknown) {
-      return {
+      result = {
         platformRef: '',
         ok: false,
         error: `Podman secret create error: ${err instanceof Error ? err.message : String(err)}`,
       };
     }
+
+    return result;
   }
 
-  async remove(platformRef: string): Promise<void> {
+  public async remove(platformRef: string): Promise<void> {
     const resp = await fetch(`${this.#apiBase}/libpod/secrets/${encodeURIComponent(platformRef)}`, {
       method: 'DELETE',
     });
@@ -67,12 +71,14 @@ export class PodmanSecretBackend implements PlatformSecretBackend {
     }
   }
 
-  async exists(platformRef: string): Promise<boolean> {
+  public async exists(platformRef: string): Promise<boolean> {
+    let ok = false;
     try {
       const resp = await fetch(`${this.#apiBase}/libpod/secrets/${encodeURIComponent(platformRef)}/json`);
-      return resp.ok;
-    } catch {
-      return false;
+      ok = resp.ok;
+    } catch (_err: unknown) {
+      console.error('exists check failed:', _err);
     }
+    return ok;
   }
 }

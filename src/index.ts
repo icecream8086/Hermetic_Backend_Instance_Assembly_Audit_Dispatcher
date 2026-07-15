@@ -19,7 +19,7 @@ function getApp(platformBindings: Record<string, unknown>): Promise<AppInstance>
     for (const key of Object.keys(platformBindings)) {
       if (typeof platformBindings[key] === 'string' && !(key in process.env)) {
         const val = z.string().parse(platformBindings[key]);
-        Object.assign(process.env, { [key]: val });
+        process.env[key] = val;
       }
     }
     const config = loadConfig();

@@ -1,5 +1,6 @@
 import type { MiddlewareHandler } from 'hono';
 import type { AppContext } from '../deps.ts';
+import { z } from 'zod';
 
 // ─── JSON depth limit ───
 
@@ -8,8 +9,10 @@ const DEFAULT_MAX_DEPTH = 10;
 function checkDepth(obj: unknown, maxDepth: number, depth = 0): boolean {
   if (depth > maxDepth) return false;
   if (obj === null || typeof obj !== 'object') return true;
-  if (Array.isArray(obj)) {
-    for (const item of obj) {
+  let _arr: unknown[] | null = null;
+  try { _arr = z.array(z.unknown()).parse(obj); } catch (_e) { void _e; }
+  if (_arr !== null) {
+    for (const item of _arr) {
       if (!checkDepth(item, maxDepth, depth + 1)) return false;
     }
     return true;

@@ -66,7 +66,6 @@ export function createSecurityRouter(deps: SecurityRouterDeps): OpenAPIHono<{ Va
     }),
     async (c) => {
       isRoot(c);
-      // eslint-disable-next-line local-rules/enforce-decode-layer -- .parse(AwaitExpr) — rule only checks immediate parent, not grandparent
       const body = CreateSecurityResourceSchema.parse(await c.req.json());
       const resource = SecurityResourceSchema.parse(await securityService.provision({
         name: body.name,
@@ -189,7 +188,6 @@ export function createSecurityRouter(deps: SecurityRouterDeps): OpenAPIHono<{ Va
   // ── POST /api/security/batch-presign ──
   app.post('/batch-presign', async (c) => {
     const claims = await verifyJwtFromHeader(c);
-    // eslint-disable-next-line local-rules/enforce-decode-layer
     const body = BatchPresignSchema.parse(await c.req.json());
 
     // Authorize each file

@@ -1,5 +1,6 @@
 /// <reference types="@cloudflare/workers-types" />
 
+import { z } from 'zod';
 import type { IQueryStore, QueryParams } from '../interfaces.ts';
 
 export class D1QueryStore implements IQueryStore {
@@ -11,10 +12,13 @@ export class D1QueryStore implements IQueryStore {
     let bound: D1PreparedStatement;
     if (params === undefined) {
       bound = stmt;
-    } else if (Array.isArray(params)) {
-      bound = stmt.bind(...params);
     } else {
-      bound = stmt.bind(params);
+      try {
+        const arrParams = z.array(z.unknown()).parse(params);
+        bound = stmt.bind(...arrParams);
+      } catch {
+        bound = stmt.bind(params);
+      }
     }
 
     const result = await bound.all<T>();

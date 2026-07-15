@@ -1,5 +1,5 @@
 import type { IAtomicStore, IStoreTransaction } from '../interfaces.ts';
-import type { VersionId } from '../../brand.ts';
+import { createVersionId, type VersionId } from '../../brand.ts';
 import type { AtomicStoreMetrics } from '../metrics.ts';
 
 const DEFAULT_CACHE_TTL_MS = 300_000; // 5 min — data barely changes, refresh on demand
@@ -107,7 +107,7 @@ export class CachedAtomicStore implements IAtomicStore {
           if (entry.data === null) return null;
           this.metrics?.recordHit();
           if (entry.coordinatorVersion !== null) {
-            return { value: entry.data, version: entry.coordinatorVersion as VersionId };
+            return { value: entry.data, version: createVersionId(entry.coordinatorVersion) };
           }
         }
       }
@@ -117,7 +117,7 @@ export class CachedAtomicStore implements IAtomicStore {
     const miss = await this.coordinator.get<T>(key);
     if (miss !== null) {
       this.#bloom.add(key);
-      const cacheEntry = { data: miss.value, cachedAt: Date.now(), coordinatorVersion: miss.version as string } satisfies CacheEntry<T>;
+      const cacheEntry = { data: miss.value, cachedAt: Date.now(), coordinatorVersion: miss.version } satisfies CacheEntry<T>;
       const lastVer = this.#storeVersion.get(key) ?? null;
       void this.store.set(key, cacheEntry, lastVer, this.storeTtlSeconds)
         .then(v => { if (v) this.#storeVersion.set(key, v); })
@@ -133,7 +133,7 @@ export class CachedAtomicStore implements IAtomicStore {
     if (version !== null) {
       this.#bloom.add(key);
       const lastVer = this.#storeVersion.get(key) ?? null;
-      const cacheEntry = { data: value, cachedAt: Date.now(), coordinatorVersion: version as string } satisfies CacheEntry<T>;
+      const cacheEntry = { data: value, cachedAt: Date.now(), coordinatorVersion: version } satisfies CacheEntry<T>;
       const storeVer = await this.store.set(key, cacheEntry, lastVer, this.storeTtlSeconds);
       if (storeVer) {
         this.#storeVersion.set(key, storeVer);

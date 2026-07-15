@@ -914,27 +914,32 @@ export class UserService implements IUserService {
 
   /** Add a user to a named user group by group name. Uses transact for atomicity. */
   async #joinNamedGroup(userId: UserId, groupName: string): Promise<void> {
-    await this.atomic.transact(async (txn) => {
-      const ugIdx = await txn.get<string[]>('usergroup:ids');
-      if (!ugIdx) return;
-      for (const id of ugIdx) {
-        const group = await txn.get<Record<string, unknown>>('usergroup:' + id);
-        if (!group) continue;
-        if (group.name !== groupName) continue;
-        const memberIds: string[] = Array.isArray(group.memberIds) ? [...group.memberIds] : [];
-        if (memberIds.includes(userId)) return;
-        memberIds.push(userId);
-        txn.set('usergroup:' + id, { ...group, memberIds, updatedAt: Date.now() });
-        return;
-      }
-    }).catch((e: unknown) => {
+    try {
+      await this.atomic.transact(async (txn) => {
+        const ugIdx = await txn.get<string[]>('usergroup:ids');
+        if (!ugIdx) return;
+        for (const id of ugIdx) {
+          const group = await txn.get<Record<string, unknown>>('usergroup:' + id);
+          if (!group) continue;
+          if (group.name !== groupName) continue;
+          let memberIds: string[];
+          try { memberIds = z.array(z.string()).parse(group.memberIds); }
+          catch (_e) { memberIds = []; }
+          if (memberIds.includes(userId)) return;
+          memberIds.push(userId);
+          txn.set('usergroup:' + id, { ...group, memberIds, updatedAt: Date.now() });
+          return;
+        }
+      });
+    } catch (e: unknown) {
       this.logger.write({
         facility: FACILITY,
         level: KernLevel.ERR,
         message: `Failed to add user ${userId} to group "${groupName}": ${e instanceof Error ? e.message : String(e)}`,
         metadata: { userId, groupName, error: e instanceof Error ? e.message : String(e) },
       });
-    });
+      throw e;
+    }
   }
 
 }

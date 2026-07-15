@@ -1,5 +1,6 @@
 import type { KernLevel } from './kern-level.ts';
-import type { LogId, Facility, SerializedBody } from '../brand.ts';
+import type { LogId, SerializedBody } from '../brand.ts';
+import { z } from 'zod';
 import { formatDmesgLine } from '../utils/dmesg.ts';
 
 // ═══════════════════════════════════════════════════════════
@@ -91,17 +92,15 @@ export function encodeCursor(c: LogCursor): string {
 
 /** Decode a cursor string back to LogCursor. Returns null if format is invalid. */
 export function decodeCursor(raw: string): LogCursor | null {
-  try {
-    const map = new Map(raw.split(';').map(p => {
-      const kv = p.split('=', 2);
-      const pair: [string, string] = [kv[0] ?? '', kv[1] ?? ''];
-      return pair;
-    }));
-    return {
-      s: map.get('s') ?? '', i: Number(map.get('i')), b: map.get('b') ?? '',
-      m: Number(map.get('m')), t: Number(map.get('t')), x: map.get('x') ?? '',
-    };
-  } catch (e) { const _r = null; return _r; }
+  const map = new Map(raw.split(';').map(p => {
+    const kv = p.split('=', 2);
+    const pair: [string, string] = [kv[0] ?? '', kv[1] ?? ''];
+    return pair;
+  }));
+  return {
+    s: map.get('s') ?? '', i: Number(map.get('i')), b: map.get('b') ?? '',
+    m: Number(map.get('m')), t: Number(map.get('t')), x: map.get('x') ?? '',
+  };
 }
 
 /** Build a cursor from a StoredAuditEntry. */
@@ -189,7 +188,7 @@ export interface IAuditAdmin {
 
 /** Format an audit entry as a dmesg-style log line. */
 export function formatAuditLine(_timestamp: number, entry: AuditEntry): string {
-  const metaActorId: string | undefined = typeof entry.metadata?.actorId === 'string' ? entry.metadata.actorId : undefined;
+  const metaActorId = z.string().optional().parse(entry.metadata?.actorId);
   const actorId = entry.actorId ?? metaActorId;
   return formatDmesgLine(entry.message, actorId);
 }

@@ -89,7 +89,7 @@ export function secureContainerProvider(inner: IContainerProvider): IContainerPr
         };
       }
       const val = Reflect.get(target, prop, receiver);
-      try { return z.function().parse(val).bind(target); } catch { /* not a function — return raw value */ }
+      try { return z.function().parse(val).bind(target); } catch (_e) { void _e; }
       return val;
     },
   });
@@ -126,7 +126,7 @@ export function secureContainerGroupProvider(inner: IContainerGroupProvider): IC
         return (input: PodSpec) => target.createPod(sanitizePodSpec(input));
       }
       const val = Reflect.get(target, prop, receiver);
-      try { return z.function().parse(val).bind(target); } catch { /* not a function — return raw value */ }
+      try { return z.function().parse(val).bind(target); } catch (_e) { void _e; }
       return val;
     },
   });

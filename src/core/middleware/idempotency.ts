@@ -1,5 +1,5 @@
 import type { MiddlewareHandler } from 'hono';
-import type { ContentfulStatusCode } from 'hono/utils/http-status';
+import { z } from 'zod';
 import type { IAtomicStore } from '../store/interfaces.ts';
 
 const { parse: parseJson } = JSON;
@@ -27,8 +27,13 @@ export function idempotency(): MiddlewareHandler<IdempotencyEnv> {
     const existing = await stores.get<string>(storageKey);
     if (existing) {
       try {
-        const cached = parseJson(existing.value) as { status: number; body: unknown };
-        return c.json(cached.body, cached.status as ContentfulStatusCode);
+        const cached: unknown = parseJson(existing.value);
+        const cachedSchema = z.object({ status: z.number(), body: z.unknown() });
+        const parsed = cachedSchema.parse(cached);
+        return new Response(JSON.stringify(parsed.body), {
+          status: parsed.status,
+          headers: { 'content-type': 'application/json' },
+        });
       } catch {
         console.debug("corrupted data — fall through to re-execute");
       }

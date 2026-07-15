@@ -49,20 +49,20 @@ function fromGeneratedTemplate(def: InstanceTemplateDef): Template {
   // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- generated template data, validated at build time
   const podSpec = s.spec as PodSpec;
 
-  return {
+  const result: Template = {
     id: def.id,
     name: def.name,
     description: def.description,
     apiVersion: z.string().parse(s.apiVersion ?? 'hbi-aad/v1'),
-    kind: 'Pod' as const,
+    kind: 'Pod',
     spec: podSpec,
     ...(dependsOn?.length ? { dependsOn } : {}),
     createdAt: now,
     updatedAt: now,
     ...(singleton !== undefined ? { singleton } : {}),
     ...(instanceLimit !== undefined ? { instanceLimit } : {}),
-  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- generated template construction; validated at build time
-  } as Template;
+  };
+  return result;
 }
 
 /** Generated templates (YAML source-of-truth) as Template shape. */

@@ -73,9 +73,10 @@ export class NotificationDO implements DurableObject {
   #handleMessage(ws: WebSocket, event: MessageEvent): void {
     try {
       const msg = z.custom<{ type: string; channels?: string[] }>().parse(parseJson(z.string().parse(event.data)));
-      if (msg.type === 'subscribe' && Array.isArray(msg.channels)) {
-        this.#filters.set(ws, new Set(msg.channels));
-        ws.send(JSON.stringify({ type: 'subscribed', channels: msg.channels }));
+      if (msg.type === 'subscribe') {
+        const channels = z.array(z.string()).parse(msg.channels);
+        this.#filters.set(ws, new Set(channels));
+        ws.send(JSON.stringify({ type: 'subscribed', channels }));
       }
     } catch {
       ws.send(JSON.stringify({ type: 'error', data: { message: 'Invalid message format' } }));

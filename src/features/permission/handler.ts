@@ -96,8 +96,7 @@ function subCrud<T, I_Create extends Record<string, unknown> = Record<string, un
   return {
     create: (r) => r.post('/', async (c) => {
       opts.guard(c);
-      const raw = await c.req.json();
-      const data = opts.createSchema.parse(raw);
+      const data = opts.createSchema.parse(await c.req.json());
       const result = await opts.createFn(data, actorFrom(c));
       return c.json(ok(result), 201);
     }),
@@ -117,8 +116,7 @@ function subCrud<T, I_Create extends Record<string, unknown> = Record<string, un
 
     update: (r) => r.put('/:id', async (c) => {
       opts.guard(c);
-      const raw = await c.req.json();
-      const data = opts.updateSchema.parse(raw);
+      const data = opts.updateSchema.parse(await c.req.json());
       return c.json(ok(await opts.updateFn(c.req.param('id'), data, actorFrom(c))));
     }),
 
@@ -327,8 +325,7 @@ export function createPermissionRouter(svc: IPermissionService): OpenAPIHono<{ V
   // ─── Capability management ───
   app.openapi(createRoute({ method: 'put', path: '/caps/user/:userId', tags: ['permission'], responses: { 200: { description: '', content: { 'application/json': { schema: OkResponse(UserCapsSchema) } } } } }), async (c) => {
     requireRoot(c);
-    const raw = await c.req.json();
-    const caps = z.number().parse(z.object({ caps: z.unknown() }).parse(raw).caps);
+    const caps = z.number().parse(z.object({ caps: z.unknown() }).parse(await c.req.json()).caps);
     await svc.setUserCaps(c.req.param('userId'), caps, actorFrom(c));
     return c.json(ok({ userId: c.req.param('userId'), caps }));
   });
@@ -340,8 +337,7 @@ export function createPermissionRouter(svc: IPermissionService): OpenAPIHono<{ V
 
   app.openapi(createRoute({ method: 'put', path: '/caps/group/:groupId', tags: ['permission'], responses: { 200: { description: '', content: { 'application/json': { schema: OkResponse(GroupCapsSchema) } } } } }), async (c) => {
     requireRoot(c);
-    const raw = await c.req.json();
-    const caps = z.number().parse(z.object({ caps: z.unknown() }).parse(raw).caps);
+    const caps = z.number().parse(z.object({ caps: z.unknown() }).parse(await c.req.json()).caps);
     await svc.setGroupCaps(c.req.param('groupId'), caps, actorFrom(c));
     return c.json(ok({ groupId: c.req.param('groupId'), caps }));
   });

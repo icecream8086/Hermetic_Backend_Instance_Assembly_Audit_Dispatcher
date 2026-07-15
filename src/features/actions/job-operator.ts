@@ -118,9 +118,9 @@ export class JobOperator implements ITaskExecutor {
   }
 
   private stepLabel(step: StepDef): string {
-    if ('run' in step && step.run != null) return step.run.slice(0, 60);
-    if ('dns' in step && step.dns != null) return `dns:${step.dns.name}`;
-    if ('uses' in step) return step.uses;
+    try { return z.object({ run: z.string() }).parse(step).run.slice(0, 60); } catch (_e) { void _e; }
+    try { return `dns:${z.object({ dns: z.object({ name: z.string() }) }).parse(step).dns.name}`; } catch (_e) { void _e; }
+    try { return z.object({ uses: z.string() }).parse(step).uses; } catch (_e) { void _e; }
     return '';
   }
 

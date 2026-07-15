@@ -16,7 +16,7 @@ import type {
   GetContainerLogInput,
   ContainerLogResult,
 } from '../../core/provider/interfaces.ts';
-import type { CreateContainerGroupInput, ContainerGroupRuntime, OciContainerStatus } from '../../core/provider/types.ts';
+import type { CreateContainerGroupInput, ContainerGroupRuntime, OciContainer, OciContainerStatus } from '../../core/provider/types.ts';
 import { createContainerId } from '../../core/provider/types.ts';
 import { createRegionId } from '../../core/region/types.ts';
 import { z } from 'zod';
@@ -545,7 +545,7 @@ export class PodmanContainerProvider implements IContainerProvider {
       },
       associatedResources: [],
       restartPolicy: info.HostConfig.RestartPolicy.Name,
-      containers: [{
+      containers: z.custom<readonly OciContainer[]>().parse([{
         id: createContainerId(info.Id),
         name: info.Name.replace(/^\//, ''),
         image: info.Config.Image,
@@ -572,7 +572,7 @@ export class PodmanContainerProvider implements IContainerProvider {
             : 'starting',
           ...(info.State.Health?.FailingStreak && info.State.Health.FailingStreak > 0 ? { message: `Failing health check (${String(info.State.Health.FailingStreak)})` } : {}),
         },
-      }] as unknown as readonly [],
+      }]),
       volumes: [],
       events: runtimeEvents(info),
       tags: [{ key: 'provider', value: 'podman' }],

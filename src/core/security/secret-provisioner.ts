@@ -1,5 +1,6 @@
 import type { IAtomicStore } from '../store/interfaces.ts';
 import type { ContainerSecret, PlatformSecretRefs } from '../../features/container-secret/types.ts';
+import { z } from 'zod';
 
 export type PlatformId = 'eci' | 'k8s' | 'podman' | 'aws';
 
@@ -52,7 +53,7 @@ export class SecretProvisioner {
     for (const backend of this.backends) {
       const ref = (refs as Record<string, string | undefined>)[backend.platform];
       if (ref) {
-        await backend.remove(ref).catch(() => {});
+        try { await backend.remove(ref); } catch (_e) { void _e; }
       }
     }
   }
@@ -66,7 +67,7 @@ export class SecretProvisioner {
     );
     for (const e of entries) {
       if (e?.value?.type === 'platformRef') {
-        await this.provision(e.value).catch(() => {});
+        try { await this.provision(e.value); } catch (_e) { void _e; }
       }
     }
   }
@@ -81,7 +82,7 @@ export class SecretProvisioner {
     const match = entries.find(e => e?.value?.name === secretName);
     const refs = match?.value?.platformRefs;
     if (!refs) return undefined;
-    return (refs as Record<string, string | undefined>)[platform];
+    return z.custom<Record<string, string | undefined>>().parse(refs)[platform];
   }
 }
 

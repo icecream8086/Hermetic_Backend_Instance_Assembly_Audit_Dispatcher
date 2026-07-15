@@ -108,13 +108,15 @@ export function applyExtensionOverrides(
         out[field.eciParam] = JSON.stringify(val);
         break;
       case 'comma-sep':
-        if (Array.isArray(val)) {
-          out[field.eciParam] = val.join(',');
+        let _csv: unknown[] | null = null;
+        try { _csv = z.array(z.unknown()).parse(val); } catch (_e) { void _e; }
+        if (_csv !== null) {
+          out[field.eciParam] = _csv.join(',');
         } else {
           try {
             const sv = z.string().parse(val);
             out[field.eciParam] = sv;
-          } catch {
+          } catch (_e2) {
             out[field.eciParam] = '';
           }
         }
@@ -169,7 +171,7 @@ export function validateExtensionOverrides(
         if (!field.validation.enum.includes(strVal)) {
           errors.push(`${field.key} must be one of: ${field.validation.enum.join(', ')}`);
         }
-      } catch { /* val is not a string, skip enum check */ }
+      } catch (_e) { void _e; }
     }
 
     // Range check

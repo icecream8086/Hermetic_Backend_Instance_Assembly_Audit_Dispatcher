@@ -3,8 +3,7 @@ import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import type { IAtomicStore, IStoreTransaction } from '../interfaces.ts';
 import { TransactConflictError } from '../interfaces.ts';
-import type { VersionId } from '../../brand.ts';
-import { generateVersionId } from '../../brand.ts';
+import { createVersionId, generateVersionId, type VersionId } from '../../brand.ts';
 
 const { parse: parseJson } = JSON;
 
@@ -56,22 +55,24 @@ export class FileKVAtomicStore implements IAtomicStore {
   public async get<T>(key: string): Promise<{ value: T; version: VersionId } | null> {
     return this.#serialise(async () => {
       await this.#ensureDir();
+      let result: { value: T; version: VersionId } | null = null;
       try {
         const raw = await readFile(this.#filePath(key), 'utf-8');
-        const entry: FileEntry<T> = parseJson(raw);
+        const entry = z.custom<FileEntry<T>>().parse(parseJson(raw));
         if (entry.metadata.e && Date.now() > entry.metadata.e) {
           // TTL expired — delete file and return null
-          try { await rm(this.#filePath(key), { force: true }); } catch (e) {
-            /* file may not exist */
-            console.debug("file may not exist");
+          try { await rm(this.#filePath(key), { force: true }); } catch (_e) {
+            console.debug("file may not exist", _e);
           }
           return null;
         }
         // null value = deleted — consistent with DO adapter behavior
         if (entry.value === null) return null;
-        const ver: VersionId = entry.metadata.v;
-        return { value: entry.value, version: ver };
-      } catch (e) { const _r = null; return _r; }
+        result = { value: entry.value, version: createVersionId(entry.metadata.v) };
+      } catch (_e) {
+        console.debug("file read error", _e);
+      }
+      return result;
     });
   }
 
@@ -83,9 +84,9 @@ export class FileKVAtomicStore implements IAtomicStore {
 
       let current: FileEntry | null = null;
       try {
-        current = parseJson(await readFile(fp, 'utf-8'));
-      } catch (e) {
-        console.debug("");
+        current = z.custom<FileEntry | null>().parse(parseJson(await readFile(fp, 'utf-8')));
+      } catch (_e) {
+        console.debug("no existing entry", _e);
       }
       if (expectedVersion === null && current !== null) return null;
       if (expectedVersion !== null && current?.metadata.v !== expectedVersion) return null;
@@ -110,37 +111,37 @@ export class FileKVAtomicStore implements IAtomicStore {
           const dw = deferredWrites.get(key);
           if (dw !== undefined) return z.custom<V>().parse(dw.value);
 
+          let fileValue: V | null = null;
           try {
             const raw = await readFile(this.#filePath(key), 'utf-8');
-            const entry: FileEntry<V> = parseJson(raw);
+            const entry = z.custom<FileEntry<V>>().parse(parseJson(raw));
             readSet.set(key, entry.metadata.v);
-            return entry.value;
-          } catch (e) {
-
-            console.debug("");
-
+            fileValue = entry.value;
+          } catch (_e) {
+            console.debug("file read error", _e);
             readSet.set(key, null);
-            return null;
           }
+          return fileValue;
         },
         getMany: async <V>(keys: string[]) => {
           const results: (V | null)[] = [];
           for (const key of keys) {
             const dw = deferredWrites.get(key);
             if (dw !== undefined) {
-              results.push(dw.value as V);
+              results.push(z.custom<V>().parse(dw.value));
               continue;
             }
+            let fileValue: V | null = null;
             try {
               const raw = await readFile(this.#filePath(key), 'utf-8');
-              const entry: FileEntry<V> = parseJson(raw);
+              const entry = z.custom<FileEntry<V>>().parse(parseJson(raw));
               readSet.set(key, entry.metadata.v);
-              results.push(entry.value);
-            } catch (e) {
-              console.debug("");
+              fileValue = entry.value;
+            } catch (_e) {
+              console.debug("file read error", _e);
               readSet.set(key, null);
-              results.push(null);
             }
+            results.push(fileValue);
           }
           return results;
         },
@@ -160,10 +161,10 @@ export class FileKVAtomicStore implements IAtomicStore {
         let currentVersion: string | null;
         try {
           const raw = await readFile(this.#filePath(key), 'utf-8');
-          const entry = parseJson(raw) as FileEntry;
+          const entry = z.custom<FileEntry>().parse(parseJson(raw));
           currentVersion = entry.metadata.v;
-        } catch (e) {
-          console.debug("");
+        } catch (_e) {
+          console.debug("file read error", _e);
           currentVersion = null;
         }
         if (currentVersion !== expectedVersion) {

@@ -169,7 +169,7 @@ export class GroupManager {
 }
 
 function normalizeItem(item: string | { id: string }): { id: string } {
-  try { z.string().parse(item); return { id: item }; } catch { return item; }
+  try { z.string().parse(item); return { id: item }; } catch (_e) { return item; }
 }
 
 function buildCompareResult(a: Record<string, unknown>, b: Record<string, unknown>): CompareResult {

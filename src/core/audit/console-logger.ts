@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { IAuditWriter, IAuditReader, IAuditAdmin, AuditEntry, StoredAuditEntry, LogQuery } from './types.ts';
 import { AuditTier } from './types.ts';
 import type { LogId } from '../brand.ts';
@@ -21,7 +22,6 @@ export class ConsoleLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
     void this.log(entry);
   }
 
-  // eslint-disable-next-line @typescript-eslint/require-await -- delegates to async log
   public async writeSync(entry: AuditEntry): Promise<LogId> {
     return this.log(entry);
   }
@@ -51,8 +51,10 @@ export class ConsoleLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
   public async query(params?: LogQuery): Promise<{ entries: StoredAuditEntry[]; nextCursor?: string; total?: number }> {
     let result = this.#entries;
     if (params?.facility) result = result.filter(e => e.facility === params.facility);
-    if (params?.startTs !== undefined) result = result.filter(e => e.timestamp >= params.startTs!);
-    if (params?.endTs !== undefined) result = result.filter(e => e.timestamp <= params.endTs!);
+    const startTs = params?.startTs;
+    if (startTs !== undefined) result = result.filter(e => e.timestamp >= startTs);
+    const endTs = params?.endTs;
+    if (endTs !== undefined) result = result.filter(e => e.timestamp <= endTs);
     const total = result.length;
     if (params?.limit) result = result.slice(0, params.limit);
     return { entries: result, total };
@@ -74,7 +76,7 @@ export class ConsoleLogger implements IAuditWriter, IAuditReader, IAuditAdmin {
   public async pruneByIds(_ids: readonly string[]): Promise<number> { return 0; }
 
   #print(entry: AuditEntry & { timestamp: number }): void {
-    const metaActorId: string | undefined = typeof entry.metadata?.actorId === 'string' ? entry.metadata.actorId : undefined;
+    const metaActorId = z.string().optional().parse(entry.metadata?.actorId);
     const actorId = entry.actorId ?? metaActorId;
     console.log(formatDmesgLine(entry.message, actorId));
   }

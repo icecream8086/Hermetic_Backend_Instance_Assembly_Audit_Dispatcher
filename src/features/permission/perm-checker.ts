@@ -211,7 +211,9 @@ export class PermissionChecker {
 
     const dag = new PermissionDag();
 
-    for (const rule of (Array.isArray(macRules) ? macRules : [])) {
+    let _macRuleList: unknown[];
+    try { _macRuleList = z.array(z.unknown()).parse(macRules); } catch (_e) { _macRuleList = []; }
+    for (const rule of _macRuleList) {
       dag.addPolicy(ruleToNode(rule, 'MAC', resourceOwnerId));
     }
     for (const pg of matchedGroups) {
@@ -321,7 +323,9 @@ function expandSelf(pattern: string, ownerId?: string, resourceId?: string): str
 }
 
 function matchPattern(pattern: string | string[], target: string): boolean {
-  const patterns = Array.isArray(pattern) ? pattern : [pattern];
+  let _patResult: string[];
+  try { _patResult = z.array(z.string()).parse(pattern); } catch (_e) { _patResult = [z.string().parse(pattern)]; }
+  const patterns = _patResult;
   return patterns.some(p => {
     if (p === '*') return true;
     if (p === target) return true;

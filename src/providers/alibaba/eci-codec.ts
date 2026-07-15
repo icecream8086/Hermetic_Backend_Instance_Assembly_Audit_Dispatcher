@@ -723,7 +723,9 @@ export function buildCreateParams(
     const aliNet = (input.providerOverrides?.alibaba ?? {}) as Record<string, unknown>;
     const sgId = input.network.securityGroupId ?? aliNet.securityGroupId as string | undefined;
     p.SecurityGroupId = String(sgId ?? '');
-    const subnetIds = input.network.subnetIds ?? (Array.isArray(aliNet.subnetIds) ? aliNet.subnetIds : undefined) as string[] | undefined;
+    let _subnetIds: unknown[] | undefined;
+    try { _subnetIds = z.array(z.unknown()).parse(aliNet.subnetIds); } catch (_e) { _subnetIds = undefined; }
+    const subnetIds = input.network.subnetIds ?? _subnetIds;
     const vSwitchId = (aliNet.vSwitchId as string | undefined) ?? (subnetIds?.length ? subnetIds.join(',') : undefined);
     if (vSwitchId) {
       p.VSwitchId = vSwitchId;
@@ -983,8 +985,10 @@ export function buildPodCreateParams(spec: PodSpec, region: string): Record<stri
   if (aliOverride.vSwitchId) {
     p.VSwitchId = String(aliOverride.vSwitchId);
   }
-  if (Array.isArray(aliOverride.subnetIds) && aliOverride.subnetIds.length > 0) {
-    p.VSwitchId = (aliOverride.subnetIds as string[]).join(',');
+  let _overrideSubnetIds: string[];
+  try { _overrideSubnetIds = z.array(z.string()).parse(aliOverride.subnetIds); } catch (_e) { _overrideSubnetIds = []; }
+  if (_overrideSubnetIds.length > 0) {
+    p.VSwitchId = _overrideSubnetIds.join(',');
     p.ScheduleStrategy = 'VSwitchRandom';
     delete p.ZoneId;
   }

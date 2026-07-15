@@ -149,18 +149,14 @@ export function registerPodHealthCheck(deps: PodHealthCheckDeps): void {
                   providerAlive = true;
                   // Scheduling → Running auto-promotion
                   if (rt.status === ContainerGroupState.Running) {
-                    try { await podService.syncRuntime(createPodId(pid)); } catch {
-
-                      console.log("best-effort");
-
+                    try { await podService.syncRuntime(createPodId(pid)); } catch (_e) {
+                      console.error('pod runtime sync failed (best-effort):', _e);
                     }
                     continue;
                   }
                 }
-              } catch {
-
-                console.log("provider unreachable — fall through to timeout");
-
+              } catch (_e) {
+                console.error('provider check failed (fall through to timeout):', _e);
               }
             }
 
@@ -187,17 +183,15 @@ export function registerPodHealthCheck(deps: PodHealthCheckDeps): void {
             let runtime;
             try {
               runtime = await podService.checkProviderStatus(createPodId(pid));
-            } catch {
-
-              console.log("");
-
+            } catch (_e) {
+              console.error('runtime check failed:', _e);
             }
             if (!runtime) {
               stableSince.delete(pid);
               const reason = decidePodGc('Running', durationMs, false, [], 0, maxRetries);
               if (reason) {
                 await dispatchPodGc(stores.atomic, queueProducer, providers, audit, {
-                  podId: pid, reason, providerId: providerId ?? pid,
+                  podId: pid, reason, providerId,
                   podName: pod.name, createdAt: pod.createdAt,
                   ...(instanceId ? { instanceId } : {}),
                 });
@@ -226,7 +220,7 @@ export function registerPodHealthCheck(deps: PodHealthCheckDeps): void {
             const reason = decidePodGc('Running', durationMs, true, containerAlive, currentFails, maxRetries);
             if (reason) {
               await dispatchPodGc(stores.atomic, queueProducer, providers, audit, {
-                podId: pid, reason, providerId: providerId ?? pid,
+                podId: pid, reason, providerId,
                 podName: pod.name, createdAt: pod.createdAt,
                 ...(instanceId ? { instanceId } : {}),
               });
@@ -244,10 +238,8 @@ export function registerPodHealthCheck(deps: PodHealthCheckDeps): void {
             });
           }
           continue;
-        } catch {
-
-          console.log("skip individual pod errors");
-
+        } catch (_e) {
+          console.error('pod health check error (skipping):', _e);
         }
       }
     } finally {
@@ -272,11 +264,13 @@ interface PodGcParams {
 
 function resolvePodGcInstanceId(raw: string | undefined): InstanceId | undefined {
   if (!raw) return undefined;
-  try { return createInstanceId(raw); } catch {
-
-    return undefined;
-
+  let parsed: InstanceId | undefined;
+  try {
+    parsed = createInstanceId(raw);
+  } catch (_e) {
+    console.error('resolvePodGcInstanceId: invalid instance id', _e);
   }
+  return parsed;
 }
 
 async function dispatchPodGc(
@@ -311,10 +305,8 @@ async function dispatchPodGc(
     try {
       const resolved = await providers.resolveContainer(instId);
       await resolved.delete({ region: createRegionId('cn-hangzhou'), providerId: params.providerId });
-    } catch {
-
-      console.log("best-effort");
-
+    } catch (_e) {
+      console.error('inline cleanup failed (best-effort):', _e);
     }
   }
 

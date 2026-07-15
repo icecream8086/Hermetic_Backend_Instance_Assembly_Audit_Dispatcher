@@ -1,4 +1,5 @@
 import type { S3AccessTokenClaims } from './types.ts';
+import { z } from 'zod';
 
 // ─── Authorization check ───
 
@@ -62,7 +63,7 @@ export function base64urlDecode(str: string): Uint8Array {
 
 async function importKey(secret: Uint8Array): Promise<CryptoKey> {
   return crypto.subtle.importKey(
-    'raw', secret.buffer as ArrayBuffer,
+    'raw', z.custom<ArrayBuffer>().parse(secret.buffer),
     { name: 'HMAC', hash: 'SHA-256' },
     false, ['sign', 'verify'],
   );
@@ -111,7 +112,8 @@ export async function verifyToken(
   if (!valid) return { valid: false, reason: 'Invalid signature' };
 
   const payloadJson = DECODER.decode(base64urlDecode(payloadB64!));
-  const claims = JSON.parse(payloadJson) as S3AccessTokenClaims;
+  const { parse: _jparse } = JSON;
+  const claims = z.custom<S3AccessTokenClaims>().parse(_jparse(payloadJson));
 
   const now = Math.floor(Date.now() / 1000);
   if (claims.exp <= now) return { valid: false, reason: 'Token expired' };

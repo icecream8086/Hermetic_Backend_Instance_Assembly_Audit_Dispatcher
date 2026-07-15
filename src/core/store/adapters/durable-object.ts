@@ -220,7 +220,7 @@ export class AtomicStoreDO implements DurableObject {
         default: {
           const _exhaustive: never = req.op;
           void _exhaustive;
-          return Response.json({ error: `Unknown op: ${String(req.op)}` }, { status: 400 });
+          return Response.json({ error: `Unknown op: ${req.op}` }, { status: 400 });
         }
       }
     } catch (err) {
@@ -326,8 +326,7 @@ export class DurableObjectAtomicStore implements IAtomicStore {
     if (parsed.value === null || parsed.value === undefined) return null;
     if (parsed.version === null) return null;
     const version = createVersionId(parsed.version);
-    const entry: { value: T; version: VersionId } = { value: parsed.value as T, version };
-    return entry;
+    return { value: z.custom<T>().parse(parsed.value), version };
   }
 
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- interface contract requires generics
@@ -336,8 +335,8 @@ export class DurableObjectAtomicStore implements IAtomicStore {
       method: 'POST',
       body: JSON.stringify({ op: 'set', key, value, expectedVersion, ttlSeconds }),
     });
+    if (!resp.ok) return null;
     const body = await resp.json();
-    if (!resp.ok) return body.version;
     const parsed = setResponseSchema.parse(body);
     return parsed.version !== null ? createVersionId(parsed.version) : null;
   }
@@ -387,13 +386,12 @@ export class DurableObjectAtomicStore implements IAtomicStore {
         // Read-your-writes: check locally deferred writes first
         const local = deferredWrites.find(w => w.key === key);
         if (local !== undefined) {
-          const value: V = local.value as V;
-          return Promise.resolve(value);
+          return Promise.resolve(z.custom<V>().parse(local.value));
         }
 
         // Register deferred read, schedule batch flush.
         return new Promise<V>(resolve => {
-          const adaptedResolve: (v: unknown) => void = resolve as (v: unknown) => void;
+          const adaptedResolve: (v: unknown) => void = z.custom<(v: unknown) => void>().parse(resolve);
           pendingReads.push({ key, resolve: adaptedResolve });
 
           if (!flushScheduled) {
@@ -408,8 +406,7 @@ export class DurableObjectAtomicStore implements IAtomicStore {
         for (const key of keys) {
           const local = deferredWrites.find(w => w.key === key);
           if (local !== undefined) {
-            const v: V = local.value as V;
-            localResults.push(v);
+            localResults.push(z.custom<V>().parse(local.value));
           } else {
             const none: V | null = null;
             localResults.push(none);
@@ -429,8 +426,7 @@ export class DurableObjectAtomicStore implements IAtomicStore {
             readSet.set(r.key, r.version);
             const idx = keys.indexOf(r.key);
             if (idx !== -1) {
-              const entry: V | null = (r.value ?? null) as V | null;
-              localResults[idx] = entry;
+              localResults[idx] = z.custom<V | null>().parse(r.value ?? null);
             }
           }
           return localResults;

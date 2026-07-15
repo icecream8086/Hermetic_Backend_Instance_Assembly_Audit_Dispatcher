@@ -1,5 +1,6 @@
 /// <reference types="@cloudflare/workers-types" />
 
+import { z } from 'zod';
 import type { IMessageQueue } from './interfaces.ts';
 import type { TaskMessage, TaskType, ImagePullPayload, SandboxGcPayload, SandboxProvisionPayload } from './types.ts';
 
@@ -68,7 +69,7 @@ export class CfQueueProducer implements IMessageQueue {
   #message<T>(type: TaskType, payload: T): TaskMessage {
     return {
       type,
-      payload: payload as TaskMessage['payload'],
+      payload: z.custom<TaskMessage['payload']>().parse(payload),
       timestamp: Date.now(),
       id: crypto.randomUUID(),
     };

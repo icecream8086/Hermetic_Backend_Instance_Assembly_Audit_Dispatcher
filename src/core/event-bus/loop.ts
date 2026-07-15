@@ -15,6 +15,15 @@ import { eventFromTrigger, DEFAULT_EVENT_LOOP_CONFIG } from './types.ts';
 
 const KEY_PENDING = 'events:pending';
 
+/** Optional update shape for EventLoopConfig — every field is optional so callers can apply partial updates. */
+interface EventLoopConfigUpdate {
+  intervalMs?: number;
+  autoStart?: boolean;
+  batchSize?: number;
+  maxQueueSize?: number;
+  onError?: (error: unknown, context: string) => void;
+}
+
 /**
  * Public control surface for the event loop.
  *
@@ -47,7 +56,7 @@ export interface IEventLoopControl {
    * Update runtime configuration.
    * @returns the merged config after applying changes.
    */
-  configure(config: Partial<EventLoopConfig>): EventLoopConfig;
+  configure(config: EventLoopConfigUpdate): EventLoopConfig;
   /** Snapshot of current state. */
   status(): EventLoopStatus;
 
@@ -133,7 +142,7 @@ export class EventLoop implements IEventLoopControl {
 
   public constructor(
     bus: EventBus,
-    config?: Partial<EventLoopConfig>,
+    config?: EventLoopConfigUpdate,
     timerBackend?: ITimerBackend,
     store?: IAtomicStore,
   ) {
@@ -142,7 +151,7 @@ export class EventLoop implements IEventLoopControl {
     this.#queue = new CircularQueue<Event>({ capacity: 0 }); // auto-grow
     this.#config = { ...DEFAULT_EVENT_LOOP_CONFIG, ...config };
     this.#store = store;
-    if (this.#store) this.#recover().catch(err => { this.#reportError(err, 'recover'); });
+    if (this.#store) void this.#recover();
     if (this.#config.autoStart) this.start();
   }
 
@@ -153,7 +162,7 @@ export class EventLoop implements IEventLoopControl {
     this.#paused = false;
     this.#startTime = this.#startTime === 0 ? Date.now() : this.#startTime;
     this.#timerHandle = this.#timerBackend.start(
-      () => { this.#tick().catch(err => { this.#reportError(err, 'tick'); }); },
+      () => { void this.#tickWithCatch(); },
       this.#config.intervalMs,
     );
   }
@@ -174,7 +183,7 @@ export class EventLoop implements IEventLoopControl {
     this.#paused = false;
   }
 
-  public configure(config: Partial<EventLoopConfig>): EventLoopConfig {
+  public configure(config: EventLoopConfigUpdate): EventLoopConfig {
     let restart = false;
 
     if (config.intervalMs !== undefined && config.intervalMs > 0) {
@@ -192,9 +201,12 @@ export class EventLoop implements IEventLoopControl {
     }
 
     if (restart) {
-      this.#timerHandle!.clear();
+      const handle = this.#timerHandle;
+      if (handle) {
+        handle.clear();
+      }
       this.#timerHandle = this.#timerBackend.start(
-        () => { this.#tick().catch(err => { this.#reportError(err, 'tick'); }); },
+        () => { void this.#tickWithCatch(); },
         this.#config.intervalMs,
       );
     }
@@ -216,7 +228,7 @@ export class EventLoop implements IEventLoopControl {
   public enqueue(event: Event): void {
     if (this.#config.maxQueueSize > 0 && this.#queue.size >= this.#config.maxQueueSize) {
       this.#reportError(
-        new Error(`Queue full (${this.#queue.size} >= ${this.#config.maxQueueSize})`),
+        new Error(`Queue full (${String(this.#queue.size)} >= ${String(this.#config.maxQueueSize)})`),
         'enqueue',
       );
       return;
@@ -224,7 +236,7 @@ export class EventLoop implements IEventLoopControl {
     // Persist BEFORE memory enqueue to close the crash window.
     // If persist is in-flight when crash occurs, the event is in the store
     // and will be recovered on restart (at-least-once delivery).
-    if (this.#store) this.#persistEnqueue(event).catch(err => { this.#reportError(err, 'persist-enqueue'); });
+    if (this.#store) void this.#persistEnqueue(event);
     this.#queue.enqueue(event);
   }
 
@@ -232,19 +244,19 @@ export class EventLoop implements IEventLoopControl {
     const event = eventFromTrigger(input);
     if (this.#config.maxQueueSize > 0 && this.#queue.size >= this.#config.maxQueueSize) {
       this.#reportError(
-        new Error(`Queue full (${this.#queue.size} >= ${this.#config.maxQueueSize})`),
+        new Error(`Queue full (${String(this.#queue.size)} >= ${String(this.#config.maxQueueSize)})`),
         'enqueue',
       );
       return event;
     }
-    if (this.#store) this.#persistEnqueue(event).catch(err => { this.#reportError(err, 'persist-enqueue'); });
+    if (this.#store) void this.#persistEnqueue(event);
     this.#queue.enqueue(event);
     return event;
   }
 
   public enqueuePriority<T>(input: TriggerEventInput<T>): Event {
     const event = eventFromTrigger(input);
-    if (this.#store) this.#persistEnqueue(event).catch(err => { this.#reportError(err, 'persist-enqueue'); });
+    if (this.#store) void this.#persistEnqueue(event);
     this.#queue.enqueue(event);
     return event;
   }
@@ -273,6 +285,15 @@ export class EventLoop implements IEventLoopControl {
 
   #reportError(err: unknown, context: string): void {
     this.#config.onError?.(err, context);
+  }
+
+  /** Fire-and-forget safe wrapper around #tick — catches errors for timer callbacks. */
+  async #tickWithCatch(): Promise<void> {
+    try {
+      await this.#tick();
+    } catch (err: unknown) {
+      this.#reportError(err, 'tick');
+    }
   }
 
   async #tick(): Promise<void> {
@@ -312,8 +333,10 @@ export class EventLoop implements IEventLoopControl {
 
   /** Recover pending events from store after construction. */
   async #recover(): Promise<void> {
+    const store = this.#store;
+    if (!store) return;
     try {
-      await this.#store!.transact(async (txn) => {
+      await store.transact(async (txn) => {
         const pending = await txn.get<Event[]>(KEY_PENDING);
         if (!pending) return;
         for (const event of pending) {
@@ -333,17 +356,25 @@ export class EventLoop implements IEventLoopControl {
   /** Append one event to the persisted queue (transient events skipped). */
   async #persistEnqueue(event: Event): Promise<void> {
     if (!EventLoop.#PERSISTED_TYPES.has(event.type)) return;
-    await this.#store!.transact(async (txn) => {
-      const pending = (await txn.get<Event[]>(KEY_PENDING)) ?? [];
-      pending.push(event);
-      txn.set(KEY_PENDING, pending);
-    });
+    const store = this.#store;
+    if (!store) return;
+    try {
+      await store.transact(async (txn) => {
+        const pending = (await txn.get<Event[]>(KEY_PENDING)) ?? [];
+        pending.push(event);
+        txn.set(KEY_PENDING, pending);
+      });
+    } catch (err) {
+      this.#reportError(err, 'persist-enqueue');
+    }
   }
 
   /** Remove dispatched events from the persisted queue. */
   async #persistDequeue(events: Event[]): Promise<void> {
+    const store = this.#store;
+    if (!store) return;
     const dispatched = new Set(events.map(e => e.id));
-    await this.#store!.transact(async (txn) => {
+    await store.transact(async (txn) => {
       const pending = (await txn.get<Event[]>(KEY_PENDING)) ?? [];
       txn.set(KEY_PENDING, pending.filter(e => !dispatched.has(e.id)));
     });

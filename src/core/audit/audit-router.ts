@@ -92,19 +92,19 @@ export function createAuditRouter(reader: IAuditReader): Hono<AuditEnv> {
       return c.json(fail('INVALID_REQUEST', 'Expected JSON body'), 400);
     }
     let parsedBody: Record<string, unknown>;
-    try { parsedBody = z.record(z.string(), z.unknown()).parse(body); } catch {
+    try { parsedBody = z.record(z.string(), z.unknown()).parse(body); } catch (_e) {
       return c.json(fail('INVALID_REQUEST', 'Expected JSON body'), 400);
     }
 
     const current = getPersistencePolicy();
+    let _rules: PersistenceRule[] = current.rules;
+    try { _rules = z.array(z.record(z.string(), z.unknown())).parse(parsedBody.rules).map((r) => parseRule(r)); } catch (_e) { void _e; }
 
     // Merge partial updates
     const updated: PersistencePolicy = {
       enabled: z.boolean().optional().parse(parsedBody.enabled) ?? current.enabled,
       defaultMinLevel: parseLevel(parsedBody.defaultMinLevel) ?? current.defaultMinLevel,
-      rules: Array.isArray(parsedBody.rules)
-        ? parsedBody.rules.map((r: Record<string, unknown>, _i: number) => parseRule(r))
-        : current.rules,
+      rules: _rules,
       updatedAt: Date.now(),
       updatedBy: userId ?? 'unknown',
     };
@@ -137,8 +137,10 @@ export function createAuditRouter(reader: IAuditReader): Hono<AuditEnv> {
 // ─── Serialization helpers ───
 
 function parseLevel(raw: unknown): KernLevel | null {
-  let str: string;
-  try { str = z.string().parse(raw); } catch { return null; }
+  let parsed: string | null = null;
+  try { parsed = z.string().parse(raw); } catch (_e) { void _e; }
+  if (parsed === null) return null;
+  const str = parsed;
   const map: Record<string, KernLevel> = {
     emerg: KernLevel.EMERG, alert: KernLevel.ALERT, crit: KernLevel.CRIT,
     err: KernLevel.ERR, warning: KernLevel.WARNING, notice: KernLevel.NOTICE,

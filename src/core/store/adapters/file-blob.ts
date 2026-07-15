@@ -29,39 +29,50 @@ export class FileBlobStore implements IBlobStore {
     await this.#ensureDir();
     const fp = this.#filePath(key);
 
-    // Handle ArrayBuffer, Buffer (Uint8Array), and other binary types
-    const isArrayBuffer = (() => { try { z.instanceof(ArrayBuffer).parse(body); return true; } catch { return false; } })();
-    if (isArrayBuffer || ArrayBuffer.isView(body)) {
+    // Handle ArrayBuffer
+    let arrayBuffer: ArrayBuffer | undefined;
+    try { arrayBuffer = z.instanceof(ArrayBuffer).parse(body); } catch (e) { console.debug("not ArrayBuffer", e); }
+    if (arrayBuffer !== undefined) {
       const { writeFile } = await import('node:fs/promises');
-      await writeFile(fp, isArrayBuffer ? Buffer.from(body as ArrayBuffer) : Buffer.from((body as Uint8Array).buffer, (body as Uint8Array).byteOffset, (body as Uint8Array).byteLength));
-    } else {
-      // ReadableStream → write to file
-      const chunks: Uint8Array[] = [];
-      const reader = body.getReader();
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-      }
-      const buf = Buffer.concat(chunks);
-      const { writeFile } = await import('node:fs/promises');
-      await writeFile(fp, buf);
+      await writeFile(fp, Buffer.from(arrayBuffer));
+      return;
     }
+
+    // Handle Uint8Array / Buffer (Node.js)
+    let uint8Array: Uint8Array | undefined;
+    try { uint8Array = z.instanceof(Uint8Array).parse(body); } catch (e) { console.debug("not Uint8Array", e); }
+    if (uint8Array !== undefined) {
+      const { writeFile } = await import('node:fs/promises');
+      await writeFile(fp, Buffer.from(uint8Array.buffer, uint8Array.byteOffset, uint8Array.byteLength));
+      return;
+    }
+
+    // Handle ReadableStream
+    const stream = z.instanceof(ReadableStream).parse(body);
+    const chunks: Uint8Array[] = [];
+    const reader = stream.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(z.custom<Uint8Array>().parse(value));
+    }
+    const buf = Buffer.concat(chunks);
+    const { writeFile } = await import('node:fs/promises');
+    await writeFile(fp, buf);
   }
 
   public async get(key: string): Promise<ReadableStream | null> {
     await this.#ensureDir();
+    let result: ReadableStream | null = null;
     try {
       const fp = this.#filePath(key);
       await stat(fp);
       const nodeStream = createReadStream(fp);
-      return Readable.toWeb(nodeStream) as ReadableStream;
-    } catch {
-
-      console.debug("");
-
-      return null;
+      result = z.custom<ReadableStream>().parse(Readable.toWeb(nodeStream));
+    } catch (e) {
+      console.debug("file not found", e);
     }
+    return result;
   }
 
   public async delete(key: string): Promise<void> {

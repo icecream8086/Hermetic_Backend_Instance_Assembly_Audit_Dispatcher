@@ -10,6 +10,7 @@ import type {
 } from './s3.ts';
 import type { S3ProviderConfig } from './s3-types.ts';
 import { payloadHash } from './s3-signer.ts';
+import { z } from 'zod';
 
 export abstract class S3ClientBase implements IS3Provider {
   public abstract readonly type: S3ProviderType;
@@ -22,9 +23,9 @@ export abstract class S3ClientBase implements IS3Provider {
   /** Subclass implements its own auth scheme (SigV4, OSS HMAC, etc.) */
   protected abstract authFetch(url: string, method: string, path: string, queryString: string, headers: Record<string, string>, bodyHash: string, body?: BodyInit): Promise<Response>;
 
-  abstract getPresignedUrl(bucket: string, key: string, expiresInSeconds?: number): Promise<string>;
+  public abstract getPresignedUrl(bucket: string, key: string, expiresInSeconds?: number): Promise<string>;
 
-  abstract putPresignedUrl(bucket: string, key: string, expiresInSeconds?: number): Promise<string>;
+  public abstract putPresignedUrl(bucket: string, key: string, expiresInSeconds?: number): Promise<string>;
 
   /** Bucket name mapping override */
   protected bucketMapping(bucket: string): string {
@@ -59,14 +60,12 @@ export abstract class S3ClientBase implements IS3Provider {
   }
 
   public async headObject(bucket: string, key: string): Promise<S3ObjectInfo | null> {
-    try {
-      const path = `/${this.bucketMapping(bucket)}/${encodeKey(key)}`;
-      const url = `${this.endpointFor(bucket)}${path}`;
-      const amzHeaders: Record<string, string> = { host: new URL(url).host };
-      const res = await this.authFetch(url, 'HEAD', path, '', amzHeaders, '');
-      if (res.status === 404) return null;
-      return parseObjectInfo(key, res);
-    } catch (e) { const _r = null; return _r; }
+    const path = `/${this.bucketMapping(bucket)}/${encodeKey(key)}`;
+    const url = `${this.endpointFor(bucket)}${path}`;
+    const amzHeaders: Record<string, string> = { host: new URL(url).host };
+    const res = await this.authFetch(url, 'HEAD', path, '', amzHeaders, '');
+    if (res.status === 404) return null;
+    return parseObjectInfo(key, res);
   }
 
   public async listObjects(
@@ -178,11 +177,20 @@ export function encodeKey(key: string): string {
 }
 
 export async function toArrayBuffer(body: ReadableStream | ArrayBuffer | Uint8Array): Promise<ArrayBuffer> {
-  if (body instanceof ReadableStream) return new Response(body).arrayBuffer();
-  if (body instanceof ArrayBuffer) return body;
-  const buf = new ArrayBuffer(body.length);
-  new Uint8Array(buf).set(body);
-  return buf;
+  try {
+    const stream = z.instanceof(ReadableStream).parse(body);
+    return await new Response(stream).arrayBuffer();
+  } catch (_e) {
+    try {
+      const ab = z.instanceof(ArrayBuffer).parse(body);
+      return ab;
+    } catch (_e2) {
+      const u8 = z.instanceof(Uint8Array).parse(body);
+      const buf = new ArrayBuffer(u8.length);
+      new Uint8Array(buf).set(u8);
+      return buf;
+    }
+  }
 }
 
 export function parseObjectInfo(key: string, res: Response): S3ObjectInfo {
@@ -200,8 +208,9 @@ export function parseObjectInfo(key: string, res: Response): S3ObjectInfo {
 export function parseListResult(xml: string): S3ListObjectsResult {
   const objects: S3ObjectInfo[] = [];
   const commonPrefixes: string[] = [];
-  let isTruncated: boolean;
-  let nextToken: string | undefined;
+  const isTruncated = xml.includes('<IsTruncated>true</IsTruncated>');
+  const tokenMatch = /<NextContinuationToken>(.*?)<\/NextContinuationToken>/.exec(xml);
+  const nextToken = tokenMatch?.[1];
 
   const contents = xml.matchAll(/<Contents>(.*?)<\/Contents>/gs);
   for (const match of contents) {
@@ -223,9 +232,6 @@ export function parseListResult(xml: string): S3ListObjectsResult {
     commonPrefixes.push(prefix);
   }
 
-  isTruncated = xml.includes('<IsTruncated>true</IsTruncated>');
-  const tokenMatch = /<NextContinuationToken>(.*?)<\/NextContinuationToken>/.exec(xml);
-  if (tokenMatch) nextToken = tokenMatch[1];
 
   return { objects, commonPrefixes, isTruncated, ...(nextToken ? { nextContinuationToken: nextToken } : {}) };
 }
