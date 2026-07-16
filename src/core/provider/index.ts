@@ -49,6 +49,7 @@ export type {
   EnvVar,
   ResourceRequirements,
   ProbeSpec,
+  ContainerLifecycle,
 } from './types.ts';
 
 export { createProviderRegistry } from './factory.ts';

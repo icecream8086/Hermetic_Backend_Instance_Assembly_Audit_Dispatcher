@@ -198,6 +198,18 @@ export interface ProbeSpec {
   readonly tcpSocket?: { readonly port: number } | undefined;
 }
 
+/** Lifecycle handler — same shape as probe handler (exec/httpGet/tcpSocket). */
+export interface LifecycleHandler {
+  readonly exec?: { readonly command: readonly string[] } | undefined;
+  readonly httpGet?: { readonly path: string; readonly port: number; readonly scheme?: string | undefined } | undefined;
+  readonly tcpSocket?: { readonly port: number } | undefined;
+}
+
+export interface ContainerLifecycle {
+  readonly postStart?: LifecycleHandler | undefined;
+  readonly preStop?: LifecycleHandler | undefined;
+}
+
 /** A container group resource instance as reported by the cloud provider.
  *  Each container in the group IS an OciContainer — the cloud orchestrator
  *  creates them, the OCI Runtime manages them at the OS level. */
@@ -302,6 +314,7 @@ export interface ContainerCreateConfig {
   readonly volumeMounts?: readonly VolumeMountConfig[] | undefined;
   /** Network mode: 'bridge' | 'host' | 'none' | 'container:<name|id>'. */
   readonly networkMode?: string | undefined;
+  readonly lifecycle?: ContainerLifecycle | undefined;
   readonly providerOverrides?: Record<string, unknown> | undefined;
 }
 

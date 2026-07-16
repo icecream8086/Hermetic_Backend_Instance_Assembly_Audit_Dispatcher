@@ -126,6 +126,7 @@ function mergeContainerSpec(parent: ContainerSpec, child: ContainerSpec): Contai
     livenessProbe: child.livenessProbe ?? parent.livenessProbe,
     readinessProbe: child.readinessProbe ?? parent.readinessProbe,
     startupProbe: child.startupProbe ?? parent.startupProbe,
+    lifecycle: child.lifecycle ?? parent.lifecycle,
     imagePullPolicy: child.imagePullPolicy ?? parent.imagePullPolicy,
     tty: child.tty ?? parent.tty,
     stdin: child.stdin ?? parent.stdin,

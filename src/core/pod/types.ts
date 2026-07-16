@@ -10,7 +10,7 @@
  */
 
 import { z } from 'zod';
-import type { EnvVar, ProbeSpec, ContainerPortConfig, VolumeMountConfig } from '../provider/types.ts';
+import type { EnvVar, ProbeSpec, ContainerPortConfig, VolumeMountConfig, ContainerLifecycle } from '../provider/types.ts';
 export type { ProbeSpec };
 import type { VersionId } from '../brand.ts';
 
@@ -75,6 +75,7 @@ export interface ContainerSpec {
   readonly livenessProbe?: ProbeSpec | undefined;
   readonly readinessProbe?: ProbeSpec | undefined;
   readonly startupProbe?: ProbeSpec | undefined;
+  readonly lifecycle?: ContainerLifecycle | undefined;
   readonly imagePullPolicy?: string | undefined;
   readonly tty?: boolean | undefined;
   readonly stdin?: boolean | undefined;

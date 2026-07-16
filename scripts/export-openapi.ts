@@ -26,6 +26,7 @@ import { createSubnetRouter } from '../src/features/subnet/handler.ts';
 import { createVolumeRouter } from '../src/features/volume/handler.ts';
 import { createImagesRouter } from '../src/features/images/handler.ts';
 import { createActionsRouter } from '../src/features/actions/handler.ts';
+import { createStorageRouter } from '../src/features/storage/handler.ts';
 import { createContainerSecretRouter } from '../src/features/container-secret/handler.ts';
 import { createInstancesRouter } from '../src/features/instances/handler.ts';
 import { createSecurityRouter } from '../src/features/security/handler.ts';
@@ -105,6 +106,7 @@ app.route('/api/images', createImagesRouter(stubProvidersRegistry as any));
 app.route('/api/container-secrets', createContainerSecretRouter(stubContainerSecretSvc));
 app.route('/api/instances', createInstancesRouter(stubInstancesSvc));
 app.route('/api/security', createSecurityRouter({ securityService: stubSecuritySvc, s3ProviderResolver: stubS3Resolver }));
+app.route('/api/storage', createStorageRouter({ s3ProviderResolver: stubS3Resolver }));
 app.route('/api/actions', createActionsRouter(stubActionDeps));
 // Audit router uses plain Hono (not OpenAPIHono) — routes added manually below
 const auditRouter = createAuditRouter(new WorkersAuditLogger());

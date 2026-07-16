@@ -2,7 +2,7 @@
 # tags: sftp, vsftp, gpu, spot
 name: "vsftp_GPU"
 description: "VSFTP with GPU acceleration — T4 GPU (ecs.gn6v), spot instance, auto EIP, multi-zone"
-apiVersion: "hbi-aad/v1"
+apiVersion: "hbi-aad/v2"
 kind: "Pod"
 spec:
   metadata:

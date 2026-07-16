@@ -2,7 +2,7 @@
 # tags: sftp, vsftp, public, spot
 name: "vsftp_pub"
 description: "VSFTP public access with EIP — spot instance, auto public IP, multi-zone"
-apiVersion: "hbi-aad/v1"
+apiVersion: "hbi-aad/v2"
 kind: "Pod"
 spec:
   metadata:

@@ -2,7 +2,7 @@
 # tags: lifecycle, producer-consumer, busybox, public-image, v2
 name: "lifecycle-busybox"
 description: "全生命周期验证 (busybox) — 纯公开镜像，无需推送，开箱即用"
-apiVersion: "hbi-aad/v1"
+apiVersion: "hbi-aad/v2"
 kind: "Pod"
 spec:
   metadata:

@@ -1,0 +1,261 @@
+# HBI-AAD v2 审计与路线图
+# 生成: 2026-07-17
+# 基于全项目代码审查 + SECAP 符号分析 + Oracle 形式化验证交叉对比
+
+meta:
+  period: "2026-07-16 ~ 2026-07-17"
+  issues_created: 12
+  issues_resolved: 8
+  spec_compliance: ~93%
+
+# ═══════════════════════════════════════════════════════════════
+# 第一部分: 已发现的缺陷与修复
+# ═══════════════════════════════════════════════════════════════
+
+findings:
+
+  - id: FIND-01
+    area: 数据一致性
+    title: InstanceService.update() credentialRef → status 不联动
+    severity: HIGH
+    issue: ISSUE-00102
+    status: APPROVED
+    root_cause: |
+      create() 按 credentialRef 派生 status (有→online, 无→offline)。
+      update() 只合并字段不重推导。先创建无凭证实例(status=offline)，
+      再补绑凭证 → status 仍是 offline → resolveByCapability 过滤掉 → 503。
+    fix: |
+      提取 static resolveStatus(credentialRef) 函数，create 和 update 共用。
+      update 中 input.status 显式传优先，否则从 credentialRef 自动推导。
+    pattern: 单点入口 + 编译器保证 — 同 ISSUE-00103/00104 模式
+
+  - id: FIND-02
+    area: 类型安全
+    title: ECI 状态映射链三处缺口
+    severity: HIGH
+    issue: ISSUE-00103
+    status: APPROVED
+    root_cause: |
+      1. containerGroupStatusSchema (Zod enum) 包含 'Expiring'，但
+         ContainerGroupState (TS enum) 只有 'Expired' → 类型漂移
+      2. toPodPhase switch 无 default → 未映射状态返回 undefined
+      3. 'Creating' 等新版 API 状态不在 Zod enum → ZodError 崩溃
+    fix: |
+      1. Zod schema 改为 z.nativeEnum(ContainerGroupState) — 单一信源
+      2. parseContainerGroup 内联归一化 Expiring→Expired
+      3. toPodPhase 加 default: never 穷举 + 安全 fallback
+
+  - id: FIND-03
+    area: Provider 接口
+    title: ResourcePolicy — 容器资源阈值 + 侧车自动忽略
+    severity: HIGH
+    issue: ISSUE-00104
+    status: APPROVED
+    root_cause: |
+      ECI 最小容器规格 0.25 vCPU / 512 MiB。低于阈值的 sidecar
+      容器未标记 __ECI_RESOURCE_IGNORE__，导致 ECI 服务端整形过大。
+    fix: |
+      ResourcePolicy 接口 (minCpu/minMemory/ignoreEnvName/markIgnored/isIgnored)
+      EciResourcePolicy + PodmanResourcePolicy 各实现一份。
+      toContainerCreateConfig 接收 policy，编译期强制。+ 内存 MiB→GiB 转换。
+
+  - id: FIND-04
+    area: OpenAPI/SDK
+    title: Template OpenAPI schema 空对象
+    severity: HIGH
+    issue: ISSUE-00106
+    status: APPROVED
+    root_cause: |
+      response-schema.ts L17: spec: z.object({}) → OpenAPI 输出空对象 → SDK
+      PodTemplate 类型为空壳 → 前端缺少全部容器/卷/探针/provider 字段。
+    fix: |
+      Step 1: ESLint rule no-empty-openapi-schema 禁止 z.object({}).openapi()
+      Step 2: spec: z.object({}) → spec: PodSpecSchema
+      Step 3: types.ts → z.infer<typeof TemplateSchema> 派生类型
+      样板模式，其他 feature 逐个跟进。
+
+  - id: FIND-05
+    area: OpenAPI/SDK
+    title: providerOverrides 类型丢失
+    severity: MEDIUM
+    issue: ISSUE-00108
+    status: APPROVED
+    root_cause: |
+      PodSpecSchema + ContainerSpecSchema 的 providerOverrides 用
+      z.record(z.string(), z.unknown()) → SDK 看到 Record<string, unknown>
+      Alibaba 的 region/instanceId/zoneId/account/instanceType 等字段数据存在但无类型。
+    fix: |
+      z.object({ alibaba: AlibabaOverridesSchema.optional() }).catchall(z.unknown())
+      3 处统一改。OpenAPI 展开 alibaba.* 全部字段。.catchall 保留扩展性。
+
+  - id: FIND-06
+    area: OpenAPI 注册
+    title: storage handler 用纯 Hono 而非 OpenAPIHono
+    severity: MEDIUM
+    issue: ISSUE-00109 + ISSUE-00110
+    status: APPROVED
+    root_cause: |
+      17 个 handler 用 new OpenAPIHono() + createRoute()，
+      只有 storage 用 new Hono() + app.get() → 4 端点不在 openapi.json。
+    fix: |
+      ISSUE-00109: storage handler → OpenAPIHono + 4 个 createRoute
+      ISSUE-00110: ESLint rule no-plain-hono-handler，feature handler 禁止 new Hono()
+
+  - id: FIND-07
+    area: API 路由完整性
+    title: ACTION 系统 API 2 缺失 + 2 路径错 + 1 空壳
+    severity: HIGH
+    issue: ISSUE-00100
+    status: APPROVED
+    detail: |
+      MISSING: POST /dags, POST /dags/{dagId}/dagRuns
+      路径错: GET /pools, GET /health (挂在 /dags 子路由下)
+      空壳: GET .../taskInstances/{tiId}/logs → 501
+
+  - id: FIND-08
+    area: SPEC 合规
+    title: SCHEDULED 转移表多两条边
+    severity: LOW
+    issue: 未发 (并入下次审计)
+    root_cause: |
+      SPEC §2.3: SCHEDULED → {QUEUED, REMOVED}
+      代码 TASK_VALID_TRANSITIONS: SCHEDULED → {QUEUED, SKIPPED, UPSTREAM_FAILED, REMOVED}
+      多了 SKIPPED 和 UPSTREAM_FAILED。调度器实际不走这些路径，但校验应挡住。
+
+# ═══════════════════════════════════════════════════════════════
+# 第二部分: Worker 运行时兼容性审计
+# ═══════════════════════════════════════════════════════════════
+
+worker_audit:
+
+  dag_scheduler:
+    verdict: 生产不可用
+    issues:
+      - severity: CRITICAL
+        title: 硬编码 SetIntervalBackend
+        detail: |
+          handler.ts:117: new SetIntervalBackend()
+          Worker 空闲时 setInterval 不触发 → 调度器停摆 → 任务饥饿
+          已有的 DoAlarmBackend (代数调度 + 防漂移) 未接入 DagScheduler
+        fix: DagScheduler 接收 ITimerBackend 依赖注入
+
+      - severity: MODERATE
+        title: setInterval 在用户请求中触发
+        detail: |
+          Worker 单线程：调度器 tick 可能在 GET /api/templates 请求处理期间执行
+          → 用户请求延迟不可预测
+        fix: DO Alarm 回调独立走 /__scheduled，与用户请求分离
+
+      - severity: LOW
+        title: 无并发锁
+        detail: 多 isolate 可能同时跑 tick。DO Alarm 天然串行 (单 DO 单线程)
+        fix: 切换到 DO Alarm 自动解决
+
+  mq_anti_patterns:
+    - location: dag-scheduler.ts execute() 阶段
+      problem: 容器执行在调度器 tick 内同步调 executor.execute()
+      effect: 容器启动 30s → 调度器冻结 30s → 其他 DAG 排队
+      should_be: execute() 只做状态转换，实际执行推 CF Queue consumer
+
+    - location: dag-scheduler.ts heartbeat() 阶段
+      problem: 每次 tick 扫描全部 RUNNING 任务检查超时
+      effect: 1000 任务 × 每 5s = 995 次空扫
+      should_be: task 进入 RUNNING 时 setAlarm(timeoutAt) 一次性到时触发
+
+    - location: dag-scheduler.ts cgGC() 阶段
+      problem: 每 tick 扫描全部 CG 检查是否该回收
+      should_be: CG 进入终态时 setAlarm(60s) 一次性到时触发
+
+# ═══════════════════════════════════════════════════════════════
+# 第三部分: OpenAPI/SDK 架构改进
+# ═══════════════════════════════════════════════════════════════
+
+openapi_improvements:
+
+  completed:
+    - z.infer 样板 (Template)
+    - no-empty-openapi-schema ESLint
+    - no-plain-hono-handler ESLint
+    - providerOverrides 类型化
+
+  pending:
+    - 其他 13 个 feature 逐个切 z.infer (ISSUE-00107 closed — 不需要全量)
+    - storage 端点从未注册到有类型 (ISSUE-00109)
+
+  principles:
+    - Zod schema = 单一信源，TS 类型从 z.infer 派生
+    - 所有 feature handler 必须 OpenAPIHono + createRoute
+    - 禁止 z.object({}) 作为 OpenAPI response schema
+    - providerOverrides 结构化 + catchall 保留扩展
+
+# ═══════════════════════════════════════════════════════════════
+# 第四部分: DAG 系统能力边界与路线图
+# ═══════════════════════════════════════════════════════════════
+
+dag_system:
+
+  implemented:
+    - DagDef/DagRun/TaskInstance 三层实体
+    - 12 态 TaskInstance 状态机 (NRI+PBT 验证)
+    - 4 态 DagRun + 聚合规则 (TLA+ 验证)
+    - 9 规则 TriggerRule 引擎 (TLA+ 穷举)
+    - 5 步过滤管线 + ConcurrencyMap (TLA+ 确定性验证)
+    - Pool 信号量 (default_pool=128)
+    - ApprovalSensor 审批门
+    - Runner 注册/心跳/下线
+    - Secret AES-256-GCM 加密
+    - YAML DSL → DagDef 编译器
+    - DAG 可视化端点 GET /runs/:id/dag → { nodes, edges }
+    - CG 生命周期 11 态 + GC (4/6 路径)
+
+  gaps:
+    - severity: MEDIUM
+      title: TaskInstance logs → 501 空壳
+    - severity: MEDIUM
+      title: CG GC 缺 provider-gone + expired-gc 两条路径
+    - severity: LOW
+      title: Cross-consistency C6 未强制 (CG=Deleted ⇒ TI terminal)
+
+  future_operators:
+    - title: webhook 操作类型
+      purpose: 外部节点 (日志/Watchdog/压测/性能服务器) 通过 OpenAPI 接入 DAG
+      needs:
+        - PATCH taskInstance (状态变更 + 执行结果)
+        - POST taskInstance logs (外部写日志)
+        - 复用现有 Runner 注册/心跳认证
+
+  frontend_guide:
+    - DAG 视图: GET /runs/:id/dag → nodes + edges + 实时状态
+    - 模板编辑: 资源从 /api/networks /api/volumes /api/subnets /api/instances 拉
+    - v1→v2 迁移: region/account/instanceId/zone → providerOverrides.alibaba.*
+      healthChecks → per-container probes, network → GET /pods/:id 查询
+
+# ═══════════════════════════════════════════════════════════════
+# 第五部分: 待清理
+# ═══════════════════════════════════════════════════════════════
+
+cleanup:
+  - id: ISSUE-00105
+    title: 模板清理 — 21→3，保留 vsftp_GPU + vsftp-pub + lifecycle-busybox
+    status: OPEN
+    note: 全部升级 apiVersion → hbi-aad/v2
+
+# ═══════════════════════════════════════════════════════════════
+# 第六部分: v2→v3 展望 (讨论级, 未发 issue)
+# ═══════════════════════════════════════════════════════════════
+
+v3_discussion:
+  - topic: DagScheduler Worker 兼容性改造
+    priority: P0 — 当前生产不可用
+    scope: ITimerBackend 注入 + DO Alarm 接入 + 并发锁
+
+  - topic: MQ 替代内联执行
+    priority: P1
+    scope: DagScheduler.execute() → CF Queue, heartbeat→setAlarm, cgGC→setAlarm
+
+  - topic: webhook operatorType
+    priority: P2
+    scope: 外部节点 OpenAPI 接入, PATCH taskInstance + POST logs
+
+  - topic: 其余 feature 的 z.infer 渐进迁移
+    priority: P3 — 按 feature 逐个切，不阻塞

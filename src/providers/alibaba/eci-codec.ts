@@ -484,6 +484,30 @@ function buildProbeParams(
   return p;
 }
 
+function buildLifecycleParams(
+  lifecycle: import('../../core/provider/types.ts').ContainerLifecycle | undefined,
+  pfx: string,
+): Record<string, string> {
+  const p: Record<string, string> = {};
+  if (!lifecycle) return p;
+
+  function encodeHandler(handler: import('../../core/provider/types.ts').LifecycleHandler | undefined, key: string) {
+    if (!handler) return;
+    const base = `${pfx}.${key}`;
+    if (handler.exec) p[`${base}.Exec.Command`] = handler.exec.command.join(' ');
+    if (handler.httpGet) {
+      p[`${base}.HttpGet.Path`] = handler.httpGet.path;
+      p[`${base}.HttpGet.Port`] = String(handler.httpGet.port);
+      if (handler.httpGet.scheme) p[`${base}.HttpGet.Scheme`] = handler.httpGet.scheme;
+    }
+    if (handler.tcpSocket) p[`${base}.TcpSocket.Port`] = String(handler.tcpSocket.port);
+  }
+
+  encodeHandler(lifecycle.postStart, 'LifecyclePostStartHandler');
+  encodeHandler(lifecycle.preStop, 'LifecyclePreStopHandler');
+  return p;
+}
+
 export function parseProbe(raw: EciProbeItem | undefined): ProbeSpec | undefined {
   if (!raw) return undefined;
   const result: ProbeSpec = {
@@ -673,6 +697,7 @@ export function buildCreateParams(
       p = { ...p, ...buildProbeParams(c.livenessProbe, cpfx, 'LivenessProbe') };
       p = { ...p, ...buildProbeParams(c.readinessProbe, cpfx, 'ReadinessProbe') };
       p = { ...p, ...buildProbeParams(c.startupProbe, cpfx, 'StartupProbe') };
+      p = { ...p, ...buildLifecycleParams(c.lifecycle, cpfx) };
 
       // ── VolumeMounts ──
       if (c.volumeMounts?.length) {
@@ -785,6 +810,7 @@ function toContainerCreateConfig(c: ContainerSpec, priority?: number): Container
     tty: c.tty ?? undefined,
     stdin: c.stdin ?? undefined,
     networkMode: c.networkMode ?? undefined,
+    lifecycle: c.lifecycle,
     providerOverrides: c.providerOverrides ?? undefined,
     resources: c.resources !== undefined ? { limits: c.resources.limits } : undefined,
   };
@@ -880,6 +906,7 @@ export function buildPodCreateParams(spec: PodSpec, region: string): Record<stri
     p = { ...p, ...buildProbeParams(c.livenessProbe, cpfx, 'LivenessProbe') };
     p = { ...p, ...buildProbeParams(c.readinessProbe, cpfx, 'ReadinessProbe') };
     p = { ...p, ...buildProbeParams(c.startupProbe, cpfx, 'StartupProbe') };
+    p = { ...p, ...buildLifecycleParams(c.lifecycle, cpfx) };
 
     // ── VolumeMounts ──
     if (c.volumeMounts?.length) {

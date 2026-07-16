@@ -24,7 +24,7 @@ export const VolumeMountSchema = z.object({
   credentialRef: z.string().optional(),
 });
 
-export const ProbeSpecSchema = z.object({
+export const HandlerSchema = z.object({
   httpGet: z.object({
     path: z.string(),
     port: z.number(),
@@ -36,12 +36,41 @@ export const ProbeSpecSchema = z.object({
   exec: z.object({
     command: z.array(z.string()).readonly(),
   }).optional(),
+});
+
+export const LifecycleSchema = z.object({
+  postStart: HandlerSchema.optional(),
+  preStop: HandlerSchema.optional(),
+});
+
+export const ProbeSpecSchema = HandlerSchema.extend({
   initialDelaySeconds: z.number().optional(),
   periodSeconds: z.number().optional(),
   timeoutSeconds: z.number().optional(),
   successThreshold: z.number().optional(),
   failureThreshold: z.number().optional(),
 });
+
+export const AlibabaOverridesSchema = z.object({
+  region: z.string().optional(),
+  securityGroupId: z.string().optional(),
+  vSwitchId: z.string().optional(),
+  subnetIds: z.array(z.string()).optional(),
+  autoCreateEip: z.union([z.boolean(), z.string()]).optional(),
+  spotStrategy: z.string().optional(),
+  spotPriceLimit: z.number().optional(),
+  ramRoleName: z.string().optional(),
+  resourceGroupId: z.string().optional(),
+  activeDeadlineSeconds: z.number().optional(),
+  instanceId: z.string().optional(),
+  instanceType: z.string().optional(),
+  eipBandwidth: z.number().optional(),
+  account: z.string().optional(),
+  healthMaxRetries: z.number().optional(),
+  apiVersion: z.string().optional(),
+  description: z.string().optional(),
+  zoneId: z.string().optional(),
+}).passthrough();
 
 export const ContainerSpecSchema = z.object({
   name: z.string().min(1),
@@ -61,11 +90,14 @@ export const ContainerSpecSchema = z.object({
   livenessProbe: ProbeSpecSchema.optional(),
   readinessProbe: ProbeSpecSchema.optional(),
   startupProbe: ProbeSpecSchema.optional(),
+  lifecycle: LifecycleSchema.optional(),
   imagePullPolicy: z.string().optional(),
   tty: z.boolean().optional(),
   stdin: z.boolean().optional(),
   networkMode: z.string().optional(),
-  providerOverrides: z.record(z.string(), z.unknown()).optional(),
+  providerOverrides: z.object({
+    alibaba: AlibabaOverridesSchema.optional(),
+  }).catchall(z.unknown()).optional(),
 });
 
 export const VolumeSpecSchema = z.object({
@@ -109,29 +141,10 @@ export const PodSpecSchema = z.object({
       mode: z.number().optional(),
     })).readonly().optional(),
   }),
-  providerOverrides: z.record(z.string(), z.unknown()).optional(),
+  providerOverrides: z.object({
+    alibaba: AlibabaOverridesSchema.optional(),
+  }).catchall(z.unknown()).optional(),
 });
-
-export const AlibabaOverridesSchema = z.object({
-  region: z.string().optional(),
-  securityGroupId: z.string().optional(),
-  vSwitchId: z.string().optional(),
-  subnetIds: z.array(z.string()).optional(),
-  autoCreateEip: z.union([z.boolean(), z.string()]).optional(),
-  spotStrategy: z.string().optional(),
-  spotPriceLimit: z.number().optional(),
-  ramRoleName: z.string().optional(),
-  resourceGroupId: z.string().optional(),
-  activeDeadlineSeconds: z.number().optional(),
-  instanceId: z.string().optional(),
-  instanceType: z.string().optional(),
-  eipBandwidth: z.number().optional(),
-  account: z.string().optional(),
-  healthMaxRetries: z.number().optional(),
-  apiVersion: z.string().optional(),
-  description: z.string().optional(),
-  zoneId: z.string().optional(),
-}).passthrough();
 
 export const PodSpecPatchSchema = z.object({
   metadata: z.object({
@@ -143,7 +156,9 @@ export const PodSpecPatchSchema = z.object({
     containers: z.array(ContainerSpecSchema).readonly().optional(),
     restartPolicy: z.enum(['Always', 'OnFailure', 'Never']).optional(),
   }).optional(),
-  providerOverrides: z.record(z.string(), z.unknown()).optional(),
+  providerOverrides: z.object({
+    alibaba: AlibabaOverridesSchema.optional(),
+  }).catchall(z.unknown()).optional(),
 });
 
 export const PodNetworkSchema = z.object({

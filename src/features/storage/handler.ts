@@ -1,10 +1,13 @@
-import { Hono } from 'hono';
+import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import type { Context } from 'hono';
+import { z } from 'zod';
 import { AppError } from '../../core/types.ts';
 import type { AppContext } from '../../core/deps.ts';
 import type { IS3Provider } from '../../core/provider/s3.ts';
 import { ListFilesQuerySchema, DiffRequestSchema, PresignForSyncRequestSchema } from './schema.ts';
+import { ListFilesResponseSchema, DiffResponseSchema, PresignForSyncResponseSchema } from './response.ts';
 import { ok } from '../../core/response.ts';
+import { OkResponse } from '../../core/http-docs/response-schema.ts';
 
 type PermChecker = NonNullable<AppContext['permissionChecker']>;
 
@@ -26,12 +29,23 @@ export interface StorageRouterDeps {
   permissionChecker?: PermChecker;
 }
 
-export function createStorageRouter(deps: StorageRouterDeps): Hono<{ Variables: AppContext }> {
+export function createStorageRouter(deps: StorageRouterDeps): OpenAPIHono<{ Variables: AppContext }> {
   const { s3ProviderResolver, permissionChecker } = deps;
-  const app = new Hono<{ Variables: AppContext }>();
+  const app = new OpenAPIHono<{ Variables: AppContext }>();
 
   // ── GET /{bucket}/files ──
-  app.get('/:bucket/files', async (c) => {
+  app.openapi(createRoute({
+    method: 'get',
+    path: '/:bucket/files',
+    tags: ['storage'],
+    request: {
+      params: z.object({ bucket: z.string() }),
+      query: ListFilesQuerySchema,
+    },
+    responses: {
+      200: { description: 'List files', content: { 'application/json': { schema: OkResponse(ListFilesResponseSchema) } } },
+    },
+  }), async (c) => {
     const bucket = c.req.param('bucket');
     await requireStoragePerm(c, permissionChecker, 'read', `storage:${bucket}`);
 
@@ -61,7 +75,18 @@ export function createStorageRouter(deps: StorageRouterDeps): Hono<{ Variables: 
   });
 
   // ── POST /{bucket}/diff ──
-  app.post('/:bucket/diff', async (c) => {
+  app.openapi(createRoute({
+    method: 'post',
+    path: '/:bucket/diff',
+    tags: ['storage'],
+    request: {
+      params: z.object({ bucket: z.string() }),
+      body: { content: { 'application/json': { schema: DiffRequestSchema } } },
+    },
+    responses: {
+      200: { description: 'Diff result', content: { 'application/json': { schema: OkResponse(DiffResponseSchema) } } },
+    },
+  }), async (c) => {
     const bucket = c.req.param('bucket');
     await requireStoragePerm(c, permissionChecker, 'read', `storage:${bucket}`);
 
@@ -94,7 +119,18 @@ export function createStorageRouter(deps: StorageRouterDeps): Hono<{ Variables: 
   });
 
   // ── POST /{bucket}/presign ──
-  app.post('/:bucket/presign', async (c) => {
+  app.openapi(createRoute({
+    method: 'post',
+    path: '/:bucket/presign',
+    tags: ['storage'],
+    request: {
+      params: z.object({ bucket: z.string() }),
+      body: { content: { 'application/json': { schema: PresignForSyncRequestSchema } } },
+    },
+    responses: {
+      200: { description: 'Presigned URL', content: { 'application/json': { schema: OkResponse(PresignForSyncResponseSchema) } } },
+    },
+  }), async (c) => {
     const bucket = c.req.param('bucket');
     const body = PresignForSyncRequestSchema.parse(await c.req.json());
 
@@ -119,7 +155,17 @@ export function createStorageRouter(deps: StorageRouterDeps): Hono<{ Variables: 
   });
 
   // ── DELETE /{bucket}/files/{key} ──
-  app.delete('/:bucket/files/:key', async (c) => {
+  app.openapi(createRoute({
+    method: 'delete',
+    path: '/:bucket/files/:key',
+    tags: ['storage'],
+    request: {
+      params: z.object({ bucket: z.string(), key: z.string() }),
+    },
+    responses: {
+      200: { description: 'Deleted', content: { 'application/json': { schema: OkResponse(z.null()) } } },
+    },
+  }), async (c) => {
     const bucket = c.req.param('bucket');
     const key = c.req.param('key');
     await requireStoragePerm(c, permissionChecker, 'delete', `storage:${bucket}/${key}`);

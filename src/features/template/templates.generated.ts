@@ -511,7 +511,7 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
     "category": "",
     "tags": [],
     "spec": {
-      "apiVersion": "hbi-aad/v1",
+      "apiVersion": "hbi-aad/v2",
       "kind": "Pod",
       "spec": {
         "metadata": {
@@ -1067,7 +1067,7 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
     "category": "",
     "tags": [],
     "spec": {
-      "apiVersion": "hbi-aad/v1",
+      "apiVersion": "hbi-aad/v2",
       "kind": "Pod",
       "spec": {
         "metadata": {
@@ -1139,7 +1139,7 @@ export const INSTANCE_TEMPLATES: InstanceTemplateDef[] = [
     "category": "",
     "tags": [],
     "spec": {
-      "apiVersion": "hbi-aad/v1",
+      "apiVersion": "hbi-aad/v2",
       "kind": "Pod",
       "spec": {
         "metadata": {

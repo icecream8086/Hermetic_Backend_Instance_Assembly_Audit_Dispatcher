@@ -138,6 +138,7 @@ export class PodService {
           ...(c.livenessProbe !== undefined ? { livenessProbe: c.livenessProbe } : {}),
           ...(c.readinessProbe !== undefined ? { readinessProbe: c.readinessProbe } : {}),
           ...(c.startupProbe !== undefined ? { startupProbe: c.startupProbe } : {}),
+          ...(c.lifecycle !== undefined ? { lifecycle: c.lifecycle } : {}),
           ...(c.imagePullPolicy !== undefined ? { imagePullPolicy: c.imagePullPolicy } : {}),
           ...(c.tty !== undefined ? { tty: c.tty } : {}),
           ...(c.stdin !== undefined ? { stdin: c.stdin } : {}),

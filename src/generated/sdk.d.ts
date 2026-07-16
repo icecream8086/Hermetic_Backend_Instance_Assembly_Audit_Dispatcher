@@ -2017,11 +2017,62 @@ export interface paths {
                                         successThreshold?: number;
                                         failureThreshold?: number;
                                     };
+                                    lifecycle?: {
+                                        postStart?: {
+                                            httpGet?: {
+                                                path: string;
+                                                port: number;
+                                                scheme?: string;
+                                            };
+                                            tcpSocket?: {
+                                                port: number;
+                                            };
+                                            exec?: {
+                                                command: string[];
+                                            };
+                                        };
+                                        preStop?: {
+                                            httpGet?: {
+                                                path: string;
+                                                port: number;
+                                                scheme?: string;
+                                            };
+                                            tcpSocket?: {
+                                                port: number;
+                                            };
+                                            exec?: {
+                                                command: string[];
+                                            };
+                                        };
+                                    };
                                     imagePullPolicy?: string;
                                     tty?: boolean;
                                     stdin?: boolean;
                                     networkMode?: string;
                                     providerOverrides?: {
+                                        alibaba?: {
+                                            region?: string;
+                                            securityGroupId?: string;
+                                            vSwitchId?: string;
+                                            subnetIds?: string[];
+                                            autoCreateEip?: boolean | string;
+                                            spotStrategy?: string;
+                                            spotPriceLimit?: number;
+                                            ramRoleName?: string;
+                                            resourceGroupId?: string;
+                                            activeDeadlineSeconds?: number;
+                                            instanceId?: string;
+                                            instanceType?: string;
+                                            eipBandwidth?: number;
+                                            account?: string;
+                                            healthMaxRetries?: number;
+                                            apiVersion?: string;
+                                            description?: string;
+                                            zoneId?: string;
+                                        } & {
+                                            [key: string]: unknown;
+                                        };
+                                    } & {
                                         [key: string]: unknown;
                                     };
                                 }[];
@@ -2120,11 +2171,62 @@ export interface paths {
                                         successThreshold?: number;
                                         failureThreshold?: number;
                                     };
+                                    lifecycle?: {
+                                        postStart?: {
+                                            httpGet?: {
+                                                path: string;
+                                                port: number;
+                                                scheme?: string;
+                                            };
+                                            tcpSocket?: {
+                                                port: number;
+                                            };
+                                            exec?: {
+                                                command: string[];
+                                            };
+                                        };
+                                        preStop?: {
+                                            httpGet?: {
+                                                path: string;
+                                                port: number;
+                                                scheme?: string;
+                                            };
+                                            tcpSocket?: {
+                                                port: number;
+                                            };
+                                            exec?: {
+                                                command: string[];
+                                            };
+                                        };
+                                    };
                                     imagePullPolicy?: string;
                                     tty?: boolean;
                                     stdin?: boolean;
                                     networkMode?: string;
                                     providerOverrides?: {
+                                        alibaba?: {
+                                            region?: string;
+                                            securityGroupId?: string;
+                                            vSwitchId?: string;
+                                            subnetIds?: string[];
+                                            autoCreateEip?: boolean | string;
+                                            spotStrategy?: string;
+                                            spotPriceLimit?: number;
+                                            ramRoleName?: string;
+                                            resourceGroupId?: string;
+                                            activeDeadlineSeconds?: number;
+                                            instanceId?: string;
+                                            instanceType?: string;
+                                            eipBandwidth?: number;
+                                            account?: string;
+                                            healthMaxRetries?: number;
+                                            apiVersion?: string;
+                                            description?: string;
+                                            zoneId?: string;
+                                        } & {
+                                            [key: string]: unknown;
+                                        };
+                                    } & {
                                         [key: string]: unknown;
                                     };
                                 }[];
@@ -2167,6 +2269,29 @@ export interface paths {
                                 }[];
                             };
                             providerOverrides?: {
+                                alibaba?: {
+                                    region?: string;
+                                    securityGroupId?: string;
+                                    vSwitchId?: string;
+                                    subnetIds?: string[];
+                                    autoCreateEip?: boolean | string;
+                                    spotStrategy?: string;
+                                    spotPriceLimit?: number;
+                                    ramRoleName?: string;
+                                    resourceGroupId?: string;
+                                    activeDeadlineSeconds?: number;
+                                    instanceId?: string;
+                                    instanceType?: string;
+                                    eipBandwidth?: number;
+                                    account?: string;
+                                    healthMaxRetries?: number;
+                                    apiVersion?: string;
+                                    description?: string;
+                                    zoneId?: string;
+                                } & {
+                                    [key: string]: unknown;
+                                };
+                            } & {
                                 [key: string]: unknown;
                             };
                         };
@@ -2553,11 +2678,62 @@ export interface paths {
                                     successThreshold?: number;
                                     failureThreshold?: number;
                                 };
+                                lifecycle?: {
+                                    postStart?: {
+                                        httpGet?: {
+                                            path: string;
+                                            port: number;
+                                            scheme?: string;
+                                        };
+                                        tcpSocket?: {
+                                            port: number;
+                                        };
+                                        exec?: {
+                                            command: string[];
+                                        };
+                                    };
+                                    preStop?: {
+                                        httpGet?: {
+                                            path: string;
+                                            port: number;
+                                            scheme?: string;
+                                        };
+                                        tcpSocket?: {
+                                            port: number;
+                                        };
+                                        exec?: {
+                                            command: string[];
+                                        };
+                                    };
+                                };
                                 imagePullPolicy?: string;
                                 tty?: boolean;
                                 stdin?: boolean;
                                 networkMode?: string;
                                 providerOverrides?: {
+                                    alibaba?: {
+                                        region?: string;
+                                        securityGroupId?: string;
+                                        vSwitchId?: string;
+                                        subnetIds?: string[];
+                                        autoCreateEip?: boolean | string;
+                                        spotStrategy?: string;
+                                        spotPriceLimit?: number;
+                                        ramRoleName?: string;
+                                        resourceGroupId?: string;
+                                        activeDeadlineSeconds?: number;
+                                        instanceId?: string;
+                                        instanceType?: string;
+                                        eipBandwidth?: number;
+                                        account?: string;
+                                        healthMaxRetries?: number;
+                                        apiVersion?: string;
+                                        description?: string;
+                                        zoneId?: string;
+                                    } & {
+                                        [key: string]: unknown;
+                                    };
+                                } & {
                                     [key: string]: unknown;
                                 };
                             }[];
@@ -2656,11 +2832,62 @@ export interface paths {
                                     successThreshold?: number;
                                     failureThreshold?: number;
                                 };
+                                lifecycle?: {
+                                    postStart?: {
+                                        httpGet?: {
+                                            path: string;
+                                            port: number;
+                                            scheme?: string;
+                                        };
+                                        tcpSocket?: {
+                                            port: number;
+                                        };
+                                        exec?: {
+                                            command: string[];
+                                        };
+                                    };
+                                    preStop?: {
+                                        httpGet?: {
+                                            path: string;
+                                            port: number;
+                                            scheme?: string;
+                                        };
+                                        tcpSocket?: {
+                                            port: number;
+                                        };
+                                        exec?: {
+                                            command: string[];
+                                        };
+                                    };
+                                };
                                 imagePullPolicy?: string;
                                 tty?: boolean;
                                 stdin?: boolean;
                                 networkMode?: string;
                                 providerOverrides?: {
+                                    alibaba?: {
+                                        region?: string;
+                                        securityGroupId?: string;
+                                        vSwitchId?: string;
+                                        subnetIds?: string[];
+                                        autoCreateEip?: boolean | string;
+                                        spotStrategy?: string;
+                                        spotPriceLimit?: number;
+                                        ramRoleName?: string;
+                                        resourceGroupId?: string;
+                                        activeDeadlineSeconds?: number;
+                                        instanceId?: string;
+                                        instanceType?: string;
+                                        eipBandwidth?: number;
+                                        account?: string;
+                                        healthMaxRetries?: number;
+                                        apiVersion?: string;
+                                        description?: string;
+                                        zoneId?: string;
+                                    } & {
+                                        [key: string]: unknown;
+                                    };
+                                } & {
                                     [key: string]: unknown;
                                 };
                             }[];
@@ -2703,6 +2930,29 @@ export interface paths {
                             }[];
                         };
                         providerOverrides?: {
+                            alibaba?: {
+                                region?: string;
+                                securityGroupId?: string;
+                                vSwitchId?: string;
+                                subnetIds?: string[];
+                                autoCreateEip?: boolean | string;
+                                spotStrategy?: string;
+                                spotPriceLimit?: number;
+                                ramRoleName?: string;
+                                resourceGroupId?: string;
+                                activeDeadlineSeconds?: number;
+                                instanceId?: string;
+                                instanceType?: string;
+                                eipBandwidth?: number;
+                                account?: string;
+                                healthMaxRetries?: number;
+                                apiVersion?: string;
+                                description?: string;
+                                zoneId?: string;
+                            } & {
+                                [key: string]: unknown;
+                            };
+                        } & {
                             [key: string]: unknown;
                         };
                     };
@@ -2920,11 +3170,62 @@ export interface paths {
                                     successThreshold?: number;
                                     failureThreshold?: number;
                                 };
+                                lifecycle?: {
+                                    postStart?: {
+                                        httpGet?: {
+                                            path: string;
+                                            port: number;
+                                            scheme?: string;
+                                        };
+                                        tcpSocket?: {
+                                            port: number;
+                                        };
+                                        exec?: {
+                                            command: string[];
+                                        };
+                                    };
+                                    preStop?: {
+                                        httpGet?: {
+                                            path: string;
+                                            port: number;
+                                            scheme?: string;
+                                        };
+                                        tcpSocket?: {
+                                            port: number;
+                                        };
+                                        exec?: {
+                                            command: string[];
+                                        };
+                                    };
+                                };
                                 imagePullPolicy?: string;
                                 tty?: boolean;
                                 stdin?: boolean;
                                 networkMode?: string;
                                 providerOverrides?: {
+                                    alibaba?: {
+                                        region?: string;
+                                        securityGroupId?: string;
+                                        vSwitchId?: string;
+                                        subnetIds?: string[];
+                                        autoCreateEip?: boolean | string;
+                                        spotStrategy?: string;
+                                        spotPriceLimit?: number;
+                                        ramRoleName?: string;
+                                        resourceGroupId?: string;
+                                        activeDeadlineSeconds?: number;
+                                        instanceId?: string;
+                                        instanceType?: string;
+                                        eipBandwidth?: number;
+                                        account?: string;
+                                        healthMaxRetries?: number;
+                                        apiVersion?: string;
+                                        description?: string;
+                                        zoneId?: string;
+                                    } & {
+                                        [key: string]: unknown;
+                                    };
+                                } & {
                                     [key: string]: unknown;
                                 };
                             }[];
@@ -2932,6 +3233,29 @@ export interface paths {
                             restartPolicy?: "Always" | "OnFailure" | "Never";
                         };
                         providerOverrides?: {
+                            alibaba?: {
+                                region?: string;
+                                securityGroupId?: string;
+                                vSwitchId?: string;
+                                subnetIds?: string[];
+                                autoCreateEip?: boolean | string;
+                                spotStrategy?: string;
+                                spotPriceLimit?: number;
+                                ramRoleName?: string;
+                                resourceGroupId?: string;
+                                activeDeadlineSeconds?: number;
+                                instanceId?: string;
+                                instanceType?: string;
+                                eipBandwidth?: number;
+                                account?: string;
+                                healthMaxRetries?: number;
+                                apiVersion?: string;
+                                description?: string;
+                                zoneId?: string;
+                            } & {
+                                [key: string]: unknown;
+                            };
+                        } & {
                             [key: string]: unknown;
                         };
                     };
@@ -7845,6 +8169,227 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/storage/{bucket}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    prefix?: string;
+                    limit?: number;
+                    continuationToken?: string;
+                };
+                header?: never;
+                path: {
+                    bucket: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description List files */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                            data: {
+                                files: {
+                                    key: string;
+                                    size: number;
+                                    sha256: string | null;
+                                    lastModified?: string;
+                                }[];
+                                nextContinuationToken?: string;
+                                isTruncated: boolean;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/storage/{bucket}/diff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    bucket: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        files: {
+                            key: string;
+                            sha256: string;
+                            size: number;
+                        }[];
+                    };
+                };
+            };
+            responses: {
+                /** @description Diff result */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                            data: {
+                                toUpload: {
+                                    key: string;
+                                    sha256: string;
+                                    size: number;
+                                }[];
+                                unchanged: {
+                                    key: string;
+                                }[];
+                                orphaned: {
+                                    key: string;
+                                }[];
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/storage/{bucket}/presign": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    bucket: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        file: {
+                            key: string;
+                            sha256: string;
+                            size: number;
+                        };
+                        ttl?: number;
+                    };
+                };
+            };
+            responses: {
+                /** @description Presigned URL */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                            data: {
+                                url: string;
+                                bucket: string;
+                                key: string;
+                                expiresAt: string;
+                                headers: {
+                                    "x-amz-meta-sha256": string;
+                                    "Content-Type": string;
+                                    "Content-Length": string;
+                                };
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/storage/{bucket}/files/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    bucket: string;
+                    key: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Deleted */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                            data: components["schemas"]["Shared3"];
+                        };
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/actions/dags/{dagId}": {
         parameters: {
             query?: never;
@@ -10312,11 +10857,62 @@ export interface components {
                             successThreshold?: number;
                             failureThreshold?: number;
                         };
+                        lifecycle?: {
+                            postStart?: {
+                                httpGet?: {
+                                    path: string;
+                                    port: number;
+                                    scheme?: string;
+                                };
+                                tcpSocket?: {
+                                    port: number;
+                                };
+                                exec?: {
+                                    command: string[];
+                                };
+                            };
+                            preStop?: {
+                                httpGet?: {
+                                    path: string;
+                                    port: number;
+                                    scheme?: string;
+                                };
+                                tcpSocket?: {
+                                    port: number;
+                                };
+                                exec?: {
+                                    command: string[];
+                                };
+                            };
+                        };
                         imagePullPolicy?: string;
                         tty?: boolean;
                         stdin?: boolean;
                         networkMode?: string;
                         providerOverrides?: {
+                            alibaba?: {
+                                region?: string;
+                                securityGroupId?: string;
+                                vSwitchId?: string;
+                                subnetIds?: string[];
+                                autoCreateEip?: boolean | string;
+                                spotStrategy?: string;
+                                spotPriceLimit?: number;
+                                ramRoleName?: string;
+                                resourceGroupId?: string;
+                                activeDeadlineSeconds?: number;
+                                instanceId?: string;
+                                instanceType?: string;
+                                eipBandwidth?: number;
+                                account?: string;
+                                healthMaxRetries?: number;
+                                apiVersion?: string;
+                                description?: string;
+                                zoneId?: string;
+                            } & {
+                                [key: string]: unknown;
+                            };
+                        } & {
                             [key: string]: unknown;
                         };
                     }[];
@@ -10415,11 +11011,62 @@ export interface components {
                             successThreshold?: number;
                             failureThreshold?: number;
                         };
+                        lifecycle?: {
+                            postStart?: {
+                                httpGet?: {
+                                    path: string;
+                                    port: number;
+                                    scheme?: string;
+                                };
+                                tcpSocket?: {
+                                    port: number;
+                                };
+                                exec?: {
+                                    command: string[];
+                                };
+                            };
+                            preStop?: {
+                                httpGet?: {
+                                    path: string;
+                                    port: number;
+                                    scheme?: string;
+                                };
+                                tcpSocket?: {
+                                    port: number;
+                                };
+                                exec?: {
+                                    command: string[];
+                                };
+                            };
+                        };
                         imagePullPolicy?: string;
                         tty?: boolean;
                         stdin?: boolean;
                         networkMode?: string;
                         providerOverrides?: {
+                            alibaba?: {
+                                region?: string;
+                                securityGroupId?: string;
+                                vSwitchId?: string;
+                                subnetIds?: string[];
+                                autoCreateEip?: boolean | string;
+                                spotStrategy?: string;
+                                spotPriceLimit?: number;
+                                ramRoleName?: string;
+                                resourceGroupId?: string;
+                                activeDeadlineSeconds?: number;
+                                instanceId?: string;
+                                instanceType?: string;
+                                eipBandwidth?: number;
+                                account?: string;
+                                healthMaxRetries?: number;
+                                apiVersion?: string;
+                                description?: string;
+                                zoneId?: string;
+                            } & {
+                                [key: string]: unknown;
+                            };
+                        } & {
                             [key: string]: unknown;
                         };
                     }[];
@@ -10462,6 +11109,29 @@ export interface components {
                     }[];
                 };
                 providerOverrides?: {
+                    alibaba?: {
+                        region?: string;
+                        securityGroupId?: string;
+                        vSwitchId?: string;
+                        subnetIds?: string[];
+                        autoCreateEip?: boolean | string;
+                        spotStrategy?: string;
+                        spotPriceLimit?: number;
+                        ramRoleName?: string;
+                        resourceGroupId?: string;
+                        activeDeadlineSeconds?: number;
+                        instanceId?: string;
+                        instanceType?: string;
+                        eipBandwidth?: number;
+                        account?: string;
+                        healthMaxRetries?: number;
+                        apiVersion?: string;
+                        description?: string;
+                        zoneId?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                } & {
                     [key: string]: unknown;
                 };
             };
@@ -10600,11 +11270,62 @@ export interface components {
                             successThreshold?: number;
                             failureThreshold?: number;
                         };
+                        lifecycle?: {
+                            postStart?: {
+                                httpGet?: {
+                                    path: string;
+                                    port: number;
+                                    scheme?: string;
+                                };
+                                tcpSocket?: {
+                                    port: number;
+                                };
+                                exec?: {
+                                    command: string[];
+                                };
+                            };
+                            preStop?: {
+                                httpGet?: {
+                                    path: string;
+                                    port: number;
+                                    scheme?: string;
+                                };
+                                tcpSocket?: {
+                                    port: number;
+                                };
+                                exec?: {
+                                    command: string[];
+                                };
+                            };
+                        };
                         imagePullPolicy?: string;
                         tty?: boolean;
                         stdin?: boolean;
                         networkMode?: string;
                         providerOverrides?: {
+                            alibaba?: {
+                                region?: string;
+                                securityGroupId?: string;
+                                vSwitchId?: string;
+                                subnetIds?: string[];
+                                autoCreateEip?: boolean | string;
+                                spotStrategy?: string;
+                                spotPriceLimit?: number;
+                                ramRoleName?: string;
+                                resourceGroupId?: string;
+                                activeDeadlineSeconds?: number;
+                                instanceId?: string;
+                                instanceType?: string;
+                                eipBandwidth?: number;
+                                account?: string;
+                                healthMaxRetries?: number;
+                                apiVersion?: string;
+                                description?: string;
+                                zoneId?: string;
+                            } & {
+                                [key: string]: unknown;
+                            };
+                        } & {
                             [key: string]: unknown;
                         };
                     }[];
@@ -10703,11 +11424,62 @@ export interface components {
                             successThreshold?: number;
                             failureThreshold?: number;
                         };
+                        lifecycle?: {
+                            postStart?: {
+                                httpGet?: {
+                                    path: string;
+                                    port: number;
+                                    scheme?: string;
+                                };
+                                tcpSocket?: {
+                                    port: number;
+                                };
+                                exec?: {
+                                    command: string[];
+                                };
+                            };
+                            preStop?: {
+                                httpGet?: {
+                                    path: string;
+                                    port: number;
+                                    scheme?: string;
+                                };
+                                tcpSocket?: {
+                                    port: number;
+                                };
+                                exec?: {
+                                    command: string[];
+                                };
+                            };
+                        };
                         imagePullPolicy?: string;
                         tty?: boolean;
                         stdin?: boolean;
                         networkMode?: string;
                         providerOverrides?: {
+                            alibaba?: {
+                                region?: string;
+                                securityGroupId?: string;
+                                vSwitchId?: string;
+                                subnetIds?: string[];
+                                autoCreateEip?: boolean | string;
+                                spotStrategy?: string;
+                                spotPriceLimit?: number;
+                                ramRoleName?: string;
+                                resourceGroupId?: string;
+                                activeDeadlineSeconds?: number;
+                                instanceId?: string;
+                                instanceType?: string;
+                                eipBandwidth?: number;
+                                account?: string;
+                                healthMaxRetries?: number;
+                                apiVersion?: string;
+                                description?: string;
+                                zoneId?: string;
+                            } & {
+                                [key: string]: unknown;
+                            };
+                        } & {
                             [key: string]: unknown;
                         };
                     }[];
@@ -10750,6 +11522,29 @@ export interface components {
                     }[];
                 };
                 providerOverrides?: {
+                    alibaba?: {
+                        region?: string;
+                        securityGroupId?: string;
+                        vSwitchId?: string;
+                        subnetIds?: string[];
+                        autoCreateEip?: boolean | string;
+                        spotStrategy?: string;
+                        spotPriceLimit?: number;
+                        ramRoleName?: string;
+                        resourceGroupId?: string;
+                        activeDeadlineSeconds?: number;
+                        instanceId?: string;
+                        instanceType?: string;
+                        eipBandwidth?: number;
+                        account?: string;
+                        healthMaxRetries?: number;
+                        apiVersion?: string;
+                        description?: string;
+                        zoneId?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                } & {
                     [key: string]: unknown;
                 };
             };

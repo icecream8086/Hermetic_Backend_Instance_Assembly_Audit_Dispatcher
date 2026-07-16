@@ -181,7 +181,26 @@ const noEmptyOpenapiSchema = {
   },
 };
 
-const localRules = { rules: { 'no-unknown-leak': noUnknownLeak, 'no-handwritten-guard': noHandwrittenGuard, 'enforce-decode-layer': enforceDecodeLayer, 'no-empty-openapi-schema': noEmptyOpenapiSchema } };
+/** no-plain-hono-handler: 禁止 feature handler 用 new Hono() */
+const noPlainHonoHandler = {
+  meta: {
+    type: 'problem',
+    docs: { description: 'Feature handler must use OpenAPIHono instead of plain Hono', recommended: 'strict' },
+    schema: [],
+    messages: { plainHono: 'Feature handler must use OpenAPIHono instead of plain Hono for OpenAPI registration.' },
+  },
+  create(context) {
+    if (!context.filename.includes('features') || !context.filename.endsWith('handler.ts')) return {};
+    return {
+      'NewExpression'(node) {
+        if (node.callee?.type !== 'Identifier' || node.callee.name !== 'Hono') return;
+        context.report({ node, messageId: 'plainHono' });
+      },
+    };
+  },
+};
+
+const localRules = { rules: { 'no-unknown-leak': noUnknownLeak, 'no-handwritten-guard': noHandwrittenGuard, 'enforce-decode-layer': enforceDecodeLayer, 'no-empty-openapi-schema': noEmptyOpenapiSchema, 'no-plain-hono-handler': noPlainHonoHandler } };
 
 export default tseslint.config(
   eslint.configs.recommended,
@@ -422,6 +441,7 @@ export default tseslint.config(
       'local-rules/no-handwritten-guard': 'error',
       'local-rules/enforce-decode-layer': 'error',
       'local-rules/no-empty-openapi-schema': 'error',
+      'local-rules/no-plain-hono-handler': 'error',
 
       // ════════════════════════════════════════════════════════
       // CEA — 锁死 ESLint 逃逸通道
