@@ -52,7 +52,8 @@
       "images": "/api/images",
       "actions": "/api/actions",
       "instances": "/api/instances",
-      "security": "/api/security"
+      "security": "/api/security",
+      "storage": "/api/storage"
     }
   },
   "dependencies": {

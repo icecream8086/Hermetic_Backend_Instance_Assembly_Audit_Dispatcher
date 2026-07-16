@@ -59,6 +59,9 @@ export type {
   IS3Provider,
 } from './s3.ts';
 
+export type { ResourcePolicy } from './resource-policy.ts';
+export { EciResourcePolicy, PodmanResourcePolicy } from './resource-policy.ts';
+
 export { createS3Provider } from './s3-factory.ts';
 export type { S3Credentials } from './s3-factory.ts';
 

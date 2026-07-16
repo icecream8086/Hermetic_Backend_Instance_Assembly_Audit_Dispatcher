@@ -8,9 +8,8 @@ import { createSecurityResourceId } from '../../core/security/types.ts';
 import { SecurityResourceStatus } from '../../core/security/types.ts';
 import { createInstanceId } from '../../core/region/instance.ts';
 import type { IS3Provider } from '../../core/provider/s3.ts';
-import type { S3AccessTokenClaims } from '../../core/security/types.ts';
-import { verifyToken, base64urlDecode, authorizeAccess } from '../../core/security/jwt.ts';
-import type { IAtomicStore } from '../../core/store/interfaces.ts';
+import { authorizeAccess } from '../../core/security/jwt.ts';
+import { jwtAuthMiddleware } from '../../core/security/middleware.ts';
 import { CreateSecurityResourceSchema, PresignQuerySchema, BatchPresignSchema, ListQuerySchema } from './schema.ts';
 import { ok } from '../../core/response.ts';
 import { OkResponse } from '../../core/http-docs/response-schema.ts';
@@ -25,20 +24,6 @@ function isRoot<E extends { Variables: { currentUser?: { role?: string } } }>(c:
   if (!role || !ADMIN_ROLES.has(role)) {
     throw new AppError(403, 'FORBIDDEN', 'Admin access required');
   }
-}
-
-async function verifyJwtFromHeader(c: Context<{ Variables: AppContext }>): Promise<S3AccessTokenClaims> {
-  const authHeader = c.req.header('Authorization');
-  if (!authHeader?.startsWith('Bearer ')) {
-    throw new AppError(401, 'UNAUTHORIZED', 'Missing or malformed Authorization header');
-  }
-  const atomic: IAtomicStore = c.var.stores.atomic;
-  const secretEntry = await atomic.get<string>('_sys:jwt-secret');
-  if (!secretEntry?.value) throw new AppError(500, 'INTERNAL_ERROR', 'JWT secret not configured');
-  const secret = base64urlDecode(secretEntry.value);
-  const result = await verifyToken(authHeader.slice(7), secret);
-  if (!result.valid) throw new AppError(401, 'UNAUTHORIZED', result.reason);
-  return result.claims;
 }
 
 export interface SecurityRouterDeps {
@@ -160,8 +145,9 @@ export function createSecurityRouter(deps: SecurityRouterDeps): OpenAPIHono<{ Va
   // ══════════════════════════════════════════════════
 
   // ── GET /api/security/presign ──
-  app.get('/presign', async (c) => {
-    const claims = await verifyJwtFromHeader(c);
+  app.get('/presign', jwtAuthMiddleware, async (c) => {
+    const claims = c.get('jwtClaims');
+    if (!claims) throw new AppError(401, 'UNAUTHORIZED', 'Not authenticated');
     const query = PresignQuerySchema.parse({
       bucket: c.req.query('bucket'),
       key: c.req.query('key'),
@@ -186,8 +172,9 @@ export function createSecurityRouter(deps: SecurityRouterDeps): OpenAPIHono<{ Va
   });
 
   // ── POST /api/security/batch-presign ──
-  app.post('/batch-presign', async (c) => {
-    const claims = await verifyJwtFromHeader(c);
+  app.post('/batch-presign', jwtAuthMiddleware, async (c) => {
+    const claims = c.get('jwtClaims');
+    if (!claims) throw new AppError(401, 'UNAUTHORIZED', 'Not authenticated');
     const body = BatchPresignSchema.parse(await c.req.json());
 
     // Authorize each file
@@ -219,8 +206,9 @@ export function createSecurityRouter(deps: SecurityRouterDeps): OpenAPIHono<{ Va
   });
 
   // ── GET /api/security/list ──
-  app.get('/list', async (c) => {
-    const claims = await verifyJwtFromHeader(c);
+  app.get('/list', jwtAuthMiddleware, async (c) => {
+    const claims = c.get('jwtClaims');
+    if (!claims) throw new AppError(401, 'UNAUTHORIZED', 'Not authenticated');
     const query = ListQuerySchema.parse({
       bucket: c.req.query('bucket'),
       prefix: c.req.query('prefix'),

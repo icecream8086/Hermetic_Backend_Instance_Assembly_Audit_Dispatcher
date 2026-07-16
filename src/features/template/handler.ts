@@ -18,6 +18,10 @@ import { PodSpecSchema } from '../../core/pod/schema.ts';
 import { mergePodSpec } from '../../core/pod/merge.ts';
 import { UserRole } from '../users/types.ts';
 import { INSTANCE_TEMPLATES, type InstanceTemplateDef } from './templates.generated.ts';
+import type { SecurityResourceService } from '../../core/security/service.ts';
+import { resolveSecurityRefs, validateSecurityPolicies } from './applicator.ts';
+import { SandboxService } from '../sandbox/sandbox.service.ts';
+import { createPodId } from '../../core/pod/types.ts';
 
 interface PermissionCheckFn { check(params: { userId: string; action: string; resource: string; ip?: string }): Promise<{ allowed: boolean; reason: string }> }
 
@@ -290,7 +294,7 @@ function canAccessTemplate(tpl: Template, user: { id: string; role?: string } | 
 
 // ─── Router ───
 
-export function createTemplateRouter(atomic: IAtomicStore, podSvc: PodService, _providers?: IProviderRegistry, permissionChecker?: PermissionCheckFn): OpenAPIHono<{ Variables: AppContext }> {
+export function createTemplateRouter(atomic: IAtomicStore, podSvc: PodService, _providers?: IProviderRegistry, permissionChecker?: PermissionCheckFn, securityService?: SecurityResourceService): OpenAPIHono<{ Variables: AppContext }> {
   const app = new OpenAPIHono<{ Variables: AppContext }>({ defaultHook: validationHook });
 
   const CreateTemplateBodySchema = z.object({
@@ -304,6 +308,8 @@ export function createTemplateRouter(atomic: IAtomicStore, podSvc: PodService, _
     instanceLimit: z.object({ type: z.enum(['fixed', 'perUser', 'perSystem']), max: z.number() }).optional(),
     resourceBinding: z.object({ domain: z.string().optional(), port: z.number().optional() }).optional(),
     metadata: z.object({ labels: z.record(z.string(), z.string()).optional(), annotations: z.record(z.string(), z.string()).optional() }).optional(),
+    securityRef: z.string().optional(),
+    securityRefs: z.array(z.string()).optional(),
   }).passthrough();
   // POST / — 创建模板
   app.openapi(createRoute({ method: 'post', path: '/', tags: ['templates'], summary: '创建模板', request: { body: { content: { 'application/json': { schema: CreateTemplateBodySchema } } } }, responses: { 201: { description: 'Template', content: { 'application/json': { schema: OkResponse(TemplateSchema) } } } } }), async (c) => {
@@ -314,6 +320,14 @@ export function createTemplateRouter(atomic: IAtomicStore, podSvc: PodService, _
 
       if (body.singleton && body.instanceLimit) {
         throw new AppError(400, 'VALIDATION_ERROR', 'singleton and instanceLimit are mutually exclusive');
+      }
+
+      // Validate security policy references before creating template
+      if (securityService) {
+        const policyNames = resolveSecurityRefs({ securityRef: body.securityRef, securityRefs: body.securityRefs });
+        if (policyNames.length > 0) {
+          await validateSecurityPolicies(policyNames, securityService);
+        }
       }
 
       const now = Date.now();
@@ -333,6 +347,8 @@ export function createTemplateRouter(atomic: IAtomicStore, podSvc: PodService, _
         instanceLimit: body.instanceLimit,
         resourceBinding: body.resourceBinding,
         spec: body.spec,
+        securityRef: body.securityRef,
+        securityRefs: body.securityRefs,
       };
       await atomic.set(PREFIX + tpl.id, tpl, null);
       const idx = await atomic.get<string[]>(INDEX_KEY);
@@ -393,6 +409,14 @@ export function createTemplateRouter(atomic: IAtomicStore, podSvc: PodService, _
       throw new AppError(400, 'VALIDATION_ERROR', 'singleton and instanceLimit are mutually exclusive');
     }
 
+    // Validate security policy references on update
+    if (securityService) {
+      const policyNames = resolveSecurityRefs({ securityRef: body.securityRef, securityRefs: body.securityRefs });
+      if (policyNames.length > 0) {
+        await validateSecurityPolicies(policyNames, securityService);
+      }
+    }
+
     const base = resolved.template;
     const updated: Template = {
       ...base,
@@ -404,6 +428,8 @@ export function createTemplateRouter(atomic: IAtomicStore, podSvc: PodService, _
       ...(body.resourceBinding !== undefined ? { resourceBinding: body.resourceBinding ?? undefined } : {}),
       ...(body.spec !== undefined ? { spec: body.spec } : {}),
       ...(body.dependsOn !== undefined ? { dependsOn: body.dependsOn ?? [] } : {}),
+      ...(body.securityRef !== undefined ? { securityRef: body.securityRef ?? undefined } : {}),
+      ...(body.securityRefs !== undefined ? { securityRefs: body.securityRefs ?? [] } : {}),
       updatedAt: Date.now(),
       ...(resolved.source === 'generated' ? { __originalGenerated: true } : {}),
     };
@@ -495,6 +521,8 @@ export function createTemplateRouter(atomic: IAtomicStore, podSvc: PodService, _
 
   // POST /:id/apply
   app.openapi(createRoute({ method: 'post', path: '/{id}/apply', tags: ['templates'], summary: '应用模板', request: { params: z.object({ id: z.string() }) }, responses: { 201: { description: 'Pod created', content: { 'application/json': { schema: OkResponse(PodCreateResponseSchema) } } } } }), async (c) => {
+    const tplId = c.req.param('id');
+    console.log(`[template] apply requested — id=${tplId}`);
     await requirePerm(c, permissionChecker, 'create', 'pod');
     const resolved = await resolveTemplate(atomic, c.req.param('id'));
 
@@ -507,10 +535,32 @@ export function createTemplateRouter(atomic: IAtomicStore, podSvc: PodService, _
     await claimInstanceSlot(atomic, resolved, user?.id ?? 'anonymous');
     await claimResourceBinding(atomic, resolved);
 
-    const pod = await podSvc.provision(resolved.spec, {
-      creatorId: user?.id,
-      templateRef: resolved.id,
-    });
+    // If template declares security policies, issue JWT token and inject into spec
+    const policyNames = resolveSecurityRefs(resolved);
+    let spec = resolved.spec;
+    if (policyNames.length > 0 && securityService) {
+      const podId = createPodId(crypto.randomUUID());
+      const sandboxSvc = new SandboxService(securityService);
+      console.log(`[template] issuing JWT — policies=${policyNames.join(',')}`);
+      const result = await sandboxSvc.provision({
+        podId,
+        securityResourceNames: policyNames,
+        spec: resolved.spec,
+      });
+      spec = result.spec;
+    }
+
+    console.log(`[template] provisioning pod — template=${resolved.name}`);
+    let pod;
+    try {
+      pod = await podSvc.provision(spec, {
+        creatorId: user?.id,
+        templateRef: resolved.id,
+      });
+    } catch (err) {
+      console.error(`[template] provision failed — template=${resolved.name}, error=${err instanceof Error ? err.message : String(err)}`);
+      throw err;
+    }
 
     c.var.audit.write({
       level: KernLevel.NOTICE,
@@ -518,6 +568,8 @@ export function createTemplateRouter(atomic: IAtomicStore, podSvc: PodService, _
       message: `Template applied — ${resolved.name} → pod ${pod.podId}`,
       metadata: { eventType: 'template.applied', templateId: resolved.id, podId: pod.podId, actorId: user?.id },
     });
+
+    console.log(`[template] apply done — podId=${pod.podId}, phase=${pod.phase}`);
 
     return c.json(ok({
       podId: pod.podId,

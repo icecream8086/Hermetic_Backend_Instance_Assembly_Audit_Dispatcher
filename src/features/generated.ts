@@ -17,6 +17,7 @@ import { createRouter as imagesRouter } from './images/index.ts';
 import { createRouter as actionsRouter } from './actions/index.ts';
 import { createRouter as instancesRouter } from './instances/index.ts';
 import { createRouter as securityRouter } from './security/index.ts';
+import { createRouter as storageRouter } from './storage/index.ts';
 
 import type { FeatureDeps } from '../core/deps.ts';
 import type { Hono } from 'hono';
@@ -43,5 +44,6 @@ export function getFeatures(): RegisteredFeature[] {
   { path: '/api/images', mount: (deps) => imagesRouter(deps) },
   { path: '/api/actions', mount: (deps) => actionsRouter(deps) },
   { path: '/api/instances', mount: (deps) => instancesRouter(deps) },
-  { path: '/api/security', mount: (deps) => securityRouter(deps) },  ];
+  { path: '/api/security', mount: (deps) => securityRouter(deps) },
+  { path: '/api/storage', mount: (deps) => storageRouter(deps) },  ];
 }

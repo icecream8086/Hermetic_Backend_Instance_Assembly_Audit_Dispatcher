@@ -6372,6 +6372,176 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/actions/dags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                            data: {
+                                id: string;
+                                name: string;
+                                description?: string;
+                                taskCount: number;
+                                maxActiveTasks?: number;
+                                maxActiveRuns?: number;
+                                schedule?: string;
+                                createdAt: number;
+                                updatedAt: number;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/actions/dags/from-yaml": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                            data: components["schemas"]["Shared23"];
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/actions/dags/pools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                            data: {
+                                name: string;
+                                slots: number;
+                                occupiedSlots: number;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/actions/dags/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                            data: {
+                                status: string;
+                                schedulerRunning: boolean;
+                                uptimeMs: number;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/actions/workflows": {
         parameters: {
             query?: never;
@@ -6603,7 +6773,7 @@ export interface paths {
                         "application/json": {
                             /** @enum {boolean} */
                             success: true;
-                            data: components["schemas"]["Shared23"];
+                            data: components["schemas"]["Shared24"];
                         };
                     };
                 };
@@ -6893,7 +7063,7 @@ export interface paths {
                         "application/json": {
                             /** @enum {boolean} */
                             success: true;
-                            data: components["schemas"]["Shared24"];
+                            data: components["schemas"]["Shared25"];
                         };
                     };
                 };
@@ -7067,7 +7237,7 @@ export interface paths {
                         "application/json": {
                             /** @enum {boolean} */
                             success: true;
-                            data: components["schemas"]["Shared25"];
+                            data: components["schemas"]["Shared26"];
                         };
                     };
                 };
@@ -7105,7 +7275,7 @@ export interface paths {
                         "application/json": {
                             /** @enum {boolean} */
                             success: true;
-                            data: components["schemas"]["Shared26"];
+                            data: components["schemas"]["Shared27"];
                         };
                     };
                 };
@@ -7591,6 +7761,329 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/actions/dags/{dagId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description dagId */
+                    dagId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                            data: components["schemas"]["Shared23"];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description dagId */
+                    dagId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                            data: components["schemas"]["Shared28"];
+                        };
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/actions/dags/{dagId}/dagRuns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description dagId */
+                    dagId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                            data: {
+                                id: string;
+                                dagId: string;
+                                status: string;
+                                executionDate: number;
+                                startedAt?: number;
+                                completedAt?: number;
+                                trigger: string;
+                                ownerId?: string;
+                                error?: string;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/actions/dags/{dagId}/dagRuns/{dagRunId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description dagId */
+                    dagId: string;
+                    /** @description dagRunId */
+                    dagRunId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                            data: {
+                                id: string;
+                                dagId: string;
+                                status: string;
+                                executionDate: number;
+                                startedAt?: number;
+                                completedAt?: number;
+                                trigger: string;
+                                ownerId?: string;
+                                error?: string;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/actions/dags/{dagId}/dagRuns/{dagRunId}/taskInstances": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description dagId */
+                    dagId: string;
+                    /** @description dagRunId */
+                    dagRunId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                            data: {
+                                id: string;
+                                taskId: string;
+                                dagRunId: string;
+                                state: string;
+                                tryNumber: number;
+                                startedAt?: number;
+                                completedAt?: number;
+                                error?: string;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/actions/dags/{dagId}/dagRuns/{dagRunId}/taskInstances/{tiId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description dagId */
+                    dagId: string;
+                    /** @description dagRunId */
+                    dagRunId: string;
+                    /** @description tiId */
+                    tiId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                            data: {
+                                id: string;
+                                taskId: string;
+                                dagRunId: string;
+                                state: string;
+                                tryNumber: number;
+                                startedAt?: number;
+                                completedAt?: number;
+                                error?: string;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/actions/dags/{dagId}/dagRuns/{dagRunId}/taskInstances/{tiId}/logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description dagId */
+                    dagId: string;
+                    /** @description dagRunId */
+                    dagRunId: string;
+                    /** @description tiId */
+                    tiId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                            data: {
+                                logs: string;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/actions/workflows/{id}": {
         parameters: {
             query?: never;
@@ -7618,7 +8111,7 @@ export interface paths {
                         "application/json": {
                             /** @enum {boolean} */
                             success: true;
-                            data: components["schemas"]["Shared23"];
+                            data: components["schemas"]["Shared24"];
                         };
                     };
                 };
@@ -7646,7 +8139,7 @@ export interface paths {
                         "application/json": {
                             /** @enum {boolean} */
                             success: true;
-                            data: components["schemas"]["Shared27"];
+                            data: components["schemas"]["Shared28"];
                         };
                     };
                 };
@@ -7852,7 +8345,7 @@ export interface paths {
                         "application/json": {
                             /** @enum {boolean} */
                             success: true;
-                            data: components["schemas"]["Shared23"];
+                            data: components["schemas"]["Shared24"];
                         };
                     };
                 };
@@ -7898,7 +8391,7 @@ export interface paths {
                         "application/json": {
                             /** @enum {boolean} */
                             success: true;
-                            data: components["schemas"]["Shared28"];
+                            data: components["schemas"]["Shared29"];
                         };
                     };
                 };
@@ -7939,7 +8432,7 @@ export interface paths {
                         "application/json": {
                             /** @enum {boolean} */
                             success: true;
-                            data: components["schemas"]["Shared28"];
+                            data: components["schemas"]["Shared29"];
                         };
                     };
                 };
@@ -7989,12 +8482,7 @@ export interface paths {
                         "application/json": {
                             /** @enum {boolean} */
                             success: true;
-                            data: {
-                                dagRunId: string;
-                                dagId: string;
-                                status: string;
-                                taskCount: number;
-                            };
+                            data: components["schemas"]["Shared29"];
                         };
                     };
                 };
@@ -8033,7 +8521,7 @@ export interface paths {
                         "application/json": {
                             /** @enum {boolean} */
                             success: true;
-                            data: components["schemas"]["Shared28"];
+                            data: components["schemas"]["WorkflowRun"];
                         };
                     };
                 };
@@ -8262,7 +8750,7 @@ export interface paths {
                         "application/json": {
                             /** @enum {boolean} */
                             success: true;
-                            data: components["schemas"]["Shared24"];
+                            data: components["schemas"]["Shared25"];
                         };
                     };
                 };
@@ -8398,7 +8886,7 @@ export interface paths {
                         "application/json": {
                             /** @enum {boolean} */
                             success: true;
-                            data: components["schemas"]["Shared29"];
+                            data: components["schemas"]["Shared30"];
                         };
                     };
                 };
@@ -8446,7 +8934,7 @@ export interface paths {
                         "application/json": {
                             /** @enum {boolean} */
                             success: true;
-                            data: components["schemas"]["Shared29"];
+                            data: components["schemas"]["Shared30"];
                         };
                     };
                 };
@@ -8568,7 +9056,7 @@ export interface paths {
                         "application/json": {
                             /** @enum {boolean} */
                             success: true;
-                            data: components["schemas"]["Shared27"];
+                            data: components["schemas"]["Shared28"];
                         };
                     };
                 };
@@ -8606,7 +9094,7 @@ export interface paths {
                         "application/json": {
                             /** @enum {boolean} */
                             success: true;
-                            data: components["schemas"]["Shared25"];
+                            data: components["schemas"]["Shared26"];
                         };
                     };
                 };
@@ -8740,7 +9228,7 @@ export interface paths {
                         "application/json": {
                             /** @enum {boolean} */
                             success: true;
-                            data: components["schemas"]["Shared26"];
+                            data: components["schemas"]["Shared27"];
                         };
                     };
                 };
@@ -10483,8 +10971,19 @@ export interface components {
         Shared20: components["schemas"]["RunnerInstance"];
         Shared21: components["schemas"]["RunnerGroup"];
         Shared22: components["schemas"]["SecurityResource"];
-        Shared23: components["schemas"]["WorkflowDef"];
-        Shared24: {
+        Shared23: {
+            id: string;
+            name: string;
+            description?: string;
+            taskCount: number;
+            maxActiveTasks?: number;
+            maxActiveRuns?: number;
+            schedule?: string;
+            createdAt: number;
+            updatedAt: number;
+        };
+        Shared24: components["schemas"]["WorkflowDef"];
+        Shared25: {
             id: string;
             name: string;
             displayName?: string;
@@ -10506,7 +11005,7 @@ export interface components {
             updatedAt: number;
             version: string;
         };
-        Shared25: {
+        Shared26: {
             id: string;
             ownerId: string;
             workflowId: string;
@@ -10521,7 +11020,7 @@ export interface components {
             updatedAt: number;
             version: string;
         };
-        Shared26: {
+        Shared27: {
             id: string;
             name: string;
             instanceId?: string;
@@ -10541,11 +11040,16 @@ export interface components {
             updatedAt: number;
             storeVersion: string;
         };
-        Shared27: {
+        Shared28: {
             deleted: boolean;
         };
-        Shared28: components["schemas"]["WorkflowRun"];
         Shared29: {
+            dagRunId: string;
+            dagId: string;
+            status: string;
+            taskCount: number;
+        };
+        Shared30: {
             id: string;
             workflowRunId: string;
             jobName: string;

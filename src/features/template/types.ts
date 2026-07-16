@@ -45,6 +45,9 @@ export interface Template {
   readonly singleton?: boolean | undefined;
   readonly instanceLimit?: TemplateInstanceLimit | undefined;
   readonly resourceBinding?: TemplateResourceBinding | undefined;
+  /** @deprecated Use securityRefs instead. */
+  readonly securityRef?: string | undefined;
+  readonly securityRefs?: readonly string[] | undefined;
 }
 
 // ═══════════════════════════════════════════
@@ -64,6 +67,9 @@ export interface CreateTemplateInput {
   singleton?: boolean | undefined;
   instanceLimit?: TemplateInstanceLimit | undefined;
   resourceBinding?: TemplateResourceBinding | undefined;
+  /** @deprecated Use securityRefs instead. */
+  securityRef?: string | undefined;
+  securityRefs?: string[] | undefined;
 }
 
 export interface UpdateTemplateInput {
@@ -78,4 +84,7 @@ export interface UpdateTemplateInput {
   singleton?: boolean | undefined;
   instanceLimit?: TemplateInstanceLimit | null | undefined;
   resourceBinding?: TemplateResourceBinding | null | undefined;
+  /** @deprecated Use securityRefs instead. */
+  securityRef?: string | null | undefined;
+  securityRefs?: string[] | null | undefined;
 }

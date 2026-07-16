@@ -47,6 +47,11 @@ function toPodPhase(cgStatus: ContainerGroupState): PodPhase {
       return 'Failed';
     case ContainerGroupState.Deleted:
       return 'Failed';
+    default: {
+      const _exhaustive: never = cgStatus;
+      void _exhaustive;
+      return 'Failed';
+    }
   }
 }
 

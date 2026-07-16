@@ -6,9 +6,9 @@ import { ok } from '../../core/response.ts';
 import { OkResponse, validationHook } from '../../core/http-docs/response-schema.ts';
 import { DeletedResponseSchema } from './response-schema.ts';
 import type { StoreSchedulerContext } from './scheduler-context.ts';
-import type { SchedulerStatus } from '../../core/scheduler/interfaces.ts';
 import { createDagId, createDagRunId, createTaskId } from '../../core/dag/types.ts';
 import { generateVersionId } from '../../core/brand.ts';
+import type { DagDef, DagRun } from '../../core/dag/types.ts';
 
 const DagDefResponseSchema = z.object({
   id: z.string(), name: z.string(), description: z.string().optional(),
@@ -31,15 +31,7 @@ const TaskInstanceResponseSchema = z.object({
   error: z.string().optional(),
 });
 
-const PoolResponseSchema = z.object({
-  name: z.string(), slots: z.number(), occupiedSlots: z.number(),
-});
-
-const HealthResponseSchema = z.object({
-  status: z.string(), schedulerRunning: z.boolean(), uptimeMs: z.number(),
-});
-
-export function createDagRouter(schedulerCtx: StoreSchedulerContext, getHealth?: () => SchedulerStatus): OpenAPIHono<{ Variables: AppContext }> {
+export function createDagRouter(schedulerCtx: StoreSchedulerContext): OpenAPIHono<{ Variables: AppContext }> {
   const app = new OpenAPIHono<{ Variables: AppContext }>({ defaultHook: validationHook });
 
   const parseDagId = (raw: string) => createDagId(raw);
@@ -76,6 +68,82 @@ export function createDagRouter(schedulerCtx: StoreSchedulerContext, getHealth?:
     if (!entry) throw new AppError(404, 'NOT_FOUND', 'DAG definition not found');
     await schedulerCtx.deleteDagDef(dagId, entry.version);
     return c.json(ok({ deleted: true }));
+  });
+
+  // POST /dags — 创建 DagDef
+  const OperatorTypeEnum = z.enum(['run', 'uses', 'dns', 'pod', 'approval-sensor', 'noop']);
+  const CreateDagDefSchema = z.object({
+    name: z.string().min(1),
+    description: z.string().optional(),
+    tasks: z.array(z.object({
+      id: z.string(), name: z.string(),
+      operatorType: OperatorTypeEnum.optional().default('noop'),
+      dependsOn: z.array(z.string()).default([]),
+    })),
+    maxActiveTasks: z.number().optional(),
+    maxActiveRuns: z.number().optional(),
+    schedule: z.string().optional(),
+  });
+  app.openapi(createRoute({ method: 'post', path: '/', tags: ['dag'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(DagDefResponseSchema) } } } } }), async (c) => {
+    const input = CreateDagDefSchema.parse(await c.req.json());
+    const now = Date.now();
+    const dagDef: DagDef = {
+      id: createDagId(`dag_${crypto.randomUUID()}`),
+      name: input.name,
+      ...(input.description !== undefined ? { description: input.description } : {}),
+      tasks: input.tasks.map((t: z.infer<typeof CreateDagDefSchema>['tasks'][number]) => ({
+        id: createTaskId(t.id),
+        name: t.name,
+        operatorType: t.operatorType,
+        dependsOn: t.dependsOn.map((d: string) => createTaskId(d)),
+        triggerRule: 'all_success',
+        retries: 0,
+        retryDelayMs: 0,
+        config: {},
+      })),
+      ...(input.maxActiveTasks !== undefined ? { maxActiveTasks: input.maxActiveTasks } : {}),
+      ...(input.maxActiveRuns !== undefined ? { maxActiveRuns: input.maxActiveRuns } : {}),
+      ...(input.schedule !== undefined ? { schedule: input.schedule } : {}),
+      createdAt: now,
+      updatedAt: now,
+      version: generateVersionId(),
+    };
+    await schedulerCtx.saveDagDef(dagDef);
+    return c.json(ok({
+      id: dagDef.id, name: dagDef.name,
+      taskCount: dagDef.tasks.length, maxActiveTasks: dagDef.maxActiveTasks,
+      maxActiveRuns: dagDef.maxActiveRuns, schedule: dagDef.schedule,
+      createdAt: dagDef.createdAt, updatedAt: dagDef.updatedAt,
+    }), 201);
+  });
+
+  // POST /dags/{dagId}/dagRuns — 触发 DagRun
+  const TriggerDagRunSchema = z.object({
+    trigger: z.enum(['manual', 'http', 'webhook']).default('manual'),
+    ownerId: z.string().optional(),
+  });
+  app.openapi(createRoute({ method: 'post', path: '/:dagId/dagRuns', tags: ['dag'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(DagRunResponseSchema) } } } } }), async (c) => {
+    const dagId = parseDagId(c.req.param('dagId'));
+    const entry = await schedulerCtx.getDagDef(dagId);
+    if (!entry) throw new AppError(404, 'NOT_FOUND', 'DAG definition not found');
+    const body = TriggerDagRunSchema.parse(await c.req.json());
+    const now = Date.now();
+    const dagRun: DagRun = {
+      id: createDagRunId(`dr_${dagId}_${now}`),
+      dagId,
+      status: 'QUEUED',
+      executionDate: now,
+      trigger: body.trigger,
+      env: {},
+      ...(body.ownerId !== undefined ? { ownerId: body.ownerId } : {}),
+      version: generateVersionId(),
+    };
+    await schedulerCtx.saveNewDagRun(dagRun);
+    return c.json(ok({
+      id: dagRun.id, dagId: dagRun.dagId, status: dagRun.status,
+      executionDate: dagRun.executionDate, trigger: dagRun.trigger,
+      ownerId: dagRun.ownerId,
+    }), 201);
   });
 
   // GET /dags/{dagId}/dagRuns
@@ -127,7 +195,7 @@ export function createDagRouter(schedulerCtx: StoreSchedulerContext, getHealth?:
   });
 
   // GET /dags/{dagId}/dagRuns/{dagRunId}/taskInstances/{tiId}/logs
-  app.openapi(createRoute({ method: 'get', path: '/:dagId/dagRuns/:dagRunId/taskInstances/:tiId/logs', tags: ['dag'], responses: { 200: { description: '', content: { 'application/json': { schema: OkResponse(z.object({ logs: z.string() })) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'get', path: '/:dagId/dagRuns/:dagRunId/taskInstances/:tiId/logs', tags: ['dag'], responses: { 200: { description: '', content: { 'application/json': { schema: OkResponse(z.object({ logs: z.string() })) } } } } }), async (_c) => {
     // ponytail: logs backend TBD — return 501 until implemented
     throw new AppError(501, 'NOT_IMPLEMENTED', 'TaskInstance logs not yet available');
   });
@@ -155,9 +223,9 @@ export function createDagRouter(schedulerCtx: StoreSchedulerContext, getHealth?:
         retryDelayMs: 0,
         config: {},
       })),
-      maxActiveTasks: input.maxActiveTasks,
-      maxActiveRuns: input.maxActiveRuns,
-      schedule: input.schedule,
+      ...(input.maxActiveTasks !== undefined ? { maxActiveTasks: input.maxActiveTasks } : {}),
+      ...(input.maxActiveRuns !== undefined ? { maxActiveRuns: input.maxActiveRuns } : {}),
+      ...(input.schedule !== undefined ? { schedule: input.schedule } : {}),
       createdAt: input.createdAt,
       updatedAt: input.updatedAt,
       version: generateVersionId(),
@@ -168,22 +236,6 @@ export function createDagRouter(schedulerCtx: StoreSchedulerContext, getHealth?:
       taskCount: dagDef.tasks.length,
       createdAt: dagDef.createdAt, updatedAt: dagDef.updatedAt,
     }), 201);
-  });
-
-  // GET /pools
-  app.openapi(createRoute({ method: 'get', path: '/pools', tags: ['dag'], responses: { 200: { description: '', content: { 'application/json': { schema: OkResponse(z.array(PoolResponseSchema)) } } } } }), async (c) => {
-    const pools = await schedulerCtx.getAllPools();
-    return c.json(ok(pools.map(p => ({ name: p.name, slots: p.slots, occupiedSlots: p.occupiedSlots }))));
-  });
-
-  // GET /health
-  app.openapi(createRoute({ method: 'get', path: '/health', tags: ['dag'], responses: { 200: { description: '', content: { 'application/json': { schema: OkResponse(HealthResponseSchema) } } } } }), async (c) => {
-    const health = getHealth?.();
-    return c.json(ok({
-      status: health ? 'ok' : 'unknown',
-      schedulerRunning: health?.running ?? false,
-      uptimeMs: health?.uptimeMs ?? 0,
-    }));
   });
 
   return app;

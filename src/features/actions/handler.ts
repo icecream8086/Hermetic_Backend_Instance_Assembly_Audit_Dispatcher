@@ -121,7 +121,23 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
   registerScheduler('dagScheduler', dagScheduler);
 
   // ── DAG API routes ──
-  app.route('/dags', createDagRouter(schedulerCtx, () => dagScheduler.status()));
+  app.route('/dags', createDagRouter(schedulerCtx));
+
+  // GET /pools — at /api/actions/pools (not under /dags)
+  app.openapi(createRoute({ method: 'get', path: '/pools', tags: ['dag'], responses: { 200: { description: '', content: { 'application/json': { schema: OkResponse(z.array(z.object({ name: z.string(), slots: z.number(), occupiedSlots: z.number() }))) } } } } }), async (c) => {
+    const pools = await schedulerCtx.getAllPools();
+    return c.json(ok(pools.map(p => ({ name: p.name, slots: p.slots, occupiedSlots: p.occupiedSlots }))));
+  });
+
+  // GET /health — at /api/actions/health (not under /dags)
+  app.openapi(createRoute({ method: 'get', path: '/health', tags: ['dag'], responses: { 200: { description: '', content: { 'application/json': { schema: OkResponse(z.object({ status: z.string(), schedulerRunning: z.boolean(), uptimeMs: z.number() })) } } } } }), async (c) => {
+    const health = dagScheduler.status();
+    return c.json(ok({
+      status: health ? 'ok' : 'unknown',
+      schedulerRunning: health?.running ?? false,
+      uptimeMs: health?.uptimeMs ?? 0,
+    }));
+  });
 
   const guard = (action: string, resource: string) =>
     async (c: { var: { currentUser?: { id?: string } }; req: { header(name: string): string | undefined } }) => {

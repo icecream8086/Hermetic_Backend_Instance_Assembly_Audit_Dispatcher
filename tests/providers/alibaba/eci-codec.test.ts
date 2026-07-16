@@ -146,7 +146,7 @@ describe('buildCreateParams', () => {
   it('maps container resources (compound)', () => {
     const p = buildCreateParams(makeFullInput());
     expect(p['Container.1.Cpu']).toBe('2');
-    expect(p['Container.1.Memory']).toBe('4096');
+    expect(p['Container.1.Memory']).toBe('4');
   });
 
   it('maps env vars with Value and FieldRefFieldPath', () => {

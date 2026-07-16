@@ -38,6 +38,8 @@ import { createRegionId, createZoneId } from '../../core/region/types.ts';
 import { createContainerId } from '../../core/provider/types.ts';
 import { applyExtensionOverrides } from '../../core/provider/extension-schema.ts';
 import './eci-schema.ts'; // register Alibaba ECI extension fields
+import { ContainerGroupState } from '../../core/provider/container-lifecycle.ts';
+import { EciResourcePolicy } from '../../core/provider/resource-policy.ts';
 
 // ═══════════════════════════════════════════════════════════════
 // Internal codec types
@@ -306,7 +308,8 @@ function buildContainerCompound(c: ContainerCreateConfig, pfx: string): Record<s
   const p: Record<string, string> = {};
   if (c.resources?.limits) {
     p[`${pfx}.Cpu`] = String(c.resources.limits.cpu);
-    p[`${pfx}.Memory`] = String(c.resources.limits.memory);
+    // ponytail: MiB→GiB; ECI accepts fractional GiB
+    p[`${pfx}.Memory`] = String(c.resources.limits.memory / 1024);
   }
   return p;
 }
@@ -844,15 +847,17 @@ export function buildPodCreateParams(spec: PodSpec, region: string): Record<stri
   // ── Top-level fields ──
   p.ContainerGroupName = sanitizeContainerName(spec.metadata.name);
 
-  const containers = spec.spec.containers.map(c => toContainerCreateConfig(c, spec.spec.priority));
-  const totalCpu = containers.reduce((s, c) => s + (c.resources?.limits?.cpu ?? 0), 0) || 1;
-  const totalMem = containers.reduce((s, c) => s + (c.resources?.limits?.memory ?? 0), 0) || 512;
+  const policy = new EciResourcePolicy();
+  const containers = spec.spec.containers.map(c => policy.markIgnored(toContainerCreateConfig(c, spec.spec.priority)));
+  const activeContainers = containers.filter(c => !policy.isIgnored(c));
+  const totalCpu = activeContainers.reduce((s, c) => s + (c.resources?.limits?.cpu ?? 0), 0) || 1;
+  const totalMemMiB = activeContainers.reduce((s, c) => s + (c.resources?.limits?.memory ?? 0), 0) || 512;
   p.Cpu = String(totalCpu);
-  p.Memory = String(totalMem);
+  p.Memory = String(totalMemMiB / 1024);
   p.RestartPolicy = spec.spec.restartPolicy;
 
   // GPU
-  const totalGpu = containers.reduce((s, c) => s + (c.resources?.limits?.gpu ?? 0), 0);
+  const totalGpu = activeContainers.reduce((s, c) => s + (c.resources?.limits?.gpu ?? 0), 0);
   if (totalGpu > 0) {
     p.GpuSpecs = JSON.stringify([{ Count: totalGpu, Type: 'nvidia.com/gpu' }]);
   }
@@ -1058,11 +1063,7 @@ function parseEvents(raw: EciEventItem[] | undefined): ContainerGroupRuntimeEven
   }));
 }
 
-const containerGroupStatusSchema = z.enum([
-  'Pending', 'Scheduling', 'ScheduleFailed', 'Running',
-  'Succeeded', 'Failed', 'Restarting', 'Updating', 'Terminating',
-  'Expiring', 'Expired', 'Deleted',
-]);
+const containerGroupStatusSchema = z.nativeEnum(ContainerGroupState);
 
 const ociContainerStatusSchema = z.enum([
   'creating', 'created', 'running', 'stopped', 'paused', 'error', 'deleted',
@@ -1070,6 +1071,12 @@ const ociContainerStatusSchema = z.enum([
 
 export function parseContainerGroup(item: EciDescribeResponse): ContainerGroupRuntime {
   const containers: EciContainerItem[] = item.Containers ?? [];
+
+  // Normalize ECI-specific statuses to canonical ContainerGroupState values.
+  // ECI returns 'Expiring' for preemptible instances being reclaimed.
+  const status =
+    item.Status === 'Expiring' ? 'Expired'
+    : (item.Status ?? 'Pending');
   const zoneId = item.ZoneId ? createZoneId(item.ZoneId, 'alibaba') : undefined;
   const gpu = item.Gpu ? z.coerce.number().parse(item.Gpu) : undefined;
   const gpuModel = gpuModelFromInstanceType(item.InstanceType);
@@ -1078,7 +1085,7 @@ export function parseContainerGroup(item: EciDescribeResponse): ContainerGroupRu
   return {
     providerId: item.ContainerGroupId ?? '',
     name: item.ContainerGroupName ?? '',
-    status: containerGroupStatusSchema.parse(item.Status ?? 'Pending'),
+    status: containerGroupStatusSchema.parse(status),
     regionId: createRegionId(item.RegionId ?? 'cn-hangzhou'),
     cpu: item.Cpu ?? 0,
     memory: item.Memory ?? 0,

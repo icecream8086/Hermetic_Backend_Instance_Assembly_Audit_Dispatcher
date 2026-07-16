@@ -6,6 +6,7 @@ import type { EventLoop } from './event-bus/loop.ts';
 import type { IAuditWriter } from './audit/types.ts';
 import type { IMessageQueue } from '../queue/interfaces.ts';
 import type { SecretEncryption } from './auth/secret-encryption.ts';
+import type { SecurityResourceService } from './security/service.ts';
 
 /**
  * Dependency injection root types.
@@ -44,6 +45,8 @@ export interface FeatureDeps {
   secretEncryption?: SecretEncryption;
   /** Resolve an S3 provider for a bucket ID. Used by the security feature for presigned URL signing. */
   s3ProviderResolver?: (bucketId: string) => Promise<{ provider: import('./provider/s3.ts').IS3Provider; bucket: { name: string; endpoint: string; region: string } }>;
+  /** Security resource service for policy validation (used by template applicator). */
+  securityService?: SecurityResourceService;
 }
 
 /** Assembled application instance returned by createApp(). */

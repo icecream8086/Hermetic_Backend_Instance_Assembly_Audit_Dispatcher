@@ -98,6 +98,11 @@ export class InstanceService {
   public constructor(private readonly atomic: IAtomicStore) {}
   #rrCounter = 0;
 
+  /** Derive instance status from credential presence. */
+  static resolveStatus(credentialRef?: string | null | undefined): InstanceStatus {
+    return credentialRef ? 'online' : 'offline';
+  }
+
   public async create(input: CreateInstanceInput): Promise<ComputeInstance> {
     const id = generateInstanceId();
     // Default zone: Podman → "local", Alibaba → region+"-g" (ECI auto-schedules, suffix is metadata)
@@ -115,7 +120,7 @@ export class InstanceService {
       ...(input.credentialRef ? { credentialRef: input.credentialRef } : {}),
       capabilities: input.capabilities ?? { container: true, image: true },
       ...(input.capacity ? { capacity: input.capacity } : {}),
-      status: input.credentialRef ? 'online' : 'offline',
+      status: InstanceService.resolveStatus(input.credentialRef),
       ...(input.labels ? { labels: { ...input.labels } } : {}),
       createdAt: now,
       updatedAt: now,
@@ -168,10 +173,14 @@ export class InstanceService {
       ...(input.labels !== undefined ? { labels: input.labels ?? undefined } : {}),
       updatedAt: Date.now(),
     };
+    // If status not explicitly provided, derive from credentialRef
+    const derivedStatus = input.status !== undefined
+      ? input.status
+      : InstanceService.resolveStatus(merged.credentialRef);
     // Belt-and-suspenders: if endpoint is still empty after merge, fill default
     const endpoint = (merged.endpoint && merged.endpoint.trim())
       || defaultEndpoint(merged.platform, String(merged.region));
-    const updated: ComputeInstance = { ...merged, endpoint };
+    const updated: ComputeInstance = { ...merged, endpoint, status: derivedStatus };
 
     const newVersion = await this.atomic.set(PREFIX + id, updated, entry.version);
     if (!newVersion) throw new AppError(409, 'CONFLICT', 'Concurrent modification detected');

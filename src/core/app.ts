@@ -10,7 +10,6 @@ import { rateLimit } from './middleware/rate-limit.ts';
 import { createFacility } from './brand.ts';
 import { getFeatures } from '../features/generated.ts';
 import { createProviderRegistry } from './provider/factory.ts';
-import type { IS3Provider } from './provider/s3.ts';
 import { createTimerBackend } from './scheduler/factory.ts';
 import { register as registerScheduler, startAll, stopAll } from './scheduler/registry.ts';
 import { EventBus } from './event-bus/bus.ts';
@@ -37,7 +36,6 @@ import type { AppContext, FeatureDeps, AppInstance } from './deps.ts';
 import { registerPodHealthCheck } from './events/health-check.ts';
 import { registerImagePullHandler } from './events/image-pull.ts';
 import { registerLogFetchHandler } from './events/log-fetch.ts';
-import { registerSecurityRefresh } from './events/security-refresh.ts';
 import { AppError } from './types.ts';
 import { SecurityResourceService } from './security/service.ts';
 import { PodStore } from './pod/store.ts';
@@ -159,19 +157,8 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
     eventBus,
   });
 
-  // 5b4. SecurityResource 自动刷新 — 每 5 分钟扫描并续期即将过期的 presigned URL
+  // 5b4. SecurityResource service — shared across features that need policy validation
   const securityService = new SecurityResourceService(stores.atomic, audit);
-  registerSecurityRefresh({
-    securityService,
-    // TODO: resolve per-bucket S3 provider when multiple storage backends are supported
-    s3Resolver: (_bucketId: string): Promise<IS3Provider> => {
-      const s3 = providers.s3Account();
-      if (!s3) throw new AppError(500, 'INTERNAL_ERROR', 'No S3 provider available for security resource refresh');
-      return Promise.resolve(s3);
-    },
-    eventBus,
-    eventLoop,
-  });
 
   // 5b5. Pod GC — periodic cleanup of stale provider resources and index entries
   const podStore = new PodStore(stores.atomic);
@@ -432,7 +419,7 @@ export async function createApp(config: AppConfig, platformBindings?: Record<str
   // 13. Auto-register features from generated registry
   // Mount at both /path and /path/ since Hono's route() doesn't normalize
   // trailing slashes — /api/users matches but /api/users/ does not.
-  const featureDeps: FeatureDeps = { stores, providers, eventBus, eventLoop, audit, queueProducer, ...(permService ? { permissionChecker: z.custom<NonNullable<FeatureDeps['permissionChecker']>>().parse(permService) } : {}), ...(secretEncryption ? { secretEncryption } : {}), s3ProviderResolver: async (bucketId: string) => { const p = providers.s3Account(); if (!p) throw new AppError(500, 'INTERNAL_ERROR', 'No S3 provider configured'); return { provider: p, bucket: { name: bucketId, endpoint: '', region: '' } }; } };
+  const featureDeps: FeatureDeps = { stores, providers, eventBus, eventLoop, audit, queueProducer, securityService, ...(permService ? { permissionChecker: z.custom<NonNullable<FeatureDeps['permissionChecker']>>().parse(permService) } : {}), ...(secretEncryption ? { secretEncryption } : {}), s3ProviderResolver: async (bucketId: string) => { const p = providers.s3Account(); if (!p) throw new AppError(500, 'INTERNAL_ERROR', 'No S3 provider configured'); return { provider: p, bucket: { name: bucketId, endpoint: '', region: '' } }; } };
   // Mount each feature with and without trailing slash (Hono app.route() doesn't normalize)
   for (const feat of getFeatures()) {
     const router = feat.mount(featureDeps);
