@@ -5,8 +5,11 @@ import {
   type TaskInstanceState,
   type SchedulerContext,
   type ITaskExecutor,
+  type ContainerGroup,
+  isTaskTerminal,
+  isCgTerminal,
+  isCgConsistentWithTi,
 } from '../dag/types.ts';
-import { isTaskTerminal, DEFAULT_TRIGGER_RULE } from '../dag/types.ts';
 import { evaluateTriggerRule } from '../dag/trigger-rule.ts';
 import {
   createTaskInstance,
@@ -14,6 +17,7 @@ import {
   shouldRetry,
   markSuccess,
   markFailed,
+  markSkipped,
   markUpstreamFailed,
 } from './task-instance.ts';
 import { ConcurrencyMap } from './concurrency-map.ts';
@@ -30,12 +34,15 @@ export interface DagSchedulerConfig {
   parallelism: number;
   /** Auto-start the scheduler loop. */
   autoStart: boolean;
+  /** DagRun overall timeout in ms. Default 24h. */
+  dagRunTimeoutMs: number;
 }
 
 const DEFAULT_CONFIG: DagSchedulerConfig = {
   intervalMs: 5000,
   parallelism: 8,
   autoStart: true,
+  dagRunTimeoutMs: 86400000,
 };
 
 // ─── Scheduler job ───
@@ -121,6 +128,7 @@ export class DagScheduler {
       await this.process();
       await this.execute();
       await this.heartbeat();
+      await this.cgGC();
     } catch (err) {
       // Log but don't crash the scheduler
       console.error(`[DagScheduler] tick #${String(this.tickCount)} error:`, err);
@@ -136,18 +144,42 @@ export class DagScheduler {
     for (const run of dagRuns) {
       if (run.status !== 'QUEUED' && run.status !== 'RUNNING') continue;
 
-      // Transition to RUNNING if this is the first active tick
       let currentRun = run;
+
+      // P4-T3: fetch dagDef early; if missing → FAILED
+      const dagDefEntry = await this.ctx.getDagDef(currentRun.dagId);
+      if (!dagDefEntry) {
+        const runEntry = await this.ctx.getDagRun(currentRun.id);
+        if (runEntry) {
+          const failedRun: DagRun = {
+            ...currentRun,
+            status: 'FAILED',
+            error: 'DAG definition not found',
+            completedAt: Date.now(),
+            version: generateVersionId(),
+          };
+          await this.ctx.updateDagRun(failedRun, runEntry.version);
+        }
+        continue;
+      }
+      const dagDef = dagDefEntry.value;
+
+      // P3-T1: maxActiveRuns check before QUEUED→RUNNING
       if (currentRun.status === 'QUEUED') {
+        if (dagDef.maxActiveRuns !== undefined) {
+          const allRuns = await this.ctx.getActiveDagRuns();
+          const activeCount = allRuns.filter(
+            r => r.dagId === currentRun.dagId && r.status === 'RUNNING',
+          ).length;
+          // ponytail: O(n) scan per QUEUED dagRun; pre-index if scale matters
+          if (activeCount >= dagDef.maxActiveRuns) continue;
+        }
+
         const runEntry = await this.ctx.getDagRun(currentRun.id);
         if (!runEntry) continue;
         currentRun = { ...currentRun, status: 'RUNNING', startedAt: Date.now(), version: generateVersionId() };
         await this.ctx.updateDagRun(currentRun, runEntry.version);
       }
-
-      const dagDefEntry = await this.ctx.getDagDef(currentRun.dagId);
-      if (!dagDefEntry) continue;
-      const dagDef = dagDefEntry.value;
 
       const tis = await this.ctx.getTaskInstances(currentRun.id);
 
@@ -170,13 +202,36 @@ export class DagScheduler {
         // Only schedule NONE and UP_FOR_RETRY tasks
         if (ti.state !== 'NONE' && ti.state !== 'UP_FOR_RETRY') continue;
 
-        // Evaluate trigger rule
+        // Build upstream state lookup
         const upstreamStates: TaskInstanceState[] = task.dependsOn.map(depId => {
           const depTi = tiMap.get(depId);
           return depTi?.state ?? 'NONE';
         });
-
         const rule = task.triggerRule;
+
+        // SPEC §5.5: eager upstream failed propagation (before allUpstreamTerminal check)
+        // Rules where FAILED is a valid trigger condition are excluded from eager UF
+        const FAILURE_TOLERANT_RULES = new Set(['one_failed', 'all_failed', 'all_done', 'none_skipped']);
+        if (ti.state === 'NONE') {
+          const anyUpstreamFailed = upstreamStates.some(
+            s => s === 'FAILED' || s === 'UPSTREAM_FAILED',
+          );
+          if (anyUpstreamFailed && rule !== 'always' && !FAILURE_TOLERANT_RULES.has(rule)) {
+            ti = markUpstreamFailed(ti, 'Upstream task failed');
+            await this.ctx.saveTaskInstance(ti);
+            tiMap.set(task.id, ti);
+            continue;
+          }
+        }
+
+        // P2: upstream terminal check — don't evaluate trigger rule until all upstream are terminal
+        const allUpstreamTerminal = task.dependsOn.every(depId => {
+          const depTi = tiMap.get(depId);
+          return depTi && isTaskTerminal(depTi.state);
+        });
+        if (ti.state === 'NONE' && !allUpstreamTerminal) continue;
+
+        // Evaluate trigger rule
         if (ti.state === 'NONE' && evaluateTriggerRule(rule, upstreamStates)) {
           ti = transitionState(ti, 'SCHEDULED');
           await this.ctx.saveTaskInstance(ti);
@@ -194,15 +249,14 @@ export class DagScheduler {
           }
         }
 
-        // Handle upstream failures
-        if (ti.state === 'NONE') {
-          const anyUpstreamFailed = upstreamStates.some(
-            s => s === 'FAILED' || s === 'UPSTREAM_FAILED',
-          );
-          if (anyUpstreamFailed && rule !== 'always') {
-            ti = markUpstreamFailed(ti, 'Upstream task failed');
+        // SPEC §5.4 BranchSkip: all upstream terminal, none failed, trigger rule not met → SKIPPED
+        if (ti.state === 'NONE' && allUpstreamTerminal) {
+          const branchFailed = upstreamStates.some(s => s === 'FAILED' || s === 'UPSTREAM_FAILED');
+          if (!branchFailed && !evaluateTriggerRule(rule, upstreamStates)) {
+            ti = markSkipped(ti, 'Trigger rule not met (all upstream terminal)');
             await this.ctx.saveTaskInstance(ti);
             tiMap.set(task.id, ti);
+            continue;
           }
         }
       }
@@ -319,6 +373,24 @@ export class DagScheduler {
           await this.ctx.updatePool({ ...pool, occupiedSlots: pool.occupiedSlots + 1 });
         }
 
+        // Approval-sensor: check approval status before executing
+        if (task.operatorType === 'approval-sensor') {
+          const status = await this.ctx.getApprovalStatus(run.id, task.name);
+          if (status === 'pending' || status === null) {
+            if (pool) await this.ctx.updatePool({ ...pool, occupiedSlots: Math.max(0, pool.occupiedSlots - 1) });
+            continue; // stay QUEUED, check again next tick
+          }
+          if (status === 'rejected') {
+            if (pool) await this.ctx.updatePool({ ...pool, occupiedSlots: Math.max(0, pool.occupiedSlots - 1) });
+            // Two-hop: QUEUED→RUNNING→FAILED (QUEUED→FAILED not in SPEC §2.3)
+            const running = transitionState(ti, 'RUNNING');
+            const failed = markFailed(running, 'Approval rejected');
+            await this.ctx.saveTaskInstance(failed);
+            continue;
+          }
+          // approved — fall through to normal execution
+        }
+
         // Resolve and dispatch to executor
         const executorKey = task.executorKey ?? task.operatorType;
         const executor = await this.getExecutor(executorKey);
@@ -332,9 +404,26 @@ export class DagScheduler {
         let running = transitionState(ti, 'RUNNING');
         await this.ctx.saveTaskInstance(running);
 
+        // P4-T2: Create ContainerGroup record and link to TI
+        const cgId = `cg_${crypto.randomUUID()}`;
+        running = { ...running, containerGroupId: cgId };
+        await this.ctx.saveTaskInstance(running);
+
+        const cg: ContainerGroup = {
+          id: cgId,
+          taskInstanceId: ti.id,
+          provider: task.executorKey ?? task.operatorType,
+          state: 'Pending', // Scheduling is a provider concern; scheduler starts at Pending
+          createdAt: Date.now(),
+          containers: [],
+          labels: {},
+        };
+        await this.ctx.saveCG(cg);
+
         // Execute
         try {
           const result = await executor.execute(task, running);
+          let cgState: ContainerGroup['state'] = result.success ? 'Succeeded' : 'Failed';
 
           if (pool) {
             const p2 = await this.ctx.getPool(poolName);
@@ -346,11 +435,23 @@ export class DagScheduler {
           } else {
             if (shouldRetry(running, task.retries)) {
               running = transitionState(running, 'UP_FOR_RETRY');
+              cgState = 'Pending'; // retry → CG stays active
             } else {
               running = markFailed(running, result.error ?? 'Task failed', result.exitCode);
             }
           }
           await this.ctx.saveTaskInstance(running);
+
+          // Update CG state
+          const cgEntry = await this.ctx.getCG(cgId);
+          if (cgEntry) {
+            const isTerminal = cgState === 'Succeeded' || cgState === 'Failed';
+            const updatedCG = { ...cgEntry.value, state: cgState, ...(isTerminal ? { completedAt: Date.now() } : {}) };
+            if (!isCgConsistentWithTi(running.state, updatedCG.state)) {
+              console.warn(`[DagScheduler] C4/C5 violation: TI=${running.state} CG=${updatedCG.state}`);
+            }
+            await this.ctx.updateCG(updatedCG, cgEntry.version);
+          }
         } catch (err) {
           if (pool) {
             const p2 = await this.ctx.getPool(poolName);
@@ -362,9 +463,49 @@ export class DagScheduler {
             running = transitionState(running, 'UP_FOR_RETRY');
           } else {
             running = markFailed(running, msg);
+            const cgEntry = await this.ctx.getCG(cgId);
+            if (cgEntry) {
+              const failedCG = { ...cgEntry.value, state: 'Failed' as const, completedAt: Date.now() };
+              if (!isCgConsistentWithTi(running.state, failedCG.state)) {
+                console.warn(`[DagScheduler] C4/C5 violation: TI=${running.state} CG=${failedCG.state}`);
+              }
+              await this.ctx.updateCG(failedCG, cgEntry.version);
+            }
           }
           await this.ctx.saveTaskInstance(running);
         }
+      }
+    }
+  }
+
+  // ─── CG GC triggers (SPEC §4.4) ───
+
+  private async cgGC(): Promise<void> {
+    const cgs = await this.ctx.getAllCGs();
+    const now = Date.now();
+    for (const cg of cgs) {
+      if (isCgTerminal(cg.state)) continue;
+      const entry = await this.ctx.getCG(cg.id);
+      if (!entry) continue;
+      const age = now - cg.createdAt;
+      // stopped-gc: Succeeded + 60s → Terminating
+      if (cg.state === 'Succeeded' && age > 60_000) {
+        await this.ctx.updateCG({ ...entry.value, state: 'Terminating' }, entry.version);
+        continue;
+      }
+      // failed-gc: Failed + 24h → Terminating
+      if (cg.state === 'Failed' && age > 86_400_000) {
+        await this.ctx.updateCG({ ...entry.value, state: 'Terminating' }, entry.version);
+        continue;
+      }
+      // stuck-gc: transient states + 10min → Terminating
+      if (['Scheduling', 'Pending', 'Restarting', 'Updating'].includes(cg.state) && age > 600_000) {
+        await this.ctx.updateCG({ ...entry.value, state: 'Terminating' }, entry.version);
+        continue;
+      }
+      // terminating-gc: Terminating + 60s → Deleted
+      if (cg.state === 'Terminating' && age > 60_000) {
+        await this.ctx.updateCG({ ...entry.value, state: 'Deleted', completedAt: now }, entry.version);
       }
     }
   }
@@ -377,6 +518,33 @@ export class DagScheduler {
 
     for (const run of dagRuns) {
       if (run.status !== 'RUNNING') continue;
+
+      // P4-T3: DagRun overall timeout check
+      if (this.config.dagRunTimeoutMs > 0 && run.startedAt) {
+        const elapsed = Date.now() - run.startedAt;
+        if (elapsed > this.config.dagRunTimeoutMs) {
+          // Only kill RUNNING TIs; QUEUED TIs stay (DagRun FAILED prevents further scheduling)
+          const tis = await this.ctx.getTaskInstances(run.id);
+          for (const ti of tis) {
+            if (ti.state === 'RUNNING') {
+              const failed = markFailed(ti, `DagRun timed out after ${String(this.config.dagRunTimeoutMs)}ms`);
+              await this.ctx.saveTaskInstance(failed);
+            }
+          }
+          const runEntry = await this.ctx.getDagRun(run.id);
+          if (runEntry) {
+            const failedRun: DagRun = {
+              ...run,
+              status: 'FAILED',
+              error: `DagRun timed out after ${String(this.config.dagRunTimeoutMs)}ms`,
+              completedAt: Date.now(),
+              version: generateVersionId(),
+            };
+            await this.ctx.updateDagRun(failedRun, runEntry.version);
+          }
+          continue;
+        }
+      }
 
       const tis = await this.ctx.getTaskInstances(run.id);
       const running = tis.filter(ti => ti.state === 'RUNNING');

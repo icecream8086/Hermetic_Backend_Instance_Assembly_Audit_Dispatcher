@@ -141,6 +141,19 @@ describe('TaskInstance state machine', () => {
       expect(r.state).toBe('UPSTREAM_FAILED');
     });
 
+    // Regression: NONE→SKIPPED and NONE→UPSTREAM_FAILED (ISSUE-00086)
+    it('NONE → SKIPPED via markSkipped', () => {
+      const ti = makeTi({ state: 'NONE' });
+      const r = markSkipped(ti, 'branch skipped');
+      expect(r.state).toBe('SKIPPED');
+    });
+
+    it('NONE → UPSTREAM_FAILED via markUpstreamFailed', () => {
+      const ti = makeTi({ state: 'NONE' });
+      const r = markUpstreamFailed(ti, 'upstream dep failed');
+      expect(r.state).toBe('UPSTREAM_FAILED');
+    });
+
     it('markDeferred transitions to DEFERRED', () => {
       const ti = makeTi({ state: 'RUNNING' });
       const r = markDeferred(ti);

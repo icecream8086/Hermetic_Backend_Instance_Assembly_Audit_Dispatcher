@@ -71,6 +71,7 @@ import { StoreSchedulerContext } from './scheduler-context.ts';
 import { JobOperator } from './job-operator.ts';
 import { buildDagFromWorkflow, createDagRunFromTrigger } from './dag-builder.ts';
 import { PodService } from '../../core/pod/service.ts';
+import { createDagRouter } from './dag-handler.ts';
 
 export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables: AppContext }> {
   const app = new OpenAPIHono<{ Variables: AppContext }>({ defaultHook: validationHook });
@@ -119,6 +120,9 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
   dagScheduler.start();
   registerScheduler('dagScheduler', dagScheduler);
 
+  // ── DAG API routes ──
+  app.route('/dags', createDagRouter(schedulerCtx, () => dagScheduler.status()));
+
   const guard = (action: string, resource: string) =>
     async (c: { var: { currentUser?: { id?: string } }; req: { header(name: string): string | undefined } }) => {
       if (!deps.permissionChecker) return;
@@ -137,7 +141,12 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
     eventBus: deps.eventBus,
     eventLoop: deps.eventLoop,
     audit: deps.audit,
-    onTrigger: async (wf, trigger, payload) => runner.startRun(wf, trigger, payload),
+    onTrigger: async (wf, trigger, payload) => {
+      const { dag } = buildDagFromWorkflow(wf);
+      await schedulerCtx.saveDagDef(dag);
+      const dagRun = createDagRunFromTrigger(dag.id, trigger, payload);
+      await schedulerCtx.saveNewDagRun({ ...dagRun, version: generateVersionId() });
+    },
   });
 
   // ── Workflow CRUD ──
@@ -229,7 +238,7 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
 
   // ── Triggers ──
 
-  app.openapi(createRoute({ method: 'post', path: '/workflows/:id/trigger', tags: ['actions'], request: { body: { content: { 'application/json': { schema: TriggerWorkflowSchema } } } }, responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(WorkflowRunResponseSchema) } } } } }), async (c) => { await guard('execute', 'action:workflow')(c);
+  app.openapi(createRoute({ method: 'post', path: '/workflows/:id/trigger', tags: ['actions'], request: { body: { content: { 'application/json': { schema: TriggerWorkflowSchema } } } }, responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(ScheduleRunResponseSchema) } } } } }), async (c) => { await guard('execute', 'action:workflow')(c);
     const wid = c.req.param('id');
     const entry = await atomic.get<WorkflowDef>(PFX_WORKFLOW_DEF + wid);
     if (!entry) throw new AppError(404, 'WORKFLOW_NOT_FOUND', 'Workflow not found');
@@ -237,13 +246,28 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
     const parsed = TriggerWorkflowSchema.parse(await c.req.json());
     const inputs = parsed.inputs ?? {};
 
-    const run = await runner.startRun(entry.value, 'manual', undefined, inputs,
-      c.var.currentUser?.id ?? 'anonymous');
-    return c.json(ok(run), 201);
+    // Build DAG and persist via scheduler (unified path)
+    const { dag } = buildDagFromWorkflow(entry.value);
+    await schedulerCtx.saveDagDef(dag);
+
+    const dagRun = createDagRunFromTrigger(
+      dag.id, 'manual', undefined, inputs,
+      c.var.currentUser?.id ?? 'anonymous',
+    );
+    const run = { ...dagRun, version: generateVersionId() };
+    await schedulerCtx.saveNewDagRun(run);
+
+    deps.audit.write({
+      level: 5, facility: 'dag-scheduler',
+      message: `DagRun ${String(run.id)} created via /trigger for workflow ${entry.value.name}`,
+      metadata: { dagId: dag.id, dagRunId: run.id, trigger: 'manual', taskCount: dag.tasks.length },
+    });
+
+    return c.json(ok({ dagRunId: run.id, dagId: dag.id, status: run.status, taskCount: dag.tasks.length }), 201);
   });
 
   /** HTTP trigger: POST /api/actions/workflows/:id/http */
-  app.openapi(createRoute({ method: 'post', path: '/workflows/:id/http', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(WorkflowRunResponseSchema) } } } } }), async (c) => {
+  app.openapi(createRoute({ method: 'post', path: '/workflows/:id/http', tags: ['actions'], responses: { 201: { description: '', content: { 'application/json': { schema: OkResponse(ScheduleRunResponseSchema) } } } } }), async (c) => {
     const wid = c.req.param('id');
     const entry = await atomic.get<WorkflowDef>(PFX_WORKFLOW_DEF + wid);
     if (!entry) throw new AppError(404, 'WORKFLOW_NOT_FOUND', 'Workflow not found');
@@ -267,9 +291,20 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
     }
     const inputs = z.record(z.string(), z.string()).optional().parse(payload.inputs) ?? {};
 
-    const run = await runner.startRun(entry.value, 'http', payload, inputs,
+    const { dag } = buildDagFromWorkflow(entry.value);
+    await schedulerCtx.saveDagDef(dag);
+    const dagRun = createDagRunFromTrigger(dag.id, 'http', payload, inputs,
       c.var.currentUser?.id ?? 'anonymous');
-    return c.json(ok(run), 201);
+    const run = { ...dagRun, version: generateVersionId() };
+    await schedulerCtx.saveNewDagRun(run);
+
+    deps.audit.write({
+      level: 5, facility: 'dag-scheduler',
+      message: `DagRun ${String(run.id)} created via /http trigger for workflow ${entry.value.name}`,
+      metadata: { dagId: dag.id, dagRunId: run.id, trigger: 'http', taskCount: dag.tasks.length },
+    });
+
+    return c.json(ok({ dagRunId: run.id, dagId: dag.id, status: run.status, taskCount: dag.tasks.length }), 201);
   });
 
   /** Scheduler-based trigger: POST /api/actions/workflows/:id/schedule
@@ -326,8 +361,12 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
         if (!branches.includes(branch) && !branches.includes('*')) continue;
       }
 
-      const run = await runner.startRun(entry.value, 'webhook', payloadObj, undefined,
+      const { dag } = buildDagFromWorkflow(entry.value);
+      await schedulerCtx.saveDagDef(dag);
+      const dagRun = createDagRunFromTrigger(dag.id, 'webhook', payloadObj, undefined,
         c.var.currentUser?.id ?? 'anonymous');
+      const run = { ...dagRun, version: generateVersionId() };
+      await schedulerCtx.saveNewDagRun(run);
       triggered.push(run.id);
     }
 
@@ -600,7 +639,11 @@ export function createActionsRouter(deps: FeatureDeps): OpenAPIHono<{ Variables:
 
     await sharedLinkService.recordUse(link.id);
 
-    const run = await runner.startRun(wfEntry.value, 'shared_link', { linkId: link.id, defaultTtl: link.defaultTtlSeconds });
+    const { dag } = buildDagFromWorkflow(wfEntry.value);
+    await schedulerCtx.saveDagDef(dag);
+    const dagRun = createDagRunFromTrigger(dag.id, 'shared_link', { linkId: link.id, defaultTtl: link.defaultTtlSeconds });
+    const run = { ...dagRun, version: generateVersionId() };
+    await schedulerCtx.saveNewDagRun(run);
     return c.json(ok({ runId: run.id, status: run.status }), 201);
   });
 

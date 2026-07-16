@@ -33,11 +33,12 @@ export const DEFAULT_TRIGGER_RULE: TriggerRule = 'all_success';
 // ─── Operator type (extensible) ───
 
 export type OperatorType =
-  | 'run'        // shell command inside container
-  | 'uses'       // reusable action reference (container image or JS)
-  | 'dns'        // DNS record upsert/delete
-  | 'pod'    // provision a full container group
-  | 'noop';      // no-op (placeholder / passthrough)
+  | 'run'              // shell command inside container
+  | 'uses'             // reusable action reference (container image or JS)
+  | 'dns'              // DNS record upsert/delete
+  | 'pod'              // provision a full container group
+  | 'approval-sensor'  // approval gate — waits for manual approve/reject
+  | 'noop';            // no-op (placeholder / passthrough)
 
 // ─── Task definition ───
 
@@ -100,7 +101,7 @@ export function isTaskTerminal(state: TaskInstanceState): boolean {
 }
 
 export const TASK_VALID_TRANSITIONS: Readonly<Record<TaskInstanceState, readonly TaskInstanceState[]>> = {
-  NONE:              ['SCHEDULED', 'REMOVED'],
+  NONE:              ['SCHEDULED', 'SKIPPED', 'UPSTREAM_FAILED', 'REMOVED'],
   SCHEDULED:         ['QUEUED', 'SKIPPED', 'UPSTREAM_FAILED', 'REMOVED'],
   QUEUED:            ['RUNNING', 'REMOVED'],
   RUNNING:           ['SUCCESS', 'FAILED', 'UP_FOR_RETRY', 'DEFERRED', 'RESTARTING', 'REMOVED'],
@@ -118,6 +119,64 @@ export function isValidTaskTransition(from: TaskInstanceState, to: TaskInstanceS
   return TASK_VALID_TRANSITIONS[from].includes(to);
 }
 
+// ─── ContainerGroup (execution carrier) ───
+
+export type ContainerGroupState =
+  | 'Scheduling'
+  | 'ScheduleFailed'
+  | 'Pending'
+  | 'Running'
+  | 'Succeeded'
+  | 'Failed'
+  | 'Restarting'
+  | 'Updating'
+  | 'Terminating'
+  | 'Expired'
+  | 'Deleted';
+
+export const CG_HARD_TERMINAL: ReadonlySet<ContainerGroupState> = new Set(['ScheduleFailed', 'Expired', 'Deleted']);
+export const CG_SOFT_TERMINAL: ReadonlySet<ContainerGroupState> = new Set(['Succeeded', 'Failed']);
+
+export function isCgTerminal(state: ContainerGroupState): boolean {
+  return CG_HARD_TERMINAL.has(state) || CG_SOFT_TERMINAL.has(state);
+}
+
+export const CG_VALID_TRANSITIONS: Readonly<Record<ContainerGroupState, readonly ContainerGroupState[]>> = {
+  Scheduling:     ['Pending', 'ScheduleFailed'],
+  ScheduleFailed: ['Deleted'],
+  Pending:        ['Running', 'Failed', 'Terminating'],
+  Running:        ['Succeeded', 'Failed', 'Restarting', 'Updating', 'Terminating', 'Expired'],
+  Succeeded:      ['Running', 'Terminating'],
+  Failed:         ['Running', 'Terminating'],
+  Restarting:     ['Pending', 'Failed', 'Terminating'],
+  Updating:       ['Running', 'Terminating'],
+  Terminating:    ['Deleted'],
+  Expired:        ['Deleted'],
+  Deleted:        [],
+};
+
+export interface ContainerGroup {
+  readonly id: string;
+  readonly taskInstanceId: string;
+  readonly provider: string;
+  state: ContainerGroupState;
+  readonly createdAt: number;
+  startedAt?: number;
+  completedAt?: number;
+  readonly containers: readonly { name: string; state: string }[];
+  readonly labels: Record<string, string>;
+}
+
+/**
+ * SPEC §4.6 C4: TI.RUNNING ⇒ CG.state ∈ active_states
+ * SPEC §4.6 C5: TI.{SUCCESS,FAILED} ⇒ CG.state ∈ terminal_states
+ */
+export function isCgConsistentWithTi(tiState: TaskInstanceState, cgState: ContainerGroupState): boolean {
+  if (tiState === 'RUNNING') return !isCgTerminal(cgState);
+  if (tiState === 'SUCCESS' || tiState === 'FAILED') return isCgTerminal(cgState);
+  return true;
+}
+
 // ─── TaskInstance (runtime) ───
 
 export interface TaskInstance {
@@ -131,6 +190,8 @@ export interface TaskInstance {
   exitCode?: number | undefined;
   error?: string | undefined;
   output?: unknown;
+  /** ID of the ContainerGroup executing this TaskInstance. */
+  readonly containerGroupId?: string;
   version: VersionId;
 }
 
@@ -225,4 +286,14 @@ export interface SchedulerContext {
   updatePool(pool: Pool): Promise<boolean>;
   /** Resolve an executor by key. */
   getExecutor(key: string): Promise<ITaskExecutor | null>;
+  /** Check approval status for a task. Returns 'pending' | 'approved' | 'rejected' | null. */
+  getApprovalStatus(dagRunId: DagRunId, taskName: string): Promise<'pending' | 'approved' | 'rejected' | null>;
+  /** Persist a ContainerGroup. */
+  saveCG(cg: ContainerGroup, version?: VersionId | null): Promise<boolean>;
+  /** Get a ContainerGroup by ID. */
+  getCG(id: string): Promise<{ value: ContainerGroup; version: VersionId } | null>;
+  /** Update a ContainerGroup with version check. */
+  updateCG(cg: ContainerGroup, version: VersionId): Promise<boolean>;
+  /** Get all ContainerGroups. */
+  getAllCGs(): Promise<ContainerGroup[]>;
 }

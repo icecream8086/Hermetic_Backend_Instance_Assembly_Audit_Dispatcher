@@ -12,7 +12,7 @@ export interface CronTriggerDeps {
   eventBus: EventBus;
   eventLoop: EventLoop;
   audit: IAuditWriter;
-  onTrigger: (wf: WorkflowDef, trigger: WorkflowRun['trigger'], payload?: unknown) => Promise<WorkflowRun>;
+  onTrigger: (wf: WorkflowDef, trigger: WorkflowRun['trigger'], payload?: unknown) => Promise<unknown>;
 }
 
 /**

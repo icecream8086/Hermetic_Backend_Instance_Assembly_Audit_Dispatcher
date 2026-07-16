@@ -63,10 +63,11 @@ function jobToTask(
 ): Task {
   const taskId = createTaskId(`task_${jobName}`);
 
+  const isApproval = !!jobDef.approval?.approvers?.length;
   return {
     id: taskId,
     name: jobName,
-    operatorType: 'pod',
+    operatorType: isApproval ? 'approval-sensor' : 'pod',
     config: {
       jobName,
       needs: jobDef.needs ?? [],
