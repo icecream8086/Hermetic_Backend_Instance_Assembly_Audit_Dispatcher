@@ -171,7 +171,7 @@ async function resolveTemplateWithChain(atomic: IAtomicStore, id: string): Promi
   const chainIds = templateOrder.map(t => t.id);
   const chain = templateOrder; // DFS: target first → ancestors in visitation order
 
-  let mergedSpec: PodSpec = tpl.spec;
+  let mergedSpec = tpl.spec;
   for (const t of chain) {
     if (t.id === id) continue;
     mergedSpec = mergePodSpec(t.spec, mergedSpec);

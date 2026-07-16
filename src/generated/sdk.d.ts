@@ -1930,7 +1930,19 @@ export interface paths {
                                     env?: {
                                         name: string;
                                         value?: string;
-                                        valueFrom?: unknown;
+                                        valueFrom?: {
+                                            secretKeyRef?: {
+                                                name: string;
+                                                key: string;
+                                            };
+                                            configMapKeyRef?: {
+                                                name: string;
+                                                key: string;
+                                            };
+                                            fieldRef?: {
+                                                fieldPath: string;
+                                            };
+                                        };
                                     }[];
                                     resources?: {
                                         limits?: {
@@ -2021,7 +2033,19 @@ export interface paths {
                                     env?: {
                                         name: string;
                                         value?: string;
-                                        valueFrom?: unknown;
+                                        valueFrom?: {
+                                            secretKeyRef?: {
+                                                name: string;
+                                                key: string;
+                                            };
+                                            configMapKeyRef?: {
+                                                name: string;
+                                                key: string;
+                                            };
+                                            fieldRef?: {
+                                                fieldPath: string;
+                                            };
+                                        };
                                     }[];
                                     resources?: {
                                         limits?: {
@@ -2165,6 +2189,8 @@ export interface paths {
                                 [key: string]: string;
                             };
                         };
+                        securityRef?: string;
+                        securityRefs?: string[];
                     } & {
                         [key: string]: unknown;
                     };
@@ -2440,7 +2466,19 @@ export interface paths {
                                 env?: {
                                     name: string;
                                     value?: string;
-                                    valueFrom?: unknown;
+                                    valueFrom?: {
+                                        secretKeyRef?: {
+                                            name: string;
+                                            key: string;
+                                        };
+                                        configMapKeyRef?: {
+                                            name: string;
+                                            key: string;
+                                        };
+                                        fieldRef?: {
+                                            fieldPath: string;
+                                        };
+                                    };
                                 }[];
                                 resources?: {
                                     limits?: {
@@ -2531,7 +2569,19 @@ export interface paths {
                                 env?: {
                                     name: string;
                                     value?: string;
-                                    valueFrom?: unknown;
+                                    valueFrom?: {
+                                        secretKeyRef?: {
+                                            name: string;
+                                            key: string;
+                                        };
+                                        configMapKeyRef?: {
+                                            name: string;
+                                            key: string;
+                                        };
+                                        fieldRef?: {
+                                            fieldPath: string;
+                                        };
+                                    };
                                 }[];
                                 resources?: {
                                     limits?: {
@@ -2783,7 +2833,19 @@ export interface paths {
                                 env?: {
                                     name: string;
                                     value?: string;
-                                    valueFrom?: unknown;
+                                    valueFrom?: {
+                                        secretKeyRef?: {
+                                            name: string;
+                                            key: string;
+                                        };
+                                        configMapKeyRef?: {
+                                            name: string;
+                                            key: string;
+                                        };
+                                        fieldRef?: {
+                                            fieldPath: string;
+                                        };
+                                    };
                                 }[];
                                 resources?: {
                                     limits?: {
@@ -6413,7 +6475,29 @@ export interface paths {
             };
         };
         put?: never;
-        post?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                            data: components["schemas"]["Shared23"];
+                        };
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -6458,7 +6542,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/actions/dags/pools": {
+    "/api/actions/pools": {
         parameters: {
             query?: never;
             header?: never;
@@ -6500,7 +6584,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/actions/dags/health": {
+    "/api/actions/health": {
         parameters: {
             query?: never;
             header?: never;
@@ -7871,7 +7955,32 @@ export interface paths {
             };
         };
         put?: never;
-        post?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description dagId */
+                    dagId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                            data: components["schemas"]["Shared29"];
+                        };
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -7907,17 +8016,7 @@ export interface paths {
                         "application/json": {
                             /** @enum {boolean} */
                             success: true;
-                            data: {
-                                id: string;
-                                dagId: string;
-                                status: string;
-                                executionDate: number;
-                                startedAt?: number;
-                                completedAt?: number;
-                                trigger: string;
-                                ownerId?: string;
-                                error?: string;
-                            };
+                            data: components["schemas"]["Shared29"];
                         };
                     };
                 };
@@ -8391,7 +8490,7 @@ export interface paths {
                         "application/json": {
                             /** @enum {boolean} */
                             success: true;
-                            data: components["schemas"]["Shared29"];
+                            data: components["schemas"]["Shared30"];
                         };
                     };
                 };
@@ -8432,7 +8531,7 @@ export interface paths {
                         "application/json": {
                             /** @enum {boolean} */
                             success: true;
-                            data: components["schemas"]["Shared29"];
+                            data: components["schemas"]["Shared30"];
                         };
                     };
                 };
@@ -8482,7 +8581,7 @@ export interface paths {
                         "application/json": {
                             /** @enum {boolean} */
                             success: true;
-                            data: components["schemas"]["Shared29"];
+                            data: components["schemas"]["Shared30"];
                         };
                     };
                 };
@@ -8886,7 +8985,7 @@ export interface paths {
                         "application/json": {
                             /** @enum {boolean} */
                             success: true;
-                            data: components["schemas"]["Shared30"];
+                            data: components["schemas"]["Shared31"];
                         };
                     };
                 };
@@ -8934,7 +9033,7 @@ export interface paths {
                         "application/json": {
                             /** @enum {boolean} */
                             success: true;
-                            data: components["schemas"]["Shared30"];
+                            data: components["schemas"]["Shared31"];
                         };
                     };
                 };
@@ -10107,34 +10206,6 @@ export interface components {
                     [key: string]: string;
                 };
             };
-            spec: Record<string, never>;
-            dependsOn?: string[];
-            createdAt: number;
-            updatedAt: number;
-            creatorId?: string;
-            /** @enum {string} */
-            visibility?: "public" | "private";
-            singleton?: boolean;
-            instanceLimit?: {
-                /** @enum {string} */
-                type: "fixed" | "perUser" | "perSystem";
-                max: number;
-            };
-            resourceBinding?: {
-                domain?: string;
-                port?: number;
-            };
-        };
-        /** @enum {string} */
-        PodPhase: "Pending" | "Running" | "Succeeded" | "Failed" | "Unknown";
-        PodEntity: {
-            podId: string;
-            name: string;
-            phase: components["schemas"]["PodPhase"];
-            providerId?: string;
-            creatorId?: string;
-            createdAt: number;
-            updatedAt: number;
             spec: {
                 metadata: {
                     name: string;
@@ -10154,7 +10225,19 @@ export interface components {
                         env?: {
                             name: string;
                             value?: string;
-                            valueFrom?: unknown;
+                            valueFrom?: {
+                                secretKeyRef?: {
+                                    name: string;
+                                    key: string;
+                                };
+                                configMapKeyRef?: {
+                                    name: string;
+                                    key: string;
+                                };
+                                fieldRef?: {
+                                    fieldPath: string;
+                                };
+                            };
                         }[];
                         resources?: {
                             limits?: {
@@ -10245,7 +10328,307 @@ export interface components {
                         env?: {
                             name: string;
                             value?: string;
-                            valueFrom?: unknown;
+                            valueFrom?: {
+                                secretKeyRef?: {
+                                    name: string;
+                                    key: string;
+                                };
+                                configMapKeyRef?: {
+                                    name: string;
+                                    key: string;
+                                };
+                                fieldRef?: {
+                                    fieldPath: string;
+                                };
+                            };
+                        }[];
+                        resources?: {
+                            limits?: {
+                                cpu: number;
+                                memory: number;
+                                gpu?: number;
+                            };
+                        };
+                        ports?: {
+                            containerPort: number;
+                            hostPort?: number;
+                            protocol?: string;
+                        }[];
+                        volumeMounts?: {
+                            volumeId: string;
+                            mountPath: string;
+                            readOnly: boolean;
+                            mountPropagation?: string;
+                            credentialRef?: string;
+                        }[];
+                        livenessProbe?: {
+                            httpGet?: {
+                                path: string;
+                                port: number;
+                                scheme?: string;
+                            };
+                            tcpSocket?: {
+                                port: number;
+                            };
+                            exec?: {
+                                command: string[];
+                            };
+                            initialDelaySeconds?: number;
+                            periodSeconds?: number;
+                            timeoutSeconds?: number;
+                            successThreshold?: number;
+                            failureThreshold?: number;
+                        };
+                        readinessProbe?: {
+                            httpGet?: {
+                                path: string;
+                                port: number;
+                                scheme?: string;
+                            };
+                            tcpSocket?: {
+                                port: number;
+                            };
+                            exec?: {
+                                command: string[];
+                            };
+                            initialDelaySeconds?: number;
+                            periodSeconds?: number;
+                            timeoutSeconds?: number;
+                            successThreshold?: number;
+                            failureThreshold?: number;
+                        };
+                        startupProbe?: {
+                            httpGet?: {
+                                path: string;
+                                port: number;
+                                scheme?: string;
+                            };
+                            tcpSocket?: {
+                                port: number;
+                            };
+                            exec?: {
+                                command: string[];
+                            };
+                            initialDelaySeconds?: number;
+                            periodSeconds?: number;
+                            timeoutSeconds?: number;
+                            successThreshold?: number;
+                            failureThreshold?: number;
+                        };
+                        imagePullPolicy?: string;
+                        tty?: boolean;
+                        stdin?: boolean;
+                        networkMode?: string;
+                        providerOverrides?: {
+                            [key: string]: unknown;
+                        };
+                    }[];
+                    volumes?: {
+                        id: string;
+                        /** @enum {string} */
+                        type: "NFSVolume" | "EmptyDirVolume" | "DiskVolume" | "SecretVolume" | "ConfigMapVolume" | "OSSVolume";
+                        options?: {
+                            [key: string]: unknown;
+                        };
+                    }[];
+                    /** @enum {string} */
+                    restartPolicy: "Always" | "OnFailure" | "Never";
+                    priority?: number;
+                    nodeSelector?: {
+                        [key: string]: string;
+                    };
+                    terminationGracePeriodSeconds?: number;
+                    secretRefs?: {
+                        secretName: string;
+                        mountPath: string;
+                        keys?: string[];
+                        mode?: number;
+                    }[];
+                    resolvedSecrets?: {
+                        [key: string]: {
+                            value?: string;
+                            platformRefs?: {
+                                eci?: string;
+                                k8s?: string;
+                                podman?: string;
+                                aws?: string;
+                            };
+                        };
+                    };
+                    secretMounts?: {
+                        mountPath: string;
+                        data: string;
+                        mode?: number;
+                    }[];
+                };
+                providerOverrides?: {
+                    [key: string]: unknown;
+                };
+            };
+            dependsOn?: string[];
+            createdAt: number;
+            updatedAt: number;
+            creatorId?: string;
+            /** @enum {string} */
+            visibility?: "public" | "private";
+            singleton?: boolean;
+            instanceLimit?: {
+                /** @enum {string} */
+                type: "fixed" | "perUser" | "perSystem";
+                max: number;
+            };
+            resourceBinding?: {
+                domain?: string;
+                port?: number;
+            };
+            securityRef?: string;
+            securityRefs?: string[];
+        };
+        /** @enum {string} */
+        PodPhase: "Pending" | "Running" | "Succeeded" | "Failed" | "Unknown";
+        PodEntity: {
+            podId: string;
+            name: string;
+            phase: components["schemas"]["PodPhase"];
+            providerId?: string;
+            creatorId?: string;
+            createdAt: number;
+            updatedAt: number;
+            spec: {
+                metadata: {
+                    name: string;
+                    labels?: {
+                        [key: string]: string;
+                    };
+                    annotations?: {
+                        [key: string]: string;
+                    };
+                };
+                spec: {
+                    containers: {
+                        name: string;
+                        image: string;
+                        command?: string[];
+                        args?: string[];
+                        env?: {
+                            name: string;
+                            value?: string;
+                            valueFrom?: {
+                                secretKeyRef?: {
+                                    name: string;
+                                    key: string;
+                                };
+                                configMapKeyRef?: {
+                                    name: string;
+                                    key: string;
+                                };
+                                fieldRef?: {
+                                    fieldPath: string;
+                                };
+                            };
+                        }[];
+                        resources?: {
+                            limits?: {
+                                cpu: number;
+                                memory: number;
+                                gpu?: number;
+                            };
+                        };
+                        ports?: {
+                            containerPort: number;
+                            hostPort?: number;
+                            protocol?: string;
+                        }[];
+                        volumeMounts?: {
+                            volumeId: string;
+                            mountPath: string;
+                            readOnly: boolean;
+                            mountPropagation?: string;
+                            credentialRef?: string;
+                        }[];
+                        livenessProbe?: {
+                            httpGet?: {
+                                path: string;
+                                port: number;
+                                scheme?: string;
+                            };
+                            tcpSocket?: {
+                                port: number;
+                            };
+                            exec?: {
+                                command: string[];
+                            };
+                            initialDelaySeconds?: number;
+                            periodSeconds?: number;
+                            timeoutSeconds?: number;
+                            successThreshold?: number;
+                            failureThreshold?: number;
+                        };
+                        readinessProbe?: {
+                            httpGet?: {
+                                path: string;
+                                port: number;
+                                scheme?: string;
+                            };
+                            tcpSocket?: {
+                                port: number;
+                            };
+                            exec?: {
+                                command: string[];
+                            };
+                            initialDelaySeconds?: number;
+                            periodSeconds?: number;
+                            timeoutSeconds?: number;
+                            successThreshold?: number;
+                            failureThreshold?: number;
+                        };
+                        startupProbe?: {
+                            httpGet?: {
+                                path: string;
+                                port: number;
+                                scheme?: string;
+                            };
+                            tcpSocket?: {
+                                port: number;
+                            };
+                            exec?: {
+                                command: string[];
+                            };
+                            initialDelaySeconds?: number;
+                            periodSeconds?: number;
+                            timeoutSeconds?: number;
+                            successThreshold?: number;
+                            failureThreshold?: number;
+                        };
+                        imagePullPolicy?: string;
+                        tty?: boolean;
+                        stdin?: boolean;
+                        networkMode?: string;
+                        providerOverrides?: {
+                            [key: string]: unknown;
+                        };
+                    }[];
+                    initContainers?: {
+                        name: string;
+                        image: string;
+                        command?: string[];
+                        args?: string[];
+                        env?: {
+                            name: string;
+                            value?: string;
+                            valueFrom?: {
+                                secretKeyRef?: {
+                                    name: string;
+                                    key: string;
+                                };
+                                configMapKeyRef?: {
+                                    name: string;
+                                    key: string;
+                                };
+                                fieldRef?: {
+                                    fieldPath: string;
+                                };
+                            };
                         }[];
                         resources?: {
                             limits?: {
@@ -11044,12 +11427,23 @@ export interface components {
             deleted: boolean;
         };
         Shared29: {
+            id: string;
+            dagId: string;
+            status: string;
+            executionDate: number;
+            startedAt?: number;
+            completedAt?: number;
+            trigger: string;
+            ownerId?: string;
+            error?: string;
+        };
+        Shared30: {
             dagRunId: string;
             dagId: string;
             status: string;
             taskCount: number;
         };
-        Shared30: {
+        Shared31: {
             id: string;
             workflowRunId: string;
             jobName: string;

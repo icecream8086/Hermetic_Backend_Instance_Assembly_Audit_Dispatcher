@@ -155,7 +155,33 @@ const enforceDecodeLayer = {
   },
 };
 
-const localRules = { rules: { 'no-unknown-leak': noUnknownLeak, 'no-handwritten-guard': noHandwrittenGuard, 'enforce-decode-layer': enforceDecodeLayer } };
+/** no-empty-openapi-schema: 禁止 z.object({}) 出现在 .openapi() 链中 */
+const noEmptyOpenapiSchema = {
+  meta: {
+    type: 'problem',
+    docs: { description: 'Disallow z.object({}) in .openapi() chain calls', recommended: 'strict' },
+    schema: [],
+    messages: { emptyOpenapi: 'Empty z.object({}) in .openapi() chain. Use a proper Zod schema (e.g., PodSpecSchema).' },
+  },
+  create(context) {
+    if (!context.filename.endsWith('/response-schema.ts')) return {};
+    const ALLOWED_NAMES = new Set(['EmptyResponse']);
+    return {
+      'CallExpression[callee.property.name="openapi"]'(node) {
+        const obj = node.callee?.object;
+        if (obj?.type !== 'CallExpression' || obj.callee?.property?.name !== 'object') return;
+        const arg = obj.arguments[0];
+        if (arg?.type === 'ObjectExpression' && arg.properties.length === 0) {
+          const name = node.arguments[0]?.value;
+          if (typeof name === 'string' && ALLOWED_NAMES.has(name)) return;
+          context.report({ node, messageId: 'emptyOpenapi' });
+        }
+      },
+    };
+  },
+};
+
+const localRules = { rules: { 'no-unknown-leak': noUnknownLeak, 'no-handwritten-guard': noHandwrittenGuard, 'enforce-decode-layer': enforceDecodeLayer, 'no-empty-openapi-schema': noEmptyOpenapiSchema } };
 
 export default tseslint.config(
   eslint.configs.recommended,
@@ -395,6 +421,7 @@ export default tseslint.config(
       'local-rules/no-unknown-leak': 'error',
       'local-rules/no-handwritten-guard': 'error',
       'local-rules/enforce-decode-layer': 'error',
+      'local-rules/no-empty-openapi-schema': 'error',
 
       // ════════════════════════════════════════════════════════
       // CEA — 锁死 ESLint 逃逸通道

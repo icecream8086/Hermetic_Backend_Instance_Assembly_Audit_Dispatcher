@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PodSpecSchema } from '../../core/pod/schema.ts';
 
 /**
  * Minimal response schema for Template.
@@ -14,7 +15,7 @@ export const TemplateSchema = z.object({
     labels: z.record(z.string(), z.string()).optional(),
     annotations: z.record(z.string(), z.string()).optional(),
   }).optional(),
-  spec: z.object({}),
+  spec: PodSpecSchema,
   dependsOn: z.array(z.string()).readonly().optional(),
   createdAt: z.number(),
   updatedAt: z.number(),
@@ -29,6 +30,8 @@ export const TemplateSchema = z.object({
     domain: z.string().optional(),
     port: z.number().optional(),
   }).optional(),
+  securityRef: z.string().optional(),
+  securityRefs: z.array(z.string()).readonly().optional(),
 }).openapi('PodTemplate');
 
 /** Template with resolved DAG chain. */

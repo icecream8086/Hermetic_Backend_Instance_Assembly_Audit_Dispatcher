@@ -1,4 +1,5 @@
-import type { PodSpec } from '../../core/pod/types.ts';
+import { z } from 'zod';
+import { TemplateSchema } from './response-schema.ts';
 
 // ═══════════════════════════════════════════
 // 模板信息 — 模板自身的元数据
@@ -23,32 +24,10 @@ export interface TemplateResourceBinding {
 }
 
 // ═══════════════════════════════════════════
-// 完整模板定义
+// 完整模板定义 — TemplateSchema 为单一信源
 // ═══════════════════════════════════════════
 
-export interface Template {
-  readonly id: string;
-  readonly name: string;
-  readonly description?: string | undefined;
-  readonly apiVersion: string;
-  readonly kind: 'Pod';
-  readonly metadata?: {
-    readonly labels?: Record<string, string> | undefined;
-    readonly annotations?: Record<string, string> | undefined;
-  } | undefined;
-  readonly spec: PodSpec;
-  readonly dependsOn?: readonly string[] | undefined;
-  readonly createdAt: number;
-  readonly updatedAt: number;
-  readonly creatorId?: string | undefined;
-  readonly visibility?: TemplateVisibility | undefined;
-  readonly singleton?: boolean | undefined;
-  readonly instanceLimit?: TemplateInstanceLimit | undefined;
-  readonly resourceBinding?: TemplateResourceBinding | undefined;
-  /** @deprecated Use securityRefs instead. */
-  readonly securityRef?: string | undefined;
-  readonly securityRefs?: readonly string[] | undefined;
-}
+export type Template = z.infer<typeof TemplateSchema>;
 
 // ═══════════════════════════════════════════
 // API 输入

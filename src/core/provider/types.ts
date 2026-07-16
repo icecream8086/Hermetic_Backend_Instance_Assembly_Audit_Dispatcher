@@ -172,9 +172,9 @@ export interface EnvVar {
   readonly name: string;
   readonly value?: string | undefined;
   readonly valueFrom?: {
-    readonly secretKeyRef?: { readonly name: string; readonly key: string };
-    readonly configMapKeyRef?: { readonly name: string; readonly key: string };
-    readonly fieldRef?: { readonly fieldPath: string };
+    readonly secretKeyRef?: { readonly name: string; readonly key: string } | undefined;
+    readonly configMapKeyRef?: { readonly name: string; readonly key: string } | undefined;
+    readonly fieldRef?: { readonly fieldPath: string } | undefined;
   } | undefined;
 }
 
@@ -193,7 +193,7 @@ export interface ProbeSpec {
   readonly periodSeconds?: number | undefined;
   readonly successThreshold?: number | undefined;
   readonly failureThreshold?: number | undefined;
-  readonly httpGet?: { readonly path: string; readonly port: number; readonly scheme?: string } | undefined;
+  readonly httpGet?: { readonly path: string; readonly port: number; readonly scheme?: string | undefined } | undefined;
   readonly exec?: { readonly command: readonly string[] } | undefined;
   readonly tcpSocket?: { readonly port: number } | undefined;
 }

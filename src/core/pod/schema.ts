@@ -3,7 +3,11 @@ import { z } from 'zod';
 export const EnvVarSchema = z.object({
   name: z.string().min(1),
   value: z.string().optional(),
-  valueFrom: z.unknown().optional(),
+  valueFrom: z.object({
+    secretKeyRef: z.object({ name: z.string(), key: z.string() }),
+    configMapKeyRef: z.object({ name: z.string(), key: z.string() }),
+    fieldRef: z.object({ fieldPath: z.string() }),
+  }).partial().optional(),
 });
 
 export const ContainerPortSchema = z.object({
